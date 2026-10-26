@@ -1,0 +1,113 @@
+name: create-app
+
+# Creates the Google-side resources for a new app, using the deploy service account:
+# Hosting site or App Hosting backends, Firestore databases, custom domain, DNS records
+# and Auth authorized domain. Safe to re-run; existing resources are left alone.
+# Scaffold the folder itself with scripts/new-app.mjs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: App folder name under apps/ (lowercase, dashes)
+        type: string
+        required: true
+      type:
+        type: choice
+        options: [hosting, apphosting]
+        default: hosting
+      firestore:
+        description: Create <name> and <name>-preview Firestore databases
+        type: boolean
+        default: false
+      domain:
+        description: "Custom domain (default: <name>.trom.dev)"
+        type: string
+        required: false
+      firestore_location:
+        type: string
+        default: nam5
+      region:
+        description: App Hosting region
+        type: string
+        default: us-central1
+
+env:
+  FIREBASE_PROJECT: apps-97595
+  FIREBASE_TOOLS: firebase-tools@15.34.1
+  DNS_ZONE: trom-dev
+  NAME: ${{ inputs.name }}
+  DOMAIN: ${{ inputs.domain || format('{0}.trom.dev', inputs.name) }}
+  REGION: ${{ inputs.region }}
+  DB_LOCATION: ${{ inputs.firestore_location }}
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check name
+        run: |
+          [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]] || { echo "::error::Bad app name: $NAME"; exit 1; }
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Hosting site
+        if: inputs.type == 'hosting'
+        run: |
+          site="trom-$NAME"
+          if npx -y "$FIREBASE_TOOLS" hosting:sites:get "$site" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+            echo "Hosting site $site already exists"
+          else
+            npx -y "$FIREBASE_TOOLS" hosting:sites:create "$site" --project "$FIREBASE_PROJECT" --non-interactive
+          fi
+
+      - name: App Hosting backends
+        if: inputs.type == 'apphosting'
+        run: |
+          for backend in "$NAME" "$NAME-preview"; do
+            if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+              echo "Backend $backend already exists"
+            else
+              npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
+                --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME"
+            fi
+          done
+          {
+            echo "### Finish in the Firebase console (App Hosting)"
+            echo "- Connect both backends to \`$GITHUB_REPOSITORY\` with root directory \`apps/$NAME\` if they are not connected."
+            echo "- Turn **automatic rollouts off** on both, so CI is the only trigger."
+            echo "- Set the environment name of \`$NAME-preview\` to \`preview\` so \`apphosting.preview.yaml\` applies."
+            echo "- Grant both backends access to the secrets the app uses (\`firebase apphosting:secrets:grantaccess\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Firestore databases
+        if: inputs.firestore
+        run: |
+          for db in "$NAME" "$NAME-preview"; do
+            if npx -y "$FIREBASE_TOOLS" firestore:databases:get "$db" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+              echo "Database $db already exists"
+            else
+              npx -y "$FIREBASE_TOOLS" firestore:databases:create "$db" --location "$DB_LOCATION" --project "$FIREBASE_PROJECT"
+            fi
+          done
+
+      - name: Custom domain, DNS and Auth
+        run: |
+          if [ '${{ inputs.type }}' = hosting ]; then
+            node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "trom-$NAME"
+          else
+            node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$NAME" --region "$REGION"
+            # Let sign-in work on the preview backend's own URL too.
+            host=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$NAME-preview" --project "$FIREBASE_PROJECT" --json \
+              | jq -r '[.. | objects | .uri? | strings][0] // empty' | sed -E 's#^https?://##; s#/.*$##')
+            if [ -n "$host" ]; then node scripts/attach-domain.mjs --domain "$host" --authorize-only; fi
+          fi
+          echo "Done: https://$DOMAIN (the certificate can take up to an hour)" >> "$GITHUB_STEP_SUMMARY"

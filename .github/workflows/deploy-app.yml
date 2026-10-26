@@ -1,0 +1,179 @@
+name: deploy-app
+
+# Builds and deploys one app. Called by preview.yml and prod.yml, and run by hand for
+# redeploys and rollbacks (Actions > deploy-app > Run workflow).
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        type: string
+        required: true
+      target:
+        description: prod or preview
+        type: string
+        required: true
+      ref:
+        description: Branch, tag or commit to deploy (default the triggering commit)
+        type: string
+        required: false
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App folder name under apps/
+        type: string
+        required: true
+      target:
+        type: choice
+        options: [preview, prod]
+        default: preview
+      ref:
+        description: "Branch, tag or commit to deploy (default: the branch you run this from). App Hosting previews need a branch."
+        type: string
+        required: false
+
+env:
+  FIREBASE_PROJECT: apps-97595
+  FIREBASE_TOOLS: firebase-tools@15.34.1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # move the deployed/<app> tag
+      statuses: write # preview link on the commit
+    concurrency:
+      group: deploy-${{ inputs.app }}-${{ inputs.target }}-${{ inputs.ref || github.ref_name }}
+      cancel-in-progress: ${{ inputs.target == 'preview' }}
+    defaults:
+      run:
+        working-directory: apps/${{ inputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Read app.json
+        id: app
+        env:
+          REF: ${{ inputs.ref || github.ref_name }}
+        run: |
+          test -f app.json || { echo "::error::apps/${{ inputs.app }}/app.json not found"; exit 1; }
+          {
+            echo "type=$(jq -r .type app.json)"
+            echo "domain=$(jq -r '.domain // empty' app.json)"
+            echo "site=$(jq -r '.hostingSite // empty' app.json)"
+            echo "backend=$(jq -r '.backend // empty' app.json)"
+            echo "preview_backend=$(jq -r '.previewBackend // empty' app.json)"
+            echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
+            echo "has_firestore=$(jq -r 'has("firestore")' app.json)"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+          # Preview channel ID from the branch name: lowercase, dashes, short enough for a DNS label.
+          site=$(jq -r '.hostingSite // ""' app.json)
+          max=$(( 50 - ${#site} ))
+          channel=$(echo "$REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-$max | sed -E 's/-+$//')
+          echo "channel=${channel:-preview}" >> "$GITHUB_OUTPUT"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      # Static apps on Firebase Hosting
+
+      - uses: actions/setup-node@v4
+        if: steps.app.outputs.type == 'hosting'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/${{ inputs.app }}/package-lock.json
+
+      - name: Install and check
+        if: steps.app.outputs.type == 'hosting'
+        run: |
+          npm ci
+          npm run typecheck --if-present
+          npm run lint --if-present
+          if jq -e '.scripts.test' package.json > /dev/null; then npm test; fi
+
+      - name: Build
+        if: steps.app.outputs.type == 'hosting'
+        env:
+          VITE_APP_ENV: ${{ inputs.target }}
+          VITE_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
+          NEXT_PUBLIC_APP_ENV: ${{ inputs.target }}
+          NEXT_PUBLIC_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
+        run: npm run build
+
+      - name: Deploy preview channel
+        id: hosting_preview
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
+        run: |
+          npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
+            --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json"
+          url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/channel.json")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to prod
+        id: hosting_prod
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'prod'
+        run: |
+          only=hosting
+          if [ '${{ steps.app.outputs.has_firestore }}' = true ]; then only=hosting,firestore; fi
+          npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
+            --message "${{ inputs.app }} ${{ steps.app.outputs.sha }}"
+          echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
+
+      # Apps with server code on Firebase App Hosting
+
+      - name: Roll out App Hosting
+        id: apphosting
+        if: steps.app.outputs.type == 'apphosting'
+        env:
+          BRANCH: ${{ inputs.ref || github.ref_name }}
+        run: |
+          if [ '${{ inputs.target }}' = prod ]; then
+            backend='${{ steps.app.outputs.backend }}'
+            npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
+              --git-commit '${{ steps.app.outputs.sha }}' --force --project "$FIREBASE_PROJECT"
+            echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
+          else
+            backend='${{ steps.app.outputs.preview_backend }}'
+            npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
+              --git-branch "$BRANCH" --force --project "$FIREBASE_PROJECT"
+            uri=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" --json \
+              | jq -r '[.. | objects | .uri? | strings][0] // empty')
+            case "$uri" in http*) ;; ?*) uri="https://$uri" ;; esac
+            echo "url=$uri" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Report
+
+      - name: Report
+        id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url }}
+        run: |
+          echo "- **${{ inputs.app }}** (${{ inputs.target }}): $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ inputs.app }}: $URL"
+          mkdir -p "$RUNNER_TEMP/link"
+          jq -n --arg app '${{ inputs.app }}' --arg url "$URL" '{app: $app, url: $url}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
+          if [ '${{ inputs.target }}' = preview ] && [ -n "$URL" ]; then
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
+              -f state=success -f context='preview/${{ inputs.app }}' -f target_url="$URL" \
+              -f description='Preview deployed' > /dev/null
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: link-${{ inputs.app }}
+          path: ${{ runner.temp }}/link/${{ inputs.app }}.json
+          retention-days: 7
+
+      - name: Move deployed tag
+        if: inputs.target == 'prod'
+        run: |
+          tag='deployed/${{ inputs.app }}'
+          git tag -f "$tag" '${{ steps.app.outputs.sha }}'
+          git push -f origin "refs/tags/$tag"

@@ -1,0 +1,44 @@
+name: prod
+
+# Every push to main deploys each app that changed since its deployed/<name> tag.
+# A failed deploy leaves the tag where it was, so the next push to main retries it.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        run: |
+          git fetch --tags --force origin
+          apps=$(node scripts/changed-apps.mjs --deployed)
+          echo "Apps to deploy: $apps"
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.apps != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect.outputs.apps) }}
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      app: ${{ matrix.app }}
+      target: prod
+    secrets: inherit
+    permissions:
+      contents: write
+      statuses: write

@@ -1,6 +1,6 @@
 # Plan: one repo for all apps on trom.dev
 
-Status: **agreed, not yet implemented.** This file records the decisions and the order of work.
+Status: **in progress.** Phase 3 (skeleton) is written; phases 1 and 2 need Tim in the consoles. This file records the decisions and the order of work.
 Update it as phases land.
 
 ## Goals
@@ -110,7 +110,10 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
 2. **DNS move**
    - Create a Cloud DNS zone for `trom.dev` and recreate every existing Namecheap record (App Hosting A/TXT/CNAME records for Sky Defender, any verification TXT, any mail records).
    - Switch nameservers at Namecheap. Check `trom.dev` still serves Sky Defender.
-3. **Skeleton**: `scripts/changed-apps.mjs`, the four workflows, `templates/static-vite`.
+3. **Skeleton** (done, untested in CI until phase 1): `scripts/changed-apps.mjs`, `scripts/new-app.mjs`,
+   `scripts/attach-domain.mjs` (custom domain, Cloud DNS records and Auth domain, used by `create-app.yml`),
+   the four workflows, `templates/static-vite`. Builds get `VITE_APP_ENV` / `NEXT_PUBLIC_APP_ENV` and
+   `VITE_FIRESTORE_DATABASE_ID` / `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` from `app.json`.
 4. **First app, end to end: Sky Defender** (simplest; no Firebase use)
    - Copy into `apps/sky-defender`, convert to Hosting, push a branch, open the preview link on a phone, merge, verify `sky-defender.trom.dev`.
 5. **Home page** at `trom.dev`. Cut the apex over from the old Sky Defender App Hosting backend to the Home Hosting site.
@@ -123,7 +126,8 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
 
 ## Open items to verify during implementation
 
-- Whether Hosting preview channel domains (`*.web.app`) need adding to Auth's authorized domains for Pong's anonymous sign-in and Tim News's sign-in to work on previews.
+- Whether Hosting preview channel domains (`*.web.app`) need adding to Auth's authorized domains for Pong's anonymous sign-in and Tim News's sign-in to work on previews. `hosting:channel:deploy` adds channel domains to Auth by default, so this should already work for Hosting apps; `create-app.yml` authorizes the App Hosting preview backend's URL.
+- `apphosting:backends:create --non-interactive` may not connect the GitHub repo or turn off automatic rollouts; `create-app.yml` lists those as console steps.
 - The exact API calls for attaching custom domains to Hosting sites and App Hosting backends from a script; fall back to one manual console step per app if needed.
 - App Hosting's handling of a root directory inside a repo with no workspace config (expected to work; confirm with Tim News).
 - Hosting site IDs are globally unique; `trom-<name>` is the naming pattern, adjust if taken.

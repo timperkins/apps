@@ -1,0 +1,149 @@
+#!/usr/bin/env node
+// Attaches a custom domain to a Hosting site or App Hosting backend, writes the DNS records
+// Firebase asks for into Cloud DNS, and adds the domain to Firebase Auth's authorized domains.
+// Run by the create-app workflow with the deploy service account; safe to re-run.
+//
+//   node scripts/attach-domain.mjs --domain pong.trom.dev --hosting-site trom-pong
+//   node scripts/attach-domain.mjs --domain news.trom.dev --backend news --region us-central1
+//   node scripts/attach-domain.mjs --domain news-preview--apps-97595.us-central1.hosted.app --authorize-only
+//
+// Env: FIREBASE_PROJECT (default apps-97595), DNS_ZONE (Cloud DNS zone name, default trom-dev).
+// Auth: an access token from `gcloud auth print-access-token`.
+import { execFileSync } from 'node:child_process';
+import { parseArgs } from 'node:util';
+
+const { values: opts } = parseArgs({
+  options: {
+    domain: { type: 'string' },
+    'hosting-site': { type: 'string' },
+    backend: { type: 'string' },
+    region: { type: 'string', default: 'us-central1' },
+    'authorize-only': { type: 'boolean', default: false },
+  },
+});
+
+const project = process.env.FIREBASE_PROJECT ?? 'apps-97595';
+const zone = process.env.DNS_ZONE ?? 'trom-dev';
+const domain = opts.domain;
+if (!domain || (!opts['authorize-only'] && !opts['hosting-site'] === !opts.backend)) {
+  console.error('usage: attach-domain.mjs --domain <host> (--hosting-site <site> | --backend <id> [--region r] | --authorize-only)');
+  process.exit(2);
+}
+
+const token = execFileSync('gcloud', ['auth', 'print-access-token'], { encoding: 'utf8' }).trim();
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-goog-user-project': project,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  return { status: res.status, ok: res.ok, json };
+}
+
+async function must(method, url, body) {
+  const res = await api(method, url, body);
+  if (!res.ok) throw new Error(`${method} ${url} -> ${res.status} ${JSON.stringify(res.json)}`);
+  return res.json;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Creates the custom domain (ignoring "already exists") and polls until Firebase reports the DNS
+// records it wants. Returns a flat list of { domainName, type, rdata, requiredAction }.
+async function requiredRecords() {
+  let base, createUrl, read;
+  if (opts['hosting-site']) {
+    base = `https://firebasehosting.googleapis.com/v1beta1/projects/${project}/sites/${opts['hosting-site']}/customDomains`;
+    createUrl = `${base}?customDomainId=${domain}`;
+    read = (d) => [d.requiredDnsUpdates];
+  } else {
+    base = `https://firebaseapphosting.googleapis.com/v1beta/projects/${project}/locations/${opts.region}/backends/${opts.backend}/domains`;
+    createUrl = `${base}?domainId=${domain}`;
+    read = (d) => d.customDomainStatus?.requiredDnsUpdates ?? [];
+  }
+
+  const created = await api('POST', createUrl, {});
+  if (!created.ok && created.status !== 409) {
+    throw new Error(`creating custom domain failed: ${created.status} ${JSON.stringify(created.json)}`);
+  }
+  console.log(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
+
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const res = await api('GET', `${base}/${domain}`);
+    if (res.ok) {
+      const records = read(res.json)
+        .flatMap((u) => u?.desired ?? [])
+        .flatMap((set) => set.records ?? []);
+      if (records.length) return records;
+    }
+    await sleep(10_000);
+  }
+  throw new Error(`Firebase did not report DNS records for ${domain} within 5 minutes`);
+}
+
+const fqdn = (name) => (name.endsWith('.') ? name : `${name}.`);
+
+function normalizeRdata(type, rdata) {
+  if (type === 'TXT' && !rdata.startsWith('"')) return `"${rdata}"`;
+  if (type === 'CNAME') return fqdn(rdata);
+  return rdata;
+}
+
+// Applies ADD/REMOVE actions on top of whatever record sets already exist, so unrelated values
+// (for example other TXT records at the apex) are kept.
+async function writeDns(records) {
+  const dns = `https://dns.googleapis.com/dns/v1/projects/${project}/managedZones/${zone}/rrsets`;
+  const groups = new Map();
+  for (const r of records) {
+    const key = `${fqdn(r.domainName)} ${r.type}`;
+    if (!groups.has(key)) groups.set(key, { name: fqdn(r.domainName), type: r.type, add: [], remove: [] });
+    const g = groups.get(key);
+    const value = normalizeRdata(r.type, r.rdata);
+    if (r.requiredAction === 'REMOVE') g.remove.push(value);
+    else g.add.push(value);
+  }
+
+  for (const { name, type, add, remove } of groups.values()) {
+    const existing = await api('GET', `${dns}/${name}/${type}`);
+    const current = existing.ok ? existing.json.rrdatas ?? [] : [];
+    const next = [...new Set([...current.filter((v) => !remove.includes(v)), ...add])];
+    const same = next.length === current.length && next.every((v) => current.includes(v));
+    if (same) {
+      console.log(`DNS ${type} ${name} already correct`);
+    } else if (!next.length) {
+      await must('DELETE', `${dns}/${name}/${type}`);
+      console.log(`DNS ${type} ${name} deleted`);
+    } else if (existing.ok) {
+      await must('PATCH', `${dns}/${name}/${type}`, { name, type, ttl: existing.json.ttl ?? 300, rrdatas: next });
+      console.log(`DNS ${type} ${name} updated: ${next.join(', ')}`);
+    } else {
+      await must('POST', dns, { name, type, ttl: 300, rrdatas: next });
+      console.log(`DNS ${type} ${name} created: ${next.join(', ')}`);
+    }
+  }
+}
+
+async function authorize(host) {
+  const url = `https://identitytoolkit.googleapis.com/admin/v2/projects/${project}/config`;
+  const config = await must('GET', url);
+  const domains = config.authorizedDomains ?? [];
+  if (domains.includes(host)) {
+    console.log(`Auth already allows ${host}`);
+    return;
+  }
+  await must('PATCH', `${url}?updateMask=authorizedDomains`, { authorizedDomains: [...domains, host] });
+  console.log(`Auth now allows ${host}`);
+}
+
+if (!opts['authorize-only']) {
+  await writeDns(await requiredRecords());
+  console.log('DNS written. Firebase verifies the domain and issues a certificate, which can take up to an hour.');
+}
+await authorize(domain);
