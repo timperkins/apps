@@ -1,6 +1,6 @@
 # Plan: one repo for all apps on trom.dev
 
-Status: **in progress.** Phase 3 (skeleton) is written; phases 1 and 2 need Tim in the consoles. This file records the decisions and the order of work.
+Status: **in progress.** Phases 1–4 are done; phase 5 (home page) is in progress. This file records the decisions and the order of work.
 Update it as phases land.
 
 ## Goals
@@ -114,9 +114,12 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
    `scripts/attach-domain.mjs` (custom domain, Cloud DNS records and Auth domain, used by `create-app.yml`),
    the four workflows, `templates/static-vite`. Builds get `VITE_APP_ENV` / `NEXT_PUBLIC_APP_ENV` and
    `VITE_FIRESTORE_DATABASE_ID` / `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` from `app.json`.
-4. **First app, end to end: Sky Defender** (simplest; no Firebase use)
+4. **First app, end to end: Sky Defender** (done: `sky-defender.trom.dev`) (simplest; no Firebase use)
    - Copy into `apps/sky-defender`, convert to Hosting, push a branch, open the preview link on a phone, merge, verify `sky-defender.trom.dev`.
 5. **Home page** at `trom.dev`. Cut the apex over from the old Sky Defender App Hosting backend to the Home Hosting site.
+   Order: run `create-app` (name `home`, `attach_domain` off) so the site exists, merge the home page so prod is
+   deployed, remove `trom.dev` from the old App Hosting backend, then run `create-app` again with `attach_domain` on.
+   When an app goes live, add it to `apps/home/src/apps.ts`.
 6. **Remaining static apps**: Pong (add preview database, env-driven DB ID), You Have Been Chosen, Scorched, Paper Airplane (static export). One branch per app.
 7. **Tim News on App Hosting**
    - Create `news` and `news-preview` backends (root `apps/news`, automatic rollouts off).
