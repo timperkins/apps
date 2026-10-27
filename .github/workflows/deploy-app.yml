@@ -111,9 +111,11 @@ jobs:
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
-            --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" || {
-            cat "$RUNNER_TEMP/channel.json"
-            echo "::error title=hosting:channel:deploy failed::$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" | tr '\n' ' ')"
+            --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" 2> "$RUNNER_TEMP/channel.err" || {
+            cat "$RUNNER_TEMP/channel.json" "$RUNNER_TEMP/channel.err"
+            msg=$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" 2>/dev/null)
+            [ -n "$msg" ] || msg=$(grep -v '^npm warn' "$RUNNER_TEMP/channel.err" | tail -n 20)
+            echo "::error title=hosting:channel:deploy failed::$(echo "${msg:-no output}" | tr '\n' ' ')"
             exit 1
           }
           url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/channel.json")
