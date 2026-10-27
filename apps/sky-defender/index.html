@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Sky Defender</title>
+<meta name="description" content="A calm but tense WWII anti-aircraft game. Turn your phone to aim.">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sky Defender">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Jost:wght@400;500&display=swap">
+
+</head>
+<body>
+<div id="safe"></div>
+<div id="topbar"></div>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="firezone" aria-hidden="true"></div>
+
+  <button id="pauseBtn" class="hudbtn" aria-label="Pause" hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
+  </button>
+
+  <div id="version" aria-hidden="true"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="hint" hidden>
+    <div class="hint-tilt"><svg class="phone" viewBox="0 0 40 70" width="34" height="58"><rect x="3" y="3" width="34" height="64" rx="7" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="20" cy="59" r="2.5" fill="currentColor"/></svg><span>Tilt your phone to aim</span></div>
+    <div class="hint-fire"><span class="ring"></span><span>Tap anywhere to fire</span></div>
+  </div>
+
+  <section id="loading" class="screen show">
+    <h1 class="title">Sky Defender</h1>
+    <div class="bar"><i id="loadbar"></i></div>
+  </section>
+
+  <section id="start" class="screen">
+    <h1 class="title">Sky Defender</h1>
+    <p class="lead">Hold your phone upright and tap to start</p>
+    <p class="best" id="bestLine"></p>
+    <div class="seg" role="radiogroup" aria-label="Difficulty">
+      <button role="radio" data-diff="normal" aria-checked="true">Normal</button>
+      <button role="radio" data-diff="expert" aria-checked="false">Expert</button>
+    </div>
+    <p class="fine" id="diffNote"></p>
+    <div class="row">
+      <button class="ghost" data-open="settings">Settings</button>
+      <button class="ghost" data-open="scores">High scores</button>
+    </div>
+    <p class="fine" id="installTip"></p>
+  </section>
+
+  <section id="nosensor" class="screen">
+    <h2>Motion sensors needed</h2>
+    <p id="nosensorMsg">Sky Defender is aimed by turning your phone, so it needs a phone or tablet with motion sensors.</p>
+    <button class="primary" id="retrySensor">Try again</button>
+  </section>
+
+  <section id="pause" class="screen">
+    <h2 id="pauseTitle">Paused</h2>
+    <p id="pauseReason" class="lead"></p>
+    <button class="primary" id="resumeBtn">Resume</button>
+    <button class="ghost" id="recalBtn">Recalibrate</button>
+    <div class="settings-inline"></div>
+    <button class="ghost small" id="quitBtn">Quit to title</button>
+  </section>
+
+  <section id="recal" class="screen">
+    <h2>Recalibrate</h2>
+    <p class="lead">Hold your phone upright and tap</p>
+  </section>
+
+  <section id="cards" class="screen">
+    <h2>Choose an upgrade</h2>
+    <p class="lead">It takes effect right away.</p>
+    <div id="cardList" class="cards"></div>
+    <button class="ghost small" id="cardsBack">Not now</button>
+  </section>
+
+  <section id="countdown" class="screen clear"><div id="countNum">3</div></section>
+
+  <section id="results" class="screen">
+    <h2>Base lost</h2>
+    <div id="rMode" class="mode" hidden>Expert mode</div>
+    <div id="newBest" class="newbest" hidden>New best score</div>
+    <div class="big" id="rScore">0</div>
+    <dl class="stats">
+      <dt>Wave reached</dt><dd id="rWave"></dd>
+      <dt>Accuracy</dt><dd id="rAcc"></dd>
+      <dt>Planes downed</dt><dd id="rKills"></dd>
+      <dt>Bombs intercepted</dt><dd id="rBombs"></dd>
+      <dt>Best score</dt><dd id="rBest"></dd>
+    </dl>
+    <button class="primary" id="againBtn">Play again</button>
+    <button class="ghost small" id="titleBtn">Title screen</button>
+  </section>
+
+  <section id="settings" class="screen">
+    <h2>Settings</h2>
+    <div class="settings-inline"></div>
+    <button class="ghost" data-close>Done</button>
+    <p class="fine" id="buildInfo"></p>
+  </section>
+
+  <section id="scores" class="screen">
+    <h2 id="scoresTitle">High scores</h2>
+    <ol id="scoreList" class="scorelist"></ol>
+    <button class="ghost" data-close>Done</button>
+  </section>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
