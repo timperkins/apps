@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Scorched: a realtime artillery game. Pick your weapon, set angle and power, and fire." />
+    <meta name="theme-color" content="#140c2e" />
+    <title>Scorched</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%23140c2e'/%3E%3Crect y='12' width='16' height='4' fill='%237a5a2e'/%3E%3Crect x='3' y='9' width='10' height='3' fill='%23e8483a'/%3E%3Crect x='6' y='7' width='4' height='2' fill='%23e8483a'/%3E%3Crect x='10' y='4' width='1' height='4' fill='%23eee'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <button id="fs-btn" class="btn small fs-corner" data-act="fullscreen" hidden>Full screen</button>
+      <section id="screen" class="screen"></section>
+      <section id="game" class="game" hidden>
+        <header id="hud" class="hud"></header>
+        <div class="viewport">
+          <div class="stage">
+            <canvas id="canvas" aria-label="Battlefield"></canvas>
+            <canvas id="labels" aria-hidden="true"></canvas>
+          </div>
+          <div id="banner" class="banner" hidden></div>
+          <div id="menu" class="menu" hidden></div>
+        </div>
+        <nav id="controls" class="controls" aria-label="Players"></nav>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
