@@ -1,0 +1,9 @@
+{
+  "name": "news",
+  "type": "apphosting",
+  "domain": "news.trom.dev",
+  "backend": "news",
+  "firestore": {
+    "prod": "tim-news"
+  }
+}

@@ -17,7 +17,7 @@ on:
         options: [hosting, apphosting]
         default: hosting
       firestore:
-        description: Create <name> and <name>-preview Firestore databases
+        description: Create the Firestore databases (names from app.json's firestore field if the app folder exists, else <name> and <name>-preview)
         type: boolean
         default: false
       attach_domain:
@@ -55,6 +55,15 @@ jobs:
       - name: Check name
         run: |
           [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]] || { echo "::error::Bad app name: $NAME"; exit 1; }
+          # Backend names from app.json when the app folder exists (an app can keep an older backend,
+          # or have no preview backend), else <name> and <name>-preview.
+          app="apps/$NAME/app.json"
+          if [ -f "$app" ]; then
+            backend=$(jq -r '.backend // empty' "$app"); preview=$(jq -r '.previewBackend // empty' "$app")
+          else
+            backend="$NAME"; preview="$NAME-preview"
+          fi
+          { echo "BACKEND=$backend"; echo "PREVIEW_BACKEND=$preview"; echo "BACKENDS=$backend $preview"; } >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@v2
         with:
@@ -77,8 +86,10 @@ jobs:
       - name: App Hosting backends
         if: inputs.type == 'apphosting'
         run: |
-          for backend in "$NAME" "$NAME-preview"; do
-            if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+          for backend in $BACKENDS; do
+            # backends:get exits 0 with a warning when the backend is missing, so check its JSON.
+            if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" --json 2> /dev/null \
+              | jq -e '.result.name' > /dev/null; then
               echo "Backend $backend already exists"
             else
               "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
@@ -89,14 +100,35 @@ jobs:
             echo "### Finish in the Firebase console (App Hosting)"
             echo "- Connect both backends to \`$GITHUB_REPOSITORY\` with root directory \`apps/$NAME\` if they are not connected."
             echo "- Turn **automatic rollouts off** on both, so CI is the only trigger."
-            echo "- Set the environment name of \`$NAME-preview\` to \`preview\` so \`apphosting.preview.yaml\` applies."
-            echo "- Grant both backends access to the secrets the app uses (\`firebase apphosting:secrets:grantaccess\`)."
+            if [ -n "$PREVIEW_BACKEND" ]; then
+              echo "- Set the environment name of \`$PREVIEW_BACKEND\` to \`preview\` so \`apphosting.preview.yaml\` applies."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Needs Secret Manager Admin on the service account. A failure here doesn't stop the rest:
+      # a backend that already had access keeps it.
+      - name: App Hosting secret access
+        if: inputs.type == 'apphosting'
+        continue-on-error: true
+        run: |
+          # Every secret named in the app's apphosting*.yaml files, granted to both backends.
+          secrets=$(cat apps/"$NAME"/apphosting*.yaml 2>/dev/null | sed -nE 's/^[[:space:]]*secret:[[:space:]]*([A-Za-z0-9_-]+).*/\1/p' | sort -u)
+          for secret in $secrets; do
+            for backend in $BACKENDS; do
+              "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:secrets:grantaccess "$secret" \
+                --backend "$backend" --project "$FIREBASE_PROJECT"
+              echo "::notice title=secrets::$secret granted to $backend"
+            done
+          done
 
       - name: Firestore databases
         if: inputs.firestore
         run: |
-          for db in "$NAME" "$NAME-preview"; do
+          dbs="$NAME $NAME-preview"
+          if [ -f "apps/$NAME/app.json" ] && jq -e .firestore "apps/$NAME/app.json" > /dev/null; then
+            dbs=$(jq -r '.firestore.prod + " " + .firestore.preview' "apps/$NAME/app.json")
+          fi
+          for db in $dbs; do
             if npx -y "$FIREBASE_TOOLS" firestore:databases:get "$db" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
               echo "Database $db already exists"
             else
@@ -110,10 +142,17 @@ jobs:
           if [ '${{ inputs.type }}' = hosting ]; then
             "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "trom-$NAME"
           else
-            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$NAME" --region "$REGION"
+            # Use the backend's own region; an existing backend may not be in the default one.
+            region=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$BACKEND" --project "$FIREBASE_PROJECT" --json \
+              | jq -r '[.. | objects | .name? | strings | capture("/locations/(?<r>[^/]+)/backends/").r][0] // empty')
+            echo "::notice title=region::$BACKEND is in ${region:-$REGION}"
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$BACKEND" --region "${region:-$REGION}"
             # Let sign-in work on the preview backend's own URL too.
-            host=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$NAME-preview" --project "$FIREBASE_PROJECT" --json \
-              | jq -r '[.. | objects | .uri? | strings][0] // empty' | sed -E 's#^https?://##; s#/.*$##')
+            host=
+            if [ -n "$PREVIEW_BACKEND" ]; then
+              host=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$PREVIEW_BACKEND" --project "$FIREBASE_PROJECT" --json \
+                | jq -r '[.. | objects | .uri? | strings][0] // empty' | sed -E 's#^https?://##; s#/.*$##')
+            fi
             if [ -n "$host" ]; then "$RUN" node scripts/attach-domain.mjs --domain "$host" --authorize-only; fi
           fi
           echo "Done: https://$DOMAIN (the certificate can take up to an hour)" >> "$GITHUB_STEP_SUMMARY"

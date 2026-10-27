@@ -77,6 +77,14 @@ async function requiredRecords() {
 
   const created = await api('POST', createUrl, {});
   if (!created.ok && created.status !== 409) {
+    if (opts.backend) {
+      // Diagnostics for a backend the domains API can't find.
+      const backendUrl = base.replace(/\/domains$/, '');
+      for (const url of [backendUrl, base, backendUrl.replace('/v1beta/', '/v1/')]) {
+        const res = await api('GET', url);
+        report(`GET ${url} -> ${res.status} ${JSON.stringify(res.json).slice(0, 300)}`);
+      }
+    }
     throw new Error(`creating custom domain failed: ${created.status} ${JSON.stringify(created.json)}`);
   }
   report(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
