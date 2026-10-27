@@ -31,4 +31,9 @@ export const APPS: AppLink[] = [
     url: 'https://paper-airplane.trom.dev',
     blurb: 'Step-by-step paper airplane folding, animated in 3D.',
   },
+  {
+    name: 'Tim News',
+    url: 'https://news.trom.dev',
+    blurb: "Today's news, written up from real reporting, with local stories and topics you care about.",
+  },
 ];
