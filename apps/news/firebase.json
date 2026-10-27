@@ -4,11 +4,6 @@
       "database": "tim-news",
       "rules": "firestore.rules",
       "indexes": "firestore.indexes.json"
-    },
-    {
-      "database": "tim-news-preview",
-      "rules": "firestore.rules",
-      "indexes": "firestore.indexes.json"
     }
   ],
   "emulators": {

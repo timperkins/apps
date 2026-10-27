@@ -3,7 +3,7 @@
 export const APP_NAME = "Tim News";
 
 /** Firestore database the app reads and writes (a named database, not "(default)"). */
-export const FIRESTORE_DATABASE_ID = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || "tim-news-preview";
+export const FIRESTORE_DATABASE_ID = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || "tim-news";
 
 /** Fixed topic list the AI tags stories with, so interests stay consistent. */
 export const TOPICS: Record<string, string> = {

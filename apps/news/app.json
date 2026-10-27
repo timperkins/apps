@@ -4,7 +4,6 @@
   "domain": "news.trom.dev",
   "backend": "news",
   "firestore": {
-    "prod": "tim-news",
-    "preview": "tim-news-preview"
+    "prod": "tim-news"
   }
 }

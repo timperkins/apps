@@ -33,12 +33,12 @@ Firestore collections: `feeds` (one doc per feed, with ordered `storyIds`), `sto
 Tim News runs on Firebase App Hosting in project `apps-97595`, from the `apps` repo (see `docs/PLAN.md` at the repo root):
 
 - Backend `news` serves https://news.trom.dev and uses the `tim-news` database. Merging to `main` rolls it out (CI runs `firebase apphosting:rollouts:create`; automatic rollouts are off).
-- Backend `news-preview` (environment name `preview`) serves branch previews from the `tim-news-preview` database. `apphosting.preview.yaml` overrides the database ID. Each push to a branch rolls that branch out there, so there is one preview at a time.
+- There is no preview backend or preview database for now, so branches get no preview link. Test locally before merging.
 - CI deploys `firestore.rules` and indexes to the target database before each rollout.
-- `apphosting.yaml` holds the web app config (public by design) and references the `GEMINI_API_KEY` secret. Both backends are granted access to it by the `create-app` workflow.
-- Under **Authentication**, the **Anonymous** and **Google** providers are enabled. Optionally, add a Firestore TTL policy on `expireAt` for `stories` and `followups` in both databases.
+- `apphosting.yaml` holds the web app config (public by design) and references the `GEMINI_API_KEY` secret. The backend has access to it.
+- Under **Authentication**, the **Anonymous** and **Google** providers are enabled. Optionally, add a Firestore TTL policy on `expireAt` for `stories` and `followups` in the database.
 
-Local development defaults to `tim-news-preview` unless `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` is set.
+Local development uses `tim-news` unless `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` is set.
 
 Cost controls: `DAILY_STORY_LIMIT` and `DAILY_FOLLOWUP_LIMIT` (default 200 each) cap generation per day, and feeds refresh at most every 15 minutes (top stories), 30 minutes (topics) or 60 minutes (local). The model is set with `GEMINI_MODEL` (default `gemini-flash-latest`). `GEMINI_THINKING` sets how much the model thinks before writing (default `low`, which keeps a refresh fast; `default` leaves it to the model).
 
