@@ -140,7 +140,11 @@ jobs:
           if [ '${{ inputs.type }}' = hosting ]; then
             "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "trom-$NAME"
           else
-            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$BACKEND" --region "$REGION"
+            # Use the backend's own region; an existing backend may not be in the default one.
+            region=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$BACKEND" --project "$FIREBASE_PROJECT" --json \
+              | jq -r '[.. | objects | .name? | strings | capture("/locations/(?<r>[^/]+)/backends/").r][0] // empty')
+            echo "::notice title=region::$BACKEND is in ${region:-$REGION}"
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$BACKEND" --region "${region:-$REGION}"
             # Let sign-in work on the preview backend's own URL too.
             host=
             if [ -n "$PREVIEW_BACKEND" ]; then
