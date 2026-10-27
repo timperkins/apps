@@ -17,7 +17,7 @@ on:
         options: [hosting, apphosting]
         default: hosting
       firestore:
-        description: Create <name> and <name>-preview Firestore databases
+        description: Create the Firestore databases (names from app.json's firestore field if the app folder exists, else <name> and <name>-preview)
         type: boolean
         default: false
       attach_domain:
@@ -90,13 +90,29 @@ jobs:
             echo "- Connect both backends to \`$GITHUB_REPOSITORY\` with root directory \`apps/$NAME\` if they are not connected."
             echo "- Turn **automatic rollouts off** on both, so CI is the only trigger."
             echo "- Set the environment name of \`$NAME-preview\` to \`preview\` so \`apphosting.preview.yaml\` applies."
-            echo "- Grant both backends access to the secrets the app uses (\`firebase apphosting:secrets:grantaccess\`)."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: App Hosting secret access
+        if: inputs.type == 'apphosting'
+        run: |
+          # Every secret named in the app's apphosting*.yaml files, granted to both backends.
+          secrets=$(cat apps/"$NAME"/apphosting*.yaml 2>/dev/null | sed -nE 's/^[[:space:]]*secret:[[:space:]]*([A-Za-z0-9_-]+).*/\1/p' | sort -u)
+          for secret in $secrets; do
+            for backend in "$NAME" "$NAME-preview"; do
+              "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:secrets:grantaccess "$secret" \
+                --backend "$backend" --project "$FIREBASE_PROJECT"
+              echo "::notice title=secrets::$secret granted to $backend"
+            done
+          done
 
       - name: Firestore databases
         if: inputs.firestore
         run: |
-          for db in "$NAME" "$NAME-preview"; do
+          dbs="$NAME $NAME-preview"
+          if [ -f "apps/$NAME/app.json" ] && jq -e .firestore "apps/$NAME/app.json" > /dev/null; then
+            dbs=$(jq -r '.firestore.prod + " " + .firestore.preview' "apps/$NAME/app.json")
+          fi
+          for db in $dbs; do
             if npx -y "$FIREBASE_TOOLS" firestore:databases:get "$db" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
               echo "Database $db already exists"
             else

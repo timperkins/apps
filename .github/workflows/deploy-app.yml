@@ -139,6 +139,12 @@ jobs:
 
       # Apps with server code on Firebase App Hosting
 
+      - name: Deploy Firestore rules (App Hosting)
+        if: steps.app.outputs.type == 'apphosting' && steps.app.outputs.database != ''
+        run: |
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.database }}' \
+            --project "$FIREBASE_PROJECT" --force
+
       - name: Roll out App Hosting
         id: apphosting
         if: steps.app.outputs.type == 'apphosting'
