@@ -34,6 +34,7 @@ on:
 
 env:
   FIREBASE_PROJECT: apps-97595
+  RUN: ${{ github.workspace }}/scripts/ci-run.sh
   FIREBASE_TOOLS: firebase-tools@15.34.1
 
 jobs:
@@ -91,10 +92,10 @@ jobs:
       - name: Install and check
         if: steps.app.outputs.type == 'hosting'
         run: |
-          npm ci
-          npm run typecheck --if-present
-          npm run lint --if-present
-          if jq -e '.scripts.test' package.json > /dev/null; then npm test; fi
+          "$RUN" npm ci
+          "$RUN" npm run typecheck --if-present
+          "$RUN" npm run lint --if-present
+          if jq -e '.scripts.test' package.json > /dev/null; then "$RUN" npm test; fi
 
       - name: Build
         if: steps.app.outputs.type == 'hosting'
@@ -103,14 +104,18 @@ jobs:
           VITE_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
           NEXT_PUBLIC_APP_ENV: ${{ inputs.target }}
           NEXT_PUBLIC_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
-        run: npm run build
+        run: '"$RUN" npm run build'
 
       - name: Deploy preview channel
         id: hosting_preview
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
-            --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json"
+            --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" || {
+            cat "$RUNNER_TEMP/channel.json"
+            echo "::error title=hosting:channel:deploy failed::$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" | tr '\n' ' ')"
+            exit 1
+          }
           url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/channel.json")
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
@@ -120,7 +125,7 @@ jobs:
         run: |
           only=hosting
           if [ '${{ steps.app.outputs.has_firestore }}' = true ]; then only=hosting,firestore; fi
-          npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
             --message "${{ inputs.app }} ${{ steps.app.outputs.sha }}"
           echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
 
@@ -134,12 +139,12 @@ jobs:
         run: |
           if [ '${{ inputs.target }}' = prod ]; then
             backend='${{ steps.app.outputs.backend }}'
-            npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
+            "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
               --git-commit '${{ steps.app.outputs.sha }}' --force --project "$FIREBASE_PROJECT"
             echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
           else
             backend='${{ steps.app.outputs.preview_backend }}'
-            npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
+            "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
               --git-branch "$BRANCH" --force --project "$FIREBASE_PROJECT"
             uri=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" --json \
               | jq -r '[.. | objects | .uri? | strings][0] // empty')

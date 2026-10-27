@@ -34,6 +34,7 @@ on:
 
 env:
   FIREBASE_PROJECT: apps-97595
+  RUN: ${{ github.workspace }}/scripts/ci-run.sh
   FIREBASE_TOOLS: firebase-tools@15.34.1
   DNS_ZONE: trom-dev
   NAME: ${{ inputs.name }}
@@ -66,7 +67,7 @@ jobs:
           if npx -y "$FIREBASE_TOOLS" hosting:sites:get "$site" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
             echo "Hosting site $site already exists"
           else
-            npx -y "$FIREBASE_TOOLS" hosting:sites:create "$site" --project "$FIREBASE_PROJECT" --non-interactive
+            "$RUN" npx -y "$FIREBASE_TOOLS" hosting:sites:create "$site" --project "$FIREBASE_PROJECT" --non-interactive
           fi
 
       - name: App Hosting backends
@@ -76,7 +77,7 @@ jobs:
             if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
               echo "Backend $backend already exists"
             else
-              npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
+              "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
                 --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME"
             fi
           done
@@ -95,19 +96,19 @@ jobs:
             if npx -y "$FIREBASE_TOOLS" firestore:databases:get "$db" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
               echo "Database $db already exists"
             else
-              npx -y "$FIREBASE_TOOLS" firestore:databases:create "$db" --location "$DB_LOCATION" --project "$FIREBASE_PROJECT"
+              "$RUN" npx -y "$FIREBASE_TOOLS" firestore:databases:create "$db" --location "$DB_LOCATION" --project "$FIREBASE_PROJECT"
             fi
           done
 
       - name: Custom domain, DNS and Auth
         run: |
           if [ '${{ inputs.type }}' = hosting ]; then
-            node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "trom-$NAME"
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "trom-$NAME"
           else
-            node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$NAME" --region "$REGION"
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$NAME" --region "$REGION"
             # Let sign-in work on the preview backend's own URL too.
             host=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$NAME-preview" --project "$FIREBASE_PROJECT" --json \
               | jq -r '[.. | objects | .uri? | strings][0] // empty' | sed -E 's#^https?://##; s#/.*$##')
-            if [ -n "$host" ]; then node scripts/attach-domain.mjs --domain "$host" --authorize-only; fi
+            if [ -n "$host" ]; then "$RUN" node scripts/attach-domain.mjs --domain "$host" --authorize-only; fi
           fi
           echo "Done: https://$DOMAIN (the certificate can take up to an hour)" >> "$GITHUB_STEP_SUMMARY"
