@@ -103,8 +103,11 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Needs Secret Manager Admin on the service account. A failure here doesn't stop the rest:
+      # a backend that already had access keeps it.
       - name: App Hosting secret access
         if: inputs.type == 'apphosting'
+        continue-on-error: true
         run: |
           # Every secret named in the app's apphosting*.yaml files, granted to both backends.
           secrets=$(cat apps/"$NAME"/apphosting*.yaml 2>/dev/null | sed -nE 's/^[[:space:]]*secret:[[:space:]]*([A-Za-z0-9_-]+).*/\1/p' | sort -u)
