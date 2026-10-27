@@ -1,6 +1,6 @@
 # Plan: one repo for all apps on trom.dev
 
-Status: **in progress.** Phases 1–5 are done; next is phase 6 (remaining static apps). This file records the decisions and the order of work.
+Status: **in progress.** Phases 1–6 are done; phase 7 (Tim News) is in review. This file records the decisions and the order of work.
 Update it as phases land.
 
 ## Goals
@@ -122,9 +122,10 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
    When an app goes live, add it to `apps/home/src/apps.ts`.
 6. **Remaining static apps**: Pong (add preview database, env-driven DB ID), You Have Been Chosen, Scorched, Paper Airplane (static export). One branch per app.
 7. **Tim News on App Hosting**
-   - Create `news` and `news-preview` backends (root `apps/news`, automatic rollouts off).
-   - `apphosting.preview.yaml` overrides `NEXT_PUBLIC_FIRESTORE_DATABASE_ID` to `tim-news-preview`; the preview backend's environment name is `preview`.
-   - Grant both backends access to the `GEMINI_API_KEY` secret.
+   - Repoint the existing `news` backend at `apps/news` in this repo (live branch `main`, automatic rollouts off).
+   - No preview backend or preview database for now: `app.json` has no `previewBackend`, so previews skip News.
+   - The backend already has access to the `GEMINI_API_KEY` secret. `create-app` grants access to new backends,
+     which needs Secret Manager Admin on the service account.
 8. **Clean up**: delete the old per-repo App Hosting backends once each subdomain is verified. Archive old repos only if Tim wants to (not planned).
 
 ## Open items to verify during implementation
