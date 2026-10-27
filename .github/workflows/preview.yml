@@ -65,7 +65,8 @@ jobs:
           body="$marker"$'\n'"**Preview links** for \`${GITHUB_SHA::7}\`"$'\n'
           for app in $(echo "$APPS" | jq -r '.[]'); do
             url=$(jq -r '.url // empty' "links/$app.json" 2>/dev/null || true)
-            body+=$'\n'"- **$app**: ${url:-deploy failed, see the run}"
+            note=$(jq -r '.note // empty' "links/$app.json" 2>/dev/null || true)
+            body+=$'\n'"- **$app**: ${url:-${note:-deploy failed, see the run}}"
           done
           body+=$'\n\n'"[Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
           echo "$body" | tee -a "$GITHUB_STEP_SUMMARY"

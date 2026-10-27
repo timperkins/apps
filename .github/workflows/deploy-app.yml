@@ -139,8 +139,11 @@ jobs:
 
       # Apps with server code on Firebase App Hosting
 
+      # An App Hosting app without a previewBackend in app.json gets no preview.
       - name: Deploy Firestore rules (App Hosting)
-        if: steps.app.outputs.type == 'apphosting' && steps.app.outputs.database != ''
+        if: >-
+          steps.app.outputs.type == 'apphosting' && steps.app.outputs.database != ''
+          && (inputs.target == 'prod' || steps.app.outputs.preview_backend != '')
         run: |
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.database }}' \
             --project "$FIREBASE_PROJECT" --force
@@ -156,6 +159,9 @@ jobs:
             "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
               --git-commit '${{ steps.app.outputs.sha }}' --force --project "$FIREBASE_PROJECT"
             echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
+          elif [ -z '${{ steps.app.outputs.preview_backend }}' ]; then
+            echo "::notice title=${{ inputs.app }}::No previewBackend in app.json, so there is no preview"
+            echo "note=no preview backend" >> "$GITHUB_OUTPUT"
           else
             backend='${{ steps.app.outputs.preview_backend }}'
             "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:rollouts:create "$backend" \
@@ -173,11 +179,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url }}
+          NOTE: ${{ steps.apphosting.outputs.note }}
         run: |
-          echo "- **${{ inputs.app }}** (${{ inputs.target }}): $URL" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ inputs.app }}: $URL"
+          echo "- **${{ inputs.app }}** (${{ inputs.target }}): ${URL:-$NOTE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ inputs.app }}: ${URL:-$NOTE}"
           mkdir -p "$RUNNER_TEMP/link"
-          jq -n --arg app '${{ inputs.app }}' --arg url "$URL" '{app: $app, url: $url}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
+          jq -n --arg app '${{ inputs.app }}' --arg url "$URL" --arg note "$NOTE" '{app: $app, url: $url, note: $note}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
           if [ '${{ inputs.target }}' = preview ] && [ -n "$URL" ]; then
             gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
               -f state=success -f context='preview/${{ inputs.app }}' -f target_url="$URL" \
