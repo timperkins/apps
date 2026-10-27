@@ -28,6 +28,10 @@ on:
         description: "Custom domain (default: <name>.trom.dev)"
         type: string
         required: false
+      ttl_collections:
+        description: "Firestore collection groups whose documents expire at their expiresAt field, space-separated (e.g. rooms players rtc). Needs firestore."
+        type: string
+        required: false
       firestore_location:
         type: string
         default: nam5
@@ -134,6 +138,27 @@ jobs:
             else
               "$RUN" npx -y "$FIREBASE_TOOLS" firestore:databases:create "$db" --location "$DB_LOCATION" --project "$FIREBASE_PROJECT"
             fi
+          done
+
+      # Firestore deletes a document in these collection groups once its expiresAt time has passed.
+      - name: Firestore TTL policies
+        if: inputs.firestore && inputs.ttl_collections != ''
+        env:
+          TTL_COLLECTIONS: ${{ inputs.ttl_collections }}
+        run: |
+          dbs="$NAME $NAME-preview"
+          if [ -f "apps/$NAME/app.json" ] && jq -e .firestore "apps/$NAME/app.json" > /dev/null; then
+            dbs=$(jq -r '.firestore.prod + " " + .firestore.preview' "apps/$NAME/app.json")
+          fi
+          for group in $TTL_COLLECTIONS; do
+            [[ "$group" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]] || { echo "::error::Bad collection group: $group"; exit 1; }
+          done
+          for db in $dbs; do
+            for group in $TTL_COLLECTIONS; do
+              "$RUN" gcloud firestore fields ttls update expiresAt --collection-group="$group" --database="$db" \
+                --enable-ttl --async --quiet --project="$FIREBASE_PROJECT"
+              echo "::notice title=ttl::$db/$group expires documents at expiresAt"
+            done
           done
 
       - name: Custom domain, DNS and Auth
