@@ -1,0 +1,81 @@
+name: preview
+
+# Every push to a branch other than main deploys a preview of each app changed on that branch.
+# Links go to the run summary, a commit status per app, and a comment on the branch's PR.
+
+on:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: preview-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        run: |
+          apps=$(node scripts/changed-apps.mjs --base origin/main)
+          echo "Changed apps: $apps"
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.apps != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect.outputs.apps) }}
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      app: ${{ matrix.app }}
+      target: preview
+    secrets: inherit
+    permissions:
+      contents: write
+      statuses: write
+
+  links:
+    needs: [detect, deploy]
+    if: always() && needs.detect.outputs.apps != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: link-*
+          path: links
+          merge-multiple: true
+      - name: Summary and PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          APPS: ${{ needs.detect.outputs.apps }}
+        run: |
+          marker='<!-- preview-links -->'
+          body="$marker"$'\n'"**Preview links** for \`${GITHUB_SHA::7}\`"$'\n'
+          for app in $(echo "$APPS" | jq -r '.[]'); do
+            url=$(jq -r '.url // empty' "links/$app.json" 2>/dev/null || true)
+            body+=$'\n'"- **$app**: ${url:-deploy failed, see the run}"
+          done
+          body+=$'\n\n'"[Run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          echo "$body" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          [ -z "$pr" ] && exit 0
+          comment=$(gh api "repos/$GH_REPO/issues/$pr/comments" --paginate \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" | head -n1)
+          if [ -n "$comment" ]; then
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$comment" -f body="$body" > /dev/null
+          else
+            gh pr comment "$pr" --body "$body"
+          fi
