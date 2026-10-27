@@ -53,6 +53,12 @@ async function must(method, url, body) {
   return res.json;
 }
 
+// Logs a line; in GitHub Actions also as a notice annotation, which is readable without the raw log.
+function report(message) {
+  console.log(message);
+  if (process.env.GITHUB_ACTIONS) console.log(`::notice title=attach-domain::${message.replaceAll('%', '%25')}`);
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Creates the custom domain (ignoring "already exists") and polls until Firebase reports the DNS
@@ -73,7 +79,7 @@ async function requiredRecords() {
   if (!created.ok && created.status !== 409) {
     throw new Error(`creating custom domain failed: ${created.status} ${JSON.stringify(created.json)}`);
   }
-  console.log(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
+  report(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
 
   for (let attempt = 0; attempt < 30; attempt++) {
     const res = await api('GET', `${base}/${domain}`);
@@ -97,7 +103,8 @@ function normalizeRdata(type, rdata) {
 }
 
 // Applies ADD/REMOVE actions on top of whatever record sets already exist, so unrelated values
-// (for example other TXT records at the apex) are kept.
+// (for example other TXT records at the apex) are kept. Address records (A, AAAA, CNAME) are
+// replaced outright: a domain moving from another backend must not keep its old IPs.
 async function writeDns(records) {
   const dns = `https://dns.googleapis.com/dns/v1/projects/${project}/managedZones/${zone}/rrsets`;
   const groups = new Map();
@@ -113,21 +120,25 @@ async function writeDns(records) {
   for (const { name, type, add, remove } of groups.values()) {
     const existing = await api('GET', `${dns}/${name}/${type}`);
     const current = existing.ok ? existing.json.rrdatas ?? [] : [];
-    const next = [...new Set([...current.filter((v) => !remove.includes(v)), ...add])];
+    const replace = ['A', 'AAAA', 'CNAME'].includes(type) && add.length > 0;
+    const next = replace ? [...new Set(add)] : [...new Set([...current.filter((v) => !remove.includes(v)), ...add])];
     const same = next.length === current.length && next.every((v) => current.includes(v));
     if (same) {
-      console.log(`DNS ${type} ${name} already correct`);
+      report(`DNS ${type} ${name} already correct`);
     } else if (!next.length) {
       await must('DELETE', `${dns}/${name}/${type}`);
-      console.log(`DNS ${type} ${name} deleted`);
+      report(`DNS ${type} ${name} deleted`);
     } else if (existing.ok) {
       await must('PATCH', `${dns}/${name}/${type}`, { name, type, ttl: existing.json.ttl ?? 300, rrdatas: next });
-      console.log(`DNS ${type} ${name} updated: ${next.join(', ')}`);
+      report(`DNS ${type} ${name} updated: ${current.join(', ')} -> ${next.join(', ')}`);
     } else {
       await must('POST', dns, { name, type, ttl: 300, rrdatas: next });
-      console.log(`DNS ${type} ${name} created: ${next.join(', ')}`);
+      report(`DNS ${type} ${name} created: ${next.join(', ')}`);
     }
   }
+
+  const final = await must('GET', `${dns}?name=${fqdn(domain)}`);
+  for (const set of final.rrsets ?? []) report(`Now ${set.type} ${set.name} = ${set.rrdatas.join(', ')}`);
 }
 
 async function authorize(host) {
@@ -135,11 +146,11 @@ async function authorize(host) {
   const config = await must('GET', url);
   const domains = config.authorizedDomains ?? [];
   if (domains.includes(host)) {
-    console.log(`Auth already allows ${host}`);
+    report(`Auth already allows ${host}`);
     return;
   }
   await must('PATCH', `${url}?updateMask=authorizedDomains`, { authorizedDomains: [...domains, host] });
-  console.log(`Auth now allows ${host}`);
+  report(`Auth now allows ${host}`);
 }
 
 if (!opts['authorize-only']) {
