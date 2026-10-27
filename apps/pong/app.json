@@ -1,0 +1,10 @@
+{
+  "name": "pong",
+  "type": "hosting",
+  "domain": "pong.trom.dev",
+  "hostingSite": "trom-pong",
+  "firestore": {
+    "prod": "pong",
+    "preview": "pong-preview"
+  }
+}
