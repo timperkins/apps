@@ -1,0 +1,119 @@
+:root {
+  --ink: #fff5ea;
+  --muted: rgba(255, 245, 234, .72);
+  --panel: rgba(20, 16, 34, .72);
+  --line: rgba(255, 245, 234, .18);
+  --accent: #ffcf8c;
+  --good: #9fe0b0;
+  --font-d: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-b: 'Jost', ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; background: #0d0f1f; color: var(--ink);
+  font-family: var(--font-b); overscroll-behavior: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none;
+}
+[hidden] { display: none !important; }
+#safe { position: fixed; top: 0; left: 0; width: 0; height: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); visibility: hidden; pointer-events: none; }
+/* Solid header strip under the status bar on the installed iOS app (height set in main.ts).
+   iOS 26 fades the top of the app; over one flat colour the fade can't be seen, and iOS
+   takes the status bar colour from this fixed bar. */
+#topbar { position: fixed; top: 0; left: 0; right: 0; height: 0; background: #000; pointer-events: none; }
+#stage { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 50% 50%; background: #0d0f1f; }
+#c { position: absolute; inset: 0; display: block; }
+#firezone { position: absolute; inset: 0; touch-action: none; }
+
+.hudbtn {
+  position: absolute; border: 0; background: none; color: var(--ink); padding: 0; display: grid; place-items: center;
+  width: 44px; height: 44px; cursor: pointer; touch-action: manipulation;
+}
+.hudbtn svg { fill: currentColor; opacity: .92; }
+#pauseBtn { right: 6px; }
+
+#version { position: absolute; left: 8px; bottom: 3px; font-size: 9px; color: var(--muted); opacity: .6; pointer-events: none; font-variant-numeric: tabular-nums; }
+#toast {
+  position: absolute; left: 50%; bottom: 27%; transform: translate(-50%, 8px); max-width: 86%; text-align: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 9px 14px; font-size: 14px; line-height: 1.35;
+  opacity: 0; transition: opacity .35s, transform .35s; pointer-events: none; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+#hint { position: absolute; inset: 0; pointer-events: none; }
+.hint-tilt { position: absolute; left: 0; right: 0; top: 50%; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 16px; text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.hint-tilt .phone { animation: rock 2.4s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes rock { 0%, 100% { transform: rotate(-24deg); } 50% { transform: rotate(24deg); } }
+.hint-fire { position: absolute; left: 0; right: 0; bottom: 13%; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 15px; text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.hint-fire .ring { width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--ink); animation: tap 1.4s ease-out infinite; }
+@keyframes tap { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+
+.screen {
+  position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); text-align: center;
+  background: linear-gradient(rgba(10, 8, 24, .55), rgba(10, 8, 24, .72));
+}
+.screen.clear { background: none; pointer-events: none; }
+.screen.show { display: flex; animation: fade .25s ease-out; }
+@keyframes fade { from { opacity: 0; } }
+#start, #loading { background: linear-gradient(rgba(10, 8, 24, .05) 30%, rgba(10, 8, 24, .45)); }
+#start { cursor: pointer; }
+.title { font-family: var(--font-d); font-weight: 700; font-size: clamp(40px, 13vw, 64px); line-height: .95; margin: 0 0 6px; letter-spacing: -.01em; text-wrap: balance; text-shadow: 0 2px 18px rgba(0,0,0,.35); }
+h2 { font-family: var(--font-d); font-weight: 700; font-size: 28px; margin: 0; }
+.lead { margin: 0; font-size: 17px; color: var(--ink); max-width: 30ch; text-wrap: balance; }
+#start .lead { animation: breathe 2.2s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .55; } }
+.best { margin: 0; color: var(--muted); font-size: 14px; }
+.fine { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; max-width: 34ch; line-height: 1.4; }
+.row { display: flex; gap: 10px; }
+.bar { width: 160px; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .2s; }
+
+button.primary, button.ghost {
+  font: 500 17px/1 var(--font-b); color: #1a1424; background: var(--accent); border: 0; border-radius: 999px; padding: 14px 28px; min-width: 190px; cursor: pointer; touch-action: manipulation;
+}
+button.ghost { background: rgba(255, 245, 234, .1); color: var(--ink); border: 1px solid var(--line); min-width: 0; padding: 11px 20px; font-size: 15px; }
+button.small { font-size: 14px; padding: 9px 16px; }
+button:active { transform: scale(.97); }
+
+.seg { display: flex; padding: 3px; border-radius: 999px; background: rgba(255, 245, 234, .1); border: 1px solid var(--line); margin-top: 4px; }
+.seg button { font: 500 15px/1 var(--font-b); color: var(--ink); background: none; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer; touch-action: manipulation; }
+.seg button[aria-checked="true"] { background: var(--accent); color: #1a1424; }
+.seg button[data-diff="expert"][aria-checked="true"] { background: #ff7a6a; }
+#diffNote { margin-top: -6px; min-height: 2.8em; }
+.mode { color: #ff8a7a; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+.settings-inline { display: flex; flex-direction: column; gap: 2px; width: min(300px, 100%); margin: 4px 0; }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 10px 4px; border-bottom: 1px solid var(--line); font-size: 15px; cursor: pointer; }
+.toggle:last-child { border-bottom: 0; }
+.switch { width: 40px; height: 24px; border-radius: 12px; background: rgba(255, 245, 234, .2); position: relative; transition: background .2s; flex: none; }
+.switch::after { content: ''; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink); transition: transform .2s; }
+.toggle[aria-checked="true"] .switch { background: #5fbf86; }
+.toggle[aria-checked="true"] .switch::after { transform: translateX(16px); }
+
+.cards { display: flex; flex-direction: column; gap: 12px; width: min(320px, 100%); }
+.card {
+  text-align: left; background: rgba(255, 245, 234, .08); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; color: var(--ink); cursor: pointer;
+  font-family: var(--font-b); display: flex; flex-direction: column; gap: 4px; touch-action: manipulation;
+}
+.card:active { background: rgba(255, 245, 234, .16); }
+.card b { font: 700 19px/1.15 var(--font-d); }
+.card .kind { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--weapon, var(--accent)); }
+.card .desc { font-size: 14.5px; color: var(--muted); line-height: 1.35; }
+
+#countNum { font: 700 96px/1 var(--font-d); text-shadow: 0 4px 24px rgba(0,0,0,.4); }
+
+.big { font: 700 54px/1 var(--font-d); }
+.newbest { color: var(--good); font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+.stats { display: grid; grid-template-columns: 1fr auto; gap: 8px 22px; margin: 4px 0 8px; font-size: 15px; width: min(280px, 100%); }
+.stats dt { text-align: left; color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.scorelist { margin: 0; padding: 0; list-style: none; width: min(280px, 100%); counter-reset: s; }
+.scorelist li { display: flex; justify-content: space-between; padding: 9px 2px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; counter-increment: s; }
+.scorelist li::before { content: counter(s) "."; color: var(--muted); width: 2ch; text-align: left; }
+.scorelist li span:first-of-type { flex: 1; text-align: left; padding-left: 8px; }
+.scorelist .empty { color: var(--muted); justify-content: center; border: 0; }
+.scorelist .empty::before { content: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hint-tilt .phone, #start .lead { animation: none; }
+}

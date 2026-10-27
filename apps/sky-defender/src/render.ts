@@ -1,0 +1,747 @@
+// Canvas renderer. The world is drawn rotated around the turret pivot so the game's
+// horizon tracks the real one; the barrel and HUD are drawn in screen space.
+import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, LIGHTS, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
+import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } from './palettes';
+import { UPGRADES, DOME_RX, DOME_RY, type Game, type Plane, type Crate, type Bomb } from './game';
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+const FIRE_Y: Record<BuildingId, number> = { search: G - 9, radar: G - 12, depot: G - 12, turret: G - 16, hangar: G - 16, repair: G - 10 };
+const LAMPS: [BuildingId, number, number, number][] = [['radar', B.radar - 5.5, G - 6.4, 10], ['hangar', B.hangar, G - 17, 14], ['depot', B.depot, G - 8, 8], ['repair', B.repair - 2.3, G - 7.6, 8], ['hangar', B.hangar + 32, G - 6, 8]];
+const SEARCH_PIVOT = mockToWorld(B.search, G - 12.4);
+
+export class Renderer {
+  private ctx: CanvasRenderingContext2D;
+  safeTop = 0;
+  time = 0;
+  W = 0; H = 0; dpr = 1;
+  /** world units to CSS pixels */
+  s = 1;
+  /** turret pivot on screen */
+  px = 0; py = 0;
+  /** camera shake offset this frame */
+  sx = 0; sy = 0;
+  private pal: BlendedPalette | null = null;
+  private palKey = '';
+
+  constructor(private canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('2D canvas unavailable');
+    this.ctx = ctx;
+  }
+  resize(w: number, h: number, safeTop = 0) {
+    this.W = w; this.H = h; this.safeTop = safeTop;
+    // full device resolution (3x on recent iPhones); a lower cap made the whole screen soft
+    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
+    this.canvas.width = Math.round(w * this.dpr); this.canvas.height = Math.round(h * this.dpr);
+    this.canvas.style.width = w + 'px'; this.canvas.style.height = h + 'px';
+    // world units per CSS pixel: keep the 390-wide design and at least 800 units of height
+    this.s = Math.min(w / 390, h / 800);
+    this.px = w / 2;
+    this.py = h - 62.4 * this.s;
+  }
+  palette(game: Game): BlendedPalette {
+    const t = smooth(game.palT);
+    const key = `${game.palFrom}|${game.palTo}|${t.toFixed(3)}`;
+    if (key !== this.palKey || !this.pal) { this.palKey = key; this.pal = blendPalette(PALETTES[game.palFrom], PALETTES[game.palTo], t); }
+    return this.pal;
+  }
+  worldToScreen(game: Game, x: number, y: number): [number, number] {
+    const c = Math.cos(game.cam), sn = Math.sin(game.cam);
+    return [this.px + this.s * (x * c + y * sn) + this.sx, this.py + this.s * (-x * sn + y * c) + this.sy];
+  }
+  sprite(P: BlendedPalette, get: (s: PaletteSprites) => Sprite, x?: number, y?: number, w?: number, h?: number) {
+    // draw a palette sprite, cross-fading between the two palettes being blended
+    const ctx = this.ctx, A = get(SPRITES[P.a.id]), Bs = get(SPRITES[P.b.id]);
+    const t = P.t;
+    const draw = (s: Sprite, a: number) => { if (!s || a <= 0) return; ctx.globalAlpha = a; ctx.drawImage(s.img, x ?? s.x, y ?? s.y, w ?? s.w, h ?? s.h); };
+    const ga = ctx.globalAlpha;
+    if (t <= 0 || A === Bs) draw(A, ga);
+    else if (t >= 1) draw(Bs, ga);
+    else { draw(A, ga); draw(Bs, ga * t); }
+    ctx.globalAlpha = ga;
+  }
+
+  drawClouds(P: BlendedPalette) {
+    // Vector clouds stay sharp at any screen size; a few widening rings feather the edges.
+    const ctx = this.ctx;
+    const layer = (S: Palette, a: number) => {
+      if (a <= 0) return;
+      for (const c of SPRITES[S.id].clouds) {
+        const g = ctx.createLinearGradient(0, c.y - c.ry - 4, 0, c.y + c.ry + 4);
+        g.addColorStop(0, S.cloudTop); g.addColorStop(1, S.cloudLit);
+        ctx.fillStyle = g;
+        CLOUD_RINGS.forEach(([, k], i) => { ctx.globalAlpha = a * c.op * k; ctx.fill(c.rings[i]); });
+      }
+      if (S.rays) {
+        // faint shafts of light that fade out away from the sun
+        const [sx, sy] = S.sun;
+        ctx.globalAlpha = a;
+        for (const [x, y] of RAYS) {
+          const g = ctx.createLinearGradient(sx, sy, x + 20, y + 5);
+          g.addColorStop(0, withAlpha(S.sunCol, .06)); g.addColorStop(1, withAlpha(S.sunCol, 0));
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(x, y); ctx.lineTo(x + 40, y + 10); ctx.closePath(); ctx.fill();
+        }
+      }
+    };
+    const ga = ctx.globalAlpha;
+    if (P.t <= 0 || P.a === P.b) layer(P.a, ga);
+    else if (P.t >= 1) layer(P.b, ga);
+    else { layer(P.a, ga * (1 - P.t)); layer(P.b, ga * P.t); }
+    ctx.globalAlpha = ga;
+  }
+
+  frame(game: Game, dt: number) {
+    this.time += dt;
+    const ctx = this.ctx, P = this.palette(game);
+    const sh = game.shake;
+    this.sx = sh ? (Math.random() - .5) * sh * this.s : 0;
+    this.sy = sh ? (Math.random() - .5) * sh * this.s : 0;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = P.sky[0][1]; ctx.fillRect(0, 0, this.W, this.H);
+
+    ctx.save();
+    ctx.translate(this.px + this.sx, this.py + this.sy);
+    ctx.scale(this.s, this.s);
+    ctx.rotate(-game.cam);
+    this.drawWorld(game, P);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(this.px + this.sx, this.py + this.sy);
+    ctx.scale(this.s, this.s);
+    this.drawGun(game, P);
+    ctx.restore();
+
+    this.drawOverlays(game, P);
+    this.drawHud(game, P);
+  }
+
+  /* ---------- world ---------- */
+  drawWorld(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx;
+    const reduce = game.settings.reduceMotion;
+    // sky
+    const sg = ctx.createLinearGradient(0, -PIVOT_Y, 0, 844 - PIVOT_Y);
+    for (const [o, c] of P.sky) sg.addColorStop(o, c);
+    ctx.fillStyle = sg; ctx.fillRect(-1500, -1600, 3000, 1700);
+    if (P.stars > .01) {
+      const k = P.stars * (.85 + .15 * Math.sin(this.time * .7));
+      ctx.fillStyle = '#ffffff';
+      for (const l of SHARED.stars) { ctx.globalAlpha = k * l.alpha; ctx.fill(l.path); }
+      ctx.globalAlpha = 1;
+    }
+    // sun
+    const [sx, sy] = P.sun;
+    const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 150);
+    glow.addColorStop(0, withAlpha(P.sunCol, P.sunGlow)); glow.addColorStop(.35, withAlpha(P.sunCol, P.sunGlow * .35)); glow.addColorStop(1, withAlpha(P.sunCol, 0));
+    ctx.fillStyle = glow; ctx.fillRect(sx - 150, sy - 150, 300, 300);
+    if (P.sunDisc > .5) { ctx.fillStyle = P.sunCol; ctx.beginPath(); ctx.arc(sx, sy, P.sunDisc, 0, 7); ctx.fill(); }
+    this.drawClouds(P);
+    // mountain ranges, far to near, with a little parallax as the world turns
+    for (let i = 0; i < LAND.ridges.length; i++) {
+      const r = LAND.ridges[i];
+      const c = this.mixHex(P.far, P.near, Math.pow(r.t, 1.15));
+      const shift = -game.cam * r.k * (reduce ? .3 : 1);
+      ctx.save(); ctx.translate(shift, 0);
+      if (r.trees) { ctx.fillStyle = c; ctx.fill(r.trees); }
+      const g = ctx.createLinearGradient(0, r.top, 0, r.base + 24);
+      g.addColorStop(0, c); g.addColorStop(1, this.mixHex(c, P.haze, .45 - .3 * r.t));
+      ctx.fillStyle = g; ctx.fill(r.path);
+      if (i < 3) {
+        const m = ctx.createLinearGradient(0, r.base - 4, 0, r.base + 26);
+        m.addColorStop(0, withAlpha(P.haze, 0)); m.addColorStop(.5, withAlpha(P.haze, .55)); m.addColorStop(1, withAlpha(P.haze, 0));
+        ctx.globalAlpha = .5 - i * .1; ctx.fillStyle = m; ctx.fillRect(-1500, r.base - 4, 3000, 30); ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+    // foreground ground and edge forest
+    const gg = ctx.createLinearGradient(0, GROUND_Y - 6, 0, GROUND_Y + 110);
+    gg.addColorStop(0, P.groundTop); gg.addColorStop(.08, P.ground); gg.addColorStop(1, this.mixHex(P.ground, '#000000', .35));
+    ctx.fillStyle = gg; ctx.fill(LAND.ground);
+    ctx.fillStyle = P.near; ctx.fill(LAND.edgeTrees);
+    ctx.fillStyle = this.mixHex(P.ground, '#000000', .35); ctx.fillRect(-1500, GROUND_Y + 110, 3000, 1400);
+
+    this.drawBase(game, P);
+    this.drawBeam(game, P);
+    this.drawTrails(game, P);
+    for (const p of game.planes) this.drawPlane(game, P, p);
+    this.drawLandingZone(game);
+    for (const c of game.crates) this.drawCrate(game, P, c);
+    for (const b of game.bombs) {
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.angle);
+      if (b.kind === 'missile') this.drawEnemyMissile(P, b);
+      else { ctx.scale(.62, .62); this.sprite(P, s => s.bombs.big); }
+      ctx.restore();
+    }
+    this.drawShots(game, P);
+    this.drawParticles(game, P);
+    this.drawShield(game);
+  }
+
+  // The shield dome over the base: a faint glass bubble with a bright rim that flares when something hits it.
+  drawShield(game: Game) {
+    if (game.shieldT <= 0) return;
+    const ctx = this.ctx;
+    // it flickers in its last three seconds
+    const ending = game.shieldT < 3 && Math.sin(this.time * 24) < 0;
+    const k = Math.min(1, game.shieldT / .5) * (ending ? .45 : 1), f = game.shieldFlash;
+    ctx.save();
+    ctx.translate(0, GROUND_Y); ctx.scale(1, DOME_RY / DOME_RX);
+    const g = ctx.createRadialGradient(0, 0, DOME_RX * .55, 0, 0, DOME_RX);
+    g.addColorStop(0, 'rgba(127,233,255,0)'); g.addColorStop(1, `rgba(127,233,255,${(.16 + .25 * f) * k})`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(0, 0, DOME_RX, Math.PI, 0); ctx.closePath(); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = '#7fe9ff'; ctx.globalAlpha = (.45 + .5 * f + .08 * Math.sin(this.time * 5)) * k; ctx.lineWidth = 1.4 + 2 * f;
+    ctx.beginPath(); ctx.arc(0, 0, DOME_RX, Math.PI, 0); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // A light plane's missile: long and skinny, nose along +y, a flickering flame at the tail.
+  drawEnemyMissile(P: BlendedPalette, b: Bomb) {
+    const ctx = this.ctx, f = .8 + .2 * Math.sin(this.time * 40 + b.id);
+    ctx.drawImage(puff('#ffb04a'), -1.6 * f, -7.2 - 1.6 * f, 3.2 * f, 4.4 * f);
+    ctx.fillStyle = P.pDark;
+    ctx.beginPath(); ctx.moveTo(-.55, -3); ctx.lineTo(-1.7, -4.8); ctx.lineTo(-.55, -4.4); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(.55, -3); ctx.lineTo(1.7, -4.8); ctx.lineTo(.55, -4.4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = P.pMid; ctx.fillRect(-.55, -4.5, 1.1, 9);
+    ctx.fillStyle = P.pHi; ctx.globalAlpha *= .45; ctx.fillRect(-.45, -4.3, .35, 8.6); ctx.globalAlpha /= .45;
+    ctx.fillStyle = P.pDark;
+    ctx.beginPath(); ctx.moveTo(-.55, 4.5); ctx.quadraticCurveTo(-.4, 5.8, 0, 6.6); ctx.quadraticCurveTo(.4, 5.8, .55, 4.5); ctx.closePath(); ctx.fill();
+  }
+
+  mixHex(a: string, b: string, t: number) {
+    // fast mix for '#rrggbb' or 'rgba()' strings
+    const pa = this.pc(a), pb = this.pc(b);
+    return `rgb(${Math.round(pa[0] + (pb[0] - pa[0]) * t)},${Math.round(pa[1] + (pb[1] - pa[1]) * t)},${Math.round(pa[2] + (pb[2] - pa[2]) * t)})`;
+  }
+  pc(c: string): [number, number, number] {
+    if (c[0] === '#') return [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+    const m = c.match(/[\d.]+/g) ?? ['0', '0', '0']; return [+m[0], +m[1], +m[2]];
+  }
+
+  drawBase(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx;
+    // lamps glow at blue hour and night
+    ctx.save();
+    ctx.translate(0, GROUND_Y); ctx.scale(1.15, 1.15); ctx.translate(-195, -800);
+    if (P.lights > .02) {
+      for (const [id, x, y, r] of LAMPS) {
+        if (game.b(id).ruined) continue;
+        ctx.globalAlpha = P.lights * .55;
+        ctx.drawImage(puff('#ffc56a'), x - r, y - r, r * 2, r * 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+    this.sprite(P, s => s.pad);
+    ctx.restore();
+    // bomb landing shadows, with the radar standing
+    if (game.alive('radar')) {
+      const pulse = .55 + .4 * Math.sin(this.time * 4);
+      for (const b of game.bombs) {
+        const lx = game.bombLandX(b), k = Math.min(1, b.t / b.T);
+        ctx.globalAlpha = pulse * (.4 + .6 * k);
+        ctx.fillStyle = P.shadow;
+        const big = b.kind === 'bomb';
+        ctx.beginPath(); ctx.ellipse(lx, GROUND_Y + 2, (big ? 9 : 4.5) * (.6 + .4 * k), (big ? 1.3 : .8), 0, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.save();
+    ctx.translate(0, GROUND_Y); ctx.scale(1.15, 1.15); ctx.translate(-195, -800);
+    for (const b of game.buildings) {
+      const st = b.ruined ? 2 : b.hp / b.max < .5 ? 1 : 0;
+      this.sprite(P, s => s.buildings[b.id][st]);
+      if (b.id === 'search' && !b.ruined) {
+        const [lx, ly] = SEARCH_PIVOT, [ax, ay] = [Math.sin(game.aim) * 700, -Math.cos(game.aim) * 700];
+        const ang = Math.atan2(ax - lx, -(ay - ly));
+        ctx.save(); ctx.translate(B.search, G - 12.4); ctx.rotate(ang); this.sprite(P, s => s.searchHead); ctx.restore();
+      }
+    }
+    // windsock
+    {
+      const x = 340, w = game.wind, droop = (1 - Math.min(1, Math.abs(w) * 1.2)) * 1.2;
+      ctx.strokeStyle = P.bMetal; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(x, G); ctx.lineTo(x, G - 16); ctx.stroke();
+      ctx.save(); ctx.translate(x, G - 15.5);
+      const dir = w >= 0 ? 1 : -1;
+      ctx.scale(dir, 1); ctx.rotate(droop + Math.sin(this.time * 3) * .05 * Math.abs(w));
+      const L = 9;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i % 2 ? '#f2ede4' : '#e0583e';
+        const x0 = i * L / 3, x1 = (i + 1) * L / 3, h0 = 1.6 - i * .35, h1 = 1.6 - (i + 1) * .35;
+        ctx.beginPath(); ctx.moveTo(x0, -h0); ctx.lineTo(x1, -h1); ctx.lineTo(x1, h1); ctx.lineTo(x0, h0); ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
+    // fires and hairline health bars
+    for (const b of game.buildings) {
+      const frac = b.hp / b.max;
+      const fx = b.def.mx, fy = FIRE_Y[b.id];
+      if ((b.ruined && b.ruinT < 25) || (!b.ruined && frac < .3)) {
+        const k = (b.ruined ? .7 : .85) * (1 + .12 * Math.sin(this.time * 17 + fx) + .06 * Math.sin(this.time * 31));
+        const f = SHARED.fire;
+        ctx.drawImage(f.img, fx - 10 * k * .8, (b.ruined ? G - 3 : fy) - 11 * k * .8 - 2, 20 * k * .8, 21 * k * .8);
+      }
+      if (!b.ruined && frac < 1) {
+        const w = 18, y = b.def.box[1] - 4;
+        ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(fx - w / 2 - .5, y - .5, w + 1, 2.6, 1.3); ctx.fill();
+        ctx.fillStyle = frac > .6 ? '#9fe0b0' : frac > .25 ? P.amber : P.red;
+        ctx.beginPath(); ctx.roundRect(fx - w / 2, y, w * frac, 1.6, .8); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  searchlightOn(game: Game, P: BlendedPalette) { return game.alive('search') && P.dark > .15; }
+  litBy(game: Game, P: BlendedPalette, x: number, y: number) {
+    if (!this.searchlightOn(game, P)) return 0;
+    const [lx, ly] = SEARCH_PIVOT;
+    const ax = Math.sin(game.aim) * 700 - lx, ay = -Math.cos(game.aim) * 700 - ly;
+    const bx = x - lx, by = y - ly;
+    const cos = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) + 1e-6);
+    const ang = Math.acos(Math.min(1, cos));
+    return Math.max(0, Math.min(1, (.13 - ang) / .05));
+  }
+  drawBeam(game: Game, P: BlendedPalette) {
+    if (!this.searchlightOn(game, P)) return;
+    const ctx = this.ctx;
+    const [lx, ly] = SEARCH_PIVOT;
+    const ax = Math.sin(game.aim) * 700, ay = -Math.cos(game.aim) * 700;
+    const ang = Math.atan2(ax - lx, -(ay - ly));
+    const k = Math.min(1, (P.dark - .15) / .5);
+    ctx.save(); ctx.translate(lx, ly - 6); ctx.rotate(ang);
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(0, 0, 0, -1100);
+    g.addColorStop(0, `rgba(255,236,190,${.24 * k})`); g.addColorStop(.4, `rgba(255,236,190,${.09 * k})`); g.addColorStop(1, 'rgba(255,236,190,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(3, 0); ctx.lineTo(1100 * Math.tan(.1), -1100); ctx.lineTo(-1100 * Math.tan(.1), -1100); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = `rgba(255,236,190,${.12 * k})`;
+    ctx.beginPath(); ctx.moveTo(-1.5, 0); ctx.lineTo(1.5, 0); ctx.lineTo(1100 * Math.tan(.04), -1100); ctx.lineTo(-1100 * Math.tan(.04), -1100); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  drawTrails(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx, now = game.t;
+    ctx.lineCap = 'round';
+    // contrails
+    for (const p of game.planes) {
+      const pts = p.trail; if (pts.length < 3) continue;
+      const fade = p.state === 'falling' ? Math.max(0, 1 - p.stateT / 2) : 1;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const k = i / (pts.length - 2), age = Math.min(1, (now - pts[i][2]) / 4.5);
+        const a = Math.pow(k, .8) * (1 - age) * fade;
+        if (a < .02) continue;
+        ctx.strokeStyle = P.contrail;
+        ctx.globalAlpha = a * .25; ctx.lineWidth = 4 - 2.6 * k;
+        ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke();
+        ctx.globalAlpha = a * .7; ctx.lineWidth = 1.3 - .8 * k;
+        ctx.stroke();
+      }
+    }
+    // thin white smoke behind falling bombs, widening and fading as it ages
+    const bombTrail = (pts: [number, number, number][], head: { x: number; y: number } | null, fadeAll: number) => {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const age = (now - pts[i][2]);
+        const a = Math.max(0, 1 - age / 5) * fadeAll;
+        if (a < .02) continue;
+        const w = .55 + Math.min(1, age / 3) * .9;
+        ctx.strokeStyle = P.trail;
+        ctx.globalAlpha = a * .3; ctx.lineWidth = w * 2.4;
+        ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke();
+        ctx.globalAlpha = a * .85; ctx.lineWidth = w * .9; ctx.stroke();
+      }
+      if (head && pts.length) { const l = pts[pts.length - 1]; ctx.globalAlpha = .9 * fadeAll; ctx.lineWidth = .55; ctx.beginPath(); ctx.moveTo(l[0], l[1]); ctx.lineTo(head.x, head.y); ctx.stroke(); }
+    };
+    for (const b of game.bombs) bombTrail(b.trail, game.bombTail(b), 1);
+    for (const tr of game.trails) bombTrail(tr.pts, null, 1 - tr.t / 4);
+    ctx.globalAlpha = 1;
+  }
+
+  drawPlane(game: Game, P: BlendedPalette, p: Plane) {
+    const ctx = this.ctx;
+    const type = p.type;
+    const falling = p.state === 'falling';
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.pitch * p.dir);
+    const fl = p.flip;
+    ctx.scale(p.dir * (Math.abs(fl) < .08 ? .08 * Math.sign(fl || 1) : fl), 1);
+    this.sprite(P, s => falling ? s.burnt[type] : s.planes[type]);
+    // at night only the searchlight shows a plane clearly
+    const lit = this.litBy(game, P, p.x, p.y);
+    const dark = P.dark * .88 * (1 - lit) * (type === 'cargo' ? .6 : 1);
+    if (dark > .02) { const s = SHARED[`sil_${type}`]; ctx.globalAlpha = dark; ctx.drawImage(s.img, s.x, s.y, s.w, s.h); ctx.globalAlpha = 1; }
+    if (p.hitFlash > 0) { const s = SHARED[`sil_${type}`]; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = p.hitFlash * .35; ctx.filter = 'none'; ctx.drawImage(puff('#ffe8c0'), s.x, s.y, s.w, s.h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }
+    // running lights
+    if ((P.dark > .2 || type === 'cargo') && !falling) {
+      const sc = SC[type], [[wx, wy], [tx, ty]] = LIGHTS[type];
+      const blink = Math.sin(this.time * 6 + p.lightPhase) > 0;
+      const c1 = type === 'cargo' ? '#9dffb8' : '#ff4a3a', c2 = type === 'cargo' ? '#ffffff' : '#7dff9a';
+      const s = 1 / Math.max(.3, Math.abs(fl));
+      if (blink || type !== 'cargo') { ctx.drawImage(puff(c1), wx * sc - 2.5 * s, wy * sc - 2.5, 5 * s, 5); }
+      if (blink) ctx.drawImage(puff(c2), tx * sc - 2 * s, ty * sc - 2, 4 * s, 4);
+    }
+    ctx.restore();
+    if (p.burning && !falling) { const f = SHARED.fire, k = .5; ctx.drawImage(f.img, p.x - 10 * k, p.y - 14 * k, 20 * k, 21 * k); }
+    // health bar, shown once it has been hit; the boss always shows its own, bigger one
+    const boss = type === 'boss';
+    if (!falling && p.max > 1 && (boss || p.hp < p.max)) {
+      const w = boss ? 44 : type === 'heavy' ? 26 : 18, y = p.y - (boss ? 22 : 15), fr = Math.max(0, p.hp / p.max);
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(p.x - w / 2 - .5, y - .5, w + 1, 2.6, 1.3); ctx.fill();
+      ctx.fillStyle = fr > .5 ? P.amber : P.red; ctx.beginPath(); ctx.roundRect(p.x - w / 2, y, w * fr, 1.6, .8); ctx.fill();
+    }
+  }
+
+  // The crate's landing zone on the pad, shown while a drop is on its way: corner marks, pulsing while the crate comes down.
+  drawLandingZone(game: Game) {
+    if (!game.cargo && !game.crates.length) return;
+    const ctx = this.ctx, y = GROUND_Y - 3, LZ_X = game.lzX;
+    const falling = game.crates.some(c => !c.landed);
+    ctx.save();
+    ctx.strokeStyle = '#9dffb8'; ctx.lineWidth = .5; ctx.lineCap = 'round';
+    ctx.globalAlpha = falling ? .45 + .35 * Math.sin(this.time * 5) : .3;
+    for (const d of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(LZ_X + d * 8, y - 1.6); ctx.lineTo(LZ_X + d * 9, y); ctx.lineTo(LZ_X + d * 6.5, y + .6); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  drawCrate(_game: Game, _P: BlendedPalette, c: Crate) {
+    const ctx = this.ctx;
+    if (c.landed) {
+      // a gentle pulse around the waiting crate: tap it to open
+      const k = (this.time * .7) % 1, glow = .5 + .5 * Math.sin(this.time * 3);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = .25 + .25 * glow;
+      ctx.drawImage(puff('#9dffb8'), c.x - 10, c.y - 12, 20, 20);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = '#bff5cf'; ctx.lineWidth = .6;
+      ctx.globalAlpha = .8 * (1 - k);
+      ctx.beginPath(); ctx.ellipse(c.x, GROUND_Y - 2.4, 5 + 9 * k, 1.2 + 2 * k, 0, 0, 7); ctx.stroke();
+      const by = c.y - 10 - 1.2 * Math.sin(this.time * 3);
+      ctx.globalAlpha = .6 + .35 * glow; ctx.lineWidth = .8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(c.x - 2.6, by - 1.8); ctx.lineTo(c.x, by + .6); ctx.lineTo(c.x + 2.6, by - 1.8); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.save(); ctx.translate(c.x, c.y);
+    ctx.scale(.7, .7);
+    const chute = c.landed ? Math.max(0, 1 - c.t * 1.5) : 1;
+    ctx.rotate(c.sway);
+    if (chute > 0) {
+      ctx.globalAlpha = chute;
+      ctx.strokeStyle = 'rgba(240,236,224,.7)'; ctx.lineWidth = .35;
+      ctx.beginPath(); ctx.moveTo(-2.5, -3); ctx.lineTo(-8, -15); ctx.moveTo(2.5, -3); ctx.lineTo(8, -15); ctx.moveTo(0, -3); ctx.lineTo(0, -16); ctx.stroke();
+      const g = ctx.createLinearGradient(0, -22, 0, -14); g.addColorStop(0, '#f4f0e6'); g.addColorStop(1, '#b9c8bd');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-9, -15); ctx.quadraticCurveTo(-9, -23, 0, -23.5); ctx.quadraticCurveTo(9, -23, 9, -15); ctx.quadraticCurveTo(4.5, -17, 0, -15.5); ctx.quadraticCurveTo(-4.5, -17, -9, -15); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#6f6248'; ctx.fillRect(-3, -3, 6, 5);
+    ctx.fillStyle = '#4fae74'; ctx.fillRect(-3, -1, 6, 1.1);
+    ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-3, -3, 6, .6);
+    if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff('#9dffb8'), -2, -6, 4, 4); }
+    ctx.restore();
+  }
+
+  drawShots(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx;
+    ctx.lineCap = 'round';
+    for (const s of game.shells) {
+      const sp = Math.hypot(s.vx, s.vy) || 1;
+      ctx.strokeStyle = P.shell; ctx.globalAlpha = .55; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(s.x - s.vx / sp * 14, s.y - s.vy / sp * 14); ctx.lineTo(s.x, s.y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#fff4d0'; ctx.beginPath(); ctx.arc(s.x, s.y, 1.2, 0, 7); ctx.fill();
+    }
+    for (const m of game.missiles) {
+      const sp = Math.hypot(m.vx, m.vy) || 1, ux = m.vx / sp, uy = m.vy / sp;
+      if (m.kind === 'fireball') {
+        const r = 7 + Math.sin(this.time * 40 + m.t * 9) * 1;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(puff('#ff7a1a'), m.x - r, m.y - r, r * 2, r * 2);
+        ctx.drawImage(puff('#fff1c0'), m.x - 3, m.y - 3, 6, 6);
+        ctx.globalCompositeOperation = 'source-over';
+        continue;
+      }
+      if (m.kind === 'bomblet') {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(puff('#ffb04a'), m.x - 2.5, m.y - 2.5, 5, 5);
+        ctx.globalCompositeOperation = 'source-over';
+        continue;
+      }
+      if (m.kind === 'cluster') {
+        ctx.strokeStyle = '#ffd36a'; ctx.globalAlpha = .6; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(m.x - ux * 12, m.y - uy * 12); ctx.lineTo(m.x, m.y); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.fillStyle = '#fff1c0'; ctx.beginPath(); ctx.arc(m.x, m.y, 2, 0, 7); ctx.fill();
+        continue;
+      }
+      const len = m.kind === 'nuke' ? 9 : m.kind === 'rocket' ? 6 : 5;
+      ctx.strokeStyle = m.kind === 'nuke' ? '#3d4238' : P.bMetal; ctx.lineWidth = m.kind === 'nuke' ? 3.4 : m.kind === 'rocket' ? 1.8 : 1.4;
+      ctx.beginPath(); ctx.moveTo(m.x - ux * len, m.y - uy * len); ctx.lineTo(m.x, m.y); ctx.stroke();
+      if (m.kind === 'nuke') {
+        ctx.strokeStyle = '#ffe14a'; ctx.lineWidth = 3.6;
+        ctx.beginPath(); ctx.moveTo(m.x - ux * 5, m.y - uy * 5); ctx.lineTo(m.x - ux * 4, m.y - uy * 4); ctx.stroke();
+      }
+      const f = m.kind === 'nuke' ? 12 : m.kind === 'rocket' ? 10 : 8;
+      ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(puff('#ffb04a'), m.x - ux * (len + 1) - f / 2, m.y - uy * (len + 1) - f / 2, f, f); ctx.globalCompositeOperation = 'source-over';
+    }
+    // sonic pulses: bright arcs spreading out along the aim they were fired at
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of game.pulses) {
+      const fade = 1 - p.r / 1000, a0 = p.a - Math.PI / 2;
+      for (let i = 0; i < 3; i++) {
+        const r = p.r - i * 9;
+        if (r < 40) continue;
+        ctx.strokeStyle = '#8fd8ff'; ctx.globalAlpha = fade * (.75 - i * .22); ctx.lineWidth = 3 - i * .8;
+        ctx.beginPath(); ctx.arc(0, 0, r, a0 - .26, a0 + .26); ctx.stroke();
+      }
+    }
+    // the laser: a hot core inside a soft red glow, flickering a little
+    if (game.lasing) {
+      const [dx, dy] = game.aimDir(), fl = 1 + .25 * Math.sin(this.time * 70);
+      const x0 = dx * 48, y0 = dy * 48, x1 = dx * 1100, y1 = dy * 1100;
+      for (const [w, c, a] of [[7, '#ff2a2a', .22], [3, '#ff5a5a', .6], [1, '#fff0f0', 1]] as [number, string, number][]) {
+        ctx.strokeStyle = c; ctx.globalAlpha = a; ctx.lineWidth = w * fl;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+      ctx.globalAlpha = .9; ctx.drawImage(puff('#ff6a5a'), x0 - 6, y0 - 6, 12, 12);
+    }
+    // chain lightning: a jagged violet bolt through every point it jumped between, redrawn each frame so it crackles
+    for (const b of game.bolts) {
+      const k = Math.min(1, b.life / .2);
+      for (const [w, c, a] of [[5, '#8a6bff', .3], [1.6, '#c9b6ff', .8], [.7, '#ffffff', 1]] as [number, string, number][]) {
+        ctx.strokeStyle = c; ctx.globalAlpha = a * k; ctx.lineWidth = w;
+        ctx.beginPath(); ctx.moveTo(b.pts[0][0], b.pts[0][1]);
+        for (let i = 1; i < b.pts.length; i++) {
+          const [x0, y0] = b.pts[i - 1], [x1, y1] = b.pts[i];
+          const len = Math.hypot(x1 - x0, y1 - y0), steps = Math.max(2, Math.round(len / 28));
+          const nx = -(y1 - y0) / (len || 1), ny = (x1 - x0) / (len || 1);
+          for (let j = 1; j < steps; j++) {
+            const t = j / steps, j2 = (Math.random() - .5) * Math.min(18, len * .12);
+            ctx.lineTo(x0 + (x1 - x0) * t + nx * j2, y0 + (y1 - y0) * t + ny * j2);
+          }
+          ctx.lineTo(x1, y1);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = P.tracer; ctx.lineWidth = .9;
+    for (const t of game.tracers) {
+      ctx.globalAlpha = Math.min(1, t.life / .1) * .85;
+      ctx.beginPath(); ctx.moveTo(t.x0, t.y0); ctx.lineTo(t.x1, t.y1); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawParticles(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx;
+    for (const p of game.particles) {
+      const k = p.t / p.life;
+      if (p.k === 'puff') {
+        const col = p.color ? P[p.color] : '#888888';
+        ctx.globalAlpha = (p.a ?? 1) * (1 - k) * (k < .08 ? k / .08 : 1);
+        const r = p.r * 1.25;
+        ctx.drawImage(puff(col), p.x - r, p.y - r, r * 2, r * 2);
+      } else if (p.k === 'fire') {
+        const f = SHARED.fire, s = p.r * (1 - k * .7) * .6;
+        ctx.globalAlpha = 1 - k * .5;
+        ctx.drawImage(f.img, p.x - 10 * s, p.y - 11 * s, 20 * s, 21 * s);
+      } else if (p.k === 'flash') {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = (1 - k) * .9;
+        ctx.drawImage(puff('#ffb04a'), p.x - p.r, p.y - p.r, p.r * 2, p.r * 2);
+        ctx.globalAlpha = (1 - k);
+        ctx.drawImage(puff('#fff1c8'), p.x - p.r * .3, p.y - p.r * .3, p.r * .6, p.r * .6);
+        ctx.globalCompositeOperation = 'source-over';
+      } else if (p.k === 'ring') {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = '#fff1c8'; ctx.globalAlpha = (1 - k) * .8; ctx.lineWidth = 2 + 10 * (1 - k);
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over';
+      } else if (p.k === 'spark') {
+        ctx.globalAlpha = 1 - k; ctx.fillStyle = '#ffe2a0'; ctx.fillRect(p.x - .4, p.y - .4, .8, .8);
+      } else if (p.k === 'debris') {
+        ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.fillStyle = P.bDark; ctx.fillRect(p.x - p.r, p.y - p.r * .6, p.r * 2, p.r * 1.2);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---------- screen space ---------- */
+  drawGun(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx;
+    if (game.b('turret').ruined) return;
+    const rc = game.recoil * 3;
+    ctx.fillStyle = P.bMetal;
+    ctx.fillRect(-2.6, -18, 1.6, 16); ctx.fillRect(1, -18, 1.6, 16);
+    const bar = ctx.createLinearGradient(-1.5, 0, 1.5, 0);
+    bar.addColorStop(0, P.bLit); bar.addColorStop(.4, P.bMetal); bar.addColorStop(1, P.bDark);
+    const barrels = game.guns === 3 ? [-3.4, 0, 3.4] : game.guns === 2 ? [-2.2, 2.2] : [0];
+    const wc = game.weapon ? UPGRADES[game.weapon].color : null;
+    for (const bx of barrels) {
+      const w = game.guns === 3 ? 2.1 : game.guns === 2 ? 2.4 : 3;
+      ctx.save(); ctx.translate(bx, rc);
+      ctx.fillStyle = bar; ctx.fillRect(-w / 2, -44, w, 44);
+      ctx.fillStyle = P.bMetal; ctx.beginPath(); ctx.roundRect(-w / 2 - .4, -48, w + .8, 5, .6); ctx.fill();
+      ctx.strokeStyle = P.bDark; ctx.lineWidth = .5; ctx.beginPath(); ctx.moveTo(-w / 2 - .4, -46); ctx.lineTo(w / 2 + .4, -46); ctx.stroke();
+      // a band in the special weapon's colour
+      if (wc) { ctx.fillStyle = wc; ctx.fillRect(-w / 2 - .3, -40, w + .6, 3); }
+      ctx.restore();
+    }
+    if (game.flash > 0) {
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = game.flash;
+      ctx.drawImage(puff('#ffb04a'), -9, -63, 18, 18);
+      ctx.fillStyle = '#fff1c0';
+      for (const bx of barrels) { ctx.beginPath(); ctx.moveTo(bx, -49); ctx.lineTo(bx - 3.4, -55); ctx.lineTo(bx, -53.2); ctx.lineTo(bx + 3.4, -55); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(bx, -50); ctx.lineTo(bx, -60); ctx.lineTo(bx + 1, -52); ctx.fill(); }
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
+    // the special weapon and what is left of it, beside the turret
+    if (game.weapon && wc) {
+      const timed = game.weapon === 'rapid' || game.weapon === 'laser';
+      const left = timed ? `${Math.ceil(game.ammo)}s` : game.weapon === 'nuke' ? '' : String(Math.ceil(game.ammo));
+      ctx.globalAlpha = .9; ctx.fillStyle = wc; ctx.textAlign = 'left'; ctx.font = `500 8px Jost, system-ui, sans-serif`;
+      ctx.fillText(`${UPGRADES[game.weapon].hud} ${left}`.trim(), 7, -46);
+      if (game.weapon === 'missiles') for (let i = 0; i < game.ammo; i++) {
+        ctx.beginPath(); const x = 7 + i * 4.2, y = -38; ctx.moveTo(x, y - 2.6); ctx.lineTo(x + 1.3, y); ctx.lineTo(x, y + 2.6); ctx.lineTo(x - 1.3, y); ctx.fill();
+      }
+    }
+    if (game.shieldT > 0) {
+      ctx.globalAlpha = .9; ctx.fillStyle = UPGRADES.shield.color; ctx.textAlign = 'right'; ctx.font = `500 8px Jost, system-ui, sans-serif`;
+      ctx.fillText(`SHIELD ${Math.ceil(game.shieldT)}s`, -7, -46);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawOverlays(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx, s = this.s;
+    // the nuke whites out the screen for a moment
+    if (game.nukeFlash > 0) {
+      ctx.fillStyle = '#fff6e0'; ctx.globalAlpha = Math.min(1, game.nukeFlash * game.nukeFlash) * (game.settings.reduceMotion ? .35 : .85);
+      ctx.fillRect(0, 0, this.W, this.H); ctx.globalAlpha = 1;
+    }
+    // missile lock bracket
+    const L = game.lock;
+    if (L.target && !L.target.dead && game.weapon === 'missiles') {
+      const [x, y] = this.worldToScreen(game, L.target.x, L.target.y);
+      const k = Math.min(1, L.t), size = (26 - 12 * k) * s, c = L.locked ? '#ff6b5a' : '#ffdf7a';
+      ctx.strokeStyle = c; ctx.lineWidth = 1.4; ctx.globalAlpha = L.locked ? .95 : .5 + .4 * k;
+      const q = size * .35;
+      for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        ctx.beginPath(); ctx.moveTo(x + dx * size, y + dy * (size - q)); ctx.lineTo(x + dx * size, y + dy * size); ctx.lineTo(x + dx * (size - q), y + dy * size); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // floating score labels
+    ctx.textAlign = 'center';
+    for (const l of game.labels) {
+      const [x, y] = this.worldToScreen(game, l.x, l.y);
+      const k = l.t / l.life;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 2.5);
+      ctx.font = `500 ${(l.big ? 13 : 10) * Math.max(.9, s)}px Jost, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillText(l.text, x + 1, y - k * 22 * s + 1);
+      ctx.fillStyle = l.color; ctx.fillText(l.text, x, y - k * 22 * s);
+    }
+    ctx.globalAlpha = 1;
+    // arrows at the screen edge for planes out of view, while the radar stands
+    if (game.alive('radar') && game.phase !== 'over') {
+      const m = 12, top = this.safeTop + 92, bottom = this.H - 34 * s;
+      const cx = this.W / 2, cy = (top + bottom) / 2;
+      ctx.strokeStyle = P.hud; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const p of game.planes) {
+        if (p.state === 'falling' || p.dead) continue;
+        const [x, y] = this.worldToScreen(game, p.x, p.y);
+        if (x > 0 && x < this.W && y > top - 40 && y < this.H) continue;
+        const dx = x - cx, dy = y - cy;
+        const tx = dx > 0 ? (this.W - m - cx) / dx : (m - cx) / dx;
+        const ty = dy > 0 ? (bottom - cy) / dy : (top - cy) / dy;
+        const t = Math.min(Math.abs(tx), Math.abs(ty));
+        const ax = cx + dx * t, ay = cy + dy * t, ang = Math.atan2(dy, dx);
+        ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
+        ctx.globalAlpha = p.type === 'cargo' ? .9 : .8;
+        ctx.strokeStyle = p.type === 'cargo' ? '#9dffb8' : P.hud;
+        ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(0, 0); ctx.lineTo(-6, 6); ctx.stroke();
+        if (p.type === 'fighter' && (p.state === 'warn' || p.state === 'dive')) { ctx.strokeStyle = P.red; ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-5, 0); ctx.lineTo(-11, 6); ctx.stroke(); }
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  drawHud(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx, W = this.W, H = this.H;
+    const u = Math.max(1, Math.min(1.35, this.s));
+    const top = this.safeTop + 14;
+    ctx.fillStyle = P.hud; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    if (game.phase !== 'idle') {
+      // score and multiplier
+      ctx.font = `500 ${17 * u}px Jost, system-ui, sans-serif`;
+      const sc = game.score.toLocaleString('en-US');
+      ctx.fillText(sc, 18, top + 18 * u);
+      const w = ctx.measureText(sc).width;
+      ctx.font = `500 ${11 * u}px Jost, system-ui, sans-serif`; ctx.globalAlpha = .8;
+      ctx.fillText('×' + game.mult, 18 + w + 5, top + 18 * u);
+      ctx.globalAlpha = 1;
+      // wave and planes remaining
+      ctx.textAlign = 'center';
+      ctx.font = `500 ${10.5 * u}px Jost, system-ui, sans-serif`;
+      this.spaced(`WAVE ${game.wave}`, W / 2, top + 12 * u, 2.4 * u);
+      if (game.difficulty === 'expert') {
+        ctx.font = `500 ${8.5 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = P.red;
+        this.spaced('EXPERT', W / 2, top + 38 * u, 2 * u);
+        ctx.fillStyle = P.hud; ctx.font = `500 ${10.5 * u}px Jost, system-ui, sans-serif`;
+      }
+      ctx.font = `${9 * u}px Jost, system-ui, sans-serif`; ctx.globalAlpha = .75;
+      const left = game.planesLeft();
+      ctx.fillText(game.phase === 'clear' ? 'cleared' : `${left} plane${left === 1 ? '' : 's'} left`, W / 2, top + 26 * u);
+      ctx.globalAlpha = 1;
+    }
+    // pinned base status strip
+    const sh = 18 * this.s;
+    ctx.fillStyle = P.stripBg; ctx.fillRect(0, H - sh, W, sh);
+    game.buildings.forEach((b, i) => {
+      const x = W / 2 + (i - 2.5) * 16 * this.s - 5 * this.s, y = H - sh / 2 - 2 * this.s;
+      const fr = b.hp / b.max;
+      if (b.ruined) { ctx.strokeStyle = '#9a8fa8'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x + .5, y + .5, 9 * this.s, 3 * this.s, 1.5 * this.s); ctx.stroke(); }
+      else { ctx.fillStyle = fr > .6 ? '#9fe0b0' : fr > .25 ? P.amber : P.red; ctx.beginPath(); ctx.roundRect(x, y, 10 * this.s, 4 * this.s, 2 * this.s); ctx.fill(); }
+    });
+    // wave title card and clear tally
+    if (game.phase === 'intro') this.drawIntro(game, P);
+    if (game.phase === 'clear') this.drawClear(game, P);
+  }
+  spaced(text: string, x: number, y: number, sp: number) {
+    const ctx = this.ctx;
+    if ('letterSpacing' in CanvasRenderingContext2D.prototype) { ctx.letterSpacing = sp + 'px'; ctx.fillText(text, x + sp / 2, y); ctx.letterSpacing = '0px'; }
+    else ctx.fillText(text, x, y);
+  }
+  drawIntro(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx, W = this.W, H = this.H, t = game.phaseT;
+    const a = Math.min(1, t / .4) * Math.min(1, (3 - t) / .5);
+    const u = Math.max(1, Math.min(1.4, this.s));
+    ctx.globalAlpha = a; ctx.fillStyle = P.hud; ctx.textAlign = 'center';
+    ctx.font = `500 ${30 * u}px Jost, system-ui, sans-serif`;
+    this.spaced(`WAVE ${game.wave}`, W / 2, H * .3, 6 * u);
+    ctx.globalAlpha = 1;
+  }
+  drawClear(game: Game, P: BlendedPalette) {
+    const ctx = this.ctx, W = this.W, H = this.H, t = game.phaseT, info = game.clearInfo;
+    if (!info) return;
+    const a = Math.min(1, t / .4) * Math.min(1, (10 - t) / .6);
+    const u = Math.max(1, Math.min(1.4, this.s));
+    ctx.globalAlpha = a; ctx.fillStyle = P.hud; ctx.textAlign = 'center';
+    ctx.font = `500 ${22 * u}px Jost, system-ui, sans-serif`;
+    this.spaced(`WAVE ${game.wave} CLEARED`, W / 2, H * .28, 3 * u);
+    ctx.font = `${13 * u}px Jost, system-ui, sans-serif`;
+    const lines: [string, number][] = [[`Wave bonus`, info.bonus], [`Base health`, info.health]];
+    if (info.perfect) lines.push(['Perfect wave', info.perfect]);
+    lines.forEach(([k, v], i) => {
+      const y = H * .28 + (30 + i * 20) * u;
+      if (t < .5 + i * .35) return;
+      ctx.textAlign = 'right'; ctx.globalAlpha = a * .8; ctx.fillText(k, W / 2 - 8, y);
+      ctx.textAlign = 'left'; ctx.globalAlpha = a; ctx.fillText('+' + v.toLocaleString('en-US'), W / 2 + 8, y);
+    });
+    if (t > 1.2) { ctx.textAlign = 'center'; ctx.globalAlpha = a * (.5 + .3 * Math.sin(t * 3)); ctx.font = `${11 * u}px Jost, system-ui, sans-serif`; ctx.fillText('Tap to continue', W / 2, H * .28 + (40 + lines.length * 20) * u); }
+    ctx.globalAlpha = 1;
+  }
+}
