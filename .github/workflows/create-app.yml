@@ -87,7 +87,9 @@ jobs:
         if: inputs.type == 'apphosting'
         run: |
           for backend in $BACKENDS; do
-            if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+            # backends:get exits 0 with a warning when the backend is missing, so check its JSON.
+            if npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" --json 2> /dev/null \
+              | jq -e '.result.name' > /dev/null; then
               echo "Backend $backend already exists"
             else
               "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
