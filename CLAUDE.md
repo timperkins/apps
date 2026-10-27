@@ -20,3 +20,15 @@ The design and current status are in `docs/PLAN.md`; read it before changing dep
 ## Before pushing
 
 Run the app's own checks from its folder (typecheck, tests, build) as listed in its `package.json`.
+
+## New apps
+
+1. Create the Google resources first so the first preview works: dispatch `create-app` from `main` (safe to re-run; the app folder doesn't need to exist yet). `gh workflow run` needs GraphQL, which Claude sessions can't use, so call REST:
+   `gh api -X POST repos/timperkins/apps/actions/workflows/create-app.yml/dispatches -f ref=main -f 'inputs[name]=<name>' -f 'inputs[type]=hosting' -F 'inputs[firestore]=true' -f 'inputs[ttl_collections]=rooms players rtc'`
+   Leave out `firestore` and `ttl_collections` if the app has no database. `ttl_collections` lists the collection groups whose documents carry an `expiresAt` timestamp.
+2. Scaffold with `node scripts/new-app.mjs <name>`, or copy the closest app. Phone-controller games with rooms: copy `apps/pong` or `apps/slither` and rename the database ids.
+3. Push on `<name>/<short-description>`, open the PR, and send Tim the preview link.
+4. After the merge and a green prod run, add the app to `apps/home/src/apps.ts` in a `home/add-<name>` PR.
+
+Raw Actions logs can't be fetched from a Claude session. Read a run's notices with `gh api repos/timperkins/apps/check-runs/<job id>/annotations`.
+
