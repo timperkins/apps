@@ -67,7 +67,6 @@ jobs:
             echo "backend=$(jq -r '.backend // empty' app.json)"
             echo "preview_backend=$(jq -r '.previewBackend // empty' app.json)"
             echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
-            echo "has_firestore=$(jq -r 'has("firestore")' app.json)"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
           # Preview channel ID from the branch name: lowercase, dashes, short enough for a DNS label.
@@ -106,6 +105,13 @@ jobs:
           NEXT_PUBLIC_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
         run: '"$RUN" npm run build'
 
+      # Rules and indexes go only to the database for this target, so a branch never changes prod rules.
+      - name: Deploy Firestore rules (preview database)
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.database != ''
+        run: |
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.database }}' \
+            --project "$FIREBASE_PROJECT" --force
+
       - name: Deploy preview channel
         id: hosting_preview
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
@@ -126,7 +132,7 @@ jobs:
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'prod'
         run: |
           only=hosting
-          if [ '${{ steps.app.outputs.has_firestore }}' = true ]; then only=hosting,firestore; fi
+          if [ -n '${{ steps.app.outputs.database }}' ]; then only='hosting,firestore:${{ steps.app.outputs.database }}'; fi
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
             --message "${{ inputs.app }} ${{ steps.app.outputs.sha }}"
           echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
