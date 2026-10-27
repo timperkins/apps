@@ -1,0 +1,11 @@
+{
+  "name": "news",
+  "type": "apphosting",
+  "domain": "news.trom.dev",
+  "backend": "news",
+  "previewBackend": "news-preview",
+  "firestore": {
+    "prod": "tim-news",
+    "preview": "tim-news-preview"
+  }
+}

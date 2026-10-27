@@ -1,0 +1,42 @@
+# Firebase App Hosting settings for Tim News.
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  minInstances: 0
+  maxInstances: 4
+  # Story generation runs after the response is sent, so give requests room to finish.
+  timeoutSeconds: 300
+
+env:
+  # Create the secret with: firebase apphosting:secrets:set GEMINI_API_KEY
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+    availability: [RUNTIME]
+
+  # Optional overrides.
+  - variable: GEMINI_MODEL
+    value: gemini-flash-latest
+    availability: [RUNTIME]
+  - variable: DAILY_STORY_LIMIT
+    value: "200"
+    availability: [RUNTIME]
+  - variable: DAILY_FOLLOWUP_LIMIT
+    value: "200"
+    availability: [RUNTIME]
+
+  # Web app config from Firebase console > Project settings > Your apps. These are public values.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyDqgldIcbiEGPtlDoVVohbwuyKBiWZq3Qc
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: apps-97595.firebaseapp.com
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: apps-97595
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:769532990756:web:7ab857aa87a4354e5c8fb1"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIRESTORE_DATABASE_ID
+    value: tim-news
+    availability: [BUILD, RUNTIME]

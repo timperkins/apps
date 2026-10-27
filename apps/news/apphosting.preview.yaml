@@ -1,0 +1,6 @@
+# Overrides for the news-preview backend, whose environment name is "preview".
+# Previews read and write their own database, never prod's.
+env:
+  - variable: NEXT_PUBLIC_FIRESTORE_DATABASE_ID
+    value: tim-news-preview
+    availability: [BUILD, RUNTIME]

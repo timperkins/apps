@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Stories, feeds and explainers are public to read and written only by the server.
+    match /stories/{id} { allow read: if true; allow write: if false; }
+    match /feeds/{id} { allow read: if true; allow write: if false; }
+    match /followups/{id} { allow read: if true; allow write: if false; }
+    match /regions/{id} { allow read: if true; allow write: if false; }
+
+    // Each reader can read and change only their own small profile.
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['interests', 'region', 'settings'])
+        && (!('interests' in request.resource.data) || request.resource.data.interests.size() <= 40);
+    }
+
+    // Budgets and other server bookkeeping.
+    match /meta/{id} { allow read, write: if false; }
+  }
+}
