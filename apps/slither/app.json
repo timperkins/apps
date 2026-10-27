@@ -1,0 +1,10 @@
+{
+  "name": "slither",
+  "type": "hosting",
+  "domain": "slither.trom.dev",
+  "hostingSite": "trom-slither",
+  "firestore": {
+    "prod": "slither",
+    "preview": "slither-preview"
+  }
+}
