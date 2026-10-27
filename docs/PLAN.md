@@ -105,7 +105,7 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
 ## Phases
 
 1. **Prep (needs Tim in the Google Cloud and GitHub consoles)**
-   - Create a deploy service account in `apps-97595` with Hosting Admin, App Hosting Admin, Firebase Rules Admin, Cloud Datastore Owner (for creating databases), DNS Administrator, and Service Account User. Store its key as GitHub secret `FIREBASE_SERVICE_ACCOUNT`. (Workload Identity Federation instead of a key is an optional later hardening.)
+   - Create a deploy service account in `apps-97595` with Hosting Admin, App Hosting Admin, Firebase Rules Admin, Cloud Datastore Owner (for creating databases), DNS Administrator, Service Account User, Service Usage Consumer (firebase-tools checks that APIs are enabled) and Firebase Authentication Admin (`attach-domain.mjs` adds authorized domains). Store its key as GitHub secret `FIREBASE_SERVICE_ACCOUNT`. (Workload Identity Federation instead of a key is an optional later hardening.)
    - Install the Firebase App Hosting GitHub app on `timperkins/apps`.
 2. **DNS move**
    - Create a Cloud DNS zone for `trom.dev` and recreate every existing Namecheap record (App Hosting A/TXT/CNAME records for Sky Defender, any verification TXT, any mail records).
