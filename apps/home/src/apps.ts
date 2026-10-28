@@ -17,6 +17,11 @@ export const APPS: AppLink[] = [
     blurb: 'Two-player Pong on a big screen. Tilt your phone to move your paddle.',
   },
   {
+    name: 'Slither',
+    url: 'https://slither.trom.dev',
+    blurb: 'Party snake game on a big screen. Steer from your phone, eat, grow, and cut off your friends.',
+  },
+  {
     name: 'Scorched',
     url: 'https://scorched.trom.dev',
     blurb: 'Realtime artillery on destructible terrain, with phones as controllers.',
