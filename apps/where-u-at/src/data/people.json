@@ -14,5 +14,37 @@
     "color": "#F76B15",
     "photo": "",
     "order": 1
+  },
+  {
+    "id": "penny-son-1",
+    "name": "Baby boy",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "penny",
+    "order": 101
+  },
+  {
+    "id": "penny-son-2",
+    "name": "Baby boy",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "penny",
+    "order": 102
+  },
+  {
+    "id": "penny-son-3",
+    "name": "Baby boy",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "penny",
+    "order": 103
+  },
+  {
+    "id": "penny-son-4",
+    "name": "Baby boy",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "penny",
+    "order": 104
   }
 ]

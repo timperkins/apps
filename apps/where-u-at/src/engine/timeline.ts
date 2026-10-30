@@ -56,7 +56,7 @@ export class Timeline {
     }
 
     for (const { event, t } of this.events) {
-      if (event.type === 'birth') this.births.set(event.people[0], t);
+      if (event.type === 'birth') for (const id of event.people) this.births.set(id, t);
       for (const id of event.people) {
         const person = this.people.get(id);
         if (!person) throw new Error(`Event ${event.id} names unknown person ${id}`);

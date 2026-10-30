@@ -172,6 +172,14 @@
   },
   {
     "id": "e014",
+    "type": "birth",
+    "date": "2015-10",
+    "people": [
+      "penny-son-1"
+    ]
+  },
+  {
+    "id": "e015",
     "type": "move",
     "date": "2017-06",
     "people": [
@@ -185,7 +193,15 @@
     }
   },
   {
-    "id": "e015",
+    "id": "e016",
+    "type": "birth",
+    "date": "2017-10",
+    "people": [
+      "penny-son-2"
+    ]
+  },
+  {
+    "id": "e017",
     "type": "move",
     "date": "2020-11",
     "people": [
@@ -199,7 +215,7 @@
     }
   },
   {
-    "id": "e016",
+    "id": "e018",
     "type": "move",
     "date": "2021-03",
     "people": [
@@ -211,5 +227,14 @@
       "lat": 47.57,
       "lng": -122.63
     }
+  },
+  {
+    "id": "e019",
+    "type": "birth",
+    "date": "2021-07",
+    "people": [
+      "penny-son-3",
+      "penny-son-4"
+    ]
   }
 ]

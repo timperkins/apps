@@ -36,7 +36,8 @@ export interface BirthEvent {
   id: string;
   type: 'birth';
   date: MonthString;
-  people: [string];
+  /** One friend, or one or more children born together (twins). */
+  people: string[];
   /** Required for friends; children are born wherever their mother is. */
   place?: Place;
 }

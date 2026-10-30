@@ -25,7 +25,8 @@ export function TimelineBar({ scene, state, timeline }: Props) {
         const person = timeline.people.get(event.people[0])!;
         const color =
           event.type === 'marriage' ? '#D4A72C' : person.kind === 'friend' ? person.color : person.sex === 'female' ? BABY_GIRL : BABY_BOY;
-        const title = event.type === 'marriage' ? `${event.people.map((id) => timeline.people.get(id)!.name.split(' ')[0]).join(' & ')} married` : `${person.name} born`;
+        const names = event.people.map((id) => timeline.people.get(id)!.name.split(' ')[0]).join(' & ');
+        const title = event.type === 'marriage' ? `${names} married` : event.people.length > 1 ? 'Twins born' : `${person.name} born`;
         return [{ id: event.id, left: ((t - start) / span) * 100, color, kind: event.type === 'marriage' ? 'marriage' : person.kind, title: `${title}, ${formatMonth(t)}` }];
       }),
     [timeline, start, span],

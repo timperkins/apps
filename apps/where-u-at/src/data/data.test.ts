@@ -27,13 +27,16 @@ describe('data', () => {
 
   it('gives everyone exactly one birth, before any of their other events', () => {
     for (const p of people) {
-      const births = events.filter((e) => e.type === 'birth' && e.people[0] === p.id);
+      const births = events.filter((e) => e.type === 'birth' && e.people.includes(p.id));
       expect(births, p.id).toHaveLength(1);
       const born = monthIndex(births[0].date);
       for (const e of events.filter((e) => e.type !== 'birth' && e.people.includes(p.id))) {
         expect(monthIndex(e.date), `${p.id} ${e.id}`).toBeGreaterThanOrEqual(born);
       }
-      if (p.kind === 'friend') expect(births[0].place, p.id).toBeDefined();
+      if (p.kind === 'friend') {
+        expect(births[0].place, p.id).toBeDefined();
+        expect(births[0].people, p.id).toHaveLength(1);
+      }
     }
   });
 
@@ -42,7 +45,7 @@ describe('data', () => {
       if (p.kind !== 'child') continue;
       const mother = byId.get(p.motherId);
       expect(mother?.kind, p.id).toBe('friend');
-      const birth = (id: string) => monthIndex(events.find((e) => e.type === 'birth' && e.people[0] === id)!.date);
+      const birth = (id: string) => monthIndex(events.find((e) => e.type === 'birth' && e.people.includes(id))!.date);
       expect(birth(p.id) - birth(p.motherId)).toBeGreaterThan(16 * 12);
       // Children follow their mother, so they never appear in moves or marriages.
       expect(events.some((e) => e.type !== 'birth' && e.people.includes(p.id))).toBe(false);
