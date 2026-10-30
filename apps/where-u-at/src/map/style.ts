@@ -5,6 +5,7 @@ import type { FeatureCollection, MultiLineString } from 'geojson';
 import { feature, mesh } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
 import world from 'world-atlas/countries-50m.json';
+import us from 'us-atlas/states-10m.json';
 
 export interface Theme {
   dark: boolean;
@@ -70,6 +71,9 @@ function unwrapRing(ring: number[][]): number[][] {
   });
 }
 const borders = mesh(topo, topo.objects.countries, (a, b) => a !== b);
+const usTopo = us as unknown as Topology<{ states: GeometryCollection }>;
+// Lines between US states only; the coast and national borders come from the countries above.
+const stateLines = mesh(usTopo, usTopo.objects.states, (a, b) => a !== b);
 
 function graticule(): FeatureCollection<MultiLineString> {
   const lines: number[][][] = [];
@@ -84,6 +88,7 @@ export function mapStyle(theme: Theme): StyleSpecification {
     sources: {
       countries: { type: 'geojson', data: countries },
       borders: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: borders } },
+      states: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: stateLines } },
       graticule: { type: 'geojson', data: graticule() },
     },
     layers: [
@@ -91,6 +96,7 @@ export function mapStyle(theme: Theme): StyleSpecification {
       { id: 'graticule', type: 'line', source: 'graticule', paint: { 'line-color': theme.graticule, 'line-width': 1 } },
       { id: 'land', type: 'fill', source: 'countries', paint: { 'fill-color': theme.land, 'fill-antialias': true } },
       { id: 'coast', type: 'line', source: 'countries', paint: { 'line-color': theme.coast, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 1.2] } },
+      { id: 'states', type: 'line', source: 'states', paint: { 'line-color': theme.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.3, 6, 0.8], 'line-opacity': 0.8 } },
       { id: 'borders', type: 'line', source: 'borders', paint: { 'line-color': theme.border, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.4, 6, 1] } },
     ],
   };
