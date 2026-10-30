@@ -4,7 +4,7 @@
     "name": "Tim",
     "kind": "friend",
     "color": "#2E9E5B",
-    "photo": "",
+    "photo": "faces/tim.jpg",
     "order": 0
   },
   {
@@ -12,7 +12,7 @@
     "name": "Penny",
     "kind": "friend",
     "color": "#F76B15",
-    "photo": "",
+    "photo": "faces/penny.jpg",
     "order": 1
   },
   {
