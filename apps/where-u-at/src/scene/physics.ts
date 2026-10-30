@@ -19,7 +19,8 @@ export interface Body {
   active: boolean;
 }
 
-export const GAP = 3;
+// Room for the colored rings (3.5px each) plus a little air.
+export const GAP = 10;
 
 const SPRING = 55;
 const DAMPING = 7.5;

@@ -84,6 +84,12 @@ interface Wedding {
   start: number;
 }
 
+/** "It's a boy!" for a baby with no name yet, else "Welcome, Ada!". */
+function babyLabel(name: string, sex: 'female' | 'male'): string {
+  if (/^baby\b/i.test(name)) return `It's a ${sex === 'female' ? 'girl' : 'boy'}!`;
+  return `Welcome, ${name.split(' ')[0]}!`;
+}
+
 export class Scene {
   readonly map: MapLibre;
   readonly player: Player;
@@ -140,9 +146,9 @@ export class Scene {
 
     timeline.people.forEach((person) => {
       const img = new Image();
-      if (person.kind === 'friend') img.src = person.photo;
-      else img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(babySvg(person.sex === 'female' ? BABY_GIRL : BABY_BOY))}`;
-      const family = person.kind === 'child' ? person.motherId : this.familyOf(person.id);
+      if (person.kind === 'child') img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(babySvg(person.sex === 'female' ? BABY_GIRL : BABY_BOY))}`;
+      else if (person.photo) img.src = person.photo;
+      const family = this.familyOf(person.kind === 'child' ? person.motherId : person.id);
       const actor: Actor = {
         person,
         color: person.kind === 'friend' ? person.color : person.sex === 'female' ? BABY_GIRL : BABY_BOY,
@@ -203,6 +209,10 @@ export class Scene {
   seek(t: number): void {
     this.player.seek(t);
     this.snap = true;
+    // Celebrations belong to the moment they happened; don't carry them to the new date.
+    this.weddings = [];
+    this.particles = [];
+    for (const a of this.actors) a.label = null;
     this.emit();
   }
 
@@ -254,8 +264,10 @@ export class Scene {
   private markBirths(crossed: TimedEvent[]) {
     for (const { event } of crossed) {
       if (event.type === 'birth') {
-        const actor = this.byId.get(event.people[0]);
-        if (actor) actor.justBorn = true;
+        for (const id of event.people) {
+          const actor = this.byId.get(id);
+          if (actor) actor.justBorn = true;
+        }
       }
     }
   }
@@ -391,16 +403,19 @@ export class Scene {
   private celebrate(crossed: TimedEvent[]) {
     for (const { event } of crossed) {
       if (event.type === 'birth') {
-        const actor = this.byId.get(event.people[0]);
-        if (!actor?.body.active) continue;
-        const { x, y } = actor.body;
-        if (actor.person.kind === 'friend') {
-          this.burst('sparkle', x, y, 18, [actor.color, '#F2C94C', actor.color], 70, 1.4);
-          this.particles.push(this.particle('wave', x, y, 0, 0, actor.color, 1.1, FRIEND_R));
-          this.setLabel(actor, `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, 3);
-        } else {
-          this.burst('star', x, y - 10, 14, [actor.color, '#ffffff', actor.color], 90, 1.5);
-          this.setLabel(actor, `Welcome, ${actor.person.name.split(' ')[0]}!`, 3);
+        for (const id of event.people) {
+          const actor = this.byId.get(id);
+          if (!actor?.body.active) continue;
+          const { x, y } = actor.body;
+          if (actor.person.kind === 'friend') {
+            this.burst('sparkle', x, y, 18, [actor.color, '#F2C94C', actor.color], 70, 1.4);
+            this.particles.push(this.particle('wave', x, y, 0, 0, actor.color, 1.1, FRIEND_R));
+            this.setLabel(actor, `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, 3);
+          } else {
+            this.burst('star', x, y - 10, 14, [actor.color, '#ffffff', actor.color], 90, 1.5);
+            // Twins share one label so the two don't sit on top of each other.
+            if (id === event.people[0]) this.setLabel(actor, event.people.length > 1 ? 'Twins!' : babyLabel(actor.person.name, actor.person.sex), 3);
+          }
         }
       } else if (event.type === 'marriage') {
         const a = this.byId.get(event.people[0]);
@@ -698,9 +713,9 @@ export class Scene {
   }
 
   private familyOf(id: string): string {
-    // Partners share a family; the wife's id names it, which is also the children's motherId.
+    // Partners and their children share a family, named after the couple.
     for (const { event } of this.timeline.events) {
-      if (event.type === 'marriage' && event.people.includes(id)) return event.people[0];
+      if (event.type === 'marriage' && event.people.includes(id)) return [...event.people].sort().join('+');
     }
     return id;
   }

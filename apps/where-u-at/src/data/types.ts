@@ -12,7 +12,7 @@ export interface Friend {
   kind: 'friend';
   /** Ring and trace color. Unique per friend, never pink or blue (those are for babies). */
   color: string;
-  /** Path relative to the site root, e.g. "faces/maya.svg", or an absolute URL. */
+  /** Path relative to the site root, e.g. "faces/tim.jpg", or an absolute URL. Empty shows initials. */
   photo: string;
   order: number;
 }
@@ -36,7 +36,8 @@ export interface BirthEvent {
   id: string;
   type: 'birth';
   date: MonthString;
-  people: [string];
+  /** One friend, or one or more children born together (twins). */
+  people: string[];
   /** Required for friends; children are born wherever their mother is. */
   place?: Place;
 }
