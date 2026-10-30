@@ -1,0 +1,306 @@
+[
+  {
+    "id": "maya-okafor",
+    "name": "Maya Okafor",
+    "kind": "friend",
+    "color": "#E5484D",
+    "photo": "faces/maya-okafor.svg",
+    "order": 0
+  },
+  {
+    "id": "daniel-reyes",
+    "name": "Daniel Reyes",
+    "kind": "friend",
+    "color": "#F76B15",
+    "photo": "faces/daniel-reyes.svg",
+    "order": 1
+  },
+  {
+    "id": "ada-reyes",
+    "name": "Ada Reyes",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "maya-okafor",
+    "order": 102
+  },
+  {
+    "id": "priya-nair",
+    "name": "Priya Nair",
+    "kind": "friend",
+    "color": "#F2A900",
+    "photo": "faces/priya-nair.svg",
+    "order": 2
+  },
+  {
+    "id": "arjun-mehta",
+    "name": "Arjun Mehta",
+    "kind": "friend",
+    "color": "#8DB600",
+    "photo": "faces/arjun-mehta.svg",
+    "order": 3
+  },
+  {
+    "id": "felix-mehta",
+    "name": "Felix Mehta",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "priya-nair",
+    "order": 105
+  },
+  {
+    "id": "yuna-mehta",
+    "name": "Yuna Mehta",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "priya-nair",
+    "order": 106
+  },
+  {
+    "id": "ravi-mehta",
+    "name": "Ravi Mehta",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "priya-nair",
+    "order": 107
+  },
+  {
+    "id": "sofia-rossi",
+    "name": "Sofia Rossi",
+    "kind": "friend",
+    "color": "#2E9E5B",
+    "photo": "faces/sofia-rossi.svg",
+    "order": 4
+  },
+  {
+    "id": "mateo-garcia",
+    "name": "Mateo García",
+    "kind": "friend",
+    "color": "#0F8A7E",
+    "photo": "faces/mateo-garcia.svg",
+    "order": 5
+  },
+  {
+    "id": "noah-garcia",
+    "name": "Noah García",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "sofia-rossi",
+    "order": 110
+  },
+  {
+    "id": "amara-mensah",
+    "name": "Amara Mensah",
+    "kind": "friend",
+    "color": "#7C5CFF",
+    "photo": "faces/amara-mensah.svg",
+    "order": 6
+  },
+  {
+    "id": "kwame-boateng",
+    "name": "Kwame Boateng",
+    "kind": "friend",
+    "color": "#9E4FC9",
+    "photo": "faces/kwame-boateng.svg",
+    "order": 7
+  },
+  {
+    "id": "remy-boateng",
+    "name": "Remy Boateng",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "amara-mensah",
+    "order": 113
+  },
+  {
+    "id": "leo-boateng",
+    "name": "Leo Boateng",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "amara-mensah",
+    "order": 114
+  },
+  {
+    "id": "mila-boateng",
+    "name": "Mila Boateng",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "amara-mensah",
+    "order": 115
+  },
+  {
+    "id": "hana-kim",
+    "name": "Hana Kim",
+    "kind": "friend",
+    "color": "#8B5E3C",
+    "photo": "faces/hana-kim.svg",
+    "order": 8
+  },
+  {
+    "id": "kenji-watanabe",
+    "name": "Kenji Watanabe",
+    "kind": "friend",
+    "color": "#D08A4E",
+    "photo": "faces/kenji-watanabe.svg",
+    "order": 9
+  },
+  {
+    "id": "kai-watanabe",
+    "name": "Kai Watanabe",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "hana-kim",
+    "order": 118
+  },
+  {
+    "id": "elena-petrova",
+    "name": "Elena Petrova",
+    "kind": "friend",
+    "color": "#6E7F2A",
+    "photo": "faces/elena-petrova.svg",
+    "order": 10
+  },
+  {
+    "id": "luca-bianchi",
+    "name": "Luca Bianchi",
+    "kind": "friend",
+    "color": "#9B2335",
+    "photo": "faces/luca-bianchi.svg",
+    "order": 11
+  },
+  {
+    "id": "iris-bianchi",
+    "name": "Iris Bianchi",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "elena-petrova",
+    "order": 121
+  },
+  {
+    "id": "ivy-bianchi",
+    "name": "Ivy Bianchi",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "elena-petrova",
+    "order": 122
+  },
+  {
+    "id": "zoe-mitchell",
+    "name": "Zoe Mitchell",
+    "kind": "friend",
+    "color": "#C2410C",
+    "photo": "faces/zoe-mitchell.svg",
+    "order": 12
+  },
+  {
+    "id": "theo-walsh",
+    "name": "Theo Walsh",
+    "kind": "friend",
+    "color": "#365E40",
+    "photo": "faces/theo-walsh.svg",
+    "order": 13
+  },
+  {
+    "id": "noor-walsh",
+    "name": "Noor Walsh",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "zoe-mitchell",
+    "order": 125
+  },
+  {
+    "id": "eli-walsh",
+    "name": "Eli Walsh",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "zoe-mitchell",
+    "order": 126
+  },
+  {
+    "id": "leila-haddad",
+    "name": "Leila Haddad",
+    "kind": "friend",
+    "color": "#C9A227",
+    "photo": "faces/leila-haddad.svg",
+    "order": 14
+  },
+  {
+    "id": "omar-farouk",
+    "name": "Omar Farouk",
+    "kind": "friend",
+    "color": "#4A4A55",
+    "photo": "faces/omar-farouk.svg",
+    "order": 15
+  },
+  {
+    "id": "sami-farouk",
+    "name": "Sami Farouk",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "leila-haddad",
+    "order": 129
+  },
+  {
+    "id": "ingrid-larsen",
+    "name": "Ingrid Larsen",
+    "kind": "friend",
+    "color": "#5B2A86",
+    "photo": "faces/ingrid-larsen.svg",
+    "order": 16
+  },
+  {
+    "id": "lars-eriksson",
+    "name": "Lars Eriksson",
+    "kind": "friend",
+    "color": "#7FA88A",
+    "photo": "faces/lars-eriksson.svg",
+    "order": 17
+  },
+  {
+    "id": "hugo-eriksson",
+    "name": "Hugo Eriksson",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "ingrid-larsen",
+    "order": 132
+  },
+  {
+    "id": "camila-souza",
+    "name": "Camila Souza",
+    "kind": "friend",
+    "color": "#A3A3A3",
+    "photo": "faces/camila-souza.svg",
+    "order": 18
+  },
+  {
+    "id": "diego-torres",
+    "name": "Diego Torres",
+    "kind": "friend",
+    "color": "#3D2B1F",
+    "photo": "faces/diego-torres.svg",
+    "order": 19
+  },
+  {
+    "id": "ezra-torres",
+    "name": "Ezra Torres",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "camila-souza",
+    "order": 135
+  },
+  {
+    "id": "jonah-torres",
+    "name": "Jonah Torres",
+    "kind": "child",
+    "sex": "male",
+    "motherId": "camila-souza",
+    "order": 136
+  },
+  {
+    "id": "rosa-torres",
+    "name": "Rosa Torres",
+    "kind": "child",
+    "sex": "female",
+    "motherId": "camila-souza",
+    "order": 137
+  }
+]
