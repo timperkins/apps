@@ -8,8 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "vitest run",
-    "fake-data": "node scripts/make-fake-data.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "maplibre-gl": "^6.16.0",

@@ -140,8 +140,8 @@ export class Scene {
 
     timeline.people.forEach((person) => {
       const img = new Image();
-      if (person.kind === 'friend') img.src = person.photo;
-      else img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(babySvg(person.sex === 'female' ? BABY_GIRL : BABY_BOY))}`;
+      if (person.kind === 'child') img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(babySvg(person.sex === 'female' ? BABY_GIRL : BABY_BOY))}`;
+      else if (person.photo) img.src = person.photo;
       const family = person.kind === 'child' ? person.motherId : this.familyOf(person.id);
       const actor: Actor = {
         person,
@@ -203,6 +203,10 @@ export class Scene {
   seek(t: number): void {
     this.player.seek(t);
     this.snap = true;
+    // Celebrations belong to the moment they happened; don't carry them to the new date.
+    this.weddings = [];
+    this.particles = [];
+    for (const a of this.actors) a.label = null;
     this.emit();
   }
 
