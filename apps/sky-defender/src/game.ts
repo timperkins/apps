@@ -1,17 +1,20 @@
 // Game rules and simulation. World space: origin at the turret pivot, x right, y down,
 // ground at GROUND_Y. Numbers follow the final mechanics plan and are tuning starting points.
-import { BUILDINGS, mockToWorld, GROUND_Y, SC, HALF, type AnyPlaneType, type PlaneType, type BuildingDef, type BuildingId } from './art';
+import { BUILDINGS, WAR_POSTS, mockToWorld, GROUND_Y, SC, HALF, type AnyPlaneType, type PlaneType, type BuildingDef, type BuildingId } from './art';
 import { paletteForWave, type ColorKey, type PaletteId } from './palettes';
 import { Sound } from './audio';
 
 export type PlaneState = 'fly' | 'turn' | 'warn' | 'dive' | 'strafe' | 'climb' | 'chase' | 'falling';
-export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over';
+/** 'won' is only reached in war mode, when the level's clock runs out with the base still standing. */
+export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
+/** Original: endless waves defending one turret. War: hold out for a fixed time from several turrets, among friendly planes. */
+export type GameMode = 'original' | 'war';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
 /** Perks: permanent gun improvements (dual, triple, reload, flak) and one-off help for the base (repair, shield). */
 export type PerkId = 'dual' | 'triple' | 'reload' | 'flak' | 'repair' | 'shield';
 export type UpgradeId = PerkId | WeaponId;
-export type Difficulty = 'normal' | 'expert';
+export type Difficulty = 'normal' | 'hard';
 type TrailPoint = [number, number, number];
 
 export interface Plane {
@@ -31,6 +34,8 @@ export interface Plane {
   dead?: boolean; diveTo?: [number, number]; strafeDone?: Set<Building>; chaseCargo?: boolean;
   // cargo plane only
   dropped?: boolean; hitByPlayer?: boolean; gone?: boolean;
+  // war mode: a friendly plane, the turret it means to drop a crate at, and the short bursts planes fire at each other
+  friend?: boolean; dropAt?: Building | null; gunCD?: number; gunT?: number; gunAt?: Plane | null;
 }
 /** A heavy bomber's big bomb, or a light plane's missile (long and skinny, on the old bomb's arc). */
 export type BombKind = 'bomb' | 'missile';
@@ -39,18 +44,24 @@ export interface Shell { x: number; y: number; vx: number; vy: number; t: number
 export type ShotKind = 'missile' | 'rocket' | 'fireball' | 'nuke' | 'cluster' | 'bomblet';
 export interface Missile { kind: ShotKind; x: number; y: number; vx: number; vy: number; t: number; target: Plane | null; smokeT: number; dead?: boolean; counted?: boolean; fuse?: number; }
 /** A sonic pulse: an arc that spreads out from the gun along the aim it was fired at. */
-export interface Pulse { a: number; r: number; hit: Set<Plane | Bomb>; hitAny: boolean; }
+export interface Pulse { x: number; a: number; r: number; hit: Set<Plane | Bomb>; hitAny: boolean; }
 export type ParticleKind = 'puff' | 'fire' | 'flash' | 'spark' | 'debris' | 'ring';
 export interface Particle { k: ParticleKind; x: number; y: number; vx: number; vy: number; r: number; life: number; t: number; grow?: number; a?: number; color?: ColorKey; ground?: boolean; }
 export interface Tracer { x0: number; y0: number; x1: number; y1: number; life: number; }
 /** A chain lightning bolt: a jagged line through the points it jumped between. */
 export interface Bolt { pts: [number, number][]; life: number; }
-export interface Crate { x: number; y: number; vx: number; vy: number; landed: boolean; t: number; sway: number; dead?: boolean; }
+/** `lz` is the x of the landing zone the crate steers to. */
+export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
-export interface Building { def: BuildingDef; id: BuildingId; i: number; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; }
+/** `outpost` marks a war mode turret standing on its own away from the base. */
+export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
 export interface WaveSpec { count: number; list: PlaneType[]; boss: boolean; }
 export interface ClearInfo { bonus: number; health: number; perfect: number; }
-export interface Results { difficulty: Difficulty; score: number; wave: number; accuracy: number; kills: number; intercepts: number; }
+export interface Results {
+  mode: GameMode; difficulty: Difficulty; score: number; wave: number; accuracy: number; kills: number; intercepts: number;
+  /** war mode: whether the level was passed, why it was lost, seconds survived and friendly planes shot down */
+  won: boolean; reason: string; time: number; friendlies: number;
+}
 export interface Hooks {
   tip?: (key: string, text: string) => void;
   hud?: () => void;
@@ -86,12 +97,23 @@ const SHIELD_TIME = 25;
 /** A boss plane comes in the middle of every fourth wave. It takes many hits, and the laser and nuke wear it down by the amount below. */
 const BOSS_EVERY = 4, LASER_DPS = 8, NUKE_DMG = 12;
 
-/** Expert mode: about twice the planes, arriving faster and in bigger groups, that fire more
+/** Hard: about twice the planes, arriving faster and in bigger groups, that fire more
  *  often and hit harder. Scores are worth half as much again. */
 export const DIFFICULTY: Record<Difficulty, { planes: number; group: number; gap: number; fire: number; damage: number; score: number }> = {
   normal: { planes: 1, group: 0, gap: 1, fire: 1, damage: 1, score: 1 },
-  expert: { planes: 2.1, group: 2, gap: .6, fire: .6, damage: 1.6, score: 1.5 },
+  hard: { planes: 2.1, group: 2, gap: .6, fire: .6, damage: 1.6, score: 1.5 },
 };
+
+/** War mode, level 1. The player starts at the middle turret (see WAR_POSTS). The sky is wider,
+ *  so planes can be shot on their way in. */
+const WAR_XE = 960;
+/** Survive this many seconds to pass; shooting down this many friendly planes loses the level. */
+export const WAR_TIME = 180, WAR_STRIKES = 3;
+/** Friendly plane types, and the share of them that carry an upgrade crate. */
+const FRIEND_TYPES: PlaneType[] = ['fighter', 'fighter', 'light', 'light', 'heavy'];
+const FRIEND_CARRY = .3;
+/** Seconds to slide over to another turret; the gun fires again once it has arrived. */
+const MOVE_TIME = .35;
 export const TYPES: Record<AnyPlaneType, { speed: number; points: number; alts: number[]; r: number }> = {
   recon: { speed: 1240 / 35, points: 50, alts: [-600, -570, -540], r: 3.4 },
   light: { speed: 1240 / 30, points: 100, alts: [-440, -380, -320], r: 3.8 },
@@ -100,8 +122,8 @@ export const TYPES: Record<AnyPlaneType, { speed: number; points: number; alts: 
   cargo: { speed: 30, points: 0, alts: [-520], r: 5 },
   boss: { speed: 1240 / 55, points: 2000, alts: [-520, -480, -440], r: 8 },
 };
-/** The boss's health: more for each boss in the game, and half as much again on expert. */
-export function bossHp(wave: number, d: Difficulty) { return Math.round((20 + 8 * (wave / BOSS_EVERY - 1)) * (d === 'expert' ? 1.5 : 1)); }
+/** The boss's health: more for each boss in the game, and half as much again on hard. */
+export function bossHp(wave: number, d: Difficulty) { return Math.round((20 + 8 * (wave / BOSS_EVERY - 1)) * (d === 'hard' ? 1.5 : 1)); }
 
 /** Ammo for each weapon; seconds for the laser (only while firing) and rapid fire. */
 export const AMMO: Record<WeaponId, number> = { missiles: 6, laser: 12, rockets: 14, fireballs: 18, sonic: 10, nuke: 1, rapid: 30, lightning: 10, cluster: 12 };
@@ -134,8 +156,8 @@ function waveSpec(wave: number, d: Difficulty = 'normal'): WaveSpec {
   // every plane goes down with one hit, so waves make up for it in numbers; a boss wave sends fewer of them
   const boss = wave % BOSS_EVERY === 0;
   const count = Math.round((4 + wave + Math.floor(wave / 2)) * D.planes * (boss ? .7 : 1));
-  // expert skips ahead to the mix of later waves; the scripted first sightings below stay put
-  const n = d === 'expert' ? wave + 3 : wave;
+  // hard skips ahead to the mix of later waves; the scripted first sightings below stay put
+  const n = d === 'hard' ? wave + 3 : wave;
   let w: Partial<Record<PlaneType, number>>;
   if (n === 1) w = { recon: 1, light: 2 };
   else if (n === 2) w = { recon: .25, light: .45, fighter: .3 };
@@ -160,10 +182,16 @@ function waveSpec(wave: number, d: Difficulty = 'normal'): WaveSpec {
 
 export class Game {
   settings = { reduceMotion: false, vibration: true };
-  /** set before start(); it holds for the whole game */
+  /** set before start() (and before reset(), for the title screen's backdrop); they hold for the whole game */
   difficulty: Difficulty = 'normal';
+  mode: GameMode = 'original';
   t = 0; wave = 0; phase: Phase = 'idle'; phaseT = 0;
   aim = 0; cam = 0;
+  /** where the gun in use stands, and where the camera is (it slides to the gun after a move) */
+  gunX = 0; viewX = 0;
+  /** war mode: the turrets from left to right and the one in use; seconds survived; friendly planes shot down;
+   *  countdowns to the next enemy group and the next friendly plane; why the game ended */
+  posts: Building[] = []; postI = 0; warT = 0; strikes = 0; enemyT = 0; friendT = 0; endReason = '';
   planes: Plane[] = []; bombs: Bomb[] = []; shells: Shell[] = []; missiles: Missile[] = []; pulses: Pulse[] = []; particles: Particle[] = [];
   tracers: Tracer[] = []; bolts: Bolt[] = []; crates: Crate[] = []; labels: Label[] = []; trails: { pts: TrailPoint[]; t: number }[] = [];
   cargo: Plane | null = null;
@@ -183,7 +211,8 @@ export class Game {
   wind = 0;
   spawnQueue: { t: number; types: (PlaneType | 'boss')[] }[] = [];
   spec: WaveSpec = waveSpec(1);
-  shake = 0; firing = false; tapEdge = false; waveDamaged = false;
+  /** oneShot: a tap that ended before the next frame still fires once (war mode holds a tap back briefly to tell it from a swipe) */
+  shake = 0; firing = false; tapEdge = false; oneShot = false; waveDamaged = false;
   palFrom: PaletteId = paletteForWave(1); palTo: PaletteId = this.palFrom; palT = 1;
   timeScale = 1; overT = 0; clearInfo: ClearInfo | null = null; lastVibe = 0;
 
@@ -200,10 +229,18 @@ export class Game {
     this.planes = []; this.bombs = []; this.shells = []; this.missiles = []; this.pulses = []; this.particles = [];
     this.tracers = []; this.bolts = []; this.crates = []; this.labels = []; this.trails = [];
     this.cargo = null; this.cargoAt = null; this.lzX = LZ_SPOTS[1];
-    this.buildings = BUILDINGS.map((d, i) => {
-      const [x] = mockToWorld(d.mx, 800);
-      return { def: d, id: d.id, i, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 };
-    });
+    const make = (d: BuildingDef, x: number, name = d.name): Building => ({ def: d, id: d.id, name, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 });
+    this.buildings = BUILDINGS.map(d => make(d, mockToWorld(d.mx, 800)[0]));
+    if (this.mode === 'war') {
+      // a turret out on its own either side of the base
+      const def = BUILDINGS.find(d => d.id === 'turret')!;
+      const out = WAR_POSTS.filter(x => x !== 0).map(x => ({ ...make(def, x, x < 0 ? 'West turret' : 'East turret'), outpost: true }));
+      this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
+    }
+    this.posts = this.buildings.filter(b => b.id === 'turret');
+    this.postI = this.posts.findIndex(b => !b.outpost);
+    this.gunX = this.viewX = this.post().x;
+    this.warT = 0; this.strikes = 0; this.enemyT = 0; this.friendT = 0; this.endReason = '';
     this.score = 0; this.mult = 1;
     this.fireCD = 0; this.recoil = 0; this.flash = 0;
     this.guns = 1; this.fastLoad = false; this.heavyFlak = false; this.shieldT = 0; this.shieldFlash = 0;
@@ -225,12 +262,162 @@ export class Game {
   }
 
   get D() { return DIFFICULTY[this.difficulty]; }
-  b(id: BuildingId): Building { return this.buildings.find(b => b.id === id)!; }
+  /** The base's own building of this kind (in war mode the outposts are turrets too, but never this one). */
+  b(id: BuildingId): Building { return this.buildings.find(b => b.id === id && !b.outpost)!; }
   alive(id: BuildingId) { return !this.b(id).ruined; }
+  /** The turret the player is using. */
+  post(): Building { return this.posts[this.postI]; }
+  get war() { return this.mode === 'war'; }
+  get ended() { return this.phase === 'over' || this.phase === 'won'; }
+  /** Planes U-turn (or, if friendly, leave) past this x. */
+  get xe() { return this.war ? WAR_XE : XE; }
+  /** Whether the gun has finished sliding over to the turret in use. */
+  get settled() { return Math.abs(this.viewX - this.gunX) < 12; }
 
   start() {
     this.reset();
-    this.startWave(1);
+    if (this.war) this.startWar(); else this.startWave(1);
+  }
+
+  /* ---------- war mode ---------- */
+  startWar() {
+    this.wave = 1;
+    this.phase = 'intro'; this.phaseT = 0;
+    this.enemyT = 3; this.friendT = .5;
+    this.wind = 0; Sound.setWind(0);
+    this.palFrom = this.palTo = paletteForWave(1); this.palT = 1;
+    this.hooks.waveStart && this.hooks.waveStart(1);
+    this.tip('swipe', 'Swipe left or right to move to another turret.');
+  }
+  /** Moves to the next standing turret in that direction (-1 left, 1 right). Returns whether it moved. */
+  move(dir: number) {
+    if (!this.war || this.ended || this.phase === 'idle') return false;
+    for (let i = this.postI + dir; i >= 0 && i < this.posts.length; i += dir) {
+      if (this.posts[i].ruined) continue;
+      this.goTo(i);
+      return true;
+    }
+    Sound.denied();
+    return false;
+  }
+  goTo(i: number) {
+    this.postI = i; this.gunX = this.posts[i].x;
+    this.firing = false; this.lasing = false;
+    this.lock = { target: null, t: 0, step: 0, locked: false };
+    Sound.click();
+  }
+  updateWar(dt: number) {
+    if (this.phase !== 'combat') return;
+    this.warT += dt;
+    if (this.warT >= WAR_TIME) { this.levelWon(); return; }
+    // the pressure builds over the level
+    const k = this.warT / WAR_TIME, D = this.D;
+    let enemies = 0, friends = 0;
+    for (const p of this.planes) if (p.state !== 'falling' && p.type !== 'cargo') p.friend ? friends++ : enemies++;
+    this.enemyT -= dt;
+    if (this.enemyT <= 0 && enemies < (5 + 5 * k) * D.planes) {
+      const w: [PlaneType, number][] = k < .12 ? [['recon', 1], ['light', 2]] : [['recon', .15], ['light', .4], ['fighter', .25 + .1 * k], ['heavy', .15 + .1 * k]];
+      const tot = w.reduce((a, [, v]) => a + v, 0);
+      const n = 1 + D.group + (Math.random() < .25 + .35 * k ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        let r = Math.random() * tot;
+        const type = w.find(([, v]) => (r -= v) <= 0)?.[0] ?? 'light';
+        this.spawnPlane(type, i);
+      }
+      this.enemyT = rand(5, 8) * (1 - .4 * k) * D.gap;
+    }
+    // friendly planes come through often, crossing the line of fire
+    this.friendT -= dt;
+    if (this.friendT <= 0) {
+      if (friends < 5) this.spawnFriend();
+      this.friendT = rand(2.5, 5);
+    }
+  }
+  spawnFriend() {
+    const type = pick(FRIEND_TYPES), T = TYPES[type];
+    const dir = Math.random() < .5 ? 1 : -1;
+    const alt = rand(-580, -320);
+    const p: Plane = {
+      id: nextId++, type, dir, x: -dir * (this.xe + 60), y: alt, alt, speed: T.speed * (type === 'heavy' ? 1.4 : 1.05) * rand(.95, 1.05),
+      hp: 1, max: 1, state: 'fly', pitch: 0, flip: 1, turnT: 0, hits: [], trail: [], trailT: 0,
+      dropCD: 0, diveCD: 0, stateT: 0, burnT: 0, burning: false, smokeT: 0, hitFlash: 0,
+      vx: 0, vy: 0, spin: 0, lightPhase: Math.random() * 6, friend: true,
+      dropAt: Math.random() < FRIEND_CARRY ? pick(this.posts) : null, gunCD: rand(2, 6),
+    };
+    this.planes.push(p);
+    this.tip('friendly', 'Planes marked green are friendly. Shoot down three and the level is lost.');
+    return p;
+  }
+  /** A friendly plane flies straight across and leaves; one carrying a crate lets it go near its turret. */
+  updateFriend(p: Plane, dt: number) {
+    p.x += p.dir * p.speed * dt;
+    const climb = clamp(p.alt - p.y, -18 * dt, 18 * dt);
+    p.y += climb;
+    p.pitch += ((climb / dt) / p.speed * .8 - p.pitch) * Math.min(1, dt * 3);
+    const t = p.dropAt;
+    if (t && !this.ended && (t.x - p.x) * p.dir <= 60) {
+      // one crate at a time per turret; otherwise try the next turret ahead
+      const lz = this.lzFor(t);
+      if (!t.ruined && !this.crates.some(c => Math.abs(c.lz - lz) < 100)) {
+        this.crates.push({ x: p.x, y: p.y + 6, vx: p.dir * p.speed, vy: (LZ_Y - p.y - 6) / CRATE_FALL, lz, landed: false, t: 0, sway: 0 });
+        this.tip('friendDrop', 'A friendly plane dropped an upgrade. Move to that turret to open it.');
+        p.dropAt = null;
+      } else p.dropAt = this.posts.find(b => (b.x - t.x) * p.dir > 0) ?? null;
+    }
+    if (Math.abs(p.x) > this.xe + 120) { p.dead = true; Sound.stopEngine(p.id); }
+  }
+  /** Where a crate dropped for this turret lands: beside it, on the side with room. */
+  lzFor(b: Building) { return b.outpost ? b.x + (b.x < 0 ? 44 : -44) : pick(LZ_SPOTS); }
+  /** Friendly and enemy planes trade short bursts of fire. It looks the part but does no real harm. */
+  dogfight(p: Plane, dt: number) {
+    if (p.gunT && p.gunT > 0) {
+      p.gunT -= dt;
+      const t = p.gunAt;
+      if (!t || t.dead || t.state === 'falling' || p.state === 'falling') { p.gunT = 0; return; }
+      if (Math.random() < dt * 18) {
+        const [nx, ny] = this.planePoint(p, 1, 0);
+        this.tracers.push({ x0: nx, y0: ny, x1: t.x + rand(-9, 9), y1: t.y + rand(-4, 4), life: .12 });
+        if (Math.random() < .4) this.particles.push({ k: 'spark', x: t.x + rand(-4, 4), y: t.y + rand(-2, 2), vx: rand(-30, 30), vy: rand(-30, 30), life: .3, t: 0, r: .5 });
+      }
+      if (p.gunT <= 0 && Math.random() < .35 && !t.hits.length) { t.hits.push({ u: rand(-.6, .3), v: rand(-1, 1) }); t.hitFlash = .6; }
+      return;
+    }
+    p.gunCD = (p.gunCD ?? rand(3, 8)) - dt;
+    if (p.gunCD > 0 || p.state !== 'fly' || this.ended) return;
+    p.gunCD = rand(4, 9);
+    for (const q of this.planes) {
+      if (!q.friend === !p.friend || q.type === 'cargo' || q.dead || q.state === 'falling') continue;
+      const dx = q.x - p.x;
+      if (Math.sign(dx) === p.dir && Math.abs(dx) < 220 && Math.abs(q.y - p.y) < 90) {
+        p.gunT = rand(.6, 1); p.gunAt = q;
+        Sound.minigun(this.panOf(p.x, p.y));
+        return;
+      }
+    }
+  }
+  /** Shooting down a friendly plane: it goes down, and three of them lose the level. */
+  friendlyDown(p: Plane) {
+    if (p.state === 'falling' || p.dead) return;
+    p.vx = p.dir * p.speed * .9; p.vy = 0; p.spin = 0;
+    p.state = 'falling'; p.stateT = 0;
+    if (!p.hits.length) p.hits.push({ u: 0, v: 0 });
+    this.strikes++;
+    this.explosion(p.x, p.y, .8, false);
+    Sound.boom(false, this.panOf(p.x, p.y)); Sound.denied();
+    this.addScore(-500, p.x, p.y, 'Friendly fire');
+    this.labels.push({ text: `Friendly down ${this.strikes}/${WAR_STRIKES}`, x: this.gunX, y: GROUND_Y - 70, t: 0, life: 2.6, color: '#ff8a7a', big: true });
+    this.vibrate(120);
+    if (this.strikes >= WAR_STRIKES) this.gameOver('You shot down three friendly planes.');
+  }
+  levelWon() {
+    this.phase = 'won'; this.phaseT = 0;
+    this.firing = false;
+    const k = this.D.score;
+    this.score += Math.round(2000 * k) + Math.round(1000 * this.baseHealth() * k);
+    this.labels.push({ text: 'Level complete', x: this.gunX, y: GROUND_Y - 80, t: 0, life: 3, color: '#bff5cf', big: true });
+    Sound.pop();
+    const done = this.hooks.gameOver;
+    if (done) setTimeout(() => done(this.results()), 3200);
   }
 
   /* ---------- waves ---------- */
@@ -274,7 +461,7 @@ export class Game {
     const dir = Math.random() < .5 ? 1 : -1;
     const alt = pick(T.alts) + rand(-15, 15);
     const p: Plane = {
-      id: nextId++, type, dir, x: -dir * (XE + 60 + i * 70), y: alt, alt, speed: T.speed * rand(.95, 1.05),
+      id: nextId++, type, dir, x: -dir * (this.xe + 60 + i * 70), y: alt, alt, speed: T.speed * rand(.95, 1.05),
       hp: 1, max: 1, state: 'fly', pitch: 0, flip: 1, turnT: 0, hits: [], trail: [], trailT: 0,
       dropCD: rand(2, 5) * this.D.fire, diveCD: rand(4, 9) * this.D.fire, stateT: 0, burnT: 0, burning: false, smokeT: 0, hitFlash: 0,
       vx: 0, vy: 0, spin: 0, lightPhase: Math.random() * 6,
@@ -293,11 +480,14 @@ export class Game {
 
   /* ---------- input ---------- */
   press() { this.firing = true; this.tapEdge = true; }
+  tap() { this.tapEdge = true; this.oneShot = true; }
   release() { this.firing = false; }
 
   /* ---------- main update ---------- */
   update(dtReal: number, tiltRoll: number) {
     const over = this.phase === 'over';
+    // the camera slides over to the turret in use
+    this.viewX += (this.gunX - this.viewX) * Math.min(1, dtReal * 3 / MOVE_TIME);
     if (over) { this.overT += dtReal; this.timeScale = this.overT < 2.6 ? .28 : .6; }
     const dt = dtReal * this.timeScale;
     // a zero-length frame (e.g. the first frame after resuming) would divide by zero in
@@ -319,14 +509,15 @@ export class Game {
         const g = this.spawnQueue.shift()!;
         g!.types.forEach((ty, i) => this.spawnPlane(ty, i));
       }
-      if (this.phase === 'combat' && this.planesLeft() === 0) this.waveCleared();
+      if (this.phase === 'combat' && !this.war && this.planesLeft() === 0) this.waveCleared();
     } else if (this.phase === 'clear') {
       if (this.phaseT >= 10) this.startWave(this.wave + 1);
     }
     if (this.cargoAt !== null && this.phase === 'combat' && this.phaseT >= this.cargoAt && this.canLaunchCargo()) this.launchCargo();
 
+    if (this.war) this.updateWar(dt);
     this.lasing = false;
-    if (!over) this.updateGun(dt);
+    if (!this.ended) this.updateGun(dt);
     this.updatePlanes(dt);
     this.updateBombs(dt);
     this.updateShells(dt);
@@ -336,7 +527,7 @@ export class Game {
     this.updateCargo(dt);
     this.updateBase(dt);
     this.updateParticles(dt);
-    if (this.weapon === 'rapid' && !over) this.useAmmo(dt);
+    if (this.weapon === 'rapid' && !this.ended) this.useAmmo(dt);
     this.nukeFlash = Math.max(0, this.nukeFlash - dtReal * 1.6);
     this.shake = Math.max(0, this.shake - dtReal * 10);
     this.flash = Math.max(0, this.flash - dt * 8);
@@ -348,14 +539,13 @@ export class Game {
     for (const b of this.bolts) b.life -= dt;
     this.bolts = this.bolts.filter(b => b.life > 0);
     this.updateEngines();
-    this.tapEdge = false;
+    this.tapEdge = false; this.oneShot = false;
   }
 
   /* ---------- gun ---------- */
   updateGun(dt: number) {
     this.fireCD -= dt;
-    const turret = this.b('turret');
-    if (turret.ruined) return;
+    if (this.post().ruined || !this.settled) return;
     this.updateLock(dt);
     const w = this.weapon;
     // guided missiles are the only thing that fires until they are spent
@@ -364,7 +554,8 @@ export class Game {
       return;
     }
     if (w === 'laser') { if (this.firing) this.fireLaser(dt); return; }
-    if (!this.firing || this.fireCD > 0) return;
+    if ((!this.firing && !this.oneShot) || this.fireCD > 0) return;
+    this.oneShot = false;
     switch (w) {
       case 'rockets': this.fireRocket(); this.fireCD = .45; break;
       case 'fireballs': this.fireFireball(); this.fireCD = .28; break;
@@ -396,19 +587,19 @@ export class Game {
       const a = this.aim + off;
       const [dx, dy] = this.aimDir(a);
       const side = c * (n === 3 ? 3.4 : 4.4);
-      this.shells.push({ x: dx * BARREL + Math.cos(this.aim) * side, y: dy * BARREL + Math.sin(this.aim) * side, vx: dx * SHELL_V0, vy: dy * SHELL_V0, t: 0, px: 0, py: 0 });
+      this.shells.push({ x: this.gunX + dx * BARREL + Math.cos(this.aim) * side, y: dy * BARREL + Math.sin(this.aim) * side, vx: dx * SHELL_V0, vy: dy * SHELL_V0, t: 0, px: 0, py: 0 });
     }
     this.stats.shots++;
     this.recoil = 1; this.flash = 1;
     Sound.thump();
     this.vibrate(8);
     const [dx, dy] = this.aimDir();
-    for (let i = 0; i < 4; i++) this.addPuff(dx * (BARREL + 2) + rand(-3, 3), dy * (BARREL + 2) + rand(-3, 3), 'smokeLight', rand(2, 3.5), 1.1, .45, dx * 15 + rand(-5, 5), dy * 15 + rand(-5, 5));
+    for (let i = 0; i < 4; i++) this.addPuff(this.gunX + dx * (BARREL + 2) + rand(-3, 3), dy * (BARREL + 2) + rand(-3, 3), 'smokeLight', rand(2, 3.5), 1.1, .45, dx * 15 + rand(-5, 5), dy * 15 + rand(-5, 5));
   }
 
   launch(kind: ShotKind, v: number, target: Plane | null = null) {
     const [dx, dy] = this.aimDir();
-    this.missiles.push({ kind, x: dx * BARREL, y: dy * BARREL, vx: dx * v, vy: dy * v, t: 0, target, smokeT: 0 });
+    this.missiles.push({ kind, x: this.gunX + dx * BARREL, y: dy * BARREL, vx: dx * v, vy: dy * v, t: 0, target, smokeT: 0 });
     this.stats.shots++;
   }
   fireMissile() {
@@ -423,7 +614,7 @@ export class Game {
     this.useAmmo();
     this.recoil = .7; this.flash = .8;
     const [dx, dy] = this.aimDir();
-    for (let i = 0; i < 6; i++) this.addPuff(dx * BARREL + rand(-3, 3), dy * BARREL + rand(-3, 3), 'smokeLight', rand(2.5, 4), 2, .6, -dx * 20 + rand(-8, 8), -dy * 20 + rand(-8, 8), 2.4);
+    for (let i = 0; i < 6; i++) this.addPuff(this.gunX + dx * BARREL + rand(-3, 3), dy * BARREL + rand(-3, 3), 'smokeLight', rand(2.5, 4), 2, .6, -dx * 20 + rand(-8, 8), -dy * 20 + rand(-8, 8), 2.4);
     Sound.rocket();
     this.vibrate(14);
   }
@@ -443,7 +634,7 @@ export class Game {
     this.vibrate(40);
   }
   fireSonic() {
-    this.pulses.push({ a: this.aim, r: BARREL, hit: new Set(), hitAny: false });
+    this.pulses.push({ x: this.gunX, a: this.aim, r: BARREL, hit: new Set(), hitAny: false });
     this.stats.shots++;
     this.useAmmo();
     this.recoil = .6;
@@ -452,12 +643,12 @@ export class Game {
   }
   /** Chain lightning: hits the plane nearest the aim, then jumps on to whatever hostile is closest. */
   fireLightning() {
-    const [dx, dy] = this.aimDir(), x0 = dx * BARREL, y0 = dy * BARREL;
+    const [dx, dy] = this.aimDir(), x0 = this.gunX + dx * BARREL, y0 = dy * BARREL;
     let first: Plane | null = null, bd = BOLT_CONE;
     for (const p of this.planes) {
-      if (p.type === 'cargo' || !this.hittable(p)) continue;
-      const d = Math.abs(Math.atan2(p.x, -p.y) - this.aim);
-      if (d < bd && Math.hypot(p.x, p.y) < BOLT_RANGE) { bd = d; first = p; }
+      if (p.type === 'cargo' || p.friend || !this.hittable(p)) continue;
+      const d = Math.abs(Math.atan2(p.x - this.gunX, -p.y) - this.aim);
+      if (d < bd && Math.hypot(p.x - this.gunX, p.y) < BOLT_RANGE) { bd = d; first = p; }
     }
     const pts: [number, number][] = [[x0, y0]];
     let hit = false;
@@ -471,7 +662,7 @@ export class Game {
         hit = true;
         let next: Plane | Bomb | null = null, nd = BOLT_JUMP;
         for (const p of this.planes) {
-          if (p.type === 'cargo' || done.has(p) || !this.hittable(p)) continue;
+          if (p.type === 'cargo' || p.friend || done.has(p) || !this.hittable(p)) continue;
           const d = Math.hypot(p.x - at.x, p.y - at.y);
           if (d < nd) { nd = d; next = p; }
         }
@@ -483,7 +674,7 @@ export class Game {
         if (!next) break;
         at = next;
       }
-    } else pts.push([dx * 520, dy * 520]);
+    } else pts.push([x0 + dx * 472, dy * 520]);
     this.bolts.push({ pts, life: .32 });
     for (const [x, y] of pts.slice(1)) this.particles.push({ k: 'flash', x, y, r: 12, life: .22, t: 0, vx: 0, vy: 0 });
     this.stats.shots++;
@@ -514,7 +705,7 @@ export class Game {
   // everything, and any plane it touches is hit at once.
   fireLaser(dt: number) {
     this.lasing = true;
-    const [dx, dy] = this.aimDir(), x0 = dx * BARREL, y0 = dy * BARREL;
+    const [dx, dy] = this.aimDir(), x0 = this.gunX + dx * BARREL, y0 = dy * BARREL;
     const near = (x: number, y: number): [number, number] | null => {
       const t = (x - x0) * dx + (y - y0) * dy;
       return t < 0 || t > LASER_LEN ? null : [x0 + dx * t, y0 + dy * t];
@@ -524,6 +715,7 @@ export class Game {
       const c = near(p.x, p.y);
       if (!c || this.planeDist(p, c[0], c[1]) > 1.5) continue;
       if (p.type === 'cargo') { this.cargoLost(true); continue; }
+      if (p.friend) { this.friendlyDown(p); continue; }
       // a one-hit plane goes at once; the boss burns down while the beam stays on it
       this.damagePlane(p, p.max > 1 && p.state !== 'falling' ? LASER_DPS * dt : 1, c);
     }
@@ -547,8 +739,8 @@ export class Game {
     if (this.weapon !== 'missiles') { L.target = null; L.t = 0; L.locked = false; return; }
     let best = null, bd = 5 * Math.PI / 180;
     for (const p of this.planes) {
-      if (p.type === 'cargo' || p.state === 'falling') continue;
-      const a = Math.atan2(p.x, -p.y), d = Math.abs(a - this.aim), dist = Math.hypot(p.x, p.y);
+      if (p.type === 'cargo' || p.friend || p.state === 'falling') continue;
+      const a = Math.atan2(p.x - this.gunX, -p.y), d = Math.abs(a - this.aim), dist = Math.hypot(p.x - this.gunX, p.y);
       if (d < bd && dist < 950) { bd = d; best = p; }
     }
     if (best && best === L.target) L.t += dt; else { L.target = best; L.t = 0; L.step = 0; }
@@ -569,9 +761,11 @@ export class Game {
         p.burnT += dt;
         if (p.burnT >= 2) { p.burnT = 0; this.damagePlane(p, 1, null); if ((p.state as PlaneState) === 'falling') continue; }
       }
-      if (p.type === 'fighter') this.updateFighter(p, dt);
+      if (p.friend) { this.updateFriend(p, dt); if (p.dead) continue; }
+      else if (p.type === 'fighter') this.updateFighter(p, dt);
       else this.updateCruise(p, dt);
-      if (p.type === 'light' || p.type === 'heavy' || p.type === 'boss') this.tryDrop(p, dt);
+      if (!p.friend && (p.type === 'light' || p.type === 'heavy' || p.type === 'boss')) this.tryDrop(p, dt);
+      if (this.war && p.type !== 'boss') this.dogfight(p, dt);
       // contrails and damage smoke
       p.trailT -= dt;
       // contrails only form up high, and not on a diving fighter
@@ -610,7 +804,7 @@ export class Game {
     const climb = clamp(dy, -18 * dt, 18 * dt);
     p.y += climb;
     p.pitch += ((climb / dt) / p.speed * .8 - p.pitch) * Math.min(1, dt * 3);
-    if (p.dir > 0 ? p.x > XE : p.x < -XE) this.beginTurn(p);
+    if (p.dir > 0 ? p.x > this.xe : p.x < -this.xe) this.beginTurn(p);
   }
   beginTurn(p: Plane) {
     p.state = 'turn'; p.turnT = 0; p.turnX = p.x; p.turnR = 30 + p.speed * .5;
@@ -639,9 +833,9 @@ export class Game {
         if (this.cargo && !this.cargo.dead && !this.cargo.hitByPlayer && p.chaseCargo) { p.state = 'chase'; p.stateT = 0; return; }
         const toward = Math.sign(-p.x) === p.dir;
         const ax = Math.abs(p.x);
-        if (p.diveCD <= 0 && toward && ax > 260 && ax < 460 && this.phase !== 'over') {
+        if (p.diveCD <= 0 && toward && ax > 260 && ax < 460 && !this.ended) {
           p.state = 'warn'; p.stateT = 0;
-          Sound.whine(2, clamp(Math.sin(Math.atan2(p.x, -p.y) - this.aim) * 1.5, -1, 1));
+          Sound.whine(2, this.panOf(p.x, p.y));
           Sound.enginePitch(p.id, 1.35);
         }
         return;
@@ -651,8 +845,10 @@ export class Game {
         p.pitch += (.32 - p.pitch) * Math.min(1, dt * 2);
         if (p.stateT >= 2) {
           p.state = 'dive'; p.stateT = 0;
-          const targets = this.buildings.filter(b => !b.ruined);
-          const tb = targets.length ? pick(targets) : this.b('turret');
+          // in war mode the base comes first, but a turret out on its own is fair game too
+          const standing = this.buildings.filter(b => !b.ruined), base = standing.filter(b => !b.outpost);
+          const targets = base.length && Math.random() < .7 ? base : standing;
+          const tb = targets.length ? pick(targets) : this.post();
           p.diveTo = [tb.x - p.dir * 110, GROUND_Y - 95];
           this.tip('dive', 'A diving fighter is closer and bigger. Shoot it now!');
         }
@@ -678,7 +874,7 @@ export class Game {
           this.tracers.push({ x0: nx, y0: ny, x1: impact + rand(-6, 6), y1: GROUND_Y - rand(0, 6), life: .14 });
           if (Math.random() < .5) this.addPuff(impact + rand(-8, 8), GROUND_Y - 2, 'dust', rand(1.5, 3), 3, .55, rand(-4, 4), -8);
         }
-        if (Math.floor(p.stateT / .45) !== Math.floor((p.stateT - dt) / .45)) Sound.minigun(clamp(Math.sin(Math.atan2(p.x, -p.y) - this.aim), -1, 1));
+        if (Math.floor(p.stateT / .45) !== Math.floor((p.stateT - dt) / .45)) Sound.minigun(this.panOf(p.x, p.y));
         // the tracer line walks across the base; every building it has reached takes about 5 HP a second
         const done = p.strafeDone ??= new Set();
         for (const b of this.buildings) if (!b.ruined && Math.abs(b.x - impact) < b.half + 10) done.add(b);
@@ -692,7 +888,7 @@ export class Game {
         p.x += p.dir * v * Math.cos(p.pitch) * dt;
         p.y += v * Math.sin(p.pitch) * dt;
         if (p.y <= p.alt) { p.y = p.alt; p.state = 'fly'; p.diveCD = rand(12, 18) * this.D.fire; Sound.enginePitch(p.id, 1); }
-        if (p.dir > 0 ? p.x > XE : p.x < -XE) { p.alt = p.y; this.beginTurn(p); p.diveCD = rand(10, 16) * this.D.fire; Sound.enginePitch(p.id, 1); }
+        if (p.dir > 0 ? p.x > this.xe : p.x < -this.xe) { p.alt = p.y; this.beginTurn(p); p.diveCD = rand(10, 16) * this.D.fire; Sound.enginePitch(p.id, 1); }
         return;
       }
       case 'chase': {
@@ -707,7 +903,7 @@ export class Game {
         if (d < 30) {
           c.hp -= 22 * dt;
           if (Math.random() < dt * 16) { const [nx, ny] = this.planePoint(p, 1, 0); this.tracers.push({ x0: nx, y0: ny, x1: c.x + rand(-8, 8), y1: c.y + rand(-3, 3), life: .12 }); }
-          if (Math.floor(p.stateT / .45) !== Math.floor((p.stateT - dt) / .45)) Sound.minigun(clamp(Math.sin(Math.atan2(c.x, -c.y) - this.aim), -1, 1));
+          if (Math.floor(p.stateT / .45) !== Math.floor((p.stateT - dt) / .45)) Sound.minigun(this.panOf(c.x, c.y));
           if (c.hp <= 0) this.cargoLost(false);
         }
         return;
@@ -717,7 +913,7 @@ export class Game {
 
   tryDrop(p: Plane, dt: number) {
     p.dropCD -= dt;
-    if (p.dropCD > 0 || p.state !== 'fly' || this.phase === 'over') return;
+    if (p.dropCD > 0 || p.state !== 'fly' || this.ended) return;
     if (p.type === 'heavy') {
       // a heavy bomber lets go over the middle of the base; the bomb soon straightens out and falls almost straight down
       if (Math.abs(p.x) > 40) return;
@@ -737,6 +933,8 @@ export class Game {
       const d = Math.abs(land - bb.x) - bb.half;
       if (d < best) { best = d; target = bb; }
     }
+    // a turret out on its own is only an occasional target
+    if (target?.outpost && Math.random() < .65) { p.dropCD = rand(2, 4); return; }
     if (target) {
       const vx0 = (target.x - p.x - .5 * wa * T * T) * MISSILE_DRAG / (1 - Math.exp(-MISSILE_DRAG * T));
       this.dropBomb(p, 'missile', T, vx0, MISSILE_DRAG, wa);
@@ -793,7 +991,7 @@ export class Game {
       Sound.boom(true, this.panOf(p.x, p.y));
       if (boss && !this.settings.reduceMotion) this.shake = Math.max(this.shake, 9);
       // a downed plane that comes down on the base still does a little damage
-      if (p.type !== 'cargo') this.blastBase(p.x, GROUND_Y - 3, boss ? 40 : 22, boss ? 30 : p.type === 'heavy' ? 14 : 8);
+      if (p.type !== 'cargo' && !p.friend) this.blastBase(p.x, GROUND_Y - 3, boss ? 40 : 22, boss ? 30 : p.type === 'heavy' ? 14 : 8);
       Sound.stopEngine(p.id);
     }
   }
@@ -801,7 +999,7 @@ export class Game {
   /** Whether a shot can touch this plane: anything flying, and a falling enemy plane once it has started to fall. */
   hittable(p: Plane) {
     if (p.dead) return false;
-    return p.state !== 'falling' || (p.type !== 'cargo' && p.stateT >= FALL_GRACE);
+    return p.state !== 'falling' || (p.type !== 'cargo' && !p.friend && p.stateT >= FALL_GRACE);
   }
   damagePlane(p: Plane, dmg: number, at: [number, number] | null) {
     if (p.dead) return false;
@@ -940,6 +1138,7 @@ export class Game {
       if (!this.hittable(p)) continue;
       if (this.planeDist(p, x, y) < R) {
         if (p.type === 'cargo') { this.cargoLost(true); continue; }
+        if (p.friend) { this.friendlyDown(p); continue; }
         const flying = p.state !== 'falling';
         this.damagePlane(p, dmg, [x, y]); hitEnemy = true;
         if (fire && flying) p.burning = true;
@@ -977,15 +1176,15 @@ export class Game {
     if (!this.settings.reduceMotion) this.shake = Math.max(this.shake, big ? 5 : 3.5);
     // and it catches any plane flying close by
     const pr = big ? 40 : 30;
-    for (const p of this.planes) if (p.type !== 'cargo' && this.hittable(p) && this.planeDist(p, b.x, b.y) < pr) this.damagePlane(p, 1, [b.x, b.y]);
+    for (const p of this.planes) if (p.type !== 'cargo' && !p.friend && this.hittable(p) && this.planeDist(p, b.x, b.y) < pr) this.damagePlane(p, 1, [b.x, b.y]);
   }
-  // The nuke: everything hostile in a huge radius takes a crushing hit. It spares the cargo plane.
+  // The nuke: everything hostile in a huge radius takes a crushing hit. It spares the cargo plane and friendly planes.
   detonateNuke(m: Missile) {
     m.dead = true;
     const { x, y } = m;
     let hit = false;
     for (const p of this.planes) {
-      if (p.type === 'cargo' || !this.hittable(p)) continue;
+      if (p.type === 'cargo' || p.friend || !this.hittable(p)) continue;
       if (this.planeDist(p, x, y) < NUKE_R) { this.damagePlane(p, NUKE_DMG, [p.x, p.y]); hit = true; }
     }
     for (const b of this.bombs) if (!b.dead && Math.hypot(b.x - x, b.y - y) < NUKE_R) { this.killBomb(b); hit = true; }
@@ -1075,12 +1274,12 @@ export class Game {
     for (const s of this.pulses) {
       s.r += SONIC_SPEED * dt;
       const inArc = (x: number, y: number, pad: number) => {
-        const d = Math.hypot(x, y);
-        let da = Math.atan2(x, -y) - s.a; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+        const d = Math.hypot(x - s.x, y);
+        let da = Math.atan2(x - s.x, -y) - s.a; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
         return Math.abs(d - s.r) < pad && Math.abs(da) < SONIC_SPREAD + pad / Math.max(d, 1);
       };
       for (const p of this.planes) {
-        if (p.type === 'cargo' || !this.hittable(p) || s.hit.has(p)) continue;
+        if (p.type === 'cargo' || p.friend || !this.hittable(p) || s.hit.has(p)) continue;
         if (!inArc(p.x, p.y, 14 + HALF[p.type] * SC[p.type] * .5)) continue;
         s.hit.add(p); s.hitAny = true;
         this.damagePlane(p, 1, [p.x, p.y]);
@@ -1098,14 +1297,14 @@ export class Game {
   /* ---------- upgrades and resupply ---------- */
   // Once a wave the cargo plane flies over on its own. It drops a crate onto a landing zone
   // on one side of the base or the other; tapping the landed crate opens the upgrade choice.
-  canLaunchCargo() { return this.alive('hangar') && !this.cargo && !this.crates.length; }
+  canLaunchCargo() { return !this.war && this.alive('hangar') && !this.cargo && !this.crates.length; }
   launchCargo() {
     this.cargoAt = null;
     this.lzX = pick(LZ_SPOTS);
     const dir = Math.random() < .5 ? 1 : -1;
     const T = TYPES.cargo;
     this.cargo = {
-      id: nextId++, type: 'cargo', dir, x: -dir * (XE + 80), y: T.alts[0], alt: T.alts[0], speed: T.speed, hp: 100, max: 100,
+      id: nextId++, type: 'cargo', dir, x: -dir * (this.xe + 80), y: T.alts[0], alt: T.alts[0], speed: T.speed, hp: 100, max: 100,
       state: 'fly', stateT: 0, pitch: 0, flip: 1, turnT: 0, hits: [], trail: [], trailT: 0, smokeT: 0, dropped: false, lightPhase: 0,
       dropCD: 0, diveCD: 0, burnT: 0, burning: false, hitFlash: 0, vx: 0, vy: 0, spin: 0,
     };
@@ -1114,8 +1313,8 @@ export class Game {
     this.tip('cargo', "An upgrade is on its way. Don't shoot the cargo plane or its crate.");
     this.hooks.hud && this.hooks.hud();
   }
-  /** The crate waiting on the landing zone, if there is one. */
-  readyCrate() { return this.phase === 'over' ? null : this.crates.find(c => c.landed && !c.dead) ?? null; }
+  /** The crate waiting on the landing zone, if there is one (in war mode, the one beside the turret in use). */
+  readyCrate() { return this.ended ? null : this.crates.find(c => c.landed && !c.dead && (!this.war || Math.abs(c.lz - this.gunX) < 150)) ?? null; }
   /** Whether this upgrade would do anything right now. */
   offerable(id: UpgradeId) {
     switch (id) {
@@ -1152,8 +1351,8 @@ export class Game {
     if (id === 'missiles') this.tip('missile', 'Hold a plane in your sights to lock on, then tap to fire a missile.');
     if (id === 'laser') this.tip('laser', 'Hold your finger down to keep the laser on.');
     if (id === 'lightning') this.tip('lightning', 'Aim near a plane and tap. The bolt jumps to whatever is close by.');
-    this.labels.push({ text: UPGRADES[id].name, x: 0, y: GROUND_Y - 70, t: 0, life: 2.4, color: '#bff5cf', big: true });
-    for (let i = 0; i < 6; i++) this.addPuff(this.lzX + rand(-4, 4), LZ_Y - rand(0, 4), 'dust', rand(1.5, 2.5), 2, .5, rand(-6, 6), -6);
+    this.labels.push({ text: UPGRADES[id].name, x: this.gunX, y: GROUND_Y - 70, t: 0, life: 2.4, color: '#bff5cf', big: true });
+    if (c) for (let i = 0; i < 6; i++) this.addPuff(c.x + rand(-4, 4), LZ_Y - rand(0, 4), 'dust', rand(1.5, 2.5), 2, .5, rand(-6, 6), -6);
     Sound.pop();
     this.vibrate(20);
     this.hooks.hud && this.hooks.hud();
@@ -1172,9 +1371,9 @@ export class Game {
       // let go a little before the landing zone; the chute steers the rest of the way
       if (!c.dropped && !c.hitByPlayer && (this.lzX - c.x) * c.dir <= 70) {
         c.dropped = true;
-        this.crates.push({ x: c.x, y: c.y + 6, vx: c.dir * c.speed, vy: (LZ_Y - c.y - 6) / CRATE_FALL, landed: false, t: 0, sway: 0 });
+        this.crates.push({ x: c.x, y: c.y + 6, vx: c.dir * c.speed, vy: (LZ_Y - c.y - 6) / CRATE_FALL, lz: this.lzX, landed: false, t: 0, sway: 0 });
       }
-      if (Math.abs(c.x) > XE + 120) { c.dead = true; c.gone = true; Sound.stopEngine(c.id); this.planes = this.planes.filter(p => p !== c); this.cargo = null; }
+      if (Math.abs(c.x) > this.xe + 120) { c.dead = true; c.gone = true; Sound.stopEngine(c.id); this.planes = this.planes.filter(p => p !== c); this.cargo = null; }
     }
     for (const cr of this.crates) {
       cr.t += dt;
@@ -1182,7 +1381,7 @@ export class Game {
       // fall at a steady rate and steer toward the landing zone, arriving as it touches down
       cr.y = Math.min(LZ_Y, cr.y + cr.vy * dt);
       const left = Math.max(.3, (LZ_Y - cr.y) / cr.vy);
-      cr.vx += ((this.lzX - cr.x) / left - cr.vx) * Math.min(1, dt * 1.2);
+      cr.vx += ((cr.lz - cr.x) / left - cr.vx) * Math.min(1, dt * 1.2);
       cr.x += cr.vx * dt;
       cr.sway = Math.sin(cr.t * 1.3) * .12 - cr.vx * .004;
       if (cr.y >= LZ_Y) this.crateLanded(cr);
@@ -1190,10 +1389,10 @@ export class Game {
     this.crates = this.crates.filter(cr => !cr.dead);
   }
   crateLanded(c: Crate) {
-    c.landed = true; c.t = 0; c.x = this.lzX; c.y = LZ_Y; c.sway = 0;
+    c.landed = true; c.t = 0; c.x = c.lz; c.y = LZ_Y; c.sway = 0;
     for (let i = 0; i < 5; i++) this.addPuff(c.x + rand(-5, 5), GROUND_Y - 1, 'dust', rand(1.2, 2), 2, .45, rand(-8, 8), -4, 1.6);
     this.labels.push({ text: 'Upgrade ready', x: c.x, y: GROUND_Y - 34, t: 0, life: 2.6, color: '#bff5cf', big: true });
-    this.tip('crate', 'Tap the crate on the pad to open it.');
+    if (!this.war || Math.abs(c.lz - this.gunX) < 150) this.tip('crate', 'Tap the crate on the pad to open it.');
     Sound.pop();
     this.vibrate(20);
     this.hooks.hud && this.hooks.hud();
@@ -1227,7 +1426,7 @@ export class Game {
       else b.hp = b.max;
       for (let i = 0; i < 4; i++) this.addPuff(b.x + rand(-b.half, b.half), GROUND_Y - rand(2, 12), 'dust', rand(1.5, 2.5), 2.4, .5, rand(-5, 5), -8);
     }
-    this.labels.push({ text: 'Base repaired', x: 0, y: GROUND_Y - 50, t: 0, life: 2.4, color: '#9fe0b0' });
+    this.labels.push({ text: 'Base repaired', x: this.gunX, y: GROUND_Y - 50, t: 0, life: 2.4, color: '#9fe0b0' });
   }
   inDome(x: number, y: number) { const dx = x / DOME_RX, dy = (y - GROUND_Y) / DOME_RY; return dx * dx + dy * dy < 1; }
   /** A bomb or missile that reaches the shield bursts on it, harmlessly. */
@@ -1251,18 +1450,27 @@ export class Game {
     if (this.shieldT > 0) { this.shieldFlash = Math.max(this.shieldFlash, .5); return; }
     b.hp -= amt * this.D.damage; b.hit = 1;
     this.waveDamaged = true;
-    if (b.id === 'turret' && !this.settings.reduceMotion) this.shake = Math.max(this.shake, quiet ? 1.2 : 4);
+    if (b === this.post() && !this.settings.reduceMotion) this.shake = Math.max(this.shake, quiet ? 1.2 : 4);
     if (!quiet) this.vibrate(30);
     if (b.hp <= 0) {
       b.hp = 0; b.ruined = true; b.ruinT = 0;
       this.explosion(b.x, GROUND_Y - 10, 1.4, true);
       Sound.boom(true, this.panOf(b.x, GROUND_Y));
       this.vibrate(80);
-      if (b.id === 'turret') { this.gameOver(); return; }
-      this.labels.push({ text: `${b.def.name} destroyed`, x: b.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#ff8a7a' });
+      if (b.id === 'turret' && !this.war) { this.gameOver(); return; }
+      this.labels.push({ text: `${b.name} destroyed`, x: b.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#ff8a7a' });
       if (b.id === 'radar') this.tip('radar', 'Radar is down. No bomb shadows or plane arrows.');
       if (b.id === 'hangar') this.tip('hangar', 'Hangar is down. No more supply drops.');
-      if (b.id === 'search') this.tip('search', 'Searchlight is down. At night, look for running lights.');
+      if (b.id === 'search' && !b.outpost) this.tip('search', 'Searchlight is down. At night, look for running lights.');
+      if (this.war) {
+        // the base is lost once all of its buildings are down; a lost turret sends the player to the nearest one left
+        if (this.buildings.every(o => o.outpost || o.id === 'turret' || o.ruined)) { this.gameOver('The base was destroyed.'); return; }
+        if (b === this.post()) {
+          const left = this.posts.map((o, i) => [o, i] as const).filter(([o]) => !o.ruined).sort(([a], [c]) => Math.abs(a.x - b.x) - Math.abs(c.x - b.x));
+          if (!left.length) { this.gameOver('Every turret was destroyed.'); return; }
+          this.goTo(left[0][1]);
+        }
+      }
       this.hooks.hud && this.hooks.hud();
     }
   }
@@ -1298,17 +1506,22 @@ export class Game {
   }
   skipClear() { if (this.phase === 'clear' && this.phaseT > 1.2) this.phaseT = 10; }
 
-  gameOver() {
+  gameOver(reason = '') {
+    if (this.ended) return;
     this.phase = 'over'; this.phaseT = 0; this.overT = 0;
+    this.endReason = reason;
     this.firing = false;
-    this.explosion(0, GROUND_Y - 14, 2.2, true);
+    this.explosion(this.gunX, GROUND_Y - 14, 2.2, true);
     Sound.boom(true, 0);
     if (!this.settings.reduceMotion) this.shake = 8;
     const done = this.hooks.gameOver;
     if (done) setTimeout(() => done(this.results()), 3200);
   }
   results(): Results {
-    return { difficulty: this.difficulty, score: this.score, wave: this.wave, accuracy: this.stats.shots ? this.stats.hitShots / this.stats.shots : 0, kills: this.stats.kills, intercepts: this.stats.intercepts };
+    return {
+      mode: this.mode, difficulty: this.difficulty, score: this.score, wave: this.wave, accuracy: this.stats.shots ? this.stats.hitShots / this.stats.shots : 0, kills: this.stats.kills, intercepts: this.stats.intercepts,
+      won: this.phase === 'won', reason: this.endReason, time: Math.min(WAR_TIME, this.warT), friendlies: this.strikes,
+    };
   }
 
   /* ---------- scoring ---------- */
@@ -1347,11 +1560,11 @@ export class Game {
     this.particles = this.particles.filter(p => p.t < p.life);
   }
 
-  panOf(x: number, y: number) { return clamp(Math.sin(Math.atan2(x, -y) - this.aim) * 1.4, -1, 1); }
+  panOf(x: number, y: number) { return clamp(Math.sin(Math.atan2(x - this.gunX, -y) - this.aim) * 1.4, -1, 1); }
   updateEngines() {
     for (const p of this.planes) {
       if (p.dead) continue;
-      const a = Math.atan2(p.x, -p.y), diff = a - this.aim, dist = Math.hypot(p.x, p.y);
+      const a = Math.atan2(p.x - this.gunX, -p.y), diff = a - this.aim, dist = Math.hypot(p.x - this.gunX, p.y);
       const g = (p.type === 'boss' ? .1 : p.type === 'heavy' ? .07 : p.type === 'fighter' ? .06 : .05) * Math.max(.3, Math.cos(diff)) * clamp(1.25 - dist / 1100, .15, 1) * (p.state === 'falling' ? .6 : 1);
       Sound.engine(p.id, p.type, g, clamp(Math.sin(diff) * 1.5, -1, 1));
     }

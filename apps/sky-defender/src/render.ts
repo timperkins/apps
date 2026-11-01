@@ -1,8 +1,9 @@
 // Canvas renderer. The world is drawn rotated around the turret pivot so the game's
-// horizon tracks the real one; the barrel and HUD are drawn in screen space.
-import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, LIGHTS, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
+// horizon tracks the real one; the barrel and HUD are drawn in screen space. In war mode the
+// camera also slides sideways to whichever turret is in use (game.viewX).
+import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, LIGHTS, BASE_SCALE, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
 import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } from './palettes';
-import { UPGRADES, DOME_RX, DOME_RY, type Game, type Plane, type Crate, type Bomb } from './game';
+import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const FIRE_Y: Record<BuildingId, number> = { search: G - 9, radar: G - 12, depot: G - 12, turret: G - 16, hangar: G - 16, repair: G - 10 };
@@ -47,6 +48,7 @@ export class Renderer {
   }
   worldToScreen(game: Game, x: number, y: number): [number, number] {
     const c = Math.cos(game.cam), sn = Math.sin(game.cam);
+    x -= game.viewX;
     return [this.px + this.s * (x * c + y * sn) + this.sx, this.py + this.s * (-x * sn + y * c) + this.sy];
   }
   sprite(P: BlendedPalette, get: (s: PaletteSprites) => Sprite, x?: number, y?: number, w?: number, h?: number) {
@@ -105,11 +107,13 @@ export class Renderer {
     ctx.translate(this.px + this.sx, this.py + this.sy);
     ctx.scale(this.s, this.s);
     ctx.rotate(-game.cam);
+    ctx.translate(-game.viewX, 0);
     this.drawWorld(game, P);
     ctx.restore();
 
     ctx.save();
-    ctx.translate(this.px + this.sx, this.py + this.sy);
+    const [gx, gy] = this.worldToScreen(game, game.gunX, 0);
+    ctx.translate(gx, gy);
     ctx.scale(this.s, this.s);
     this.drawGun(game, P);
     ctx.restore();
@@ -122,6 +126,8 @@ export class Renderer {
   drawWorld(game: Game, P: BlendedPalette) {
     const ctx = this.ctx;
     const reduce = game.settings.reduceMotion;
+    // the sky is far away, so it barely moves when the camera slides to another turret
+    ctx.save(); ctx.translate(game.viewX * .9, 0);
     // sky
     const sg = ctx.createLinearGradient(0, -PIVOT_Y, 0, 844 - PIVOT_Y);
     for (const [o, c] of P.sky) sg.addColorStop(o, c);
@@ -139,11 +145,12 @@ export class Renderer {
     ctx.fillStyle = glow; ctx.fillRect(sx - 150, sy - 150, 300, 300);
     if (P.sunDisc > .5) { ctx.fillStyle = P.sunCol; ctx.beginPath(); ctx.arc(sx, sy, P.sunDisc, 0, 7); ctx.fill(); }
     this.drawClouds(P);
+    ctx.restore();
     // mountain ranges, far to near, with a little parallax as the world turns
     for (let i = 0; i < LAND.ridges.length; i++) {
       const r = LAND.ridges[i];
       const c = this.mixHex(P.far, P.near, Math.pow(r.t, 1.15));
-      const shift = -game.cam * r.k * (reduce ? .3 : 1);
+      const shift = -game.cam * r.k * (reduce ? .3 : 1) + game.viewX * (.85 - .45 * r.t);
       ctx.save(); ctx.translate(shift, 0);
       if (r.trees) { ctx.fillStyle = c; ctx.fill(r.trees); }
       const g = ctx.createLinearGradient(0, r.top, 0, r.base + 24);
@@ -160,8 +167,8 @@ export class Renderer {
     const gg = ctx.createLinearGradient(0, GROUND_Y - 6, 0, GROUND_Y + 110);
     gg.addColorStop(0, P.groundTop); gg.addColorStop(.08, P.ground); gg.addColorStop(1, this.mixHex(P.ground, '#000000', .35));
     ctx.fillStyle = gg; ctx.fill(LAND.ground);
-    ctx.fillStyle = P.near; ctx.fill(LAND.edgeTrees);
-    ctx.fillStyle = this.mixHex(P.ground, '#000000', .35); ctx.fillRect(-1500, GROUND_Y + 110, 3000, 1400);
+    ctx.fillStyle = P.near; ctx.fill(game.war ? LAND.edgeTreesWar : LAND.edgeTrees);
+    ctx.fillStyle = this.mixHex(P.ground, '#000000', .35); ctx.fillRect(-2500, GROUND_Y + 110, 5000, 1400);
 
     this.drawBase(game, P);
     this.drawBeam(game, P);
@@ -254,9 +261,14 @@ export class Renderer {
     ctx.translate(0, GROUND_Y); ctx.scale(1.15, 1.15); ctx.translate(-195, -800);
     for (const b of game.buildings) {
       const st = b.ruined ? 2 : b.hp / b.max < .5 ? 1 : 0;
+      const ox = this.offset(b);
+      ctx.save(); ctx.translate(ox, 0);
+      // a war mode outpost stands on its own patch of packed earth
+      if (b.outpost) { ctx.fillStyle = P.bGround; ctx.beginPath(); ctx.ellipse(B.turret, G + 1.2, 34, 3, 0, 0, 7); ctx.fill(); }
       this.sprite(P, s => s.buildings[b.id][st]);
+      ctx.restore();
       if (b.id === 'search' && !b.ruined) {
-        const [lx, ly] = SEARCH_PIVOT, [ax, ay] = [Math.sin(game.aim) * 700, -Math.cos(game.aim) * 700];
+        const [lx, ly] = SEARCH_PIVOT, [ax, ay] = this.aimPoint(game);
         const ang = Math.atan2(ax - lx, -(ay - ly));
         ctx.save(); ctx.translate(B.search, G - 12.4); ctx.rotate(ang); this.sprite(P, s => s.searchHead); ctx.restore();
       }
@@ -279,7 +291,7 @@ export class Renderer {
     // fires and hairline health bars
     for (const b of game.buildings) {
       const frac = b.hp / b.max;
-      const fx = b.def.mx, fy = FIRE_Y[b.id];
+      const fx = b.def.mx + this.offset(b), fy = FIRE_Y[b.id];
       if ((b.ruined && b.ruinT < 25) || (!b.ruined && frac < .3)) {
         const k = (b.ruined ? .7 : .85) * (1 + .12 * Math.sin(this.time * 17 + fx) + .06 * Math.sin(this.time * 31));
         const f = SHARED.fire;
@@ -295,11 +307,15 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** How far a building is drawn from where its drawing puts it, in mockup units (war mode's outposts reuse the turret's). */
+  offset(b: Building) { return (b.x - mockToWorld(b.def.mx, G)[0]) / BASE_SCALE; }
+  /** A point far out along the aim, which the searchlight follows. */
+  aimPoint(game: Game): [number, number] { return [game.gunX + Math.sin(game.aim) * 700, -Math.cos(game.aim) * 700]; }
   searchlightOn(game: Game, P: BlendedPalette) { return game.alive('search') && P.dark > .15; }
   litBy(game: Game, P: BlendedPalette, x: number, y: number) {
     if (!this.searchlightOn(game, P)) return 0;
     const [lx, ly] = SEARCH_PIVOT;
-    const ax = Math.sin(game.aim) * 700 - lx, ay = -Math.cos(game.aim) * 700 - ly;
+    const [px, py] = this.aimPoint(game), ax = px - lx, ay = py - ly;
     const bx = x - lx, by = y - ly;
     const cos = (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by) + 1e-6);
     const ang = Math.acos(Math.min(1, cos));
@@ -309,7 +325,7 @@ export class Renderer {
     if (!this.searchlightOn(game, P)) return;
     const ctx = this.ctx;
     const [lx, ly] = SEARCH_PIVOT;
-    const ax = Math.sin(game.aim) * 700, ay = -Math.cos(game.aim) * 700;
+    const [ax, ay] = this.aimPoint(game);
     const ang = Math.atan2(ax - lx, -(ay - ly));
     const k = Math.min(1, (P.dark - .15) / .5);
     ctx.save(); ctx.translate(lx, ly - 6); ctx.rotate(ang);
@@ -369,22 +385,31 @@ export class Renderer {
     ctx.rotate(p.pitch * p.dir);
     const fl = p.flip;
     ctx.scale(p.dir * (Math.abs(fl) < .08 ? .08 * Math.sign(fl || 1) : fl), 1);
-    this.sprite(P, s => falling ? s.burnt[type] : s.planes[type]);
+    const ally = p.friend && type !== 'cargo' && type !== 'boss' ? type : null;
+    this.sprite(P, s => ally ? (falling ? s.alliesBurnt[ally] : s.allies[ally]) : falling ? s.burnt[type] : s.planes[type]);
     // at night only the searchlight shows a plane clearly
     const lit = this.litBy(game, P, p.x, p.y);
-    const dark = P.dark * .88 * (1 - lit) * (type === 'cargo' ? .6 : 1);
+    const dark = P.dark * .88 * (1 - lit) * (type === 'cargo' || p.friend ? .6 : 1);
     if (dark > .02) { const s = SHARED[`sil_${type}`]; ctx.globalAlpha = dark; ctx.drawImage(s.img, s.x, s.y, s.w, s.h); ctx.globalAlpha = 1; }
     if (p.hitFlash > 0) { const s = SHARED[`sil_${type}`]; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = p.hitFlash * .35; ctx.filter = 'none'; ctx.drawImage(puff('#ffe8c0'), s.x, s.y, s.w, s.h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }
     // running lights
-    if ((P.dark > .2 || type === 'cargo') && !falling) {
+    const green = type === 'cargo' || p.friend;
+    if ((P.dark > .2 || green) && !falling) {
       const sc = SC[type], [[wx, wy], [tx, ty]] = LIGHTS[type];
       const blink = Math.sin(this.time * 6 + p.lightPhase) > 0;
-      const c1 = type === 'cargo' ? '#9dffb8' : '#ff4a3a', c2 = type === 'cargo' ? '#ffffff' : '#7dff9a';
+      const c1 = green ? '#9dffb8' : '#ff4a3a', c2 = green ? '#ffffff' : '#7dff9a';
       const s = 1 / Math.max(.3, Math.abs(fl));
-      if (blink || type !== 'cargo') { ctx.drawImage(puff(c1), wx * sc - 2.5 * s, wy * sc - 2.5, 5 * s, 5); }
+      if (blink || !green) { ctx.drawImage(puff(c1), wx * sc - 2.5 * s, wy * sc - 2.5, 5 * s, 5); }
       if (blink) ctx.drawImage(puff(c2), tx * sc - 2 * s, ty * sc - 2, 4 * s, 4);
     }
     ctx.restore();
+    // a friendly plane carries a green marker above it, so it can be told apart at a glance
+    if (p.friend && !falling) {
+      const y = p.y - 11 - .8 * Math.sin(this.time * 3 + p.lightPhase);
+      ctx.strokeStyle = '#9dffb8'; ctx.lineWidth = 1; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.moveTo(p.x - 3, y - 2.4); ctx.lineTo(p.x, y); ctx.lineTo(p.x + 3, y - 2.4); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     if (p.burning && !falling) { const f = SHARED.fire, k = .5; ctx.drawImage(f.img, p.x - 10 * k, p.y - 14 * k, 20 * k, 21 * k); }
     // health bar, shown once it has been hit; the boss always shows its own, bigger one
     const boss = type === 'boss';
@@ -397,14 +422,16 @@ export class Renderer {
 
   // The crate's landing zone on the pad, shown while a drop is on its way: corner marks, pulsing while the crate comes down.
   drawLandingZone(game: Game) {
-    if (!game.cargo && !game.crates.length) return;
-    const ctx = this.ctx, y = GROUND_Y - 3, LZ_X = game.lzX;
-    const falling = game.crates.some(c => !c.landed);
+    const zones: [number, boolean][] = game.crates.map(c => [c.lz, !c.landed]);
+    if (game.cargo) zones.push([game.lzX, false]);
+    const ctx = this.ctx, y = GROUND_Y - 3;
     ctx.save();
     ctx.strokeStyle = '#9dffb8'; ctx.lineWidth = .5; ctx.lineCap = 'round';
-    ctx.globalAlpha = falling ? .45 + .35 * Math.sin(this.time * 5) : .3;
-    for (const d of [-1, 1]) {
-      ctx.beginPath(); ctx.moveTo(LZ_X + d * 8, y - 1.6); ctx.lineTo(LZ_X + d * 9, y); ctx.lineTo(LZ_X + d * 6.5, y + .6); ctx.stroke();
+    for (const [LZ_X, falling] of zones) {
+      ctx.globalAlpha = falling ? .45 + .35 * Math.sin(this.time * 5) : .3;
+      for (const d of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(LZ_X + d * 8, y - 1.6); ctx.lineTo(LZ_X + d * 9, y); ctx.lineTo(LZ_X + d * 6.5, y + .6); ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -494,13 +521,13 @@ export class Renderer {
         const r = p.r - i * 9;
         if (r < 40) continue;
         ctx.strokeStyle = '#8fd8ff'; ctx.globalAlpha = fade * (.75 - i * .22); ctx.lineWidth = 3 - i * .8;
-        ctx.beginPath(); ctx.arc(0, 0, r, a0 - .26, a0 + .26); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p.x, 0, r, a0 - .26, a0 + .26); ctx.stroke();
       }
     }
     // the laser: a hot core inside a soft red glow, flickering a little
     if (game.lasing) {
       const [dx, dy] = game.aimDir(), fl = 1 + .25 * Math.sin(this.time * 70);
-      const x0 = dx * 48, y0 = dy * 48, x1 = dx * 1100, y1 = dy * 1100;
+      const x0 = game.gunX + dx * 48, y0 = dy * 48, x1 = game.gunX + dx * 1100, y1 = dy * 1100;
       for (const [w, c, a] of [[7, '#ff2a2a', .22], [3, '#ff5a5a', .6], [1, '#fff0f0', 1]] as [number, string, number][]) {
         ctx.strokeStyle = c; ctx.globalAlpha = a; ctx.lineWidth = w * fl;
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
@@ -572,7 +599,7 @@ export class Renderer {
   /* ---------- screen space ---------- */
   drawGun(game: Game, P: BlendedPalette) {
     const ctx = this.ctx;
-    if (game.b('turret').ruined) return;
+    if (game.post().ruined) return;
     const rc = game.recoil * 3;
     ctx.fillStyle = P.bMetal;
     ctx.fillRect(-2.6, -18, 1.6, 16); ctx.fillRect(1, -18, 1.6, 16);
@@ -659,8 +686,9 @@ export class Renderer {
         const t = Math.min(Math.abs(tx), Math.abs(ty));
         const ax = cx + dx * t, ay = cy + dy * t, ang = Math.atan2(dy, dx);
         ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
-        ctx.globalAlpha = p.type === 'cargo' ? .9 : .8;
-        ctx.strokeStyle = p.type === 'cargo' ? '#9dffb8' : P.hud;
+        const green = p.type === 'cargo' || p.friend;
+        ctx.globalAlpha = green ? .9 : .8;
+        ctx.strokeStyle = green ? '#9dffb8' : P.hud;
         ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(0, 0); ctx.lineTo(-6, 6); ctx.stroke();
         if (p.type === 'fighter' && (p.state === 'warn' || p.state === 'dive')) { ctx.strokeStyle = P.red; ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-5, 0); ctx.lineTo(-11, 6); ctx.stroke(); }
         ctx.restore();
@@ -683,32 +711,72 @@ export class Renderer {
       ctx.font = `500 ${11 * u}px Jost, system-ui, sans-serif`; ctx.globalAlpha = .8;
       ctx.fillText('×' + game.mult, 18 + w + 5, top + 18 * u);
       ctx.globalAlpha = 1;
-      // wave and planes remaining
+      // wave and planes remaining; in war mode the level and the time left
       ctx.textAlign = 'center';
       ctx.font = `500 ${10.5 * u}px Jost, system-ui, sans-serif`;
-      this.spaced(`WAVE ${game.wave}`, W / 2, top + 12 * u, 2.4 * u);
-      if (game.difficulty === 'expert') {
+      this.spaced(game.war ? 'WAR · LEVEL 1' : `WAVE ${game.wave}`, W / 2, top + 12 * u, 2.4 * u);
+      if (game.difficulty === 'hard') {
         ctx.font = `500 ${8.5 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = P.red;
-        this.spaced('EXPERT', W / 2, top + 38 * u, 2 * u);
+        this.spaced('HARD', W / 2, top + 38 * u, 2 * u);
         ctx.fillStyle = P.hud; ctx.font = `500 ${10.5 * u}px Jost, system-ui, sans-serif`;
       }
-      ctx.font = `${9 * u}px Jost, system-ui, sans-serif`; ctx.globalAlpha = .75;
-      const left = game.planesLeft();
-      ctx.fillText(game.phase === 'clear' ? 'cleared' : `${left} plane${left === 1 ? '' : 's'} left`, W / 2, top + 26 * u);
-      ctx.globalAlpha = 1;
+      if (game.war) {
+        const left = Math.max(0, Math.ceil(WAR_TIME - game.warT));
+        ctx.font = `500 ${12 * u}px Jost, system-ui, sans-serif`;
+        ctx.fillText(game.phase === 'won' ? 'survived' : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`, W / 2, top + 27 * u);
+        this.drawStrikes(game, P, 18, top + 34 * u, u);
+      } else {
+        ctx.font = `${9 * u}px Jost, system-ui, sans-serif`; ctx.globalAlpha = .75;
+        const left = game.planesLeft();
+        ctx.fillText(game.phase === 'clear' ? 'cleared' : `${left} plane${left === 1 ? '' : 's'} left`, W / 2, top + 26 * u);
+        ctx.globalAlpha = 1;
+      }
     }
     // pinned base status strip
     const sh = 18 * this.s;
     ctx.fillStyle = P.stripBg; ctx.fillRect(0, H - sh, W, sh);
-    game.buildings.forEach((b, i) => {
-      const x = W / 2 + (i - 2.5) * 16 * this.s - 5 * this.s, y = H - sh / 2 - 2 * this.s;
+    // in war mode the outposts sit apart at either end of the strip, and the turret in use is underlined
+    const base = game.buildings.filter(b => !b.outpost);
+    game.buildings.forEach(b => {
+      const i = base.indexOf(b);
+      const x = i >= 0 ? W / 2 + (i - (base.length - 1) / 2) * 16 * this.s - 5 * this.s : W / 2 + Math.sign(b.x) * ((base.length + 3) / 2 * 16) * this.s - 5 * this.s;
+      const y = H - sh / 2 - 2 * this.s;
       const fr = b.hp / b.max;
       if (b.ruined) { ctx.strokeStyle = '#9a8fa8'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(x + .5, y + .5, 9 * this.s, 3 * this.s, 1.5 * this.s); ctx.stroke(); }
       else { ctx.fillStyle = fr > .6 ? '#9fe0b0' : fr > .25 ? P.amber : P.red; ctx.beginPath(); ctx.roundRect(x, y, 10 * this.s, 4 * this.s, 2 * this.s); ctx.fill(); }
+      if (game.war && b === game.post()) { ctx.fillStyle = P.hud; ctx.globalAlpha = .85; ctx.fillRect(x + 2 * this.s, y + 6 * this.s, 6 * this.s, 1.2 * this.s); ctx.globalAlpha = 1; }
     });
+    // in war mode, arrows toward the other turrets show which way to swipe
+    if (game.war && game.phase !== 'idle' && !game.ended) {
+      ctx.strokeStyle = P.hud; ctx.lineWidth = 1.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const y = H - sh - 22 * this.s;
+      for (const d of [-1, 1]) {
+        if (!game.posts.some((b, i) => !b.ruined && (i - game.postI) * d > 0)) continue;
+        const x = d < 0 ? 14 : W - 14;
+        ctx.globalAlpha = .45 + .15 * Math.sin(this.time * 3);
+        ctx.beginPath(); ctx.moveTo(x - d * 5, y - 7); ctx.lineTo(x + d * 2, y); ctx.lineTo(x - d * 5, y + 7); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
     // wave title card and clear tally
     if (game.phase === 'intro') this.drawIntro(game, P);
     if (game.phase === 'clear') this.drawClear(game, P);
+  }
+  /** War mode: one mark for each friendly plane the player may still shoot down before losing, crossed out once used. */
+  drawStrikes(game: Game, P: BlendedPalette, x: number, y: number, u: number) {
+    const ctx = this.ctx;
+    ctx.textAlign = 'left'; ctx.font = `500 ${8 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = P.hud; ctx.globalAlpha = .75;
+    this.spaced('FRIENDLY FIRE', x, y + 8 * u, 1.2 * u);
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let i = 0; i < WAR_STRIKES; i++) {
+      const cx = x + 5 * u + i * 14 * u, cy = y + 18 * u, used = i < game.strikes;
+      // a small plane seen from above
+      ctx.strokeStyle = used ? P.red : '#9dffb8'; ctx.lineWidth = 1.4 * u; ctx.globalAlpha = used ? 1 : .85;
+      ctx.beginPath(); ctx.moveTo(cx, cy - 4 * u); ctx.lineTo(cx, cy + 4 * u); ctx.moveTo(cx - 4.5 * u, cy); ctx.lineTo(cx + 4.5 * u, cy); ctx.moveTo(cx - 2 * u, cy + 3.5 * u); ctx.lineTo(cx + 2 * u, cy + 3.5 * u); ctx.stroke();
+      if (used) { ctx.lineWidth = 1.6 * u; ctx.beginPath(); ctx.moveTo(cx - 5 * u, cy - 5 * u); ctx.lineTo(cx + 5 * u, cy + 5 * u); ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
   }
   spaced(text: string, x: number, y: number, sp: number) {
     const ctx = this.ctx;
@@ -721,7 +789,13 @@ export class Renderer {
     const u = Math.max(1, Math.min(1.4, this.s));
     ctx.globalAlpha = a; ctx.fillStyle = P.hud; ctx.textAlign = 'center';
     ctx.font = `500 ${30 * u}px Jost, system-ui, sans-serif`;
-    this.spaced(`WAVE ${game.wave}`, W / 2, H * .3, 6 * u);
+    this.spaced(game.war ? 'LEVEL 1' : `WAVE ${game.wave}`, W / 2, H * .3, 6 * u);
+    if (game.war) {
+      ctx.font = `${14 * u}px Jost, system-ui, sans-serif`;
+      ctx.fillText(`Hold out for ${WAR_TIME / 60} minutes`, W / 2, H * .3 + 28 * u);
+      ctx.globalAlpha = a * .8; ctx.font = `${12 * u}px Jost, system-ui, sans-serif`;
+      ctx.fillText(`Don't shoot down ${WAR_STRIKES} friendly planes`, W / 2, H * .3 + 48 * u);
+    }
     ctx.globalAlpha = 1;
   }
   drawClear(game: Game, P: BlendedPalette) {

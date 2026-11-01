@@ -2,13 +2,14 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, type Difficulty, type Results, type UpgradeId } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId } from './game';
 import { Tilt } from './input';
 import { Sound } from './audio';
 
 type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; reduceMotion: boolean; }
-interface ScoreEntry { score: number; wave: number; date: number; }
+/** `wave` is the wave reached; war mode keeps the level instead, and `time` is the seconds survived. */
+interface ScoreEntry { score: number; wave: number; date: number; time?: number; won?: boolean; }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -23,10 +24,12 @@ const store = {
 
 const settings: Settings = Object.assign({ sound: true, music: true, vibration: true, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }, store.get('settings', {}));
 const seenTips = new Set<string>(store.get<string[]>('tips', []));
-// normal and expert keep their own high scores
-const scoreKey = (d: Difficulty) => d === 'expert' ? 'scores.expert' : 'scores';
-let difficulty: Difficulty = store.get<Difficulty>('difficulty', 'normal') === 'expert' ? 'expert' : 'normal';
-let scores = store.get<ScoreEntry[]>(scoreKey(difficulty), []);
+// every mode and difficulty keeps its own high scores; hard was once called expert, and its scores keep that key
+const scoreKey = (m: GameMode, d: Difficulty) => (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
+const savedDiff = store.get<string>('difficulty', 'normal');
+let difficulty: Difficulty = savedDiff === 'hard' || savedDiff === 'expert' ? 'hard' : 'normal';
+let gameMode: GameMode = store.get<string>('mode', 'original') === 'war' ? 'war' : 'original';
+let scores = store.get<ScoreEntry[]>(scoreKey(gameMode, difficulty), []);
 
 let mode: Mode = 'loading';   // loading | start | play | paused | cards | countdown | results | recal | nosensor
 let toastTimer = 0;
@@ -45,6 +48,7 @@ const game = new Game({
 });
 applySettings();
 game.difficulty = difficulty;
+game.mode = gameMode;
 if (Tilt.debug) (window as unknown as { __sd: unknown }).__sd = { game, Tilt, renderer };
 
 /* ---------- layout: keep the game physically portrait even if the screen rotates ---------- */
@@ -122,30 +126,44 @@ function applySettings() {
 }
 buildSettings();
 
-function setDifficulty(d: Difficulty) {
+/** Picks the game mode and difficulty for the next game; the title screen's backdrop shows that mode's map. */
+function setChoice(m: GameMode, d: Difficulty) {
+  const remap = m !== gameMode;
+  gameMode = m; game.mode = m;
   difficulty = d; game.difficulty = d;
-  store.set('difficulty', d);
-  scores = store.get<ScoreEntry[]>(scoreKey(d), []);
+  store.set('mode', m); store.set('difficulty', d);
+  scores = store.get<ScoreEntry[]>(scoreKey(m, d), []);
+  if (remap && mode === 'start') { game.reset(); game.phase = 'idle'; }
+  document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === m)));
   document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.diff === d)));
-  $('diffNote').textContent = d === 'expert' ? 'About twice the planes, firing more often and hitting harder. Points are worth 1.5x.' : 'The standard game.';
+  const hard = 'About twice the planes, firing more often and hitting harder. Points are worth 1.5x.';
+  $('diffNote').textContent = m === 'war'
+    ? `Hold out for ${WAR_TIME / 60} minutes. Swipe left or right to move between three turrets, and don't shoot down ${WAR_STRIKES} friendly planes.` + (d === 'hard' ? ' Hard: more enemy planes, hitting harder.' : '')
+    : d === 'hard' ? hard : 'The standard game.';
   const b = best();
   $('bestLine').textContent = b ? `Best ${b.toLocaleString('en-US')}` : '';
 }
+document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => b.addEventListener('click', e => {
+  e.stopPropagation(); Sound.ui();
+  setChoice(b.dataset.mode === 'war' ? 'war' : 'original', difficulty);
+}));
 document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.addEventListener('click', e => {
   e.stopPropagation(); Sound.ui();
-  setDifficulty(b.dataset.diff === 'expert' ? 'expert' : 'normal');
+  setChoice(gameMode, b.dataset.diff === 'hard' ? 'hard' : 'normal');
 }));
+const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 function renderScores() {
-  $('scoresTitle').textContent = difficulty === 'expert' ? 'Expert high scores' : 'High scores';
+  $('scoresTitle').textContent = `${gameMode === 'war' ? 'War' : 'Original'}${difficulty === 'hard' ? ', hard' : ''}: high scores`;
   const ol = $('scoreList');
-  ol.innerHTML = scores.length ? scores.map((s: ScoreEntry) => `<li><span>${s.score.toLocaleString('en-US')}</span><span>wave ${s.wave}</span></li>`).join('') : '<li class="empty">No scores yet</li>';
+  const detail = (s: ScoreEntry) => gameMode === 'war' ? (s.won ? 'passed' : clock(s.time ?? 0)) : `wave ${s.wave}`;
+  ol.innerHTML = scores.length ? scores.map((s: ScoreEntry) => `<li><span>${s.score.toLocaleString('en-US')}</span><span>${detail(s)}</span></li>`).join('') : '<li class="empty">No scores yet</li>';
 }
 function best() { return scores.length ? scores[0].score : 0; }
 function startScreen() {
   mode = 'start';
   game.reset();
   game.phase = 'idle';
-  setDifficulty(difficulty);
+  setChoice(gameMode, difficulty);
   const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || (navigator as Navigator & { standalone?: boolean }).standalone;
   const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   $('installTip').textContent = standalone ? (ios ? 'Tip: turn on Portrait Orientation Lock in Control Center so the screen never turns while you aim.' : '')
@@ -184,19 +202,48 @@ async function tryLockPortrait() {
   try { await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> })?.lock?.('portrait-primary'); } catch { }
 }
 
-/* ---------- firing ---------- */
+/* ---------- firing, and swiping between turrets in war mode ---------- */
 const pointers = new Set<number>();
 const fz = $('firezone');
+/** In war mode a touch waits this long (ms) before it fires, so the start of a swipe doesn't loose a shot at a friendly plane. */
+const SWIPE_HOLD = 90, SWIPE_DIST = 40, SWIPE_TIME = 500;
+let swipe: { id: number; x: number; y: number; t: number; timer: number; fired: boolean; sliding: boolean } | null = null;
 fz.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (mode !== 'play') return;
   if (tapsCrate(e)) { openCards(); return; }
   pointers.add(e.pointerId);
   if (game.phase === 'clear') game.skipClear();
+  if (game.war) {
+    if (swipe) clearTimeout(swipe.timer);
+    const s = { id: e.pointerId, x: e.offsetX, y: e.offsetY, t: e.timeStamp, fired: false, sliding: false, timer: 0 };
+    s.timer = window.setTimeout(() => { if (swipe === s && !s.sliding && pointers.has(s.id)) { s.fired = true; game.press(); hintProgress('fire'); } }, SWIPE_HOLD);
+    swipe = s;
+    return;
+  }
   game.press();
   hintProgress('fire');
 });
-const up = (e: PointerEvent) => { pointers.delete(e.pointerId); if (!pointers.size) game.release(); };
+fz.addEventListener('pointermove', e => {
+  const s = swipe;
+  if (!s || e.pointerId !== s.id || mode !== 'play') return;
+  const dx = e.offsetX - s.x, dy = e.offsetY - s.y;
+  if (!s.fired && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { s.sliding = true; clearTimeout(s.timer); }
+  if (Math.abs(dx) > SWIPE_DIST && Math.abs(dx) > Math.abs(dy) * 1.5 && e.timeStamp - s.t < SWIPE_TIME) {
+    clearTimeout(s.timer); swipe = null;
+    game.release();
+    game.move(Math.sign(dx));
+  }
+});
+const up = (e: PointerEvent) => {
+  const s = swipe;
+  if (s && s.id === e.pointerId) {
+    // a quick tap, over before its shot was due: fire it now
+    clearTimeout(s.timer); swipe = null;
+    if (!s.fired && !s.sliding && mode === 'play') { game.tap(); hintProgress('fire'); }
+  }
+  pointers.delete(e.pointerId); if (!pointers.size) game.release();
+};
 fz.addEventListener('pointerup', up); fz.addEventListener('pointercancel', up); fz.addEventListener('pointerleave', up);
 // iOS shows a magnifier or zooms on a double tap even with user-scalable=no and
 // user-select: none. Swallowing the touch itself stops that; pointer events still fire.
@@ -211,7 +258,12 @@ document.addEventListener('touchend', e => {
 }, { passive: false });
 for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
 // keyboard for desktop testing
-addEventListener('keydown', e => { if (e.code === 'Space' && mode === 'play') { if (!e.repeat) game.press(); e.preventDefault(); } if (e.key === 'p' || e.key === 'Escape') { if (mode === 'play') pause(); } });
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && mode === 'play') { if (!e.repeat) game.press(); e.preventDefault(); }
+  if (e.key === 'p' || e.key === 'Escape') { if (mode === 'play') pause(); }
+  // war mode: z and x stand in for swiping left and right
+  if ((e.key === 'z' || e.key === 'x') && mode === 'play' && !e.repeat) game.move(e.key === 'z' ? -1 : 1);
+});
 addEventListener('keyup', e => { if (e.code === 'Space') game.release(); });
 
 /* ---------- HUD buttons ---------- */
@@ -289,17 +341,26 @@ document.addEventListener('visibilitychange', () => {
 function showResults(r: Results) {
   if (mode === 'start') return;
   const prevBest = best();
-  scores.push({ score: r.score, wave: r.wave, date: Date.now() });
+  const war = r.mode === 'war';
+  scores.push({ score: r.score, wave: r.wave, date: Date.now(), ...(war ? { time: Math.round(r.time), won: r.won } : {}) });
   scores.sort((a, b) => b.score - a.score);
   scores = scores.slice(0, 5);
-  store.set(scoreKey(r.difficulty), scores);
-  $('rMode').hidden = r.difficulty !== 'expert';
+  store.set(scoreKey(r.mode, r.difficulty), scores);
+  $('rTitle').textContent = !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
+  $('rReason').textContent = war && !r.won ? r.reason : '';
+  $('rReason').hidden = !(war && !r.won && r.reason);
+  const tags = [war ? 'War, level 1' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
+  $('rMode').textContent = tags.join(' · ');
+  $('rMode').hidden = !tags.length;
   $('rScore').textContent = r.score.toLocaleString('en-US');
-  $('rWave').textContent = String(r.wave);
-  $('rAcc').textContent = Math.round(r.accuracy * 100) + '%';
-  $('rKills').textContent = String(r.kills);
-  $('rBombs').textContent = String(r.intercepts);
-  $('rBest').textContent = best().toLocaleString('en-US');
+  const stats: [string, string][] = [
+    war ? ['Time survived', clock(r.time)] : ['Wave reached', String(r.wave)],
+    ['Accuracy', Math.round(r.accuracy * 100) + '%'],
+    ['Planes downed', String(r.kills)],
+    war ? ['Friendly planes hit', `${r.friendlies} of ${WAR_STRIKES}`] : ['Bombs intercepted', String(r.intercepts)],
+    ['Best score', best().toLocaleString('en-US')],
+  ];
+  $('rStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   $('newBest').hidden = !(r.score > prevBest && r.score > 0);
   Sound.stopAllEngines();
   setHud(false);

@@ -32,15 +32,19 @@ Perks last the whole game or act at once: dual shot, then triple shot (a fan of 
 
 Special weapons replace the gun until their ammo or time runs out: guided missiles (the only thing that fires until they are spent), laser (a solid beam while the finger is down), rockets, fireballs, sonic pulse, nuke, rapid fire, chain lightning (hits the plane nearest the aim, then jumps to up to four more planes or bombs) and cluster shells (each bursts into a spray of bomblets). Ammo and timings are in `AMMO` in `src/game.ts`.
 
-## Expert mode
+## Game modes and difficulty
 
-Picked on the title screen and remembered. Expert has about twice the planes per wave, mixes in fighters and heavy bombers from the start, sends them in bigger groups with shorter gaps, and they drop, fire and dive more often. Everything that hits the base does 1.6x the damage. Points are worth 1.5x, and expert keeps its own high scores. The numbers are in `DIFFICULTY` in `src/game.ts`.
+Both are picked on the title screen and remembered, and every mode and difficulty keeps its own high scores.
+
+- **Original** is the game as it has always been: endless waves defending one turret.
+- **War** (level 1): the base sits in the middle of a wider map with three turrets: the base's own, where you start, and one out on its own either side. Swipe left or right to move to the turret on that side (in debug, `z` and `x`); the camera slides over and the gun fires again once it arrives. A touch waits 90 ms before it fires so the start of a swipe doesn't loose a shot. Enemy planes come in from beyond either edge, so they can be shot on the way in. They mostly go for the base, but fighters and light planes sometimes hit an outlying turret; if the turret in use falls you move to the nearest one left. Friendly planes (olive green with a roundel and a green marker above them) fly through often, and the challenge is not to hit them: three friendly planes shot down loses the level, and the HUD shows the three marks. Some friendly planes drop an upgrade crate beside a turret; move there and tap it to open it. Friendly and enemy planes trade bursts of fire for show; it does no real damage. Survive 3 minutes to pass. The level is also lost if every base building or every turret is destroyed. The numbers are near `WAR_TIME` in `src/game.ts`, and the turret positions are `WAR_POSTS` in `src/art.ts`.
+- **Hard** (was Expert) has about twice the planes per wave, mixes in fighters and heavy bombers from the start, sends them in bigger groups with shorter gaps, and they drop, fire and dive more often. Everything that hits the base does 1.6x the damage. Points are worth 1.5x. In War it means bigger, more frequent enemy groups. The numbers are in `DIFFICULTY` in `src/game.ts`.
 
 ## Enemies
 
 Every plane goes down with one hit, so waves grow quickly (`waveSpec` in `src/game.ts`). A falling plane can be hit once more, which blows it apart in the air so it does no damage when it would have hit the base. Heavy bombers drop big bombs over the middle of the base that soon fall almost straight down and hit very hard; light planes fire long, skinny missiles on a slower arc aimed at standing buildings; fighters dive and strafe.
 
-Every fourth wave (4, 8, 12, ...) has a boss: a much bigger dark bomber with red bands, twin tails and gun turrets that flies in on its own about a third of the way into the wave, which brings fewer planes than usual. It always shows a health bar and takes 20 hits on wave 4, 8 more for each boss after that, and half as much again on expert (`bossHp` in `src/game.ts`). It fires two missiles at a time, aimed at the two standing buildings nearest where they would come down. The laser burns it down while the beam stays on it, and the nuke takes off 12 hits.
+Every fourth wave (4, 8, 12, ...) has a boss: a much bigger dark bomber with red bands, twin tails and gun turrets that flies in on its own about a third of the way into the wave, which brings fewer planes than usual. It always shows a health bar and takes 20 hits on wave 4, 8 more for each boss after that, and half as much again on hard (`bossHp` in `src/game.ts`). It fires two missiles at a time, aimed at the two standing buildings nearest where they would come down. The laser burns it down while the beam stays on it, and the nuke takes off 12 hits.
 
 ## Code map
 

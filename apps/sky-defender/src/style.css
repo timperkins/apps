@@ -79,7 +79,8 @@ button:active { transform: scale(.97); }
 .seg { display: flex; padding: 3px; border-radius: 999px; background: rgba(255, 245, 234, .1); border: 1px solid var(--line); margin-top: 4px; }
 .seg button { font: 500 15px/1 var(--font-b); color: var(--ink); background: none; border: 0; border-radius: 999px; padding: 10px 22px; cursor: pointer; touch-action: manipulation; }
 .seg button[aria-checked="true"] { background: var(--accent); color: #1a1424; }
-.seg button[data-diff="expert"][aria-checked="true"] { background: #ff7a6a; }
+.seg button[data-diff="hard"][aria-checked="true"] { background: #ff7a6a; }
+.seg + .seg { margin-top: -4px; }
 #diffNote { margin-top: -6px; min-height: 2.8em; }
 .mode { color: #ff8a7a; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
 .settings-inline { display: flex; flex-direction: column; gap: 2px; width: min(300px, 100%); margin: 4px 0; }
