@@ -232,7 +232,8 @@ fz.addEventListener('pointermove', e => {
   if (Math.abs(dx) > SWIPE_DIST && Math.abs(dx) > Math.abs(dy) * 1.5 && e.timeStamp - s.t < SWIPE_TIME) {
     clearTimeout(s.timer); swipe = null;
     game.release();
-    game.move(Math.sign(dx));
+    // drag the view: swiping right pulls the scene along, bringing up the turret on the left
+    game.move(-Math.sign(dx));
   }
 });
 const up = (e: PointerEvent) => {
@@ -261,7 +262,7 @@ for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e =
 addEventListener('keydown', e => {
   if (e.code === 'Space' && mode === 'play') { if (!e.repeat) game.press(); e.preventDefault(); }
   if (e.key === 'p' || e.key === 'Escape') { if (mode === 'play') pause(); }
-  // war mode: z and x stand in for swiping left and right
+  // war mode: z and x move to the turret on the left and right
   if ((e.key === 'z' || e.key === 'x') && mode === 'play' && !e.repeat) game.move(e.key === 'z' ? -1 : 1);
 });
 addEventListener('keyup', e => { if (e.code === 'Space') game.release(); });
