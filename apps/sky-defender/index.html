@@ -45,9 +45,13 @@
     <h1 class="title">Sky Defender</h1>
     <p class="lead">Hold your phone upright and tap to start</p>
     <p class="best" id="bestLine"></p>
+    <div class="seg" role="radiogroup" aria-label="Game mode">
+      <button role="radio" data-mode="original" aria-checked="true">Original</button>
+      <button role="radio" data-mode="war" aria-checked="false">War</button>
+    </div>
     <div class="seg" role="radiogroup" aria-label="Difficulty">
       <button role="radio" data-diff="normal" aria-checked="true">Normal</button>
-      <button role="radio" data-diff="expert" aria-checked="false">Expert</button>
+      <button role="radio" data-diff="hard" aria-checked="false">Hard</button>
     </div>
     <p class="fine" id="diffNote"></p>
     <div class="row">
@@ -87,17 +91,12 @@
   <section id="countdown" class="screen clear"><div id="countNum">3</div></section>
 
   <section id="results" class="screen">
-    <h2>Base lost</h2>
-    <div id="rMode" class="mode" hidden>Expert mode</div>
+    <h2 id="rTitle">Base lost</h2>
+    <p id="rReason" class="lead" hidden></p>
+    <div id="rMode" class="mode" hidden></div>
     <div id="newBest" class="newbest" hidden>New best score</div>
     <div class="big" id="rScore">0</div>
-    <dl class="stats">
-      <dt>Wave reached</dt><dd id="rWave"></dd>
-      <dt>Accuracy</dt><dd id="rAcc"></dd>
-      <dt>Planes downed</dt><dd id="rKills"></dd>
-      <dt>Bombs intercepted</dt><dd id="rBombs"></dd>
-      <dt>Best score</dt><dd id="rBest"></dd>
-    </dl>
+    <dl class="stats" id="rStats"></dl>
     <button class="primary" id="againBtn">Play again</button>
     <button class="ghost small" id="titleBtn">Title screen</button>
   </section>

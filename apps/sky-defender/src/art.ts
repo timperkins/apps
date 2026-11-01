@@ -8,6 +8,8 @@ export const TX = 195;             // mockup turret x
 export const PIVOT_Y = G - 18.4;   // turret pivot in mockup space; world origin
 export const GROUND_Y = 18.4;      // ground line in world space
 export const BASE_SCALE = 1.15;
+/** War mode's turrets, in world x: the base's own turret in the middle and one out on its own either side. */
+export const WAR_POSTS = [-470, 0, 470];
 export const B = { search: 70, radar: 110, depot: 152, turret: 195, hangar: 244, repair: 296 };
 
 const f = (n: number) => Math.round(n * 100) / 100;
@@ -204,6 +206,14 @@ const CARGO = {
   rim: '#d8f0ff', pLight: '#e6eee8', pMid: '#86a690', pDark: '#2c3e36', glassTop: '#d6f2ff', pHi: '#ffffff', prop: 'rgba(240,250,255,.25)',
 };
 
+/** Friendly planes are olive green with a blue and white roundel, so they read apart from the dark enemy planes. */
+const ALLY = {
+  rim: '#eaffd2', pLight: '#a7b884', pMid: '#5f7444', pDark: '#252e1b', glassTop: '#d6f2ff', pHi: '#ffffff', prop: 'rgba(240,255,230,.25)',
+};
+/** Where each friendly airframe wears its roundel, in the plane's own unscaled units. */
+const ROUNDEL: Record<PlaneType, [number, number]> = { heavy: [-14, -2], light: [-12, -1.5], fighter: [-6, -.5], recon: [-4, -.5] };
+const roundel = ([x, y]: [number, number]) => `<circle cx="${x}" cy="${y}" r="3.6" fill="#f4f1e6"/><circle cx="${x}" cy="${y}" r="2.5" fill="#2f55a4"/><circle cx="${x}" cy="${y}" r="1" fill="#f4f1e6"/>`;
+
 /** The boss keeps some of the sky's light but is mostly dark gunmetal, with a hot glow in its glass. */
 const boss = (S: Palette): Palette => ({
   ...S, rim: hexMix(S.rim, '#ff9a80', .5), pLight: hexMix(S.pLight, '#6e737e', .7), pMid: hexMix(S.pMid, '#3a3f4a', .75),
@@ -212,6 +222,8 @@ const boss = (S: Palette): Palette => ({
 
 export interface PaletteSprites {
   planes: Record<AnyPlaneType, Sprite>; burnt: Record<AnyPlaneType, Sprite>;
+  /** war mode's friendly planes */
+  allies: Record<PlaneType, Sprite>; alliesBurnt: Record<PlaneType, Sprite>;
   buildings: Record<BuildingId, Sprite[]>; bombs: { small: Sprite; big: Sprite };
   searchHead: Sprite; pad: Sprite; clouds: CloudShape[];
 }
@@ -220,7 +232,7 @@ export const SHARED = {} as { fire: Sprite; puff: HTMLCanvasElement; stars: Star
 
 async function buildPalette(id: PaletteId) {
   const S = PALETTES[id];
-  const out = { planes: {}, burnt: {}, buildings: {}, bombs: {} } as PaletteSprites;
+  const out = { planes: {}, burnt: {}, allies: {}, alliesBurnt: {}, buildings: {}, bombs: {} } as PaletteSprites;
   const RS = 6;
   const jobs: Promise<unknown>[] = [];
   for (const t of ['heavy', 'light', 'fighter', 'recon'] as const) {
@@ -229,6 +241,9 @@ async function buildPalette(id: PaletteId) {
     jobs.push(raster(S, inner, box, RS, 'normal').then(r => out.planes[t] = r));
     jobs.push(raster(S, inner, box, RS, 'burnt').then(r => out.burnt[t] = r));
     if (id === 'gold') jobs.push(raster(S, inner, box, RS, 'sil').then(r => SHARED[`sil_${t}`] = r));
+    const ally = `<g transform="scale(${s})">${SH[t]}${roundel(ROUNDEL[t])}</g>`;
+    jobs.push(raster({ ...S, ...ALLY }, ally, box, RS, 'normal').then(r => out.allies[t] = r));
+    jobs.push(raster({ ...S, ...ALLY }, ally, box, RS, 'burnt').then(r => out.alliesBurnt[t] = r));
   }
   {
     const s = SC.cargo, box: Box = [-54 * s, -30 * s, 108 * s, 44 * s];
@@ -335,7 +350,8 @@ export function puff(color: string): HTMLCanvasElement {
 
 /* ---------- landscape (world space) ---------- */
 export interface Ridge { path: Path2D; trees: Path2D | null; top: number; base: number; t: number; k: number; }
-export const LAND = { ridges: [] as Ridge[], ground: new Path2D(), edgeTrees: new Path2D() };
+/** `edgeTreesWar` leaves clearings for war mode's outlying turrets. */
+export const LAND = { ridges: [] as Ridge[], ground: new Path2D(), edgeTrees: new Path2D(), edgeTreesWar: new Path2D() };
 function buildLandscape() {
   const L = [[688, 22, 190, 2, 4], [706, 26, 140, 3, 4], [726, 28, 100, 4, 5], [748, 24, 80, 5, 5], [770, 18, 60, 6, 5]];
   const X0 = -1300, X1 = 1300;
@@ -364,15 +380,21 @@ function buildLandscape() {
   const gy = GROUND_Y;
   g.moveTo(-1400, gy + 2); g.lineTo(-215, gy + 1); g.bezierCurveTo(-115, gy - 4, 105, gy - 4, 215, gy + 1); g.lineTo(1400, gy + 2); g.lineTo(1400, 1400); g.lineTo(-1400, 1400); g.closePath();
   LAND.ground = g;
-  const t = new Path2D(), r = rng(41), nn = noise(43);
-  for (let x = -1300; x <= 1300; x += 1.6) {
-    if (Math.abs(x) < 200) continue;
-    const edge = Math.min(1, (Math.abs(x) - 200) / 60);
-    if (nn(x / 18) < .2 + .5 * (1 - edge)) continue;
-    const h = 4 + r() * 6 * (0.6 + .4 * edge), y = gy - 2;
-    t.moveTo(x - h * .28, y + 1.5); t.lineTo(x, y - h); t.lineTo(x + h * .28, y + 1.5); t.closePath();
-  }
-  LAND.edgeTrees = t;
+  const treeLine = (clear: number[]) => {
+    const t = new Path2D(), r = rng(41), nn = noise(43);
+    for (let x = -1300; x <= 1300; x += 1.6) {
+      // the gap to the nearest clearing, thinning out toward its edge
+      const gap = Math.min(...clear.map(c => Math.abs(x - c) - (c ? 60 : 200)));
+      if (gap < 0) continue;
+      const edge = Math.min(1, gap / 60);
+      if (nn(x / 18) < .2 + .5 * (1 - edge)) continue;
+      const h = 4 + r() * 6 * (0.6 + .4 * edge), y = gy - 2;
+      t.moveTo(x - h * .28, y + 1.5); t.lineTo(x, y - h); t.lineTo(x + h * .28, y + 1.5); t.closePath();
+    }
+    return t;
+  };
+  LAND.edgeTrees = treeLine([0]);
+  LAND.edgeTreesWar = treeLine(WAR_POSTS);
 }
 
 export async function loadArt(onProgress?: (fraction: number) => void) {
