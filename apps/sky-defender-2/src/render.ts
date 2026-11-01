@@ -6,6 +6,20 @@ import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } 
 import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
+/** A plane silhouette filled with gold, made once per silhouette. */
+const goldCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function goldSil(img: HTMLCanvasElement) {
+  let c = goldCache.get(img);
+  if (!c) {
+    c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d')!;
+    g.drawImage(img, 0, 0); g.globalCompositeOperation = 'source-in';
+    const gr = g.createLinearGradient(0, 0, 0, c.height); gr.addColorStop(0, '#fff0a0'); gr.addColorStop(.45, '#f2c23a'); gr.addColorStop(1, '#b07a14');
+    g.fillStyle = gr; g.fillRect(0, 0, c.width, c.height);
+    goldCache.set(img, c);
+  }
+  return c;
+}
 const FIRE_Y: Record<BuildingId, number> = { search: G - 9, radar: G - 12, depot: G - 12, turret: G - 16, hangar: G - 16, repair: G - 10 };
 const LAMPS: [BuildingId, number, number, number][] = [['radar', B.radar - 5.5, G - 6.4, 10], ['hangar', B.hangar, G - 17, 14], ['depot', B.depot, G - 8, 8], ['repair', B.repair - 2.3, G - 7.6, 8], ['hangar', B.hangar + 32, G - 6, 8]];
 const SEARCH_PIVOT = mockToWorld(B.search, G - 12.4);
@@ -392,21 +406,29 @@ export class Renderer {
     const dark = P.dark * .88 * (1 - lit) * (type === 'cargo' || p.friend ? .6 : 1);
     if (dark > .02) { const s = SHARED[`sil_${type}`]; ctx.globalAlpha = dark; ctx.drawImage(s.img, s.x, s.y, s.w, s.h); ctx.globalAlpha = 1; }
     if (p.hitFlash > 0) { const s = SHARED[`sil_${type}`]; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = p.hitFlash * .35; ctx.filter = 'none'; ctx.drawImage(puff('#ffe8c0'), s.x, s.y, s.w, s.h); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; }
+    // a gold plane: the cargo plane washed in gold, with a glint running along it
+    if (p.gold) {
+      const s = SHARED.sil_cargo, g = goldSil(s.img);
+      ctx.globalAlpha = falling ? .35 : .62; ctx.drawImage(g, s.x, s.y, s.w, s.h);
+      if (!falling) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .18 + .12 * Math.sin(this.time * 4); ctx.drawImage(puff('#ffd34a'), s.x - 4, s.y - 4, s.w + 8, s.h + 8); ctx.globalCompositeOperation = 'source-over'; }
+      ctx.globalAlpha = 1;
+    }
     // running lights
     const green = type === 'cargo' || p.friend;
     if ((P.dark > .2 || green) && !falling) {
       const sc = SC[type], [[wx, wy], [tx, ty]] = LIGHTS[type];
       const blink = Math.sin(this.time * 6 + p.lightPhase) > 0;
-      const c1 = green ? '#9dffb8' : '#ff4a3a', c2 = green ? '#ffffff' : '#7dff9a';
+      const c1 = p.gold ? '#ffd34a' : green ? '#9dffb8' : '#ff4a3a', c2 = green ? '#ffffff' : '#7dff9a';
       const s = 1 / Math.max(.3, Math.abs(fl));
       if (blink || !green) { ctx.drawImage(puff(c1), wx * sc - 2.5 * s, wy * sc - 2.5, 5 * s, 5); }
       if (blink) ctx.drawImage(puff(c2), tx * sc - 2 * s, ty * sc - 2, 4 * s, 4);
     }
     ctx.restore();
-    // a friendly plane carries a green marker above it, so it can be told apart at a glance
-    if (p.friend && !falling) {
-      const y = p.y - 11 - .8 * Math.sin(this.time * 3 + p.lightPhase);
-      ctx.strokeStyle = '#9dffb8'; ctx.lineWidth = 1; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = .9;
+    // a friendly plane carries a green marker above it, so it can be told apart at a glance; a gold plane, a gold one
+    if ((p.friend || p.gold) && !falling) {
+      const y = p.y - (p.gold ? 14 : 11) - .8 * Math.sin(this.time * 3 + p.lightPhase);
+      if (p.gold) this.twinkles(p.x, p.y, 34, 12, p.lightPhase);
+      ctx.strokeStyle = p.gold ? '#ffd34a' : '#9dffb8'; ctx.lineWidth = 1; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = .9;
       ctx.beginPath(); ctx.moveTo(p.x - 3, y - 2.4); ctx.lineTo(p.x, y); ctx.lineTo(p.x + 3, y - 2.4); ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -422,12 +444,13 @@ export class Renderer {
 
   // The crate's landing zone on the pad, shown while a drop is on its way: corner marks, pulsing while the crate comes down.
   drawLandingZone(game: Game) {
-    const zones: [number, boolean][] = game.crates.map(c => [c.lz, !c.landed]);
-    if (game.cargo) zones.push([game.lzX, false]);
+    const zones: [number, boolean, boolean][] = game.crates.map(c => [c.lz, !c.landed, !!c.gold]);
+    if (game.cargo) zones.push([game.lzX, false, !!game.cargo.gold]);
     const ctx = this.ctx, y = GROUND_Y - 3;
     ctx.save();
-    ctx.strokeStyle = '#9dffb8'; ctx.lineWidth = .5; ctx.lineCap = 'round';
-    for (const [LZ_X, falling] of zones) {
+    ctx.lineWidth = .5; ctx.lineCap = 'round';
+    for (const [LZ_X, falling, gold] of zones) {
+      ctx.strokeStyle = gold ? '#ffd34a' : '#9dffb8';
       ctx.globalAlpha = falling ? .45 + .35 * Math.sin(this.time * 5) : .3;
       for (const d of [-1, 1]) {
         ctx.beginPath(); ctx.moveTo(LZ_X + d * 8, y - 1.6); ctx.lineTo(LZ_X + d * 9, y); ctx.lineTo(LZ_X + d * 6.5, y + .6); ctx.stroke();
@@ -443,9 +466,9 @@ export class Renderer {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = .25 + .25 * glow;
-      ctx.drawImage(puff('#9dffb8'), c.x - 10, c.y - 12, 20, 20);
+      ctx.drawImage(puff(c.gold ? '#ffd34a' : '#9dffb8'), c.x - 10, c.y - 12, 20, 20);
       ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = '#bff5cf'; ctx.lineWidth = .6;
+      ctx.strokeStyle = c.gold ? '#ffe9a0' : '#bff5cf'; ctx.lineWidth = .6;
       ctx.globalAlpha = .8 * (1 - k);
       ctx.beginPath(); ctx.ellipse(c.x, GROUND_Y - 2.4, 5 + 9 * k, 1.2 + 2 * k, 0, 0, 7); ctx.stroke();
       const by = c.y - 10 - 1.2 * Math.sin(this.time * 3);
@@ -465,10 +488,31 @@ export class Renderer {
       ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-9, -15); ctx.quadraticCurveTo(-9, -23, 0, -23.5); ctx.quadraticCurveTo(9, -23, 9, -15); ctx.quadraticCurveTo(4.5, -17, 0, -15.5); ctx.quadraticCurveTo(-4.5, -17, -9, -15); ctx.fill();
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = '#6f6248'; ctx.fillRect(-3, -3, 6, 5);
-    ctx.fillStyle = '#4fae74'; ctx.fillRect(-3, -1, 6, 1.1);
+    ctx.fillStyle = c.gold ? '#c9952a' : '#6f6248'; ctx.fillRect(-3, -3, 6, 5);
+    ctx.fillStyle = c.gold ? '#ffe27a' : '#4fae74'; ctx.fillRect(-3, -1, 6, 1.1);
     ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-3, -3, 6, .6);
-    if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff('#9dffb8'), -2, -6, 4, 4); }
+    if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff(c.gold ? '#ffd34a' : '#9dffb8'), -2, -6, 4, 4); }
+    ctx.restore();
+    // a gold pack sparkles
+    if (c.gold) this.twinkles(c.x, c.y - 1.5, 14, 10, 1.7);
+  }
+  /** Little four-point gold glints that wink on and off around (x, y), in a w by h box. */
+  twinkles(x: number, y: number, w: number, h: number, seed: number) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = '#fff3b8';
+    for (let i = 0; i < 6; i++) {
+      const ph = this.time * (1.6 + i * .23) + seed * 3.1 + i * 1.9, k = Math.sin(ph);
+      if (k <= 0) continue;
+      // each glint moves to a new spot every time it winks
+      const n = Math.floor(ph / (Math.PI * 2)), rx = Math.sin(n * 12.9898 + i * 78.233 + seed) * 43758.5453, ry = Math.sin(n * 39.346 + i * 11.135 + seed) * 24634.6345;
+      const gx = x + (rx - Math.floor(rx) - .5) * w, gy = y + (ry - Math.floor(ry) - .5) * h, r = 1.8 * k;
+      ctx.globalAlpha = .9 * k;
+      ctx.beginPath();
+      ctx.moveTo(gx, gy - r); ctx.lineTo(gx + r * .25, gy - r * .25); ctx.lineTo(gx + r, gy); ctx.lineTo(gx + r * .25, gy + r * .25);
+      ctx.lineTo(gx, gy + r); ctx.lineTo(gx - r * .25, gy + r * .25); ctx.lineTo(gx - r, gy); ctx.lineTo(gx - r * .25, gy - r * .25);
+      ctx.closePath(); ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -688,7 +732,7 @@ export class Renderer {
         ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
         const green = p.type === 'cargo' || p.friend;
         ctx.globalAlpha = green ? .9 : .8;
-        ctx.strokeStyle = green ? '#9dffb8' : P.hud;
+        ctx.strokeStyle = p.gold ? '#ffd34a' : green ? '#9dffb8' : P.hud;
         ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(0, 0); ctx.lineTo(-6, 6); ctx.stroke();
         if (p.type === 'fighter' && (p.state === 'warn' || p.state === 'dive')) { ctx.strokeStyle = P.red; ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-5, 0); ctx.lineTo(-11, 6); ctx.stroke(); }
         ctx.restore();

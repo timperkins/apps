@@ -11,8 +11,8 @@ export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
 export type GameMode = 'original' | 'war';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
-/** Perks: permanent gun improvements (dual, triple, reload, flak) and one-off help for the base (repair, shield). */
-export type PerkId = 'dual' | 'triple' | 'reload' | 'flak' | 'repair' | 'shield';
+/** Perks: permanent gun improvements (dual, triple, reload, flak), leeching (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
+export type PerkId = 'dual' | 'triple' | 'reload' | 'flak' | 'leech' | 'repair' | 'rebuild' | 'shield';
 export type UpgradeId = PerkId | WeaponId;
 export type Difficulty = 'normal' | 'hard';
 type TrailPoint = [number, number, number];
@@ -34,6 +34,8 @@ export interface Plane {
   dead?: boolean; diveTo?: [number, number]; strafeDone?: Set<Building>; chaseCargo?: boolean;
   // cargo plane only
   dropped?: boolean; hitByPlayer?: boolean; gone?: boolean;
+  /** a gold resupply plane, whose crate is a gold pack */
+  gold?: boolean;
   // war mode: a friendly plane, the turret it means to drop a crate at, and the short bursts planes fire at each other
   friend?: boolean; dropAt?: Building | null; gunCD?: number; gunT?: number; gunAt?: Plane | null;
 }
@@ -51,7 +53,8 @@ export interface Tracer { x0: number; y0: number; x1: number; y1: number; life: 
 /** A chain lightning bolt: a jagged line through the points it jumped between. */
 export interface Bolt { pts: [number, number][]; life: number; }
 /** `lz` is the x of the landing zone the crate steers to. */
-export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; }
+/** A gold crate is a gold pack: opening it gives every permanent upgrade at once. */
+export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; gold?: boolean; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
 /** `outpost` marks a war mode turret standing on its own away from the base. */
 export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
@@ -94,6 +97,10 @@ const BOLT_CONE = 14 * Math.PI / 180, BOLT_RANGE = 1000, BOLT_JUMP = 230, BOLT_C
 /** The shield dome over the base, an ellipse on the ground. */
 export const DOME_RX = 190, DOME_RY = 115;
 const SHIELD_TIME = 25;
+/** The chance each wave that the resupply plane is a gold plane; leeching heals each standing building by this share of its full strength per kill. */
+const GOLD_CHANCE = .2, LEECH_HEAL = .02;
+/** Everything a gold pack gives. */
+export const GOLD_PACK: PerkId[] = ['triple', 'reload', 'flak', 'leech'];
 /** A boss plane comes in the middle of every fourth wave. It takes many hits, and the laser and nuke wear it down by the amount below. */
 const BOSS_EVERY = 4, LASER_DPS = 8, NUKE_DMG = 12;
 
@@ -132,7 +139,9 @@ export const UPGRADES: Record<UpgradeId, { name: string; kind: string; desc: str
   triple: { name: 'Triple shot', kind: 'Permanent', desc: 'A third barrel. Every shot fires a fan of three shells.', hud: 'TRIPLE', color: '#fff1c8' },
   reload: { name: 'Fast loader', kind: 'Permanent', desc: 'The gun fires half as fast again, for the rest of the game.', hud: 'LOADER', color: '#fff1c8' },
   flak: { name: 'Heavy flak', kind: 'Permanent', desc: 'Bigger shells with a much wider burst. Near misses count.', hud: 'FLAK', color: '#fff1c8' },
+  leech: { name: 'Leeching', kind: 'Permanent', desc: 'Every plane you shoot down heals each standing building by 2% of its full strength.', hud: 'LEECH', color: '#ffd34a' },
   repair: { name: 'Repair crew', kind: 'Right away', desc: 'Every standing building back to full strength, and ruined ones rebuilt to half.', hud: 'REPAIR', color: '#9fe0b0' },
+  rebuild: { name: 'Rebuild', kind: 'Right away', desc: 'Every destroyed building rebuilt to full strength.', hud: 'REBUILD', color: '#9fe0b0' },
   shield: { name: 'Shield dome', kind: `${SHIELD_TIME} seconds`, desc: 'A dome over the base. Bombs and missiles burst on it, and nothing gets through.', hud: 'SHIELD', color: '#7fe9ff' },
   missiles: { name: 'Guided missiles', kind: `${AMMO.missiles} missiles`, desc: 'Hold a plane in your sights to lock on, then tap. Your gun waits until they are spent.', hud: 'MISSILES', color: '#ffcf7a' },
   laser: { name: 'Laser', kind: `${AMMO.laser} seconds of beam`, desc: 'A solid beam for as long as your finger is down. It cuts through everything in its path.', hud: 'LASER', color: '#ff5a5a' },
@@ -197,13 +206,15 @@ export class Game {
   cargo: Plane | null = null;
   /** when this wave's resupply plane takes off (seconds into combat), or null once it has flown */
   cargoAt: number | null = null;
+  /** whether this wave's resupply plane is a gold plane */
+  goldWave = false;
   /** where this drop's crate lands */
   lzX = LZ_SPOTS[1];
   buildings: Building[] = [];
   score = 0; mult = 1;
   fireCD = 0; recoil = 0; flash = 0;
   /** barrels on the gun: 1, 2 with dual shot, 3 with triple shot */
-  guns = 1; fastLoad = false; heavyFlak = false; shieldT = 0; shieldFlash = 0;
+  guns = 1; fastLoad = false; heavyFlak = false; leech = false; shieldT = 0; shieldFlash = 0;
   weapon: WeaponId | null = null; ammo = 0;
   lasing = false; laserSnd = 0; nukeFlash = 0;
   lock: Lock = { target: null, t: 0, step: 0, locked: false };
@@ -243,7 +254,7 @@ export class Game {
     this.warT = 0; this.strikes = 0; this.enemyT = 0; this.friendT = 0; this.endReason = '';
     this.score = 0; this.mult = 1;
     this.fireCD = 0; this.recoil = 0; this.flash = 0;
-    this.guns = 1; this.fastLoad = false; this.heavyFlak = false; this.shieldT = 0; this.shieldFlash = 0;
+    this.guns = 1; this.fastLoad = false; this.heavyFlak = false; this.leech = false; this.goldWave = false; this.shieldT = 0; this.shieldFlash = 0;
     this.weapon = null; this.ammo = 0;
     this.lasing = false; this.laserSnd = 0; this.nukeFlash = 0;
     this.lock = { target: null, t: 0, step: 0, locked: false };
@@ -439,6 +450,7 @@ export class Game {
     this.spawnQueue = q;
     // one resupply plane every wave
     this.cargoAt = rand(6, 14);
+    this.goldWave = Math.random() < GOLD_CHANCE;
     this.waveDamaged = false;
     this.wind = n >= 4 ? rand(-1, 1) : 0;
     Sound.setWind(this.wind);
@@ -1030,6 +1042,7 @@ export class Game {
         this.vibrate(120);
       }
       if (this.lock.target === p) this.lock = { target: null, t: 0, step: 0, locked: false };
+      if (this.leech) this.leechHeal();
     } else if (dmg >= 1) Sound.hitPlane(this.panOf(p.x, p.y));
     return true;
   }
@@ -1306,9 +1319,13 @@ export class Game {
     this.cargo = {
       id: nextId++, type: 'cargo', dir, x: -dir * (this.xe + 80), y: T.alts[0], alt: T.alts[0], speed: T.speed, hp: 100, max: 100,
       state: 'fly', stateT: 0, pitch: 0, flip: 1, turnT: 0, hits: [], trail: [], trailT: 0, smokeT: 0, dropped: false, lightPhase: 0,
-      dropCD: 0, diveCD: 0, burnT: 0, burning: false, hitFlash: 0, vx: 0, vy: 0, spin: 0,
+      dropCD: 0, diveCD: 0, burnT: 0, burning: false, hitFlash: 0, vx: 0, vy: 0, spin: 0, gold: this.goldWave,
     };
     this.planes.push(this.cargo);
+    if (this.goldWave) {
+      this.labels.push({ text: 'Gold plane incoming', x: 0, y: GROUND_Y - 70, t: 0, life: 2.6, color: '#ffd34a', big: true });
+      this.tip('gold', "A gold plane! Its gold pack holds every permanent upgrade, plus Leeching. Don't shoot it.");
+    }
     for (const p of this.planes) if (p.type === 'fighter' && p.state === 'fly' && Math.random() < .35) p.chaseCargo = true;
     this.tip('cargo', "An upgrade is on its way. Don't shoot the cargo plane or its crate.");
     this.hooks.hud && this.hooks.hud();
@@ -1322,7 +1339,10 @@ export class Game {
       case 'triple': return this.guns === 2;
       case 'reload': return !this.fastLoad;
       case 'flak': return !this.heavyFlak;
+      // leeching only comes in a gold pack
+      case 'leech': return false;
       case 'repair': return this.baseHealth() < .9;
+      case 'rebuild': return this.buildings.some(b => b.ruined);
       case 'shield': return this.shieldT <= 0;
       default: return true;
     }
@@ -1344,7 +1364,9 @@ export class Game {
     else if (id === 'dual' || id === 'triple') this.guns = id === 'dual' ? 2 : 3;
     else if (id === 'reload') this.fastLoad = true;
     else if (id === 'flak') this.heavyFlak = true;
+    else if (id === 'leech') this.leech = true;
     else if (id === 'repair') this.repairBase();
+    else if (id === 'rebuild') this.rebuildBase();
     else if (id === 'shield') { this.shieldT = SHIELD_TIME; Sound.shield(); }
     this.lock = { target: null, t: 0, step: 0, locked: false };
     this.firing = false;
@@ -1355,6 +1377,22 @@ export class Game {
     if (c) for (let i = 0; i < 6; i++) this.addPuff(c.x + rand(-4, 4), LZ_Y - rand(0, 4), 'dust', rand(1.5, 2.5), 2, .5, rand(-6, 6), -6);
     Sound.pop();
     this.vibrate(20);
+    this.hooks.hud && this.hooks.hud();
+  }
+  /** Opens the waiting gold pack: every permanent upgrade at once, Leeching included. */
+  openGold() {
+    const c = this.readyCrate();
+    if (!c || !c.gold) return;
+    c.dead = true;
+    this.crates = this.crates.filter(cr => !cr.dead);
+    this.guns = 3; this.fastLoad = true; this.heavyFlak = true; this.leech = true;
+    this.firing = false;
+    this.labels.push({ text: 'Gold pack', x: this.gunX, y: GROUND_Y - 78, t: 0, life: 2.8, color: '#ffd34a', big: true });
+    this.labels.push({ text: 'Triple shot, Fast loader, Heavy flak, Leeching', x: this.gunX, y: GROUND_Y - 58, t: 0, life: 2.8, color: '#ffe9a0' });
+    for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28; this.particles.push({ k: 'spark', x: c.x, y: c.y - 3, vx: Math.cos(a) * rand(20, 60), vy: Math.sin(a) * rand(20, 60) - 20, life: rand(.5, .9), t: 0, r: .6 }); }
+    this.tip('leech', 'Leeching: every plane you shoot down heals your standing buildings a little.');
+    Sound.pop(); Sound.shield();
+    this.vibrate(40);
     this.hooks.hud && this.hooks.hud();
   }
   updateCargo(dt: number) {
@@ -1371,7 +1409,7 @@ export class Game {
       // let go a little before the landing zone; the chute steers the rest of the way
       if (!c.dropped && !c.hitByPlayer && (this.lzX - c.x) * c.dir <= 70) {
         c.dropped = true;
-        this.crates.push({ x: c.x, y: c.y + 6, vx: c.dir * c.speed, vy: (LZ_Y - c.y - 6) / CRATE_FALL, lz: this.lzX, landed: false, t: 0, sway: 0 });
+        this.crates.push({ x: c.x, y: c.y + 6, vx: c.dir * c.speed, vy: (LZ_Y - c.y - 6) / CRATE_FALL, lz: this.lzX, landed: false, t: 0, sway: 0, gold: c.gold });
       }
       if (Math.abs(c.x) > this.xe + 120) { c.dead = true; c.gone = true; Sound.stopEngine(c.id); this.planes = this.planes.filter(p => p !== c); this.cargo = null; }
     }
@@ -1391,7 +1429,7 @@ export class Game {
   crateLanded(c: Crate) {
     c.landed = true; c.t = 0; c.x = c.lz; c.y = LZ_Y; c.sway = 0;
     for (let i = 0; i < 5; i++) this.addPuff(c.x + rand(-5, 5), GROUND_Y - 1, 'dust', rand(1.2, 2), 2, .45, rand(-8, 8), -4, 1.6);
-    this.labels.push({ text: 'Upgrade ready', x: c.x, y: GROUND_Y - 34, t: 0, life: 2.6, color: '#bff5cf', big: true });
+    this.labels.push({ text: c.gold ? 'Gold pack ready' : 'Upgrade ready', x: c.x, y: GROUND_Y - 34, t: 0, life: 2.6, color: c.gold ? '#ffd34a' : '#bff5cf', big: true });
     if (!this.war || Math.abs(c.lz - this.gunX) < 150) this.tip('crate', 'Tap the crate on the pad to open it.');
     Sound.pop();
     this.vibrate(20);
@@ -1427,6 +1465,23 @@ export class Game {
       for (let i = 0; i < 4; i++) this.addPuff(b.x + rand(-b.half, b.half), GROUND_Y - rand(2, 12), 'dust', rand(1.5, 2.5), 2.4, .5, rand(-5, 5), -8);
     }
     this.labels.push({ text: 'Base repaired', x: this.gunX, y: GROUND_Y - 50, t: 0, life: 2.4, color: '#9fe0b0' });
+  }
+  /** Every destroyed building rebuilt to full strength. */
+  rebuildBase() {
+    for (const b of this.buildings) {
+      if (!b.ruined) continue;
+      b.ruined = false; b.ruinT = 0; b.hp = b.max;
+      for (let i = 0; i < 6; i++) this.addPuff(b.x + rand(-b.half, b.half), GROUND_Y - rand(2, 12), 'dust', rand(1.5, 2.5), 2.4, .5, rand(-5, 5), -8);
+    }
+    this.labels.push({ text: 'Base rebuilt', x: this.gunX, y: GROUND_Y - 50, t: 0, life: 2.4, color: '#9fe0b0' });
+  }
+  /** Leeching: a kill heals every standing building by 2% of its full strength. */
+  leechHeal() {
+    for (const b of this.buildings) {
+      if (b.ruined || b.hp >= b.max) continue;
+      b.hp = Math.min(b.max, b.hp + b.max * LEECH_HEAL);
+      this.particles.push({ k: 'flash', x: b.x, y: GROUND_Y - 10, r: 6, life: .3, t: 0, vx: 0, vy: 0 });
+    }
   }
   inDome(x: number, y: number) { const dx = x / DOME_RX, dy = (y - GROUND_Y) / DOME_RY; return dx * dx + dy * dy < 1; }
   /** A bomb or missile that reaches the shield bursts on it, harmlessly. */

@@ -211,7 +211,7 @@ let swipe: { id: number; x: number; y: number; t: number; timer: number; fired: 
 fz.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (mode !== 'play') return;
-  if (tapsCrate(e)) { openCards(); return; }
+  if (tapsCrate(e)) { if (game.readyCrate()?.gold) game.openGold(); else openCards(); return; }
   pointers.add(e.pointerId);
   if (game.phase === 'clear') game.skipClear();
   if (game.war) {
