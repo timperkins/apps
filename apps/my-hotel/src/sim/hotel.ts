@@ -25,7 +25,7 @@ import {
 import { findPath, type Point } from './path';
 import { nextRandom, pick } from './rng';
 
-export const MAP_IDS = ['seaside', 'city', 'lodge'] as const;
+export const MAP_IDS = ['city', 'seaside', 'lodge'] as const;
 export type MapId = (typeof MAP_IDS)[number];
 
 export const PLAYER_SPEED = 6;
