@@ -4,7 +4,6 @@ import { BAG_COLORS, FIRST_NAMES, HAIR_COLORS, HATS, LAST_INITIALS, OUTFIT_COLOR
 import {
   COIN_PILE,
   DESK_ZONE,
-  HOUSEKEEPER_SPOT,
   LOT,
   PILE_RADIUS,
   QUEUE_CELLS,
@@ -38,8 +37,12 @@ export const CHECKIN_TIME = { player: 0.6, staff: 1.8 };
 export const CLEAN_TIME = { player: 1.5, staff: 4 };
 export const PAD_SIZE = 2.4;
 export const LOT_PAD_SIZE = 3.4;
-export const STAFF_PRICES = { receptionist: 250, housekeeper: 150 } as const;
-export type StaffRole = keyof typeof STAFF_PRICES;
+export const CLERK_PRICE = 250;
+export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
+export const CLEANER_STEP = 50;
+/** Cleaner pads in the lobby; every other lot gets one more. */
+export const LOBBY_CLEANER_SPOTS: Point[] = [{ x: 5.5, z: 1.8 }, { x: 10.4, z: 7.4 }];
+export type StaffRole = 'receptionist' | 'housekeeper';
 
 export interface Room {
   id: number;
@@ -70,7 +73,9 @@ export interface Guest {
 }
 
 export interface Staff {
+  id: string;
   role: StaffRole;
+  home: Point; // where they wait when there's nothing to do
   pos: Point;
   path: Point[];
   heading: number;
@@ -78,7 +83,7 @@ export interface Staff {
 }
 
 export interface Hotel {
-  version: 2;
+  version: 3;
   map: MapId;
   time: number;
   coins: number;
@@ -91,6 +96,7 @@ export interface Hotel {
   rooms: Room[];
   guests: Guest[];
   staff: Staff[];
+  cleanerSpots: { id: number; x: number; z: number; hired: boolean }[];
   padPaid: Record<string, number>;
   checkin: number; // 0..1 progress on the guest at the front
   player: { pos: Point; heading: number; moving: boolean };
@@ -129,7 +135,7 @@ export interface Pad {
 
 export function createHotel(map: MapId, seed = Date.now()): Hotel {
   const h: Hotel = {
-    version: 2,
+    version: 3,
     map,
     time: 0,
     coins: 0,
@@ -142,6 +148,7 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
     rooms: [],
     guests: [],
     staff: [],
+    cleanerSpots: [],
     padPaid: {},
     checkin: 0,
     player: { pos: { x: 0.9, z: 9.5 }, heading: 0, moving: false },
@@ -151,6 +158,7 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
     layoutVersion: 0,
     rng: { seed: seed | 0 },
   };
+  for (const spot of LOBBY_CLEANER_SPOTS) addCleanerSpot(h, spot);
   for (const [i, j] of START_LOTS) addLot(h, i, j);
   // the left wing starts with both rooms built
   h.rooms.filter((r) => r.i === -1).forEach((r) => (r.built = true));
@@ -168,9 +176,17 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
   return h;
 }
 
+function addCleanerSpot(h: Hotel, p: Point) {
+  h.cleanerSpots.push({ id: h.cleanerSpots.length + 1, x: p.x, z: p.z, hired: false });
+}
+
+/** Every lot except the lobby has a cleaner pad in its front corridor. */
+export const lotCleanerSpot = (i: number, j: number): Point => ({ x: i * LOT + 6, z: j * LOT + 9.5 });
+
 function addLot(h: Hotel, i: number, j: number) {
   h.lots.push(lotKey(i, j));
   if (i === 0 && j === 0) return;
+  addCleanerSpot(h, lotCleanerSpot(i, j));
   for (const side of [0, 1] as const) {
     h.rooms.push({ id: h.nextRoomId++, i, j, side, built: false, state: 'ready', guestId: null, clean: 0 });
   }
@@ -195,6 +211,10 @@ export function roomPrice(h: Hotel): number {
 
 export function lotPrice(h: Hotel): number {
   return Math.round((300 * 1.6 ** h.lotsBought) / 50) * 50;
+}
+
+export function cleanerPrice(h: Hotel): number {
+  return CLEANER_PRICE + CLEANER_STEP * h.cleanerSpots.filter((c) => c.hired).length;
 }
 
 export function levelInfo(xp: number) {
@@ -231,12 +251,14 @@ export function pads(h: Hotel): Pad[] {
     const id = `lot:${i},${j}`;
     out.push({ id, kind: 'lot', x: c.x, z: c.z, size: LOT_PAD_SIZE, price: lp, paid: paid(id), label: 'LAND' });
   }
-  const hired = new Set(h.staff.map((s) => s.role));
-  if (!hired.has('housekeeper')) {
-    out.push({ id: 'staff:housekeeper', kind: 'staff', x: 5.5, z: 1.8, size: PAD_SIZE, price: STAFF_PRICES.housekeeper, paid: paid('staff:housekeeper'), label: 'CLEANER' });
+  const cp = cleanerPrice(h);
+  for (const c of h.cleanerSpots) {
+    if (c.hired) continue;
+    const id = `staff:cleaner:${c.id}`;
+    out.push({ id, kind: 'staff', x: c.x, z: c.z, size: PAD_SIZE, price: cp, paid: paid(id), label: 'CLEANER' });
   }
-  if (!hired.has('receptionist')) {
-    out.push({ id: 'staff:receptionist', kind: 'staff', x: 1, z: 2, size: PAD_SIZE, price: STAFF_PRICES.receptionist, paid: paid('staff:receptionist'), label: 'CLERK' });
+  if (!h.staff.some((s) => s.role === 'receptionist')) {
+    out.push({ id: 'staff:receptionist', kind: 'staff', x: 1, z: 2, size: PAD_SIZE, price: CLERK_PRICE, paid: paid('staff:receptionist'), label: 'CLERK' });
   }
   return out;
 }
@@ -479,8 +501,8 @@ function updateStaff(h: Hotel, s: Staff, dt: number) {
     }
     return;
   }
-  if (s.path.length === 0 && Math.hypot(s.pos.x - HOUSEKEEPER_SPOT.x, s.pos.z - HOUSEKEEPER_SPOT.z) > 0.5) {
-    s.path = findPath(grid(h), s.pos, HOUSEKEEPER_SPOT) ?? [];
+  if (s.path.length === 0 && Math.hypot(s.pos.x - s.home.x, s.pos.z - s.home.z) > 0.5) {
+    s.path = findPath(grid(h), s.pos, s.home) ?? [];
   }
 }
 
@@ -507,7 +529,7 @@ function payPads(h: Hotel, dt: number, ev: HotelEvent[]) {
 }
 
 function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
-  const [kind, arg] = pad.id.split(':');
+  const [kind, arg, extra] = pad.id.split(':');
   if (kind === 'room') {
     const room = h.rooms.find((r) => r.id === Number(arg));
     if (room) room.built = true;
@@ -519,12 +541,27 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
     for (const [ei, ej] of enclosedLots(new Set(h.lots))) addLot(h, ei, ej);
     ev.push({ kind: 'unlocked', what: 'More land! Build rooms on it.' });
   } else if (kind === 'staff') {
-    const role = arg as StaffRole;
-    const spot = role === 'receptionist' ? RECEPTIONIST_SPOT : HOUSEKEEPER_SPOT;
-    h.staff.push({ role, pos: { x: pad.x, z: pad.z }, path: [], heading: 0, roomId: null });
-    const s = h.staff[h.staff.length - 1];
-    s.path = findPath(grid(h), s.pos, spot) ?? [{ ...spot }];
-    ev.push({ kind: 'unlocked', what: role === 'receptionist' ? 'Hired a desk clerk!' : 'Hired a cleaner!' });
+    const clerk = arg === 'receptionist';
+    const spotId = Number(extra);
+    if (!clerk) {
+      const c = h.cleanerSpots.find((x) => x.id === spotId);
+      if (c) c.hired = true;
+    }
+    // cleaners wait a step back from their pad so it doesn't look like a pad is still there
+    const home = clerk ? { ...RECEPTIONIST_SPOT } : { x: pad.x, z: pad.z - 1.5 };
+    if (isBlocked(grid(h), home.x, home.z)) Object.assign(home, { x: pad.x, z: pad.z });
+    const s: Staff = {
+      id: clerk ? 'clerk' : `cleaner-${spotId}`,
+      role: clerk ? 'receptionist' : 'housekeeper',
+      home,
+      pos: { x: pad.x, z: pad.z },
+      path: [],
+      heading: 0,
+      roomId: null,
+    };
+    s.path = findPath(grid(h), s.pos, home) ?? [{ ...home }];
+    h.staff.push(s);
+    ev.push({ kind: 'unlocked', what: clerk ? 'Hired a desk clerk!' : 'Hired a cleaner!' });
   }
   h.layoutVersion++;
   // anyone whose route crossed new walls gets a fresh one

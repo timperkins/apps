@@ -165,14 +165,14 @@ export class Renderer {
 
   private updateStaff(h: Hotel) {
     for (const s of h.staff) {
-      let p = this.staff.get(s.role);
+      let p = this.staff.get(s.id);
       if (!p) {
         p =
           s.role === 'receptionist'
             ? makePerson({ outfit: this.T.accent, skin: '#c98c62', hat: 'bellhop', hatColor: this.T.trim, bowTie: '#ffffff' })
             : makePerson({ outfit: '#4fc3f7', skin: '#f1c9a5', hat: 'beanie', hatColor: '#0288d1', mop: true }, 0.95);
         this.live.add(p.root);
-        this.staff.set(s.role, p);
+        this.staff.set(s.id, p);
       }
       p.root.position.set(s.pos.x, 0, s.pos.z);
       const facing = s.path.length ? s.heading : s.role === 'receptionist' ? Math.PI / 2 : s.heading;

@@ -38,6 +38,18 @@ describe('saving', () => {
     expect(hasSave('lodge', store)).toBe(false);
   });
 
+  it('upgrades a save from before multiple cleaners', () => {
+    const h = createHotel('city', 3) as unknown as Record<string, unknown>;
+    h.version = 2;
+    delete h.cleanerSpots;
+    h.staff = [{ role: 'housekeeper', pos: { x: 5, z: 2 }, path: [], heading: 0, roomId: null }];
+    const loaded = deserialize(JSON.stringify(h), 'city')!;
+    expect(loaded.version).toBe(3);
+    expect(loaded.staff[0].id).toBe('cleaner-1');
+    expect(loaded.cleanerSpots.filter((c) => !c.hired)).toHaveLength(3);
+    for (let i = 0; i < 100; i++) tick(loaded, 1 / 30);
+  });
+
   it('starts fresh on missing or broken saves', () => {
     const store = memoryStorage();
     store.setItem(saveKey('city'), '{oops');

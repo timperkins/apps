@@ -36,7 +36,6 @@ export const COIN_PILE = { x: 3, z: 9 };
 export const PILE_RADIUS = 1.6;
 export const QUEUE_CELLS: [number, number][] = [4, 5, 6, 7, 8, 9, 10].map((x) => [x, 5]);
 export const RECEPTIONIST_SPOT = { x: 1, z: 6 };
-export const HOUSEKEEPER_SPOT = { x: 10.5, z: 3 };
 
 // ---------- room lots ----------
 // Each non-lobby lot holds two rooms at the back (x 0-4 and 7-11, z 0-6) with a corridor

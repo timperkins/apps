@@ -48,7 +48,9 @@ describe('a new hotel', () => {
     const p = pads(h);
     expect(p.filter((x) => x.kind === 'room')).toHaveLength(2);
     expect(p.filter((x) => x.kind === 'lot').length).toBeGreaterThanOrEqual(3);
-    expect(p.filter((x) => x.kind === 'staff')).toHaveLength(2);
+    // a clerk, two cleaners in the lobby and one in each wing
+    expect(p.filter((x) => x.id === 'staff:receptionist')).toHaveLength(1);
+    expect(p.filter((x) => x.id.startsWith('staff:cleaner:'))).toHaveLength(4);
   });
 
   it('every pad and every room can be reached on foot', () => {
@@ -161,6 +163,8 @@ describe('buying', () => {
     expect(lotPrice(h)).toBeGreaterThan(pad.price);
     // the new lot comes with two room pads
     expect(pads(h).filter((p) => p.kind === 'room')).toHaveLength(4);
+    // ...and a cleaner pad of its own
+    expect(pads(h).filter((p) => p.id.startsWith('staff:cleaner:'))).toHaveLength(5);
   });
 
   it('land that ends up walled in comes with the purchase', () => {
@@ -188,12 +192,35 @@ describe('buying', () => {
   it('a hired cleaner cleans dirty rooms', () => {
     const h = createHotel('seaside', 4);
     h.coins = 1000;
-    walkTo(h, pads(h).find((p) => p.id === 'staff:housekeeper')!);
+    walkTo(h, pads(h).find((p) => p.id === 'staff:cleaner:1')!);
     run(h, 3);
     h.rooms[0].state = 'dirty';
     walkTo(h, { x: 6, z: 18 });
     const ev = run(h, 30);
     expect(ev.some((e) => e.kind === 'cleaned')).toBe(true);
+  });
+});
+
+describe('cleaners', () => {
+  it('you can hire several, and each one costs a bit more', () => {
+    const h = createHotel('seaside', 6);
+    h.coins = 5000;
+    const cleanerPads = pads(h).filter((p) => p.id.startsWith('staff:cleaner:'));
+    const first = cleanerPads[0].price;
+    for (const pad of cleanerPads.slice(0, 2)) {
+      walkTo(h, pad);
+      run(h, 3);
+    }
+    expect(h.staff.filter((s) => s.role === 'housekeeper')).toHaveLength(2);
+    expect(pads(h).find((p) => p.id.startsWith('staff:cleaner:'))!.price).toBe(first + 100);
+    // two dirty rooms get cleaned at the same time
+    h.rooms.filter((r) => r.built).forEach((r) => {
+      r.state = 'dirty';
+      r.guestId = null;
+    });
+    walkTo(h, { x: 6, z: 18 });
+    const ev = run(h, 30);
+    expect(ev.filter((e) => e.kind === 'cleaned').length).toBeGreaterThanOrEqual(2);
   });
 });
 
