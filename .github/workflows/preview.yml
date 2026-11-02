@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       apps: ${{ steps.changed.outputs.apps }}
+      new: ${{ steps.new.outputs.apps }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,10 +26,35 @@ jobs:
           apps=$(node scripts/changed-apps.mjs --base origin/main)
           echo "Changed apps: $apps"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
+      - id: new
+        run: |
+          apps=$(node scripts/new-apps.mjs --base origin/main)
+          echo "New apps: $apps"
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
+  # An app added on this branch gets its Google resources (site or backends, databases, domain)
+  # before its first deploy. create-app is safe to re-run, so every push re-checks them.
+  setup:
+    needs: detect
+    if: needs.detect.outputs.new != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.new) }}
+    uses: ./.github/workflows/create-app.yml
+    with:
+      name: ${{ matrix.name }}
+      type: ${{ matrix.type }}
+      firestore: ${{ matrix.firestore }}
+      ttl_collections: ${{ matrix.ttl_collections }}
+      domain: ${{ matrix.domain }}
+    secrets: inherit
 
   deploy:
-    needs: detect
-    if: needs.detect.outputs.apps != '[]'
+    needs: [detect, setup]
+    if: >-
+      always() && needs.detect.result == 'success' && needs.detect.outputs.apps != '[]'
+      && (needs.setup.result == 'success' || needs.setup.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +69,7 @@ jobs:
       statuses: write
 
   links:
-    needs: [detect, deploy]
+    needs: [detect, setup, deploy]
     if: always() && needs.detect.outputs.apps != '[]'
     runs-on: ubuntu-latest
     permissions:

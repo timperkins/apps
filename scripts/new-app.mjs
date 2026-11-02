@@ -2,7 +2,8 @@
 // Scaffolds apps/<name>/ from a template and writes its deploy config.
 //
 //   node scripts/new-app.mjs <name> [--template static-vite] [--type hosting|apphosting]
-//                                   [--domain <host>] [--firestore] [--config-only]
+//                                   [--domain <host>] [--firestore] [--ttl-collections "<group> ..."]
+//                                   [--config-only]
 //
 // --config-only writes app.json and the Firebase config into an existing folder (for apps
 // copied in from another repo) without copying a template.
@@ -21,6 +22,7 @@ const { values: opts, positionals } = parseArgs({
     type: { type: 'string', default: 'hosting' },
     domain: { type: 'string' },
     firestore: { type: 'boolean', default: false },
+    'ttl-collections': { type: 'string' },
     'config-only': { type: 'boolean', default: false },
   },
 });
@@ -73,6 +75,9 @@ if (opts.type === 'hosting') {
 }
 if (opts.firestore) {
   app.firestore = { prod: name, preview: `${name}-preview` };
+  // Collection groups whose documents carry an expiresAt timestamp; create-app adds a TTL policy for each.
+  const ttl = (opts['ttl-collections'] ?? '').split(/[\s,]+/).filter(Boolean);
+  if (ttl.length) app.ttlCollections = ttl;
 }
 writeJson(join(dir, 'app.json'), app);
 
@@ -108,8 +113,8 @@ if (!configOnly && existsSync(join(dir, 'package.json'))) {
 }
 
 console.log(`\nWrote apps/${name}. Next:`);
-console.log(`  1. Run the create-app workflow (name: ${name}, type: ${opts.type}${opts.firestore ? ', firestore: true' : ''}) to create the Google resources and DNS.`);
-console.log(`  2. Commit apps/${name} on a branch named ${name}/<short-description> and push for a preview link.`);
+console.log(`  Commit apps/${name} on a branch named ${name}/<short-description> and push. The preview run`);
+console.log(`  creates the Google resources and DNS from app.json (create-app), then deploys a preview.`);
 
 function writeJson(path, value) {
   writeFileSync(path, JSON.stringify(value, null, 2) + '\n');

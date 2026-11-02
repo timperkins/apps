@@ -95,7 +95,7 @@ For App Hosting apps: `"type": "apphosting"`, `"backend": "news"`, `"previewBack
 
 **Manual:** `deploy-app.yml` (workflow_dispatch: app, target prod or preview, optional ref) for redeploys and rollbacks.
 
-**New app:** `create-app.yml` (workflow_dispatch: name, type) runs with the deploy service account, so no Claude session needs Google credentials. It:
+**New app:** `create-app.yml` (workflow_dispatch: name, type; also called by `preview.yml` for each app whose `app.json` is new on the branch, with inputs from that `app.json`) runs with the deploy service account, so no Claude session needs Google credentials. It:
 - creates the Hosting site (or both App Hosting backends with root directory `apps/<name>`),
 - creates the `<name>` and `<name>-preview` Firestore databases if requested,
 - creates the Cloud DNS records and attaches `<name>.trom.dev` to the site or backend,
