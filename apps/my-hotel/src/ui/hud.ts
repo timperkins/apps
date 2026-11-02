@@ -1,0 +1,100 @@
+// The heads-up display: coins, hotel level, hints, toasts and floating "+coins".
+import { levelInfo, padUnderPlayer, playerAtDesk, rating, type Hotel, type HotelEvent } from '../sim/hotel';
+import { THEMES } from '../render/theme';
+
+export class Hud {
+  readonly el: HTMLDivElement;
+  private coins: HTMLElement;
+  private level: HTMLElement;
+  private bar: HTMLElement;
+  private barText: HTMLElement;
+  private hint: HTMLElement;
+  private keys: HTMLElement;
+  private toasts: HTMLElement;
+  private last = { coins: -1, xp: -1, hint: '' };
+
+  constructor(h: Hotel, onMenu: () => void) {
+    this.el = document.createElement('div');
+    this.el.className = 'hud';
+    this.el.innerHTML = `
+      <div class="pill coins"><span class="coin"></span><b>0</b></div>
+      <div class="pill level"><div class="star"><b>1</b></div><div class="bar"><span></span><em></em></div></div>
+      <button class="pill menu" type="button" title="Change map">${THEMES[h.map].name} · Maps</button>
+      <div class="pill keys">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys</div>
+      <div class="hint"></div>
+      <div class="toasts"></div>`;
+    this.coins = this.el.querySelector('.coins b')!;
+    this.level = this.el.querySelector('.star b')!;
+    this.bar = this.el.querySelector('.bar span')!;
+    this.barText = this.el.querySelector('.bar em')!;
+    this.hint = this.el.querySelector('.hint')!;
+    this.keys = this.el.querySelector('.keys')!;
+    this.toasts = this.el.querySelector('.toasts')!;
+    this.el.querySelector('.menu')!.addEventListener('click', onMenu);
+    document.body.appendChild(this.el);
+  }
+
+  update(h: Hotel, controlsUsed: boolean) {
+    if (h.coins !== this.last.coins) {
+      this.last.coins = h.coins;
+      this.coins.textContent = h.coins.toLocaleString('en-US');
+    }
+    if (h.xp !== this.last.xp) {
+      this.last.xp = h.xp;
+      const l = levelInfo(h.xp);
+      const r = rating(h);
+      this.level.textContent = String(l.level);
+      this.bar.style.width = `${(100 * l.into) / l.need}%`;
+      this.barText.textContent = `Hotel level ${l.level}${r ? ` · ${r.toFixed(1)}★` : ''}`;
+    }
+    this.keys.classList.toggle('gone', controlsUsed && h.time > 8);
+    const hint = hintFor(h);
+    if (hint !== this.last.hint) {
+      this.last.hint = hint;
+      this.hint.textContent = hint;
+      this.hint.classList.toggle('show', hint !== '');
+    }
+  }
+
+  events(ev: HotelEvent[], popAt: (text: string) => void) {
+    for (const e of ev) {
+      if (e.kind === 'collect') popAt(`+${e.amount}`);
+      if (e.kind === 'review' && e.stars >= 4) this.toast(`${'★'.repeat(e.stars)} ${e.name}`, `“${e.text}”`);
+      if (e.kind === 'gaveUp') this.toast(`😡 ${e.name} left`, 'Nobody checked them in in time.');
+      if (e.kind === 'unlocked') this.toast('🎉 Unlocked', e.what);
+      if (e.kind === 'levelUp') this.toast(`⭐ Hotel level ${e.level}!`, 'Guests pay more and come more often.');
+    }
+  }
+
+  private toast(title: string, body: string) {
+    const t = document.createElement('div');
+    t.className = 'pill toast';
+    t.innerHTML = `<b></b><small></small>`;
+    t.querySelector('b')!.textContent = title;
+    t.querySelector('small')!.textContent = body;
+    this.toasts.prepend(t);
+    while (this.toasts.children.length > 3) this.toasts.lastElementChild!.remove();
+    setTimeout(() => t.classList.add('out'), 3200);
+    setTimeout(() => t.remove(), 3700);
+  }
+
+  dispose() {
+    this.el.remove();
+  }
+}
+
+function hintFor(h: Hotel): string {
+  const pad = padUnderPlayer(h);
+  if (pad && h.coins <= 0) return 'You need coins. Collect them at the desk!';
+  if (pad) return 'Stay on the pad to pay';
+  if (playerAtDesk(h)) {
+    const waiting = h.guests.some((g) => g.state === 'queued');
+    const free = h.rooms.some((r) => r.built && r.state === 'ready');
+    if (waiting && !free) return 'No clean rooms! Go tidy one up.';
+    if (!waiting) return 'Waiting for guests…';
+    return '';
+  }
+  if (h.served === 0 && h.time < 40) return 'Stand behind the desk to check guests in';
+  if (h.pile >= 40 && h.coins < 40) return 'Coins are piling up at the desk';
+  return '';
+}
