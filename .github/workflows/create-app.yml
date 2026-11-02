@@ -77,6 +77,12 @@ env:
   DOMAIN: ${{ inputs.domain || format('{0}.trom.dev', inputs.name) }}
   REGION: ${{ inputs.region }}
   DB_LOCATION: ${{ inputs.firestore_location }}
+  # New App Hosting backends attach to the shared "apps" Firebase web app (the deploy service account
+  # can't create web apps, and every app shares one). An app.json can name another with webAppId.
+  DEFAULT_WEB_APP_ID: "1:769532990756:web:db61ccd442333d635c8fb1"
+  # Developer Connect repo link for new backends (projects/.../connections/.../gitRepositoryLinks/...).
+  # Empty means use the one an existing App Hosting backend is connected to.
+  REPO_LINK: ""
 
 jobs:
   create:
@@ -93,10 +99,12 @@ jobs:
           app="apps/$NAME/app.json"
           if [ -f "$app" ]; then
             backend=$(jq -r '.backend // empty' "$app"); preview=$(jq -r '.previewBackend // empty' "$app")
+            web_app=$(jq -r '.webAppId // empty' "$app")
           else
             backend="$NAME"; preview="$NAME-preview"
           fi
           { echo "BACKEND=$backend"; echo "PREVIEW_BACKEND=$preview"; echo "BACKENDS=$backend $preview"; } >> "$GITHUB_ENV"
+          echo "WEB_APP_ID=${web_app:-$DEFAULT_WEB_APP_ID}" >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@v2
         with:
@@ -126,17 +134,51 @@ jobs:
               echo "Backend $backend already exists"
             else
               "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
-                --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME"
+                --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME" --app "$WEB_APP_ID"
             fi
           done
-          {
-            echo "### Finish in the Firebase console (App Hosting)"
-            echo "- Connect both backends to \`$GITHUB_REPOSITORY\` with root directory \`apps/$NAME\` if they are not connected."
-            echo "- Turn **automatic rollouts off** on both, so CI is the only trigger."
-            if [ -n "$PREVIEW_BACKEND" ]; then
-              echo "- Set the environment name of \`$PREVIEW_BACKEND\` to \`preview\` so \`apphosting.preview.yaml\` applies."
+
+      # What the Firebase console would otherwise do by hand: connect each backend to this repo through
+      # the Developer Connect link the existing backends use, mark the preview backend's environment
+      # as preview (so apphosting.preview.yaml applies), and turn automatic rollouts off (CI rolls out).
+      - name: App Hosting repo link, environment and rollouts
+        if: inputs.type == 'apphosting'
+        run: |
+          api=https://firebaseapphosting.googleapis.com/v1beta
+          token=$(gcloud auth print-access-token)
+          call() { "$RUN" curl -sS --fail-with-body -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "$@"; }
+
+          # The repo link: REPO_LINK if set, else the one an existing backend already uses.
+          link="$REPO_LINK"
+          if [ -z "$link" ]; then
+            link=$(call "$api/projects/$FIREBASE_PROJECT/locations/-/backends" \
+              | jq -r '[.backends[]? | .codebase.repository // empty | select(test("/gitRepositoryLinks/"))] | unique
+                       | (map(select(test("apps"; "i"))) + .)[0] // empty')
+          fi
+          [ -n "$link" ] || { echo "::error::No Developer Connect repo link found; set REPO_LINK in create-app.yml"; exit 1; }
+          echo "::notice title=repo link::$link"
+
+          for backend in $BACKENDS; do
+            name=$(npx -y "$FIREBASE_TOOLS" apphosting:backends:get "$backend" --project "$FIREBASE_PROJECT" --json \
+              | jq -r '.result.name // empty')
+            [ -n "$name" ] || { echo "::error::Backend $backend not found"; exit 1; }
+            current=$(call "$api/$name")
+
+            if [ -z "$(echo "$current" | jq -r '.codebase.repository // empty')" ]; then
+              body=$(jq -n --arg r "$link" --arg d "apps/$NAME" '{codebase: {repository: $r, rootDirectory: $d}}')
+              call -X PATCH "$api/$name?updateMask=codebase" -d "$body" > /dev/null
+              echo "::notice title=$backend::connected to $link (apps/$NAME)"
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$backend" = "$PREVIEW_BACKEND" ] && [ "$(echo "$current" | jq -r '.environment // empty')" != preview ]; then
+              call -X PATCH "$api/$name?updateMask=environment" -d '{"environment": "preview"}' > /dev/null
+              echo "::notice title=$backend::environment set to preview"
+            fi
+
+            call -X PATCH "$api/$name/traffic?updateMask=rolloutPolicy.disabled" \
+              -d '{"rolloutPolicy": {"disabled": true}}' > /dev/null
+            echo "::notice title=$backend::automatic rollouts off"
+          done
 
       # Needs Secret Manager Admin on the service account. A failure here doesn't stop the rest:
       # a backend that already had access keeps it.
