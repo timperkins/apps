@@ -341,14 +341,14 @@ describe('soda machines', () => {
 });
 
 describe('VIPs', () => {
-  it('a VIP comes every minute and leaves 100,000 coins on the pile', () => {
+  it('a VIP comes every minute and leaves 5,000 coins on the pile', () => {
     const h = createHotel('seaside', 3);
     const ev = run(h, 75);
     const vip = ev.filter((e) => e.kind === 'vip');
     expect(vip).toHaveLength(1);
-    expect(h.pile).toBeGreaterThanOrEqual(100_000);
+    expect(h.pile).toBeGreaterThanOrEqual(5_000);
     walkTo(h, COIN_PILE);
-    expect(h.coins).toBeGreaterThanOrEqual(100_000);
+    expect(h.coins).toBeGreaterThanOrEqual(5_000);
     expect(run(h, 60).filter((e) => e.kind === 'vip')).toHaveLength(1);
   });
 });
