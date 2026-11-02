@@ -11,7 +11,7 @@ const app = initializeApp({
   apiKey: env.VITE_FIREBASE_API_KEY || 'AIzaSyDqgldIcbiEGPtlDoVVohbwuyKBiWZq3Qc',
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'apps-97595.firebaseapp.com',
   projectId: env.VITE_FIREBASE_PROJECT_ID || 'apps-97595',
-  appId: env.VITE_FIREBASE_APP_ID || '1:769532990756:web:a9962066d10703605c8fb1',
+  appId: env.VITE_FIREBASE_APP_ID || '1:769532990756:web:db61ccd442333d635c8fb1',
 });
 
 export const auth = getAuth(app);
