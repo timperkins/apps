@@ -77,9 +77,9 @@ env:
   DOMAIN: ${{ inputs.domain || format('{0}.trom.dev', inputs.name) }}
   REGION: ${{ inputs.region }}
   DB_LOCATION: ${{ inputs.firestore_location }}
-  # New App Hosting backends attach to this existing Firebase web app (the one Tim News uses), because the
-  # deploy service account can't create web apps. An app.json can name another with webAppId.
-  DEFAULT_WEB_APP_ID: "1:769532990756:web:7ab857aa87a4354e5c8fb1"
+  # New App Hosting backends attach to the shared "apps" Firebase web app (the deploy service account
+  # can't create web apps, and every app shares one). An app.json can name another with webAppId.
+  DEFAULT_WEB_APP_ID: "1:769532990756:web:db61ccd442333d635c8fb1"
   # Developer Connect repo link for new backends (projects/.../connections/.../gitRepositoryLinks/...).
   # Empty means use the one an existing App Hosting backend is connected to.
   REPO_LINK: ""

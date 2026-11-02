@@ -8,7 +8,8 @@ The design and current status are in `docs/PLAN.md`; read it before changing dep
 - Never push to `main`. Work on a branch named `<app>/<short-description>` (or `infra/<...>` for repo-wide changes) and open a PR.
 - Each app is self-contained: run `npm` commands from inside `apps/<name>/`, keep its own `package-lock.json`, and do not import from another app.
 - Don't change files outside the app you're working on unless the task is about shared setup.
-- Firebase project: `apps-97595`. Each app uses its own named Firestore database; previews use `<name>-preview`. Never point preview builds at a prod database.
+- Firebase project: `apps-97595`. Every app uses the shared `apps` web app for its client config (these values are public):
+  `apiKey: "AIzaSyDqgldIcbiEGPtlDoVVohbwuyKBiWZq3Qc"`, `authDomain: "apps-97595.firebaseapp.com"`, `projectId: "apps-97595"`, `storageBucket: "apps-97595.firebasestorage.app"`, `messagingSenderId: "769532990756"`, `appId: "1:769532990756:web:db61ccd442333d635c8fb1"`. Each app uses its own named Firestore database; previews use `<name>-preview`. Never point preview builds at a prod database.
 
 ## After pushing a branch
 
