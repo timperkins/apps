@@ -211,6 +211,29 @@ describe('buying', () => {
 });
 
 describe('cleaners', () => {
+  it('a cleaner pad stays after you hire, so you can hire more there', () => {
+    const h = createHotel('seaside', 6);
+    h.coins = 5000;
+    const pad = pads(h).find((p) => p.id === 'staff:cleaner:1')!;
+    walkTo(h, pad);
+    run(h, 3);
+    expect(h.staff.filter((s) => s.role === 'housekeeper')).toHaveLength(1);
+    // standing still doesn't buy another one
+    run(h, 3);
+    expect(h.staff.filter((s) => s.role === 'housekeeper')).toHaveLength(1);
+    const again = pads(h).find((p) => p.id === 'staff:cleaner:1')!;
+    expect(again.price).toBe(pad.price + 50);
+    // step off and back on to hire the next one, up to three per pad
+    for (let k = 0; k < 3; k++) {
+      walkTo(h, { x: pad.x, z: pad.z + 3 });
+      if (!pads(h).some((p) => p.id === 'staff:cleaner:1')) break;
+      walkTo(h, pad);
+      run(h, 3);
+    }
+    expect(h.staff.filter((s) => s.id.startsWith('cleaner-1'))).toHaveLength(3);
+    expect(pads(h).some((p) => p.id === 'staff:cleaner:1')).toBe(false);
+  });
+
   it('you can hire several, and each one costs a bit more', () => {
     const h = createHotel('seaside', 6);
     h.coins = 5000;

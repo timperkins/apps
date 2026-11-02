@@ -40,6 +40,7 @@ export const LOT_PAD_SIZE = 3.4;
 export const CLERK_PRICE = 250;
 export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
 export const CLEANER_STEP = 50;
+export const CLEANERS_PER_PAD = 3; // a cleaner pad stays until this many have been hired there
 /** Cleaner pads in the lobby; every other lot gets one more. */
 export const LOBBY_CLEANER_SPOTS: Point[] = [{ x: 5.5, z: 1.8 }, { x: 10.4, z: 7.4 }];
 export const RESTOCKER_PRICE = 200;
@@ -123,6 +124,7 @@ export interface Hotel {
   cleanerSpots: { id: number; x: number; z: number; hired: boolean }[];
   vending: Vending[];
   padPaid: Record<string, number>;
+  padLock?: string | null; // a pad that was just bought from; it waits until the player steps off
   checkin: number; // 0..1 progress on the guest at the front
   player: { pos: Point; heading: number; moving: boolean };
   nextGuestId: number;
@@ -252,8 +254,12 @@ export function lotPrice(h: Hotel): number {
 }
 
 export function cleanerPrice(h: Hotel): number {
-  return CLEANER_PRICE + CLEANER_STEP * h.cleanerSpots.filter((c) => c.hired).length;
+  return CLEANER_PRICE + CLEANER_STEP * h.staff.filter((s) => s.role === 'housekeeper').length;
 }
+
+/** How many cleaners have been hired from one cleaner pad. */
+export const cleanersAt = (h: Hotel, spotId: number) =>
+  h.staff.filter((s) => s.id === `cleaner-${spotId}` || s.id.startsWith(`cleaner-${spotId}-`)).length;
 
 export function levelInfo(xp: number) {
   let level = 1, need = 10, floor = 0;
@@ -291,7 +297,7 @@ export function pads(h: Hotel): Pad[] {
   }
   const cp = cleanerPrice(h);
   for (const c of h.cleanerSpots) {
-    if (c.hired) continue;
+    if (cleanersAt(h, c.id) >= CLEANERS_PER_PAD) continue;
     const id = `staff:cleaner:${c.id}`;
     out.push({ id, kind: 'staff', x: c.x, z: c.z, size: PAD_SIZE, price: cp, paid: paid(id), label: 'CLEANER' });
   }
@@ -657,13 +663,15 @@ function collectPile(h: Hotel, ev: HotelEvent[]) {
 
 function payPads(h: Hotel, dt: number, ev: HotelEvent[]) {
   const pad = padUnderPlayer(h);
-  if (!pad || h.coins <= 0) return;
+  if (h.padLock && pad?.id !== h.padLock) h.padLock = null;
+  if (!pad || h.coins <= 0 || pad.id === h.padLock) return;
   const rate = Math.max(pad.price / 1.5, 40);
   const pay = Math.min(h.coins, pad.price - pad.paid, Math.ceil(rate * dt));
   h.coins -= pay;
   h.padPaid[pad.id] = pad.paid + pay;
   if (h.padPaid[pad.id] >= pad.price) {
     delete h.padPaid[pad.id];
+    h.padLock = pad.id; // a pad that stays (cleaners) doesn't start charging again until you step off
     unlock(h, pad, ev);
   }
 }
@@ -687,15 +695,16 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
   } else if (kind === 'staff') {
     const clerk = arg === 'receptionist';
     const spotId = Number(extra);
+    const n = clerk ? 0 : cleanersAt(h, spotId);
     if (!clerk) {
       const c = h.cleanerSpots.find((x) => x.id === spotId);
       if (c) c.hired = true;
     }
-    // cleaners wait a step back from their pad so it doesn't look like a pad is still there
-    const home = clerk ? { ...RECEPTIONIST_SPOT } : { x: pad.x, z: pad.z - 1.5 };
-    if (isBlocked(grid(h), home.x, home.z)) Object.assign(home, { x: pad.x, z: pad.z });
+    // cleaners wait a step back from their pad, side by side
+    const home = clerk ? { ...RECEPTIONIST_SPOT } : { x: pad.x + [0, -0.9, 0.9][n % 3], z: pad.z - 1.5 };
+    if (isBlocked(grid(h), home.x, home.z)) Object.assign(home, { x: pad.x + [0, -0.9, 0.9][n % 3], z: pad.z });
     const s: Staff = {
-      id: clerk ? 'clerk' : `cleaner-${spotId}`,
+      id: clerk ? 'clerk' : n === 0 ? `cleaner-${spotId}` : `cleaner-${spotId}-${n + 1}`,
       role: clerk ? 'receptionist' : 'housekeeper',
       home,
       pos: { x: pad.x, z: pad.z },
