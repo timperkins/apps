@@ -4,8 +4,36 @@ name: create-app
 # Hosting site or App Hosting backends, Firestore databases, custom domain, DNS records
 # and Auth authorized domain. Safe to re-run; existing resources are left alone.
 # Scaffold the folder itself with scripts/new-app.mjs.
+# preview.yml calls this for every app a branch adds, with the inputs read from its app.json,
+# so it only needs running by hand for apps added before that, or to change a setting.
 
 on:
+  workflow_call:
+    inputs:
+      name:
+        type: string
+        required: true
+      type:
+        type: string
+        default: hosting
+      firestore:
+        type: boolean
+        default: false
+      attach_domain:
+        type: boolean
+        default: true
+      domain:
+        type: string
+        required: false
+      ttl_collections:
+        type: string
+        required: false
+      firestore_location:
+        type: string
+        default: nam5
+      region:
+        type: string
+        default: us-central1
   workflow_dispatch:
     inputs:
       name:
@@ -59,6 +87,7 @@ jobs:
       - name: Check name
         run: |
           [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]] || { echo "::error::Bad app name: $NAME"; exit 1; }
+          case '${{ inputs.type }}' in hosting|apphosting) ;; *) echo "::error::Bad app type: ${{ inputs.type }}"; exit 1 ;; esac
           # Backend names from app.json when the app folder exists (an app can keep an older backend,
           # or have no preview backend), else <name> and <name>-preview.
           app="apps/$NAME/app.json"
