@@ -476,7 +476,7 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(c.x - 2.6, by - 1.8); ctx.lineTo(c.x, by + .6); ctx.lineTo(c.x + 2.6, by - 1.8); ctx.stroke();
       ctx.restore();
     }
-    ctx.save(); ctx.translate(c.x, c.y);
+    ctx.save(); ctx.translate(c.x + (c.dodgeX ?? 0), c.y);
     ctx.scale(.7, .7);
     const chute = c.landed ? Math.max(0, 1 - c.t * 1.5) : 1;
     ctx.rotate(c.sway);

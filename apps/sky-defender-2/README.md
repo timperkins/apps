@@ -2,6 +2,10 @@
 
 A portrait-locked WWII anti-aircraft PWA. Turn the phone like a steering wheel to aim (aim gain 1.4x, so the horizon is reached at about 60 degrees of tilt); tap or hold anywhere on the screen to fire.
 
+On a computer (a mouse and no touch screen, or a device with no motion sensors) the left and right arrow keys (or A and D) aim, space fires, Enter or a click opens a landed crate, and `z`/`x` move between turrets in war mode.
+
+Upgrades: each wave has a 20% chance that the resupply plane is a gold plane (gold marker, gold arrow). Its gold pack offers a choice of every permanent upgrade you don't have yet, including two that only come in gold packs: **Leeching** (each kill heals every standing building by 2% of its max) and **Upgrade shifter** (cargo planes and falling crates dodge your shots). **Rebuild** is a one-off card in normal crates that brings every destroyed building back at full health.
+
 Built from the final game mechanics plan and the approved Alpine Dusk (realistic) art.
 
 ## Run it

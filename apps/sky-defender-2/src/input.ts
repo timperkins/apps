@@ -26,6 +26,8 @@ export type SensorResult = 'ok' | 'none' | 'denied';
 
 class TiltInput {
   readonly debug = /[?&]debug\b/.test(location.search);
+  /** On a computer, the arrow keys aim instead of the phone's roll. */
+  keyboard = false;
   available = false;
   /** unfiltered roll, radians, clockwise positive */
   raw = 0;
@@ -38,6 +40,7 @@ class TiltInput {
   private keys = 0;
   private bound: ((e: DeviceOrientationEvent) => void) | null = null;
   private debugInstalled = false;
+  private keysInstalled = false;
 
   onOrientation(e: DeviceOrientationEvent) {
     if (e.beta == null || e.gamma == null) return;
@@ -55,9 +58,11 @@ class TiltInput {
   }
 
   async start(): Promise<SensorResult> {
-    if (this.debug) { this.available = true; this.installDebug(); return 'ok'; }
+    if (this.debug) { this.available = true; this.keyboard = true; this.installDebug(); return 'ok'; }
+    // a computer (a mouse and no touch screen) plays with the keyboard straight away
+    if (isComputer()) { this.useKeyboard(); return 'ok'; }
     const DOE = window.DeviceOrientationEvent as OrientationEventWithPermission | undefined;
-    if (!DOE) return 'none';
+    if (!DOE) { this.useKeyboard(); return 'ok'; }
     if (typeof DOE.requestPermission === 'function') {
       try { if (await DOE.requestPermission() !== 'granted') return 'denied'; } catch { return 'denied'; }
     }
@@ -72,7 +77,23 @@ class TiltInput {
       if (this.available) return 'ok';
       await new Promise(r => setTimeout(r, 50));
     }
-    return this.available ? 'ok' : 'none';
+    if (this.available) return 'ok';
+    // no motion sensors after all: fall back to the keyboard
+    this.useKeyboard();
+    return 'ok';
+  }
+
+  /** Keyboard aiming: the left and right arrow keys (or A and D) turn the gun while held. */
+  useKeyboard() {
+    this.available = true; this.keyboard = true; this.flatness = 0;
+    if (this.keysInstalled) return;
+    this.keysInstalled = true;
+    const held = new Set<string>();
+    const sync = () => { this.keys = (held.has('r') ? 1 : 0) - (held.has('l') ? 1 : 0); };
+    const side = (e: KeyboardEvent) => e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' ? 'l' : e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D' ? 'r' : null;
+    window.addEventListener('keydown', e => { const k = side(e); if (k) { held.add(k); sync(); e.preventDefault(); } });
+    window.addEventListener('keyup', e => { const k = side(e); if (k) { held.delete(k); sync(); } });
+    window.addEventListener('blur', () => { held.clear(); sync(); });
   }
 
   private installDebug() {
@@ -87,13 +108,17 @@ class TiltInput {
   calibrate() { this.offset = this.raw; this.filter.reset(); }
 
   update(t: number, dt: number): number {
-    if (this.debug && this.keys) this.raw += this.keys * dt * 1.2;
+    // held keys turn the gun steadily; it stops at the same limit tilting does
+    if (this.keyboard && this.keys) this.raw = Math.max(-1.2, Math.min(1.2, this.raw + this.keys * dt * 1.1));
     this.value = this.filter.filter(this.raw - this.offset, t);
     return this.value;
   }
 
   /** sensors stopped reporting (e.g. permission revoked) */
-  stale() { return !this.debug && performance.now() - this.lastEvent > 2500; }
+  stale() { return !this.keyboard && performance.now() - this.lastEvent > 2500; }
 }
+
+/** A computer: a precise pointer and no touch screen. */
+export function isComputer() { return matchMedia('(pointer: fine)').matches && !matchMedia('(any-pointer: coarse)').matches && navigator.maxTouchPoints === 0; }
 
 export const Tilt = new TiltInput();

@@ -119,3 +119,11 @@ button:active { transform: scale(.97); }
 @media (prefers-reduced-motion: reduce) {
   .hint-tilt .phone, #start .lead { animation: none; }
 }
+
+/* a gold pack: gold trim, and a tighter list so up to six choices fit on a phone */
+#cards.gold h2 { color: #ffd34a; }
+#cards.gold .cards { gap: 8px; }
+#cards.gold .card { border-color: rgba(255, 211, 74, .55); padding: 10px 14px; gap: 2px; }
+#cards.gold .card b { font-size: 17px; }
+#cards.gold .card .desc { font-size: 13.5px; }
+#cards.gold { justify-content: safe center; overflow-y: auto; }

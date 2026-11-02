@@ -11,8 +11,8 @@ export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
 export type GameMode = 'original' | 'war';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
-/** Perks: permanent gun improvements (dual, triple, reload, flak), leeching (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
-export type PerkId = 'dual' | 'triple' | 'reload' | 'flak' | 'leech' | 'repair' | 'rebuild' | 'shield';
+/** Perks: permanent gun improvements (dual, triple, reload, flak), leeching and the upgrade shifter (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
+export type PerkId = 'dual' | 'triple' | 'reload' | 'flak' | 'leech' | 'shifter' | 'repair' | 'rebuild' | 'shield';
 export type UpgradeId = PerkId | WeaponId;
 export type Difficulty = 'normal' | 'hard';
 type TrailPoint = [number, number, number];
@@ -36,6 +36,8 @@ export interface Plane {
   dropped?: boolean; hitByPlayer?: boolean; gone?: boolean;
   /** a gold resupply plane, whose crate is a gold pack */
   gold?: boolean;
+  /** upgrade shifter: seconds left of a dodge, and which way (-1 up, 1 down) */
+  dodgeT?: number; dodgeDir?: number;
   // war mode: a friendly plane, the turret it means to drop a crate at, and the short bursts planes fire at each other
   friend?: boolean; dropAt?: Building | null; gunCD?: number; gunT?: number; gunAt?: Plane | null;
 }
@@ -54,7 +56,9 @@ export interface Tracer { x0: number; y0: number; x1: number; y1: number; life: 
 export interface Bolt { pts: [number, number][]; life: number; }
 /** `lz` is the x of the landing zone the crate steers to. */
 /** A gold crate is a gold pack: opening it gives every permanent upgrade at once. */
-export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; gold?: boolean; }
+export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; gold?: boolean;
+  /** upgrade shifter: seconds left of a sideways dodge, which way, and how far it is off its path right now */
+  dodgeT?: number; dodgeDir?: number; dodgeX?: number; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
 /** `outpost` marks a war mode turret standing on its own away from the base. */
 export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
@@ -99,8 +103,11 @@ export const DOME_RX = 190, DOME_RY = 115;
 const SHIELD_TIME = 25;
 /** The chance each wave that the resupply plane is a gold plane; leeching heals each standing building by this share of its full strength per kill. */
 const GOLD_CHANCE = .2, LEECH_HEAL = .02;
-/** Everything a gold pack gives. */
-export const GOLD_PACK: PerkId[] = ['triple', 'reload', 'flak', 'leech'];
+/** The permanent upgrades a gold pack offers; dual or triple shot is whichever comes next. Leeching and the shifter only come in a gold pack. */
+const GOLD_ONLY: PerkId[] = ['leech', 'shifter'];
+const GOLD_PACK: PerkId[] = ['dual', 'triple', 'reload', 'flak', 'leech', 'shifter'];
+/** How long an upgrade shifter dodge lasts, and how close a shot gets (past touching) before the cargo moves. */
+const DODGE_TIME = .7, DODGE_PAD = 14;
 /** A boss plane comes in the middle of every fourth wave. It takes many hits, and the laser and nuke wear it down by the amount below. */
 const BOSS_EVERY = 4, LASER_DPS = 8, NUKE_DMG = 12;
 
@@ -139,6 +146,7 @@ export const UPGRADES: Record<UpgradeId, { name: string; kind: string; desc: str
   triple: { name: 'Triple shot', kind: 'Permanent', desc: 'A third barrel. Every shot fires a fan of three shells.', hud: 'TRIPLE', color: '#fff1c8' },
   reload: { name: 'Fast loader', kind: 'Permanent', desc: 'The gun fires half as fast again, for the rest of the game.', hud: 'LOADER', color: '#fff1c8' },
   flak: { name: 'Heavy flak', kind: 'Permanent', desc: 'Bigger shells with a much wider burst. Near misses count.', hud: 'FLAK', color: '#fff1c8' },
+  shifter: { name: 'Upgrade shifter', kind: 'Permanent', desc: 'Cargo planes and their crates dodge your shots, so you never shoot down an upgrade by accident.', hud: 'SHIFTER', color: '#ffd34a' },
   leech: { name: 'Leeching', kind: 'Permanent', desc: 'Every plane you shoot down heals each standing building by 2% of its full strength.', hud: 'LEECH', color: '#ffd34a' },
   repair: { name: 'Repair crew', kind: 'Right away', desc: 'Every standing building back to full strength, and ruined ones rebuilt to half.', hud: 'REPAIR', color: '#9fe0b0' },
   rebuild: { name: 'Rebuild', kind: 'Right away', desc: 'Every destroyed building rebuilt to full strength.', hud: 'REBUILD', color: '#9fe0b0' },
@@ -214,7 +222,7 @@ export class Game {
   score = 0; mult = 1;
   fireCD = 0; recoil = 0; flash = 0;
   /** barrels on the gun: 1, 2 with dual shot, 3 with triple shot */
-  guns = 1; fastLoad = false; heavyFlak = false; leech = false; shieldT = 0; shieldFlash = 0;
+  guns = 1; fastLoad = false; heavyFlak = false; leech = false; shifter = false; shieldT = 0; shieldFlash = 0;
   weapon: WeaponId | null = null; ammo = 0;
   lasing = false; laserSnd = 0; nukeFlash = 0;
   lock: Lock = { target: null, t: 0, step: 0, locked: false };
@@ -254,7 +262,7 @@ export class Game {
     this.warT = 0; this.strikes = 0; this.enemyT = 0; this.friendT = 0; this.endReason = '';
     this.score = 0; this.mult = 1;
     this.fireCD = 0; this.recoil = 0; this.flash = 0;
-    this.guns = 1; this.fastLoad = false; this.heavyFlak = false; this.leech = false; this.goldWave = false; this.shieldT = 0; this.shieldFlash = 0;
+    this.guns = 1; this.fastLoad = false; this.heavyFlak = false; this.leech = false; this.shifter = false; this.goldWave = false; this.shieldT = 0; this.shieldFlash = 0;
     this.weapon = null; this.ammo = 0;
     this.lasing = false; this.laserSnd = 0; this.nukeFlash = 0;
     this.lock = { target: null, t: 0, step: 0, locked: false };
@@ -726,7 +734,7 @@ export class Game {
       if (!this.hittable(p)) continue;
       const c = near(p.x, p.y);
       if (!c || this.planeDist(p, c[0], c[1]) > 1.5) continue;
-      if (p.type === 'cargo') { this.cargoLost(true); continue; }
+      if (p.type === 'cargo') { if (!this.dodge(p)) this.cargoLost(true); continue; }
       if (p.friend) { this.friendlyDown(p); continue; }
       // a one-hit plane goes at once; the boss burns down while the beam stays on it
       this.damagePlane(p, p.max > 1 && p.state !== 'falling' ? LASER_DPS * dt : 1, c);
@@ -739,7 +747,7 @@ export class Game {
     }
     for (const cr of this.crates) {
       const c = near(cr.x, cr.y - 4);
-      if (c && !cr.landed && !cr.dead && Math.hypot(cr.x - c[0], cr.y - 4 - c[1]) < 7) this.crateLost(cr);
+      if (c && !cr.landed && !cr.dead && Math.hypot(cr.x - c[0], cr.y - 4 - c[1]) < 7 && !this.dodge(cr)) this.crateLost(cr);
     }
     this.laserSnd -= dt;
     if (this.laserSnd <= 0) { this.laserSnd = .09; Sound.laser(); }
@@ -1127,10 +1135,16 @@ export class Game {
       const x = px + (x1 - px) * i / segs, y = py + (y1 - py) * i / segs;
       for (const p of this.planes) {
         if (!this.hittable(p)) continue;
+        // with the upgrade shifter, a cargo plane moves out of the way just before a shot gets to it, and the shot flies on
+        if (p.type === 'cargo' && this.shifter) { if (this.planeDist(p, x, y) < pad + DODGE_PAD) this.dodge(p); continue; }
         if (this.planeDist(p, x, y) < pad) return [x, y];
       }
       for (const b of this.bombs) if (Math.hypot(b.x - x, b.y - y) - this.bombR(b) < pad) return [x, y];
-      for (const c of this.crates) if (!c.landed && Math.hypot(c.x - x, c.y - 4 - y) < 6 + pad) return [x, y];
+      for (const c of this.crates) {
+        if (c.landed || c.dead) continue;
+        if (this.shifter) { if (Math.hypot(c.x - x, c.y - 4 - y) < 6 + pad + DODGE_PAD) this.dodge(c); continue; }
+        if (Math.hypot(c.x - x, c.y - 4 - y) < 6 + pad) return [x, y];
+      }
     }
     return null;
   }
@@ -1150,7 +1164,7 @@ export class Game {
     for (const p of this.planes) {
       if (!this.hittable(p)) continue;
       if (this.planeDist(p, x, y) < R) {
-        if (p.type === 'cargo') { this.cargoLost(true); continue; }
+        if (p.type === 'cargo') { if (!this.dodge(p)) this.cargoLost(true); continue; }
         if (p.friend) { this.friendlyDown(p); continue; }
         const flying = p.state !== 'falling';
         this.damagePlane(p, dmg, [x, y]); hitEnemy = true;
@@ -1164,7 +1178,7 @@ export class Game {
         if (b.hp <= 0) this.killBomb(b);
       }
     }
-    for (const c of this.crates) if (!c.landed && !c.dead && Math.hypot(c.x - x, c.y - 4 - y) < R + 5) this.crateLost(c);
+    for (const c of this.crates) if (!c.landed && !c.dead && Math.hypot(c.x - x, c.y - 4 - y) < R + 5 && !this.dodge(c)) this.crateLost(c);
     if (s.counted !== false) this.scoreShot(hitEnemy);
     this.flak(x, y, R / 9);
     Sound.flak(Math.min(1, Math.hypot(x, y) / 800), this.panOf(x, y));
@@ -1324,7 +1338,7 @@ export class Game {
     this.planes.push(this.cargo);
     if (this.goldWave) {
       this.labels.push({ text: 'Gold plane incoming', x: 0, y: GROUND_Y - 70, t: 0, life: 2.6, color: '#ffd34a', big: true });
-      this.tip('gold', "A gold plane! Its gold pack holds every permanent upgrade, plus Leeching. Don't shoot it.");
+      this.tip('gold', "A gold plane! Its gold pack lets you choose any permanent upgrade, even the gold-only ones. Don't shoot it.");
     }
     for (const p of this.planes) if (p.type === 'fighter' && p.state === 'fly' && Math.random() < .35) p.chaseCargo = true;
     this.tip('cargo', "An upgrade is on its way. Don't shoot the cargo plane or its crate.");
@@ -1339,16 +1353,21 @@ export class Game {
       case 'triple': return this.guns === 2;
       case 'reload': return !this.fastLoad;
       case 'flak': return !this.heavyFlak;
-      // leeching only comes in a gold pack
-      case 'leech': return false;
+      case 'leech': return !this.leech;
+      case 'shifter': return !this.shifter;
       case 'repair': return this.baseHealth() < .9;
       case 'rebuild': return this.buildings.some(b => b.ruined);
       case 'shield': return this.shieldT <= 0;
       default: return true;
     }
   }
-  offers(): UpgradeId[] {
-    const ids = (Object.keys(UPGRADES) as UpgradeId[]).filter(k => this.offerable(k));
+  /** The choice in a crate. A gold pack offers every permanent upgrade not yet owned; a plain crate a random three of the rest. */
+  offers(gold = false): UpgradeId[] {
+    if (gold) {
+      const g = GOLD_PACK.filter(k => this.offerable(k));
+      if (g.length) return g;
+    }
+    const ids = (Object.keys(UPGRADES) as UpgradeId[]).filter(k => this.offerable(k) && !GOLD_ONLY.includes(k as PerkId));
     for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
     // a badly damaged base always gets the chance to repair
     const out = ids.slice(0, 3);
@@ -1365,6 +1384,7 @@ export class Game {
     else if (id === 'reload') this.fastLoad = true;
     else if (id === 'flak') this.heavyFlak = true;
     else if (id === 'leech') this.leech = true;
+    else if (id === 'shifter') this.shifter = true;
     else if (id === 'repair') this.repairBase();
     else if (id === 'rebuild') this.rebuildBase();
     else if (id === 'shield') { this.shieldT = SHIELD_TIME; Sound.shield(); }
@@ -1373,26 +1393,12 @@ export class Game {
     if (id === 'missiles') this.tip('missile', 'Hold a plane in your sights to lock on, then tap to fire a missile.');
     if (id === 'laser') this.tip('laser', 'Hold your finger down to keep the laser on.');
     if (id === 'lightning') this.tip('lightning', 'Aim near a plane and tap. The bolt jumps to whatever is close by.');
+    if (id === 'leech') this.tip('leech', 'Leeching: every plane you shoot down heals your standing buildings a little.');
+    if (c?.gold) for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28; this.particles.push({ k: 'spark', x: c.x, y: c.y - 3, vx: Math.cos(a) * rand(20, 60), vy: Math.sin(a) * rand(20, 60) - 20, life: rand(.5, .9), t: 0, r: .6 }); }
     this.labels.push({ text: UPGRADES[id].name, x: this.gunX, y: GROUND_Y - 70, t: 0, life: 2.4, color: '#bff5cf', big: true });
     if (c) for (let i = 0; i < 6; i++) this.addPuff(c.x + rand(-4, 4), LZ_Y - rand(0, 4), 'dust', rand(1.5, 2.5), 2, .5, rand(-6, 6), -6);
     Sound.pop();
     this.vibrate(20);
-    this.hooks.hud && this.hooks.hud();
-  }
-  /** Opens the waiting gold pack: every permanent upgrade at once, Leeching included. */
-  openGold() {
-    const c = this.readyCrate();
-    if (!c || !c.gold) return;
-    c.dead = true;
-    this.crates = this.crates.filter(cr => !cr.dead);
-    this.guns = 3; this.fastLoad = true; this.heavyFlak = true; this.leech = true;
-    this.firing = false;
-    this.labels.push({ text: 'Gold pack', x: this.gunX, y: GROUND_Y - 78, t: 0, life: 2.8, color: '#ffd34a', big: true });
-    this.labels.push({ text: 'Triple shot, Fast loader, Heavy flak, Leeching', x: this.gunX, y: GROUND_Y - 58, t: 0, life: 2.8, color: '#ffe9a0' });
-    for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28; this.particles.push({ k: 'spark', x: c.x, y: c.y - 3, vx: Math.cos(a) * rand(20, 60), vy: Math.sin(a) * rand(20, 60) - 20, life: rand(.5, .9), t: 0, r: .6 }); }
-    this.tip('leech', 'Leeching: every plane you shoot down heals your standing buildings a little.');
-    Sound.pop(); Sound.shield();
-    this.vibrate(40);
     this.hooks.hud && this.hooks.hud();
   }
   updateCargo(dt: number) {
@@ -1400,6 +1406,8 @@ export class Game {
     if (c && c.dead) this.cargo = null;
     else if (c) {
       c.x += c.dir * c.speed * dt;
+      // an upgrade shifter dodge: a quick hop off its line and back
+      if (c.dodgeT && c.dodgeT > 0) { c.dodgeT = Math.max(0, c.dodgeT - dt); c.y = c.alt + (c.dodgeDir ?? 1) * 22 * Math.sin(Math.PI * (1 - c.dodgeT / DODGE_TIME)); }
       c.trailT -= dt;
       if (c.trailT <= 0) { c.trailT = .1; c.trail.push([c.x - c.dir * 17, c.y + 1, this.t]); if (c.trail.length > 45) c.trail.shift(); }
       if (c.hitByPlayer || c.hp < 100) {
@@ -1415,6 +1423,7 @@ export class Game {
     }
     for (const cr of this.crates) {
       cr.t += dt;
+      if (cr.dodgeT && cr.dodgeT > 0) { cr.dodgeT = Math.max(0, cr.dodgeT - dt); cr.dodgeX = (cr.dodgeDir ?? 1) * 16 * Math.sin(Math.PI * (1 - cr.dodgeT / DODGE_TIME)); }
       if (cr.landed) continue;
       // fall at a steady rate and steer toward the landing zone, arriving as it touches down
       cr.y = Math.min(LZ_Y, cr.y + cr.vy * dt);
@@ -1425,6 +1434,17 @@ export class Game {
       if (cr.y >= LZ_Y) this.crateLanded(cr);
     }
     this.crates = this.crates.filter(cr => !cr.dead);
+  }
+  /** Upgrade shifter: a cargo plane or falling crate about to be hit dodges, and the shot misses it. Returns whether it dodged. */
+  dodge(o: Plane | Crate) {
+    if (!this.shifter) return false;
+    if (!(o.dodgeT && o.dodgeT > 0)) {
+      o.dodgeT = DODGE_TIME;
+      o.dodgeDir = Math.random() < .5 ? -1 : 1;
+      this.labels.push({ text: 'Dodged', x: o.x, y: o.y - 14, t: 0, life: 1, color: '#ffd34a' });
+      Sound.whine(.4, this.panOf(o.x, o.y));
+    }
+    return true;
   }
   crateLanded(c: Crate) {
     c.landed = true; c.t = 0; c.x = c.lz; c.y = LZ_Y; c.sway = 0;

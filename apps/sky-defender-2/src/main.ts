@@ -3,7 +3,7 @@ import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
 import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId } from './game';
-import { Tilt } from './input';
+import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 
 type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu';
@@ -187,12 +187,22 @@ async function begin() {
     show('nosensor'); mode = 'nosensor';
     return;
   }
-  tryLockPortrait();
+  if (Tilt.keyboard) keyboardText(); else tryLockPortrait();
   Tilt.calibrate();
   game.start();
   show(null);
   setHud(true);
   mode = 'play';
+}
+/** On a computer the on-screen help talks about keys, not tilting and tapping. */
+function keyboardText() {
+  document.querySelector('#hint .hint-tilt span:last-child')!.textContent = 'Left and right arrow keys to aim';
+  document.querySelector('#hint .hint-fire span:last-child')!.textContent = 'Space bar to fire';
+  document.querySelector<SVGElement>('#hint .phone')!.style.display = 'none';
+}
+if (isComputer()) {
+  document.querySelector('#start .lead')!.textContent = 'Click to start. Arrow keys aim, space bar fires.';
+  document.querySelector('#recal .lead')!.textContent = 'Click to continue';
 }
 async function tryLockPortrait() {
   // Android: a fullscreen page or installed app can lock portrait. iOS relies on the layout counter-rotation.
@@ -211,7 +221,7 @@ let swipe: { id: number; x: number; y: number; t: number; timer: number; fired: 
 fz.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (mode !== 'play') return;
-  if (tapsCrate(e)) { if (game.readyCrate()?.gold) game.openGold(); else openCards(); return; }
+  if (tapsCrate(e)) { openCrate(); return; }
   pointers.add(e.pointerId);
   if (game.phase === 'clear') game.skipClear();
   if (game.war) {
@@ -260,7 +270,9 @@ document.addEventListener('touchend', e => {
 for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
 // keyboard for desktop testing
 addEventListener('keydown', e => {
-  if (e.code === 'Space' && mode === 'play') { if (!e.repeat) game.press(); e.preventDefault(); }
+  if (e.code === 'Space' && mode === 'play') { if (!e.repeat) { game.press(); hintProgress('fire'); } e.preventDefault(); }
+  // Enter opens a crate waiting on the pad
+  if (e.key === 'Enter' && mode === 'play' && !e.repeat && game.readyCrate()) openCrate();
   if (e.key === 'p' || e.key === 'Escape') { if (mode === 'play') pause(); }
   // war mode: z and x move to the turret on the left and right
   if ((e.key === 'z' || e.key === 'x') && mode === 'play' && !e.repeat) game.move(e.key === 'z' ? -1 : 1);
@@ -279,13 +291,17 @@ function tapsCrate(e: PointerEvent) {
   const [x, y] = renderer.worldToScreen(game, c.x, c.y - 3);
   return Math.hypot(e.offsetX - x, e.offsetY - y) < 26 + 10 * renderer.s;
 }
-function openCards() {
+/** Opens the crate waiting on the pad. A gold pack lets you pick any permanent upgrade you don't have yet. */
+function openCrate() {
+  const gold = !!game.readyCrate()?.gold;
   mode = 'cards';
   game.release(); pointers.clear();
   Sound.ui();
+  $('cardsTitle').textContent = gold ? 'Gold pack: choose an upgrade' : 'Choose an upgrade';
+  $('cards').classList.toggle('gold', gold);
   const list = $('cardList');
   list.innerHTML = '';
-  for (const id of game.offers()) {
+  for (const id of game.offers(gold)) {
     const u = UPGRADES[id];
     const b = document.createElement('button');
     b.className = 'card';
@@ -371,7 +387,10 @@ $('againBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); 
 $('titleBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); startScreen(); });
 
 /* ---------- tips and first-run hint ---------- */
+/** Tips that read differently when playing on a computer. */
+const KEYBOARD_TIPS: Record<string, string> = { crate: 'Click the crate on the pad, or press Enter, to open it.' };
 function showTip(key: string, text: string) {
+  if (Tilt.keyboard && KEYBOARD_TIPS[key]) { key += '.keys'; text = KEYBOARD_TIPS[key.slice(0, -5)]; }
   if (seenTips.has(key)) return;
   seenTips.add(key); store.set('tips', [...seenTips]);
   toastQueue.push(text);
@@ -401,7 +420,7 @@ function frame(now: number) {
   if (mode === 'loading') return;
   const roll = Tilt.update(now / 1000, dt);
   if (mode === 'play') {
-    if (!Tilt.debug && Tilt.flatness > .9) { flatT += dt; if (flatT > .4) pause('flat'); } else flatT = 0;
+    if (!Tilt.keyboard && Tilt.flatness > .9) { flatT += dt; if (flatT > .4) pause('flat'); } else flatT = 0;
     if (Tilt.stale()) pause('sensor');
     if (hintState && Math.abs(roll) > .26) hintProgress('tilt');
     game.update(dt, roll);
