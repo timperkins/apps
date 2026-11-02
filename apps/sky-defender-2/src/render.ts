@@ -319,6 +319,13 @@ export class Renderer {
         ctx.fillStyle = frac > .6 ? '#9fe0b0' : frac > .25 ? P.amber : P.red;
         ctx.beginPath(); ctx.roundRect(fx - w / 2, y, w * frac, 1.6, .8); ctx.fill();
       }
+      // the building's health in small white figures above it ("0%" once it is ruined)
+      const pct = b.ruined ? 0 : Math.max(1, Math.round(frac * 100));
+      // the turret's sits beside the gun barrel, which would otherwise cross it
+      const tx = b.id === 'turret' ? fx + 16 : fx, ty = b.id === 'turret' ? FIRE_Y.turret - 2 : b.def.box[1] - (!b.ruined && frac < 1 ? 5.5 : 2.5);
+      ctx.font = `600 4.6px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillText(pct + '%', tx + .3, ty + .3);
+      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = b.ruined ? .6 : .92; ctx.fillText(pct + '%', tx, ty); ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
