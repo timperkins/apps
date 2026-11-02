@@ -32,7 +32,7 @@ export const PLAYER_SPEED = 6;
 export const PLAYER_RADIUS = 0.35;
 export const GUEST_SPEED = 3.2;
 export const STAFF_SPEED = 2.6;
-export const PATIENCE = 45;
+export const START_GUESTS = 3;
 export const MAX_QUEUE = QUEUE_CELLS.length;
 export const CHECKIN_TIME = { player: 0.6, staff: 1.8 };
 export const CLEAN_TIME = { player: 1.5, staff: 4 };
@@ -110,7 +110,6 @@ export type HotelEvent =
   | { kind: 'collect'; amount: number }
   | { kind: 'paid'; amount: number; tip: number }
   | { kind: 'review'; name: string; stars: number; text: string }
-  | { kind: 'gaveUp'; name: string }
   | { kind: 'cleaned'; roomId: number }
   | { kind: 'unlocked'; what: string }
   | { kind: 'levelUp'; level: number };
@@ -156,6 +155,16 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
   // the left wing starts with both rooms built
   h.rooms.filter((r) => r.i === -1).forEach((r) => (r.built = true));
   h.layoutVersion++;
+  // a few guests are already in line, so there's something to do right away
+  for (let k = 0; k < START_GUESTS; k++) {
+    const [cx, cz] = QUEUE_CELLS[k];
+    const g = newGuest(h, { x: cx + 0.5, z: cz + 0.5 });
+    g.state = 'queued';
+    g.queueIndex = k;
+    g.heading = -Math.PI / 2;
+    h.guests.push(g);
+  }
+  h.nextArrival = 4;
   return h;
 }
 
@@ -291,13 +300,19 @@ function hits(g: Grid, x: number, z: number): boolean {
 }
 
 function spawnGuests(h: Hotel) {
+  const waitingNow = h.guests.filter((g) => g.state === 'arriving' || g.state === 'queued').length;
+  if (waitingNow === 0) h.nextArrival = Math.min(h.nextArrival, h.time + 1);
   if (h.time < h.nextArrival) return;
   const lvl = levelInfo(h.xp).level;
   const interval = Math.max(2.5, 10 - builtRoomCount(h) * 0.7 - lvl * 0.3);
   h.nextArrival = h.time + interval * (0.75 + nextRandom(h.rng) * 0.5);
   const waiting = h.guests.filter((g) => g.state === 'arriving' || g.state === 'queued').length;
   if (waiting >= MAX_QUEUE) return;
-  const g: Guest = {
+  h.guests.push(newGuest(h, { x: SPAWN.x + (nextRandom(h.rng) - 0.5) * 6, z: SPAWN.z }));
+}
+
+function newGuest(h: Hotel, pos: Point): Guest {
+  return {
     id: h.nextGuestId++,
     name: `${pick(h.rng, FIRST_NAMES)} ${pick(h.rng, LAST_INITIALS)}.`,
     look: {
@@ -308,7 +323,7 @@ function spawnGuests(h: Hotel) {
       bag: pick(h.rng, BAG_COLORS),
     },
     state: 'arriving',
-    pos: { x: SPAWN.x + (nextRandom(h.rng) - 0.5) * 6, z: SPAWN.z },
+    pos,
     path: [],
     heading: Math.PI,
     waited: 0,
@@ -317,7 +332,6 @@ function spawnGuests(h: Hotel) {
     stayLeft: 0,
     angry: false,
   };
-  h.guests.push(g);
 }
 
 /** Give each waiting guest a spot in line and send them to it. */
@@ -345,12 +359,6 @@ function updateGuest(h: Hotel, g: Guest, dt: number, ev: HotelEvent[]) {
       if (g.state === 'arriving' && g.path.length === 0) {
         g.state = 'queued';
         g.heading = -Math.PI / 2;
-      }
-      if (g.waited >= PATIENCE) {
-        g.angry = true;
-        sendHome(h, g);
-        addReview(h, 1, g.name, ev);
-        ev.push({ kind: 'gaveUp', name: g.name });
       }
       break;
     case 'toRoom':
@@ -414,12 +422,11 @@ function checkIn(h: Hotel, dt: number, ev: HotelEvent[]) {
   front.path = findPath(grid(h), front.pos, bed) ?? [bed];
 }
 
+/** Guests wait as long as it takes; a quick check-in just earns a better review and tip. */
 export function starsForWait(waited: number): number {
-  if (waited < 10) return 5;
-  if (waited < 18) return 4;
-  if (waited < 28) return 3;
-  if (waited < 38) return 2;
-  return 1;
+  if (waited < 15) return 5;
+  if (waited < 35) return 4;
+  return 3;
 }
 
 function addReview(h: Hotel, stars: number, name: string, ev: HotelEvent[]) {

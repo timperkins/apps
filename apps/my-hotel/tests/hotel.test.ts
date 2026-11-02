@@ -104,17 +104,23 @@ describe('the core loop', () => {
     expect(h.rooms.find((r) => r.id === dirty!.id)!.state).not.toBe('dirty');
   });
 
-  it('guests left waiting give up', () => {
+  it('starts with guests already in line', () => {
     const h = createHotel('seaside', 5);
-    const ev = run(h, 60);
-    expect(ev.some((e) => e.kind === 'gaveUp')).toBe(true);
-    expect(h.reviews).toContain(1);
+    expect(h.guests.filter((g) => g.state === 'queued')).toHaveLength(3);
+  });
+
+  it('guests wait as long as it takes and never leave', () => {
+    const h = createHotel('seaside', 5);
+    run(h, 120);
+    expect(h.guests.some((g) => g.state === 'leaving')).toBe(false);
+    expect(h.guests.filter((g) => g.state === 'queued').length).toBeGreaterThanOrEqual(3);
+    expect(h.reviews).toHaveLength(0);
   });
 
   it('fewer stars the longer the wait', () => {
     expect(starsForWait(2)).toBe(5);
-    expect(starsForWait(20)).toBe(3);
-    expect(starsForWait(60)).toBe(1);
+    expect(starsForWait(20)).toBe(4);
+    expect(starsForWait(600)).toBe(3);
   });
 });
 
@@ -168,6 +174,12 @@ describe('buying', () => {
     walkTo(h, pads(h).find((p) => p.id === 'staff:receptionist')!);
     run(h, 3);
     expect(h.staff.map((s) => s.role)).toContain('receptionist');
+    // free rooms for the clerk to hand out (the player checked guests in on the way past the desk)
+    h.rooms.forEach((r) => {
+      if (r.state !== 'occupied') r.state = 'ready';
+    });
+    h.rooms.filter((r) => !r.built).forEach((r) => (r.built = true));
+    h.layoutVersion++;
     walkTo(h, { x: 6, z: 18 }); // go outside
     const ev = run(h, 40);
     expect(ev.some((e) => e.kind === 'paid')).toBe(true);

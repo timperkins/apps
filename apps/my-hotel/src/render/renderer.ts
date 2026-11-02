@@ -1,7 +1,7 @@
 // Draws a hotel each frame: the static world (rebuilt when the layout changes) plus the live
 // layer of people, pads, coins, bubbles and progress rings.
 import * as THREE from 'three';
-import { CLEAN_TIME, PATIENCE, pads, type Hotel, type Pad } from '../sim/hotel';
+import { CLEAN_TIME, pads, type Hotel, type Pad } from '../sim/hotel';
 import { COIN_PILE, DESK_ZONE, roomGeom } from '../sim/layout';
 import { Label, UI_FONT, ball, box, drawBubble, drawRing, mat, roundRect } from './kit';
 import { PLAYER_LOOK, animatePerson, makePerson, turnTowards, type Person } from './people';
@@ -148,13 +148,10 @@ export class Renderer {
       animatePerson(v.person, g.path.length > 0, this.time + g.id);
 
       const waiting = g.state === 'queued' || g.state === 'arriving';
-      v.bubble.sprite.visible = waiting || (g.state === 'leaving' && g.angry);
-      if (v.bubble.sprite.visible) {
-        const left = waiting ? Math.max(0, 1 - g.waited / PATIENCE) : 0;
-        const q = Math.round(left * 24) / 24;
-        const icon = g.angry ? '😡' : left < 0.3 ? '😤' : '🛏️';
-        const color = left < 0.3 ? '#e53935' : left < 0.55 ? '#fb8c00' : '#43a047';
-        v.bubble.draw(`${icon}${q}`, (c) => drawBubble(c, icon, g.angry ? null : q, color));
+      v.bubble.sprite.visible = waiting;
+      if (waiting) {
+        const icon = g.waited > 35 ? '😴' : g.waited > 15 ? '⌛' : '🛏️';
+        v.bubble.draw(icon, (c) => drawBubble(c, icon, null, ''));
         v.bubble.sprite.position.set(g.pos.x, 3.0, g.pos.z);
       }
     }

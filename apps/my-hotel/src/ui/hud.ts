@@ -60,7 +60,6 @@ export class Hud {
     for (const e of ev) {
       if (e.kind === 'collect') popAt(`+${e.amount}`);
       if (e.kind === 'review' && e.stars >= 4) this.toast(`${'★'.repeat(e.stars)} ${e.name}`, `“${e.text}”`);
-      if (e.kind === 'gaveUp') this.toast(`😡 ${e.name} left`, 'Nobody checked them in in time.');
       if (e.kind === 'unlocked') this.toast('🎉 Unlocked', e.what);
       if (e.kind === 'levelUp') this.toast(`⭐ Hotel level ${e.level}!`, 'Guests pay more and come more often.');
     }
