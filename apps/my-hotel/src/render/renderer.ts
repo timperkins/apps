@@ -137,7 +137,9 @@ export class Renderer {
       seen.add(g.id);
       let v = this.guests.get(g.id);
       if (!v) {
-        const person = makePerson({ ...g.look, hatColor: g.look.outfit === '#264653' ? '#e76f51' : '#264653' });
+        const person = g.vip
+          ? makePerson({ ...g.look, hat: 'manager', hatColor: '#212121', bowTie: '#e53935' }, 1.1)
+          : makePerson({ ...g.look, hatColor: g.look.outfit === '#264653' ? '#e76f51' : '#264653' });
         const bubble = new Label(256, 256, 1.4);
         this.live.add(person.root, bubble.sprite);
         v = { person, bubble };
@@ -151,9 +153,10 @@ export class Renderer {
 
       const waiting = g.state === 'queued' || g.state === 'arriving';
       const thirsty = g.state === 'toSoda';
-      v.bubble.sprite.visible = waiting || thirsty;
-      if (waiting || thirsty) {
-        const icon = thirsty ? '🥤' : g.waited > 35 ? '😴' : g.waited > 15 ? '⌛' : '🛏️';
+      const vip = g.state === 'vip';
+      v.bubble.sprite.visible = waiting || thirsty || vip;
+      if (waiting || thirsty || vip) {
+        const icon = vip ? '👑' : thirsty ? '🥤' : g.waited > 35 ? '😴' : g.waited > 15 ? '⌛' : '🛏️';
         v.bubble.draw(icon, (c) => drawBubble(c, icon, null, ''));
         v.bubble.sprite.position.set(g.pos.x, 3.0, g.pos.z);
       }

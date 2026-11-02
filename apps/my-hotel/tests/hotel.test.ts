@@ -120,7 +120,7 @@ describe('the core loop', () => {
   it('guests wait as long as it takes and never leave', () => {
     const h = createHotel('seaside', 5);
     run(h, 120);
-    expect(h.guests.some((g) => g.state === 'leaving')).toBe(false);
+    expect(h.guests.some((g) => g.state === 'leaving' && !g.vip)).toBe(false);
     expect(h.guests.filter((g) => g.state === 'queued').length).toBeGreaterThanOrEqual(3);
     expect(h.reviews).toHaveLength(0);
   });
@@ -328,6 +328,19 @@ describe('soda machines', () => {
     expect(ev.some((e) => e.kind === 'restocked' && !e.byPlayer)).toBe(true);
     expect(m.stock).toBe(MACHINE_STOCK);
     expect(h.pile).toBe(pile + 250);
+  });
+});
+
+describe('VIPs', () => {
+  it('a VIP comes every minute and leaves 100,000 coins on the pile', () => {
+    const h = createHotel('seaside', 3);
+    const ev = run(h, 75);
+    const vip = ev.filter((e) => e.kind === 'vip');
+    expect(vip).toHaveLength(1);
+    expect(h.pile).toBeGreaterThanOrEqual(100_000);
+    walkTo(h, COIN_PILE);
+    expect(h.coins).toBeGreaterThanOrEqual(100_000);
+    expect(run(h, 60).filter((e) => e.kind === 'vip')).toHaveLength(1);
   });
 });
 

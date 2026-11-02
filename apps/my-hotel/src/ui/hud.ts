@@ -61,6 +61,7 @@ export class Hud {
       if (e.kind === 'collect') popAt(`+${e.amount}`);
       if (e.kind === 'review' && e.stars >= 4) this.toast(`${'★'.repeat(e.stars)} ${e.name}`, `“${e.text}”`);
       if (e.kind === 'unlocked') this.toast('🎉 Unlocked', e.what);
+      if (e.kind === 'vip') this.toast(`👑 VIP ${e.name}`, `Left ${e.amount.toLocaleString('en-US')} coins at the desk!`);
       if (e.kind === 'restocked' && e.byPlayer) this.toast('🥤 Restocked', e.cash ? `Took ${e.cash} coins from the machine.` : 'The machine is full again.');
       if (e.kind === 'levelUp') this.toast(`⭐ Hotel level ${e.level}!`, 'Guests pay more and come more often.');
     }

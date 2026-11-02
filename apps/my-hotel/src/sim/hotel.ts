@@ -40,6 +40,9 @@ export const LOT_PAD_SIZE = 3.4;
 export const CLERK_PRICE = 250;
 export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
 export const CLEANER_STEP = 50;
+export const VIP_EVERY = 60; // seconds between VIP visits
+export const VIP_GIFT = 100_000;
+export const VIP_SPOT = { x: 4.6, z: 9.6 }; // next to the coin pile
 export const ALARM_SLEEP = 5; // seconds a guest sleeps in a room with an alarm clock
 export const CLEANERS_PER_PAD = 3; // a cleaner pad stays until this many have been hired there
 /** Cleaner pads in the lobby; every other lot gets one more. */
@@ -80,7 +83,7 @@ export interface Room {
   alarm?: boolean; // an alarm clock wakes guests after ALARM_SLEEP seconds
 }
 
-export type GuestState = 'arriving' | 'queued' | 'toRoom' | 'sleeping' | 'toSoda' | 'leaving';
+export type GuestState = 'arriving' | 'queued' | 'toRoom' | 'sleeping' | 'toSoda' | 'vip' | 'leaving';
 
 export interface Guest {
   id: number;
@@ -96,6 +99,7 @@ export interface Guest {
   stayLeft: number;
   angry: boolean;
   vendId: number | null; // the machine a guest is heading to
+  vip?: boolean;
 }
 
 export interface Staff {
@@ -127,6 +131,7 @@ export interface Hotel {
   cleanerSpots: { id: number; x: number; z: number; hired: boolean }[];
   vending: Vending[];
   padPaid: Record<string, number>;
+  nextVip?: number; // game time of the next VIP visit
   padLock?: string | null; // a pad that was just bought from; it waits until the player steps off
   checkin: number; // 0..1 progress on the guest at the front
   player: { pos: Point; heading: number; moving: boolean };
@@ -148,6 +153,7 @@ export type HotelEvent =
   | { kind: 'review'; name: string; stars: number; text: string }
   | { kind: 'cleaned'; roomId: number }
   | { kind: 'soda'; machineId: number }
+  | { kind: 'vip'; name: string; amount: number }
   | { kind: 'restocked'; machineId: number; cash: number; byPlayer: boolean }
   | { kind: 'unlocked'; what: string }
   | { kind: 'levelUp'; level: number };
@@ -337,6 +343,7 @@ export function tick(h: Hotel, dt: number, input: Input = { x: 0, z: 0 }): Hotel
   h.time += dt;
   movePlayer(h, dt, input);
   spawnGuests(h);
+  spawnVip(h);
   arrangeQueue(h);
   for (const g of h.guests) updateGuest(h, g, dt, ev);
   h.guests = h.guests.filter((g) => !(g.state === 'leaving' && g.path.length === 0));
@@ -392,6 +399,19 @@ function spawnGuests(h: Hotel) {
   const waiting = h.guests.filter((g) => g.state === 'arriving' || g.state === 'queued').length;
   if (waiting >= MAX_QUEUE) return;
   h.guests.push(newGuest(h, { x: SPAWN.x + (nextRandom(h.rng) - 0.5) * 6, z: SPAWN.z }));
+}
+
+/** Every minute a VIP walks in, leaves a big gift on the coin pile and heads off. */
+function spawnVip(h: Hotel) {
+  h.nextVip ??= h.time + VIP_EVERY;
+  if (h.time < h.nextVip) return;
+  h.nextVip = h.time + VIP_EVERY;
+  const g = newGuest(h, { x: SPAWN.x, z: SPAWN.z });
+  g.vip = true;
+  g.state = 'vip';
+  g.look = { ...g.look, outfit: '#ffd54f', bag: '#6a1b9a' };
+  g.path = findPath(grid(h), g.pos, VIP_SPOT) ?? [{ ...VIP_SPOT }];
+  h.guests.push(g);
 }
 
 function newGuest(h: Hotel, pos: Point): Guest {
@@ -475,6 +495,13 @@ function updateGuest(h: Hotel, g: Guest, dt: number, ev: HotelEvent[]) {
           ev.push({ kind: 'soda', machineId: m.id });
         }
         g.vendId = null;
+        sendHome(h, g);
+      }
+      break;
+    case 'vip':
+      if (g.path.length === 0) {
+        h.pile += VIP_GIFT;
+        ev.push({ kind: 'vip', name: g.name, amount: VIP_GIFT });
         sendHome(h, g);
       }
       break;
