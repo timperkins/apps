@@ -6,6 +6,8 @@ import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } 
 import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
+/** The glow color of a crate. */
+const crateTint = (c: Crate) => c.diamond ? '#9fe6ff' : c.gold ? '#ffd34a' : '#9dffb8';
 /** A plane silhouette filled with gold, made once per silhouette. */
 const goldCache = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
 function goldSil(img: HTMLCanvasElement) {
@@ -444,13 +446,13 @@ export class Renderer {
 
   // The crate's landing zone on the pad, shown while a drop is on its way: corner marks, pulsing while the crate comes down.
   drawLandingZone(game: Game) {
-    const zones: [number, boolean, boolean][] = game.crates.map(c => [c.lz, !c.landed, !!c.gold]);
-    if (game.cargo) zones.push([game.lzX, false, !!game.cargo.gold]);
+    const zones: [number, boolean, string][] = game.crates.map(c => [c.lz, !c.landed, crateTint(c)]);
+    if (game.cargo) zones.push([game.lzX, false, game.cargo.gold ? '#ffd34a' : '#9dffb8']);
     const ctx = this.ctx, y = GROUND_Y - 3;
     ctx.save();
     ctx.lineWidth = .5; ctx.lineCap = 'round';
-    for (const [LZ_X, falling, gold] of zones) {
-      ctx.strokeStyle = gold ? '#ffd34a' : '#9dffb8';
+    for (const [LZ_X, falling, tint] of zones) {
+      ctx.strokeStyle = tint;
       ctx.globalAlpha = falling ? .45 + .35 * Math.sin(this.time * 5) : .3;
       for (const d of [-1, 1]) {
         ctx.beginPath(); ctx.moveTo(LZ_X + d * 8, y - 1.6); ctx.lineTo(LZ_X + d * 9, y); ctx.lineTo(LZ_X + d * 6.5, y + .6); ctx.stroke();
@@ -466,9 +468,9 @@ export class Renderer {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = .25 + .25 * glow;
-      ctx.drawImage(puff(c.gold ? '#ffd34a' : '#9dffb8'), c.x - 10, c.y - 12, 20, 20);
+      ctx.drawImage(puff(crateTint(c)), c.x - 10, c.y - 12, 20, 20);
       ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = c.gold ? '#ffe9a0' : '#bff5cf'; ctx.lineWidth = .6;
+      ctx.strokeStyle = c.diamond ? '#d8f6ff' : c.gold ? '#ffe9a0' : '#bff5cf'; ctx.lineWidth = .6;
       ctx.globalAlpha = .8 * (1 - k);
       ctx.beginPath(); ctx.ellipse(c.x, GROUND_Y - 2.4, 5 + 9 * k, 1.2 + 2 * k, 0, 0, 7); ctx.stroke();
       const by = c.y - 10 - 1.2 * Math.sin(this.time * 3);
@@ -488,19 +490,21 @@ export class Renderer {
       ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-9, -15); ctx.quadraticCurveTo(-9, -23, 0, -23.5); ctx.quadraticCurveTo(9, -23, 9, -15); ctx.quadraticCurveTo(4.5, -17, 0, -15.5); ctx.quadraticCurveTo(-4.5, -17, -9, -15); ctx.fill();
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = c.gold ? '#c9952a' : '#6f6248'; ctx.fillRect(-3, -3, 6, 5);
-    ctx.fillStyle = c.gold ? '#ffe27a' : '#4fae74'; ctx.fillRect(-3, -1, 6, 1.1);
+    ctx.fillStyle = c.diamond ? '#4fb8d8' : c.gold ? '#c9952a' : '#6f6248'; ctx.fillRect(-3, -3, 6, 5);
+    ctx.fillStyle = c.diamond ? '#c9f4ff' : c.gold ? '#ffe27a' : '#4fae74'; ctx.fillRect(-3, -1, 6, 1.1);
+    // a diamond pack is cut like a gem: a lighter facet down one side
+    if (c.diamond) { ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.moveTo(-3, -3); ctx.lineTo(0, -3); ctx.lineTo(-3, 2); ctx.closePath(); ctx.fill(); }
     ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-3, -3, 6, .6);
-    if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff(c.gold ? '#ffd34a' : '#9dffb8'), -2, -6, 4, 4); }
+    if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff(crateTint(c)), -2, -6, 4, 4); }
     ctx.restore();
-    // a gold pack sparkles
-    if (c.gold) this.twinkles(c.x, c.y - 1.5, 14, 10, 1.7);
+    // gold and diamond packs sparkle
+    if (c.gold || c.diamond) this.twinkles(c.x + (c.dodgeX ?? 0), c.y - 1.5, 14, 10, 1.7, c.diamond ? '#effcff' : '#fff3b8');
   }
   /** Little four-point gold glints that wink on and off around (x, y), in a w by h box. */
-  twinkles(x: number, y: number, w: number, h: number, seed: number) {
+  twinkles(x: number, y: number, w: number, h: number, seed: number, color = '#fff3b8') {
     const ctx = this.ctx;
     ctx.save();
-    ctx.fillStyle = '#fff3b8';
+    ctx.fillStyle = color;
     for (let i = 0; i < 6; i++) {
       const ph = this.time * (1.6 + i * .23) + seed * 3.1 + i * 1.9, k = Math.sin(ph);
       if (k <= 0) continue;
@@ -521,9 +525,11 @@ export class Renderer {
     ctx.lineCap = 'round';
     for (const s of game.shells) {
       const sp = Math.hypot(s.vx, s.vy) || 1;
-      ctx.strokeStyle = P.shell; ctx.globalAlpha = .55; ctx.lineWidth = 1;
+      // a ghost shell is light blue and glows
+      if (s.ghost) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .7; ctx.drawImage(puff('#7fd8ff'), s.x - 4, s.y - 4, 8, 8); ctx.globalCompositeOperation = 'source-over'; }
+      ctx.strokeStyle = s.ghost ? '#9fe6ff' : P.shell; ctx.globalAlpha = .55; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(s.x - s.vx / sp * 14, s.y - s.vy / sp * 14); ctx.lineTo(s.x, s.y); ctx.stroke();
-      ctx.globalAlpha = 1; ctx.fillStyle = '#fff4d0'; ctx.beginPath(); ctx.arc(s.x, s.y, 1.2, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = s.ghost ? '#e2f8ff' : '#fff4d0'; ctx.beginPath(); ctx.arc(s.x, s.y, 1.2, 0, 7); ctx.fill();
     }
     for (const m of game.missiles) {
       const sp = Math.hypot(m.vx, m.vy) || 1, ux = m.vx / sp, uy = m.vy / sp;

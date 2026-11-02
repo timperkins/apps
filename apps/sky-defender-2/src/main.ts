@@ -2,7 +2,7 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind } from './game';
 import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 
@@ -221,7 +221,8 @@ let swipe: { id: number; x: number; y: number; t: number; timer: number; fired: 
 fz.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (mode !== 'play') return;
-  if (tapsCrate(e)) { openCrate(); return; }
+  const tapped = tappedCrate(e);
+  if (tapped) { openCrate(tapped); return; }
   pointers.add(e.pointerId);
   if (game.phase === 'clear') game.skipClear();
   if (game.war) {
@@ -285,23 +286,30 @@ $('pauseBtn').addEventListener('click', e => { e.stopPropagation(); if (mode ===
 
 /* ---------- upgrade crate ---------- */
 // A landed crate waits on the landing zone beside the turret; a tap near it opens it.
-function tapsCrate(e: PointerEvent) {
-  const c = game.readyCrate();
-  if (!c) return false;
-  const [x, y] = renderer.worldToScreen(game, c.x, c.y - 3);
-  return Math.hypot(e.offsetX - x, e.offsetY - y) < 26 + 10 * renderer.s;
+/** The landed crate a tap is on, if any. */
+function tappedCrate(e: PointerEvent) {
+  for (const c of game.readyCrates()) {
+    const [x, y] = renderer.worldToScreen(game, c.x, c.y - 3);
+    if (Math.hypot(e.offsetX - x, e.offsetY - y) < 26 + 10 * renderer.s) return c;
+  }
+  return null;
 }
-/** Opens the crate waiting on the pad. A gold pack lets you pick any permanent upgrade you don't have yet. */
-function openCrate() {
-  const gold = !!game.readyCrate()?.gold;
+/** The crate whose cards are showing. */
+let opening: Crate | null = null;
+/** Opens a crate waiting on the pad. A gold pack lets you pick any permanent upgrade you don't have yet; a diamond pack, Ghost shot or Drop shot. */
+function openCrate(c = game.readyCrate()) {
+  if (!c) return;
+  opening = c;
+  const pack: PackKind = c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain';
   mode = 'cards';
   game.release(); pointers.clear();
   Sound.ui();
-  $('cardsTitle').textContent = gold ? 'Gold pack: choose an upgrade' : 'Choose an upgrade';
-  $('cards').classList.toggle('gold', gold);
+  $('cardsTitle').textContent = pack === 'diamond' ? 'Diamond pack: choose an upgrade' : pack === 'gold' ? 'Gold pack: choose an upgrade' : 'Choose an upgrade';
+  $('cards').classList.toggle('gold', pack === 'gold');
+  $('cards').classList.toggle('diamond', pack === 'diamond');
   const list = $('cardList');
   list.innerHTML = '';
-  for (const id of game.offers(gold)) {
+  for (const id of game.offers(pack)) {
     const u = UPGRADES[id];
     const b = document.createElement('button');
     b.className = 'card';
@@ -314,7 +322,8 @@ function openCrate() {
 }
 function pickUpgrade(id: UpgradeId) {
   Sound.ui();
-  game.chooseUpgrade(id);
+  game.chooseUpgrade(id, opening);
+  opening = null;
   show(null); mode = 'play'; last = performance.now();
 }
 $('cardsBack').addEventListener('click', e => { e.stopPropagation(); show(null); mode = 'play'; last = performance.now(); });

@@ -127,3 +127,7 @@ button:active { transform: scale(.97); }
 #cards.gold .card b { font-size: 17px; }
 #cards.gold .card .desc { font-size: 13.5px; }
 #cards.gold { justify-content: safe center; overflow-y: auto; }
+
+/* a diamond pack: icy blue trim */
+#cards.diamond h2 { color: #9fe6ff; }
+#cards.diamond .card { border-color: rgba(159, 230, 255, .6); }
