@@ -25,7 +25,7 @@ Run the app's own checks from its folder (typecheck, tests, build) as listed in 
 
 1. Scaffold with `node scripts/new-app.mjs <name>` (add `--type apphosting`, `--firestore` and `--ttl-collections "rooms players rtc"` as needed), or copy the closest app and fix its `app.json`. Phone-controller games with rooms: copy `apps/pong` or `apps/slither` and rename the database ids. `ttlCollections` in `app.json` lists the collection groups whose documents carry an `expiresAt` timestamp.
 2. Push on `<name>/<short-description>` and open the PR. The preview run sees the new `app.json` and runs `create-app` first (site or backends, databases, TTL policies, domain and DNS), then deploys. Send Tim the preview link.
-3. App Hosting apps still need the console steps listed in that run's summary (connect both backends to the repo, automatic rollouts off, preview backend environment `preview`) before their preview can deploy.
+3. For App Hosting apps, `create-app` also connects both backends to this repo, sets the preview backend's environment to `preview` and turns automatic rollouts off, so no console steps are needed.
 4. After the merge and a green prod run, add the app to `apps/home/src/apps.ts` in a `home/add-<name>` PR.
 
 To re-run `create-app` by hand (for an app added before this, or to change a setting), call REST, since `gh workflow run` needs GraphQL, which Claude sessions can't use:
