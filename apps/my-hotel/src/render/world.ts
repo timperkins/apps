@@ -1,7 +1,7 @@
 // Builds the parts of the scene that only change when the layout changes:
 // ground, outside scenery, floors, walls, furniture, unbuilt plots and land for sale.
 import * as THREE from 'three';
-import { grid, type Hotel } from '../sim/hotel';
+import { grid, type Hotel, type Vending } from '../sim/hotel';
 import { DESK, ENTRANCE_X, LOT, SOFA, lotKey, lotsForSale, parseLot, roomGeom, worldBounds } from '../sim/layout';
 import { nextRandom } from '../sim/rng';
 import { ball, box, canvasTexture, cone, cyl, decal, mat, roundRect, toonMap, UI_FONT } from './kit';
@@ -46,6 +46,7 @@ export function buildWorld(h: Hotel, T: Theme): THREE.Group {
     roomFurniture(root, T, r.id, g);
   }
 
+  for (const m of h.vending) vendingMachine(root, T, m);
   for (const [i, j] of forSale) landForSale(root, T, i, j);
   return root;
 }
@@ -188,6 +189,38 @@ function roomFurniture(root: THREE.Group, T: Theme, id: number, g: ReturnType<ty
   p.position.set(x0 + 1.0, ROOM_H + 0.45, z0 + 0.5);
   p.rotation.x = -0.6;
   root.add(p);
+}
+
+/** A soda machine: red cabinet, glowing window with cans, and a slot at the bottom. */
+function vendingMachine(root: THREE.Group, T: Theme, v: Vending) {
+  const g = new THREE.Group();
+  g.position.set(v.cell[0] + 0.5, 0, v.cell[1] + 0.5);
+  g.rotation.y = v.face;
+  box(g, 0.95, 1.9, 0.8, '#e53935', 0, 0, 0);
+  box(g, 1.0, 0.12, 0.85, '#b71c1c', 0, 1.9, 0);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 1.0), new THREE.MeshBasicMaterial({ color: '#e3f2fd' }));
+  glass.position.set(-0.12, 1.15, 0.41);
+  g.add(glass);
+  const cans = ['#ffca28', '#43a047', '#1e88e5', '#8e24aa'];
+  for (let row = 0; row < 3; row++) {
+    for (let k = 0; k < 3; k++) {
+      cyl(g, 0.06, 0.06, 0.2, cans[(row + k) % cans.length], -0.3 + k * 0.18, 0.75 + row * 0.32, 0.36, 8);
+    }
+  }
+  box(g, 0.2, 0.6, 0.04, '#eeeeee', 0.3, 1.0, 0.41);
+  box(g, 0.6, 0.18, 0.04, '#212121', 0, 0.25, 0.41);
+  const sign = canvasTexture(256, 96, (c, w, h) => {
+    c.fillStyle = '#ffffff';
+    c.font = `bold 66px ${UI_FONT}`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('SODA', w / 2, h / 2 + 4);
+  });
+  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshBasicMaterial({ map: sign, transparent: true }));
+  s.position.set(0, 1.78, 0.41);
+  g.add(s);
+  void T;
+  root.add(g);
 }
 
 function landForSale(root: THREE.Group, T: Theme, i: number, j: number) {

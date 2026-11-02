@@ -125,6 +125,7 @@ export interface Grid {
 export interface LayoutInput {
   owned: Set<LotKey>;
   builtRooms: { i: number; j: number; side: 0 | 1 }[];
+  blockedCells?: [number, number][]; // furniture such as vending machines
 }
 
 export function worldBounds(owned: Set<LotKey>) {
@@ -188,6 +189,7 @@ export function buildGrid(input: LayoutInput): Grid {
       }
     }
   }
+  for (const [x, z] of input.blockedCells ?? []) mark(x, z, null);
   return grid;
 }
 

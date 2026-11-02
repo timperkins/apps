@@ -1,6 +1,6 @@
 // One save per map, kept in the browser. The version field lets later updates migrate old saves.
-import { LOBBY_CLEANER_SPOTS, createHotel, lotCleanerSpot, type Hotel, type MapId, type Staff } from '../sim/hotel';
-import { RECEPTIONIST_SPOT, parseLot } from '../sim/layout';
+import { LOBBY_CLEANER_SPOTS, LOBBY_MACHINE, addMachine, createHotel, lotCleanerSpot, lotMachine, type Hotel, type MapId, type Staff } from '../sim/hotel';
+import { RECEPTIONIST_SPOT, START_LOTS, lotKey, parseLot } from '../sim/layout';
 
 export const saveKey = (map: MapId) => `my-hotel:save:${map}`;
 
@@ -16,7 +16,8 @@ export function deserialize(text: string | null, map: MapId): Hotel | null {
     const h = JSON.parse(text) as Hotel;
     if (!h || h.map !== map || !Array.isArray(h.lots) || !h.player) return null;
     if ((h.version as number) === 2) migrateFrom2(h);
-    if (h.version !== 3) return null;
+    if ((h.version as number) === 3) migrateFrom3(h);
+    if (h.version !== 4) return null;
     return h;
   } catch {
     return null;
@@ -79,5 +80,20 @@ function migrateFrom2(h: Hotel) {
     h.cleanerSpots[0].hired = true;
     return { ...s, id: 'cleaner-1', home: { x: spots[0].x, z: spots[0].z - 1.5 } } as Staff;
   });
-  h.version = 3;
+  (h as { version: number }).version = 3;
+}
+
+/** Version 4 added vending machines: one in the lobby and one on every lot bought since. */
+function migrateFrom3(h: Hotel) {
+  h.vending = [];
+  addMachine(h, LOBBY_MACHINE);
+  const start = new Set(START_LOTS.map(([i, j]) => lotKey(i, j)));
+  for (const k of h.lots) {
+    if (start.has(k)) continue;
+    const [i, j] = parseLot(k);
+    addMachine(h, lotMachine(i, j));
+  }
+  for (const g of h.guests) g.vendId ??= null;
+  h.layoutVersion++;
+  h.version = 4;
 }

@@ -42,7 +42,28 @@ export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
 export const CLEANER_STEP = 50;
 /** Cleaner pads in the lobby; every other lot gets one more. */
 export const LOBBY_CLEANER_SPOTS: Point[] = [{ x: 5.5, z: 1.8 }, { x: 10.4, z: 7.4 }];
-export type StaffRole = 'receptionist' | 'housekeeper';
+export const RESTOCKER_PRICE = 200;
+export const RESTOCKER_PAD = { x: 8.2, z: 3.3 };
+export const SODA_PRICE = 50;
+export const MACHINE_STOCK = 6;
+export const RESTOCK_TIME = 1.5; // seconds the restocker spends at a machine
+export const SODA_CHANCE = 0.7; // share of guests who grab a soda on the way out
+export type StaffRole = 'receptionist' | 'housekeeper' | 'restocker';
+
+/** A vending machine fills one grid cell; guests and the player use it from the front. */
+export interface Vending {
+  id: number;
+  cell: [number, number];
+  face: number; // heading the front faces, 0 = +z
+  stock: number;
+  cash: number; // soda money waiting inside
+}
+
+/** Where to stand to use a machine. */
+export function machineFront(m: Vending): Point {
+  return { x: m.cell[0] + 0.5 + Math.sin(m.face) * 1.1, z: m.cell[1] + 0.5 + Math.cos(m.face) * 1.1 };
+}
+export const MACHINE_REACH = 1.2;
 
 export interface Room {
   id: number;
@@ -55,7 +76,7 @@ export interface Room {
   clean: number; // 0..1 cleaning progress
 }
 
-export type GuestState = 'arriving' | 'queued' | 'toRoom' | 'sleeping' | 'leaving';
+export type GuestState = 'arriving' | 'queued' | 'toRoom' | 'sleeping' | 'toSoda' | 'leaving';
 
 export interface Guest {
   id: number;
@@ -70,6 +91,7 @@ export interface Guest {
   roomId: number | null;
   stayLeft: number;
   angry: boolean;
+  vendId: number | null; // the machine a guest is heading to
 }
 
 export interface Staff {
@@ -80,10 +102,12 @@ export interface Staff {
   path: Point[];
   heading: number;
   roomId: number | null; // housekeeper's current job
+  vendId?: number | null; // restocker's current job
+  busy?: number; // seconds spent at the current job
 }
 
 export interface Hotel {
-  version: 3;
+  version: 4;
   map: MapId;
   time: number;
   coins: number;
@@ -97,6 +121,7 @@ export interface Hotel {
   guests: Guest[];
   staff: Staff[];
   cleanerSpots: { id: number; x: number; z: number; hired: boolean }[];
+  vending: Vending[];
   padPaid: Record<string, number>;
   checkin: number; // 0..1 progress on the guest at the front
   player: { pos: Point; heading: number; moving: boolean };
@@ -117,6 +142,8 @@ export type HotelEvent =
   | { kind: 'paid'; amount: number; tip: number }
   | { kind: 'review'; name: string; stars: number; text: string }
   | { kind: 'cleaned'; roomId: number }
+  | { kind: 'soda'; machineId: number }
+  | { kind: 'restocked'; machineId: number; cash: number; byPlayer: boolean }
   | { kind: 'unlocked'; what: string }
   | { kind: 'levelUp'; level: number };
 
@@ -135,7 +162,7 @@ export interface Pad {
 
 export function createHotel(map: MapId, seed = Date.now()): Hotel {
   const h: Hotel = {
-    version: 3,
+    version: 4,
     map,
     time: 0,
     coins: 0,
@@ -149,6 +176,7 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
     guests: [],
     staff: [],
     cleanerSpots: [],
+    vending: [],
     padPaid: {},
     checkin: 0,
     player: { pos: { x: 0.9, z: 9.5 }, heading: 0, moving: false },
@@ -159,7 +187,8 @@ export function createHotel(map: MapId, seed = Date.now()): Hotel {
     rng: { seed: seed | 0 },
   };
   for (const spot of LOBBY_CLEANER_SPOTS) addCleanerSpot(h, spot);
-  for (const [i, j] of START_LOTS) addLot(h, i, j);
+  addMachine(h, LOBBY_MACHINE);
+  for (const [i, j] of START_LOTS) addLot(h, i, j, false); // the lobby's machine is the only one at first
   // the left wing starts with both rooms built
   h.rooms.filter((r) => r.i === -1).forEach((r) => (r.built = true));
   h.layoutVersion++;
@@ -183,10 +212,19 @@ function addCleanerSpot(h: Hotel, p: Point) {
 /** Every lot except the lobby has a cleaner pad in its front corridor. */
 export const lotCleanerSpot = (i: number, j: number): Point => ({ x: i * LOT + 6, z: j * LOT + 9.5 });
 
-function addLot(h: Hotel, i: number, j: number) {
+/** The lobby's machine stands against the back wall; every lot bought later has one in its front-right corner. */
+export const LOBBY_MACHINE = { cell: [3, 1] as [number, number], face: 0 };
+export const lotMachine = (i: number, j: number) => ({ cell: [i * LOT + 10, j * LOT + 10] as [number, number], face: -Math.PI / 2 });
+
+export function addMachine(h: Hotel, m: { cell: [number, number]; face: number }) {
+  h.vending.push({ id: h.vending.length + 1, cell: [...m.cell], face: m.face, stock: MACHINE_STOCK, cash: 0 });
+}
+
+function addLot(h: Hotel, i: number, j: number, withMachine = true) {
   h.lots.push(lotKey(i, j));
   if (i === 0 && j === 0) return;
   addCleanerSpot(h, lotCleanerSpot(i, j));
+  if (withMachine) addMachine(h, lotMachine(i, j));
   for (const side of [0, 1] as const) {
     h.rooms.push({ id: h.nextRoomId++, i, j, side, built: false, state: 'ready', guestId: null, clean: 0 });
   }
@@ -198,7 +236,7 @@ const gridCache = new WeakMap<Hotel, { version: number; grid: Grid }>();
 export function grid(h: Hotel): Grid {
   const c = gridCache.get(h);
   if (c && c.version === h.layoutVersion) return c.grid;
-  const g = buildGrid({ owned: new Set(h.lots), builtRooms: h.rooms.filter((r) => r.built) });
+  const g = buildGrid({ owned: new Set(h.lots), builtRooms: h.rooms.filter((r) => r.built), blockedCells: h.vending.map((m) => m.cell) });
   gridCache.set(h, { version: h.layoutVersion, grid: g });
   return g;
 }
@@ -257,6 +295,10 @@ export function pads(h: Hotel): Pad[] {
     const id = `staff:cleaner:${c.id}`;
     out.push({ id, kind: 'staff', x: c.x, z: c.z, size: PAD_SIZE, price: cp, paid: paid(id), label: 'CLEANER' });
   }
+  if (!h.staff.some((s) => s.role === 'restocker')) {
+    const id = 'staff:restocker';
+    out.push({ id, kind: 'staff', x: RESTOCKER_PAD.x, z: RESTOCKER_PAD.z, size: PAD_SIZE, price: RESTOCKER_PRICE, paid: paid(id), label: 'RESTOCKER' });
+  }
   if (!h.staff.some((s) => s.role === 'receptionist')) {
     out.push({ id: 'staff:receptionist', kind: 'staff', x: 1, z: 2, size: PAD_SIZE, price: CLERK_PRICE, paid: paid('staff:receptionist'), label: 'CLERK' });
   }
@@ -282,7 +324,8 @@ export function tick(h: Hotel, dt: number, input: Input = { x: 0, z: 0 }): Hotel
   h.guests = h.guests.filter((g) => !(g.state === 'leaving' && g.path.length === 0));
   checkIn(h, dt, ev);
   cleanRooms(h, dt, ev);
-  for (const s of h.staff) updateStaff(h, s, dt);
+  playerRestock(h, ev);
+  for (const s of h.staff) updateStaff(h, s, dt, ev);
   collectPile(h, ev);
   payPads(h, dt, ev);
   return ev;
@@ -353,6 +396,7 @@ function newGuest(h: Hotel, pos: Point): Guest {
     roomId: null,
     stayLeft: 0,
     angry: false,
+    vendId: null,
   };
 }
 
@@ -398,11 +442,74 @@ function updateGuest(h: Hotel, g: Guest, dt: number, ev: HotelEvent[]) {
           room.guestId = null;
           room.clean = 0;
         }
+        if (!goForSoda(h, g)) sendHome(h, g);
+      }
+      break;
+    case 'toSoda':
+      if (g.path.length === 0) {
+        const m = h.vending.find((x) => x.id === g.vendId);
+        if (m) turnTo(g, m);
+        g.stayLeft -= dt;
+        if (g.stayLeft > 0) break;
+        if (m && m.stock > 0) {
+          m.stock--;
+          m.cash += SODA_PRICE;
+          ev.push({ kind: 'soda', machineId: m.id });
+        }
+        g.vendId = null;
         sendHome(h, g);
       }
       break;
     case 'leaving':
       break;
+  }
+}
+
+/** Sodas a machine can still promise: its stock minus guests already on their way to it. */
+export function sodasLeft(h: Hotel, m: Vending): number {
+  return m.stock - h.guests.filter((g) => g.state === 'toSoda' && g.vendId === m.id).length;
+}
+
+function goForSoda(h: Hotel, g: Guest): boolean {
+  if (nextRandom(h.rng) > SODA_CHANCE) return false;
+  const near = h.vending
+    .filter((m) => sodasLeft(h, m) > 0)
+    .map((m) => ({ m, d: Math.hypot(machineFront(m).x - g.pos.x, machineFront(m).z - g.pos.z) }))
+    .sort((a, b) => a.d - b.d)[0];
+  if (!near) return false;
+  const path = findPath(grid(h), g.pos, machineFront(near.m));
+  if (!path) return false;
+  g.state = 'toSoda';
+  g.vendId = near.m.id;
+  g.stayLeft = 0.8; // time spent picking a drink
+  g.path = path;
+  return true;
+}
+
+function turnTo(m: { pos: Point; heading: number }, v: Vending) {
+  m.heading = Math.atan2(v.cell[0] + 0.5 - m.pos.x, v.cell[1] + 0.5 - m.pos.z);
+}
+
+function restock(h: Hotel, m: Vending, byPlayer: boolean, ev: HotelEvent[]) {
+  const cash = m.cash;
+  m.stock = MACHINE_STOCK;
+  m.cash = 0;
+  if (byPlayer) {
+    h.coins += cash;
+    if (cash) ev.push({ kind: 'collect', amount: cash });
+  } else {
+    h.pile += cash; // the restocker brings the money to the desk
+  }
+  ev.push({ kind: 'restocked', machineId: m.id, cash, byPlayer });
+}
+
+/** Walking up to a machine refills it and takes out the soda money. */
+function playerRestock(h: Hotel, ev: HotelEvent[]) {
+  const p = h.player.pos;
+  for (const m of h.vending) {
+    if (m.stock >= MACHINE_STOCK && m.cash === 0) continue;
+    const f = machineFront(m);
+    if (Math.hypot(p.x - f.x, p.z - f.z) <= MACHINE_REACH) restock(h, m, true, ev);
   }
 }
 
@@ -481,8 +588,9 @@ function cleanRooms(h: Hotel, dt: number, ev: HotelEvent[]) {
   }
 }
 
-function updateStaff(h: Hotel, s: Staff, dt: number) {
+function updateStaff(h: Hotel, s: Staff, dt: number, ev: HotelEvent[]) {
   walk(s, STAFF_SPEED, dt);
+  if (s.role === 'restocker') return updateRestocker(h, s, dt, ev);
   if (s.role !== 'housekeeper') return;
   if (s.roomId !== null) {
     const room = h.rooms.find((r) => r.id === s.roomId);
@@ -500,6 +608,38 @@ function updateStaff(h: Hotel, s: Staff, dt: number) {
       s.path = path;
     }
     return;
+  }
+  if (s.path.length === 0 && Math.hypot(s.pos.x - s.home.x, s.pos.z - s.home.z) > 0.5) {
+    s.path = findPath(grid(h), s.pos, s.home) ?? [];
+  }
+}
+
+/** The restocker refills any machine that is running low, emptiest first. */
+function updateRestocker(h: Hotel, s: Staff, dt: number, ev: HotelEvent[]) {
+  if (s.vendId != null) {
+    const m = h.vending.find((x) => x.id === s.vendId);
+    if (!m || m.stock >= MACHINE_STOCK) {
+      s.vendId = null;
+      return;
+    }
+    if (s.path.length) return;
+    turnTo(s, m);
+    s.busy = (s.busy ?? 0) + dt;
+    if (s.busy < RESTOCK_TIME) return;
+    s.busy = 0;
+    s.vendId = null;
+    restock(h, m, false, ev);
+    return;
+  }
+  const job = h.vending.filter((m) => m.stock <= MACHINE_STOCK / 2).sort((a, b) => a.stock - b.stock)[0];
+  if (job) {
+    const path = findPath(grid(h), s.pos, machineFront(job));
+    if (path) {
+      s.vendId = job.id;
+      s.busy = 0;
+      s.path = path;
+      return;
+    }
   }
   if (s.path.length === 0 && Math.hypot(s.pos.x - s.home.x, s.pos.z - s.home.z) > 0.5) {
     s.path = findPath(grid(h), s.pos, s.home) ?? [];
@@ -540,6 +680,10 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
     h.lotsBought++;
     for (const [ei, ej] of enclosedLots(new Set(h.lots))) addLot(h, ei, ej);
     ev.push({ kind: 'unlocked', what: 'More land! Build rooms on it.' });
+  } else if (kind === 'staff' && arg === 'restocker') {
+    const home = { x: RESTOCKER_PAD.x, z: RESTOCKER_PAD.z };
+    h.staff.push({ id: 'restocker', role: 'restocker', home, pos: { ...home }, path: [], heading: 0, roomId: null, vendId: null, busy: 0 });
+    ev.push({ kind: 'unlocked', what: 'Hired a restocker! They keep the soda machines full.' });
   } else if (kind === 'staff') {
     const clerk = arg === 'receptionist';
     const spotId = Number(extra);

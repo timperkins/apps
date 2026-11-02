@@ -61,6 +61,7 @@ export class Hud {
       if (e.kind === 'collect') popAt(`+${e.amount}`);
       if (e.kind === 'review' && e.stars >= 4) this.toast(`${'★'.repeat(e.stars)} ${e.name}`, `“${e.text}”`);
       if (e.kind === 'unlocked') this.toast('🎉 Unlocked', e.what);
+      if (e.kind === 'restocked' && e.byPlayer) this.toast('🥤 Restocked', e.cash ? `Took ${e.cash} coins from the machine.` : 'The machine is full again.');
       if (e.kind === 'levelUp') this.toast(`⭐ Hotel level ${e.level}!`, 'Guests pay more and come more often.');
     }
   }
@@ -95,5 +96,6 @@ function hintFor(h: Hotel): string {
   }
   if (h.served === 0 && h.time < 40) return 'Stand behind the desk to check guests in';
   if (h.pile >= 40 && h.coins < 40) return 'Coins are piling up at the desk';
+  if (h.vending.some((m) => m.stock === 0) && !h.staff.some((s) => s.role === 'restocker')) return 'A soda machine is empty. Walk up to it to restock!';
   return '';
 }

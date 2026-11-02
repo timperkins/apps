@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MACHINE_STOCK,
+  SODA_PRICE,
   createHotel,
+  machineFront,
   grid,
   lotPrice,
   pads,
@@ -51,6 +54,9 @@ describe('a new hotel', () => {
     // a clerk, two cleaners in the lobby and one in each wing
     expect(p.filter((x) => x.id === 'staff:receptionist')).toHaveLength(1);
     expect(p.filter((x) => x.id.startsWith('staff:cleaner:'))).toHaveLength(4);
+    // one soda machine, and a restocker to hire
+    expect(h.vending).toHaveLength(1);
+    expect(p.filter((x) => x.id === 'staff:restocker')).toHaveLength(1);
   });
 
   it('every pad and every room can be reached on foot', () => {
@@ -165,6 +171,9 @@ describe('buying', () => {
     expect(pads(h).filter((p) => p.kind === 'room')).toHaveLength(4);
     // ...and a cleaner pad of its own
     expect(pads(h).filter((p) => p.id.startsWith('staff:cleaner:'))).toHaveLength(5);
+    // ...and a soda machine
+    expect(h.vending).toHaveLength(2);
+    expect(findPath(grid(h), h.player.pos, machineFront(h.vending[1]))).not.toBeNull();
   });
 
   it('land that ends up walled in comes with the purchase', () => {
@@ -221,6 +230,51 @@ describe('cleaners', () => {
     walkTo(h, { x: 6, z: 18 });
     const ev = run(h, 30);
     expect(ev.filter((e) => e.kind === 'cleaned').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('soda machines', () => {
+  it('guests buy sodas on the way out, and the player restocks and takes the money', () => {
+    const h = createHotel('seaside', 7);
+    walkTo(h, deskSpot);
+    let sodas = 0;
+    for (let t = 0; t < 120 && sodas < 2; t += DT) sodas += tick(h, DT).filter((e) => e.kind === 'soda').length;
+    expect(sodas).toBeGreaterThanOrEqual(2);
+    const m = h.vending[0];
+    expect(m.stock).toBeLessThan(MACHINE_STOCK);
+    expect(m.cash).toBeGreaterThanOrEqual(2 * SODA_PRICE);
+    const cash = m.cash;
+    const coins = h.coins;
+    walkTo(h, machineFront(m));
+    expect(m.stock).toBe(MACHINE_STOCK);
+    expect(m.cash).toBe(0);
+    expect(h.coins).toBe(coins + cash);
+  });
+
+  it('an empty machine sells nothing', () => {
+    const h = createHotel('seaside', 7);
+    h.vending[0].stock = 0;
+    walkTo(h, deskSpot);
+    h.vending[0].stock = 0;
+    const ev = run(h, 80);
+    expect(ev.some((e) => e.kind === 'soda')).toBe(false);
+  });
+
+  it('a hired restocker refills machines and brings the money to the desk', () => {
+    const h = createHotel('seaside', 8);
+    h.coins = 1000;
+    walkTo(h, pads(h).find((p) => p.id === 'staff:restocker')!);
+    run(h, 3);
+    expect(h.staff.map((s) => s.role)).toContain('restocker');
+    walkTo(h, { x: 6, z: 18 }); // go outside
+    const m = h.vending[0];
+    m.stock = 1;
+    m.cash = 250;
+    const pile = h.pile;
+    const ev = run(h, 20);
+    expect(ev.some((e) => e.kind === 'restocked' && !e.byPlayer)).toBe(true);
+    expect(m.stock).toBe(MACHINE_STOCK);
+    expect(h.pile).toBe(pile + 250);
   });
 });
 

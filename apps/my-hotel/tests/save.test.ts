@@ -42,9 +42,11 @@ describe('saving', () => {
     const h = createHotel('city', 3) as unknown as Record<string, unknown>;
     h.version = 2;
     delete h.cleanerSpots;
+    delete h.vending;
     h.staff = [{ role: 'housekeeper', pos: { x: 5, z: 2 }, path: [], heading: 0, roomId: null }];
     const loaded = deserialize(JSON.stringify(h), 'city')!;
-    expect(loaded.version).toBe(3);
+    expect(loaded.version).toBe(4);
+    expect(loaded.vending).toHaveLength(1);
     expect(loaded.staff[0].id).toBe('cleaner-1');
     expect(loaded.cleanerSpots.filter((c) => !c.hired)).toHaveLength(3);
     for (let i = 0; i < 100; i++) tick(loaded, 1 / 30);

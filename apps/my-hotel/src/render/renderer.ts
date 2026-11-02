@@ -1,7 +1,7 @@
 // Draws a hotel each frame: the static world (rebuilt when the layout changes) plus the live
 // layer of people, pads, coins, bubbles and progress rings.
 import * as THREE from 'three';
-import { CLEAN_TIME, pads, type Hotel, type Pad } from '../sim/hotel';
+import { CLEAN_TIME, MACHINE_STOCK, pads, type Hotel, type Pad } from '../sim/hotel';
 import { COIN_PILE, DESK_ZONE, roomGeom } from '../sim/layout';
 import { Label, UI_FONT, ball, box, drawBubble, drawRing, mat, roundRect } from './kit';
 import { PLAYER_LOOK, animatePerson, makePerson, turnTowards, type Person } from './people';
@@ -36,6 +36,7 @@ export class Renderer {
   private staff = new Map<string, Person>();
   private rooms = new Map<number, RoomView>();
   private padViews = new Map<string, { mesh: THREE.Mesh; canvas: HTMLCanvasElement; tex: THREE.CanvasTexture; key: string }>();
+  private machines = new Map<number, Label>();
   private pile = new THREE.Group();
   private pileCount = -1;
   private deskRing = new Label(256, 256, 1.3);
@@ -94,6 +95,7 @@ export class Renderer {
     this.updateStaff(h);
     this.updateRooms(h);
     this.updatePads(h);
+    this.updateMachines(h);
     this.updatePile(h);
     this.updateDesk(h);
 
@@ -148,9 +150,10 @@ export class Renderer {
       animatePerson(v.person, g.path.length > 0, this.time + g.id);
 
       const waiting = g.state === 'queued' || g.state === 'arriving';
-      v.bubble.sprite.visible = waiting;
-      if (waiting) {
-        const icon = g.waited > 35 ? '😴' : g.waited > 15 ? '⌛' : '🛏️';
+      const thirsty = g.state === 'toSoda';
+      v.bubble.sprite.visible = waiting || thirsty;
+      if (waiting || thirsty) {
+        const icon = thirsty ? '🥤' : g.waited > 35 ? '😴' : g.waited > 15 ? '⌛' : '🛏️';
         v.bubble.draw(icon, (c) => drawBubble(c, icon, null, ''));
         v.bubble.sprite.position.set(g.pos.x, 3.0, g.pos.z);
       }
@@ -170,7 +173,9 @@ export class Renderer {
         p =
           s.role === 'receptionist'
             ? makePerson({ outfit: this.T.accent, skin: '#c98c62', hat: 'bellhop', hatColor: this.T.trim, bowTie: '#ffffff' })
-            : makePerson({ outfit: '#4fc3f7', skin: '#f1c9a5', hat: 'beanie', hatColor: '#0288d1', mop: true }, 0.95);
+            : s.role === 'restocker'
+              ? makePerson({ outfit: '#e53935', skin: '#8d5524', hat: 'cap', hatColor: '#ffffff', bag: '#ffca28' }, 0.95)
+              : makePerson({ outfit: '#4fc3f7', skin: '#f1c9a5', hat: 'beanie', hatColor: '#0288d1', mop: true }, 0.95);
         this.live.add(p.root);
         this.staff.set(s.id, p);
       }
@@ -278,6 +283,25 @@ export class Renderer {
     }
   }
 
+  /** Stock count over each soda machine, or a bubble when it needs a refill. */
+  private updateMachines(h: Hotel) {
+    for (const m of h.vending) {
+      let l = this.machines.get(m.id);
+      if (!l) {
+        l = new Label(256, 256, 1.2);
+        l.sprite.position.set(m.cell[0] + 0.5, 3.0, m.cell[1] + 0.5);
+        this.live.add(l.sprite);
+        this.machines.set(m.id, l);
+      }
+      const low = m.stock <= MACHINE_STOCK / 2;
+      l.sprite.visible = low;
+      if (low) {
+        const icon = m.stock === 0 ? '📦' : '🥤';
+        l.draw(`${m.stock}`, (c) => drawBubble(c, icon, m.stock / MACHINE_STOCK, m.stock === 0 ? '#e53935' : '#ffa000'));
+      }
+    }
+  }
+
   private updatePile(h: Hotel) {
     const n = Math.min(40, Math.ceil(h.pile / 5));
     if (n === this.pileCount) return;
@@ -328,7 +352,7 @@ function drawPad(canvas: HTMLCanvasElement, pad: Pad, T: Theme) {
   g.fillStyle = dark ? '#3b2f2f' : '#ffffff';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.font = `bold 46px ${UI_FONT}`;
+  g.font = `bold ${pad.label.length > 7 ? 36 : 46}px ${UI_FONT}`;
   g.fillText(pad.label, w / 2, 92);
   g.font = `bold 52px ${UI_FONT}`;
   g.fillText(`${(pad.price - pad.paid).toLocaleString('en-US')}`, w / 2 + 22, 170);
