@@ -151,10 +151,12 @@ export function buildGrid(input: LayoutInput): Grid {
     if (kind) grid.walls.set(idx, kind);
   };
 
+  const forSale = new Set(lotsForSale(input.owned).map(([i, j]) => lotKey(i, j)));
   for (const k of input.owned) {
     const [i, j] = parseLot(k);
     const ox = i * LOT, oz = j * LOT;
     const open = (di: number, dj: number) => input.owned.has(lotKey(i + di, j + dj));
+    const doors = landDoors(i, j, forSale);
     for (let lx = 0; lx < LOT; lx++) {
       for (let lz = 0; lz < LOT; lz++) {
         let wall = false;
@@ -168,6 +170,7 @@ export function buildGrid(input: LayoutInput): Grid {
           if (!open(di, dj)) wall = true;
         }
         if (wall && i === 0 && j === 0 && lz === LOT - 1 && ENTRANCE_CELLS.includes(lx)) wall = false;
+        if (wall && doors.has(lx * LOT + lz)) wall = false;
         if (wall) mark(ox + lx, oz + lz, 'outer');
       }
     }
@@ -191,6 +194,21 @@ export function buildGrid(input: LayoutInput): Grid {
   }
   for (const [x, z] of input.blockedCells ?? []) mark(x, z, null);
   return grid;
+}
+
+/**
+ * Doorways in a lot's outer wall, one on each side that faces land for sale, so the player can
+ * walk from inside the hotel straight out to the LAND pad. Placed where nothing else stands.
+ * Returns local cells as lx * LOT + lz.
+ */
+export function landDoors(i: number, j: number, forSale: Set<LotKey>): Set<number> {
+  const out = new Set<number>();
+  const lobby = i === 0 && j === 0;
+  if (forSale.has(lotKey(i, j - 1))) for (const lx of lobby ? [7] : [5, 6]) out.add(lx * LOT + 0);
+  if (forSale.has(lotKey(i, j + 1))) out.add(4 * LOT + (LOT - 1));
+  if (forSale.has(lotKey(i - 1, j))) out.add(0 * LOT + 7);
+  if (forSale.has(lotKey(i + 1, j))) out.add((LOT - 1) * LOT + 7);
+  return out;
 }
 
 export function isBlocked(g: Grid, x: number, z: number): boolean {

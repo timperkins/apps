@@ -206,6 +206,15 @@ describe('buying', () => {
     expect(findPath(grid(h), h.player.pos, machineFront(h.vending[1]))).not.toBeNull();
   });
 
+  it('land for sale can be reached from inside, through a doorway', () => {
+    const h = createHotel('seaside', 2);
+    for (const pad of pads(h).filter((p) => p.kind === 'lot')) {
+      const path = findPath(grid(h), h.player.pos, pad)!;
+      // never goes out the front door onto the street
+      expect(path.every((p) => p.z < 11), pad.id).toBe(true);
+    }
+  });
+
   it('land that ends up walled in comes with the purchase', () => {
     const owned = new Set([lotKey(-1, 0), lotKey(0, 0), lotKey(1, 0), lotKey(-1, -1), lotKey(1, -1), lotKey(-1, -2), lotKey(0, -2), lotKey(1, -2)]);
     expect(enclosedLots(owned)).toEqual([[0, -1]]);
