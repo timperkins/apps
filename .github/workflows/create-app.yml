@@ -77,6 +77,9 @@ env:
   DOMAIN: ${{ inputs.domain || format('{0}.trom.dev', inputs.name) }}
   REGION: ${{ inputs.region }}
   DB_LOCATION: ${{ inputs.firestore_location }}
+  # New App Hosting backends attach to this existing Firebase web app (the one Tim News uses), because the
+  # deploy service account can't create web apps. An app.json can name another with webAppId.
+  DEFAULT_WEB_APP_ID: "1:769532990756:web:7ab857aa87a4354e5c8fb1"
 
 jobs:
   create:
@@ -93,10 +96,12 @@ jobs:
           app="apps/$NAME/app.json"
           if [ -f "$app" ]; then
             backend=$(jq -r '.backend // empty' "$app"); preview=$(jq -r '.previewBackend // empty' "$app")
+            web_app=$(jq -r '.webAppId // empty' "$app")
           else
             backend="$NAME"; preview="$NAME-preview"
           fi
           { echo "BACKEND=$backend"; echo "PREVIEW_BACKEND=$preview"; echo "BACKENDS=$backend $preview"; } >> "$GITHUB_ENV"
+          echo "WEB_APP_ID=${web_app:-$DEFAULT_WEB_APP_ID}" >> "$GITHUB_ENV"
 
       - uses: google-github-actions/auth@v2
         with:
@@ -126,7 +131,7 @@ jobs:
               echo "Backend $backend already exists"
             else
               "$RUN" npx -y "$FIREBASE_TOOLS" apphosting:backends:create --non-interactive --project "$FIREBASE_PROJECT" \
-                --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME"
+                --backend "$backend" --primary-region "$REGION" --root-dir "apps/$NAME" --app "$WEB_APP_ID"
             fi
           done
           {
