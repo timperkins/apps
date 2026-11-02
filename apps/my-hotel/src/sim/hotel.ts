@@ -40,6 +40,7 @@ export const LOT_PAD_SIZE = 3.4;
 export const CLERK_PRICE = 250;
 export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
 export const CLEANER_STEP = 50;
+export const ALARM_SLEEP = 5; // seconds a guest sleeps in a room with an alarm clock
 export const CLEANERS_PER_PAD = 3; // a cleaner pad stays until this many have been hired there
 /** Cleaner pads in the lobby; every other lot gets one more. */
 export const LOBBY_CLEANER_SPOTS: Point[] = [{ x: 5.5, z: 1.8 }, { x: 10.4, z: 7.4 }];
@@ -75,6 +76,8 @@ export interface Room {
   state: 'ready' | 'occupied' | 'dirty';
   guestId: number | null;
   clean: number; // 0..1 cleaning progress
+  paid?: number; // what the room cost to build (starting rooms were free)
+  alarm?: boolean; // an alarm clock wakes guests after ALARM_SLEEP seconds
 }
 
 export type GuestState = 'arriving' | 'queued' | 'toRoom' | 'sleeping' | 'toSoda' | 'leaving';
@@ -151,7 +154,7 @@ export type HotelEvent =
 
 export interface Pad {
   id: string;
-  kind: 'room' | 'lot' | 'staff';
+  kind: 'room' | 'lot' | 'staff' | 'alarm';
   x: number;
   z: number;
   size: number;
@@ -249,6 +252,9 @@ export function roomPrice(h: Hotel): number {
   return Math.round((40 * 1.55 ** Math.max(0, builtRoomCount(h) - 2)) / 10) * 10;
 }
 
+/** An alarm clock costs half of what its room did. */
+export const alarmPrice = (r: Room) => Math.max(20, Math.round((r.paid ?? 40) / 2 / 10) * 10);
+
 export function lotPrice(h: Hotel): number {
   return Math.round((300 * 1.6 ** h.lotsBought) / 50) * 50;
 }
@@ -283,6 +289,12 @@ export function pads(h: Hotel): Pad[] {
   const paid = (id: string) => h.padPaid[id] ?? 0;
   const rp = roomPrice(h);
   for (const r of h.rooms) {
+    if (r.built && !r.alarm) {
+      // a built room's pad turns into an alarm clock pad
+      const g = roomGeom(r.i, r.j, r.side);
+      const id = `alarm:${r.id}`;
+      out.push({ id, kind: 'alarm', x: g.pad.x, z: g.pad.z, size: PAD_SIZE, price: alarmPrice(r), paid: paid(id), label: 'ALARM CLOCK' });
+    }
     if (r.built) continue;
     const g = roomGeom(r.i, r.j, r.side);
     const id = `room:${r.id}`;
@@ -553,6 +565,7 @@ function checkIn(h: Hotel, dt: number, ev: HotelEvent[]) {
   front.state = 'toRoom';
   front.queueIndex = -1;
   front.stayLeft = 14 + nextRandom(h.rng) * 12;
+  if (room.alarm) front.stayLeft = ALARM_SLEEP;
   const bed = roomGeom(room.i, room.j, room.side).bed;
   front.path = findPath(grid(h), front.pos, bed) ?? [bed];
 }
@@ -680,8 +693,19 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
   const [kind, arg, extra] = pad.id.split(':');
   if (kind === 'room') {
     const room = h.rooms.find((r) => r.id === Number(arg));
-    if (room) room.built = true;
-    ev.push({ kind: 'unlocked', what: 'New room!' });
+    if (room) {
+      room.built = true;
+      room.paid = pad.price;
+    }
+    h.padLock = `alarm:${arg}`; // the alarm clock pad appears under your feet; step off first
+    ev.push({ kind: 'unlocked', what: 'New room! Add an alarm clock to make guests wake up faster.' });
+  } else if (kind === 'alarm') {
+    const room = h.rooms.find((r) => r.id === Number(arg));
+    if (room) room.alarm = true;
+    // a guest already asleep there wakes up soon too
+    const g = room && h.guests.find((x) => x.id === room.guestId && x.state === 'sleeping');
+    if (g) g.stayLeft = Math.min(g.stayLeft, ALARM_SLEEP);
+    ev.push({ kind: 'unlocked', what: `Alarm clock! Guests in room ${100 + Number(arg)} sleep ${ALARM_SLEEP} seconds.` });
   } else if (kind === 'lot') {
     const [i, j] = parseLot(arg);
     addLot(h, i, j);

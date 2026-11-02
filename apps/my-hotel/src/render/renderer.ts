@@ -330,7 +330,7 @@ function drawPad(canvas: HTMLCanvasElement, pad: Pad, T: Theme) {
   const g = canvas.getContext('2d')!;
   const w = canvas.width, h = canvas.height;
   g.clearRect(0, 0, w, h);
-  const color = pad.kind === 'lot' ? T.accent2 : pad.kind === 'staff' ? '#7e57c2' : T.accent;
+  const color = pad.kind === 'lot' ? T.accent2 : pad.kind === 'staff' ? '#7e57c2' : pad.kind === 'alarm' ? '#e53935' : T.accent;
   g.fillStyle = color;
   roundRect(g, 6, 6, w - 12, h - 12, 40);
   g.fill();
@@ -352,7 +352,7 @@ function drawPad(canvas: HTMLCanvasElement, pad: Pad, T: Theme) {
   g.fillStyle = dark ? '#3b2f2f' : '#ffffff';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.font = `bold ${pad.label.length > 7 ? 36 : 46}px ${UI_FONT}`;
+  g.font = `bold ${pad.label.length > 9 ? 30 : pad.label.length > 7 ? 36 : 46}px ${UI_FONT}`;
   g.fillText(pad.label, w / 2, 92);
   g.font = `bold 52px ${UI_FONT}`;
   g.fillText(`${(pad.price - pad.paid).toLocaleString('en-US')}`, w / 2 + 22, 170);

@@ -145,6 +145,36 @@ describe('buying', () => {
     expect(grid(h).walls.size).toBeGreaterThan(0);
   });
 
+  it('a built room gets an alarm clock pad for half its price, and guests there sleep 5 seconds', () => {
+    const h = createHotel('seaside', 2);
+    const pad = pads(h).find((p) => p.kind === 'room')!;
+    h.coins = 500;
+    walkTo(h, pad);
+    run(h, 3);
+    const alarm = pads(h).find((p) => p.id === `alarm:${pad.id.split(':')[1]}`)!;
+    expect(alarm.price).toBe(Math.max(20, Math.round(pad.price / 20) * 10));
+    // standing still on the new pad doesn't buy it
+    expect(h.coins).toBe(500 - pad.price);
+    walkTo(h, { x: pad.x, z: pad.z - 1.9 });
+    walkTo(h, alarm);
+    run(h, 2);
+    expect(h.coins).toBe(500 - pad.price - alarm.price);
+    const room = h.rooms.find((r) => r.id === Number(pad.id.split(':')[1]))!;
+    expect(room.alarm).toBe(true);
+    // fill every other room so the next guest goes to this one
+    h.rooms.forEach((r) => {
+      if (r.id !== room.id && r.built) r.state = 'occupied';
+    });
+    walkTo(h, deskSpot);
+    let t = 0;
+    while (room.state !== 'occupied' && t < 20) {
+      tick(h, DT);
+      t += DT;
+    }
+    const guest = h.guests.find((g) => g.id === room.guestId)!;
+    expect(guest.stayLeft).toBeLessThanOrEqual(5);
+  });
+
   it('a pad keeps partial payments', () => {
     const h = createHotel('seaside', 2);
     const pad = pads(h).find((p) => p.kind === 'room')!;

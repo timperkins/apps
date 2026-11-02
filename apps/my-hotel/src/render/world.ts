@@ -43,7 +43,7 @@ export function buildWorld(h: Hotel, T: Theme): THREE.Group {
       decal(root, g.rect.x1 - g.rect.x0 - 0.3, g.rect.z1 - g.rect.z0 - 0.3, toonMap(dashed('rgba(80,70,60,0.18)', '#ffffff')), cx, 0.02, cz);
       continue;
     }
-    roomFurniture(root, T, r.id, g);
+    roomFurniture(root, T, r.id, g, !!r.alarm);
   }
 
   for (const m of h.vending) vendingMachine(root, T, m);
@@ -161,7 +161,7 @@ function lobby(root: THREE.Group, T: Theme) {
   root.add(s);
 }
 
-function roomFurniture(root: THREE.Group, T: Theme, id: number, g: ReturnType<typeof roomGeom>) {
+function roomFurniture(root: THREE.Group, T: Theme, id: number, g: ReturnType<typeof roomGeom>, alarm: boolean) {
   const x0 = g.rect.x0, z0 = g.rect.z0;
   const bx = x0 + 2.6, bz = z0 + 2.5;
   // bed: frame, headboard, mattress, pillow (blanket is drawn by the live layer)
@@ -173,6 +173,7 @@ function roomFurniture(root: THREE.Group, T: Theme, id: number, g: ReturnType<ty
   box(root, 0.5, 0.6, 0.5, T.trim, x0 + 1.3, 0, z0 + 1.4);
   cyl(root, 0.05, 0.05, 0.4, '#555555', x0 + 1.3, 0.6, z0 + 1.4, 6);
   cyl(root, 0.18, 0.28, 0.32, T.accent2, x0 + 1.3, 1.0, z0 + 1.4);
+  if (alarm) alarmClock(root, x0 + 3.95, z0 + 1.4);
   decal(root, 2.4, 1.5, mat(T.blankets[(id + 2) % T.blankets.length]), x0 + 2.5, 0.025, z0 + 5);
   // number plate on the back wall
   const plate = canvasTexture(256, 128, (c, w, h) => {
@@ -221,6 +222,21 @@ function vendingMachine(root: THREE.Group, T: Theme, v: Vending) {
   g.add(s);
   void T;
   root.add(g);
+}
+
+/** A little red twin-bell alarm clock on its own nightstand. */
+function alarmClock(root: THREE.Group, x: number, z: number) {
+  box(root, 0.5, 0.6, 0.5, '#8d6e63', x, 0, z);
+  const face = cyl(root, 0.24, 0.24, 0.14, '#e53935', x, 0.85, z, 18);
+  face.rotation.x = Math.PI / 2;
+  const dial = cyl(root, 0.18, 0.18, 0.02, '#ffffff', x, 0.85, z + 0.07, 18);
+  dial.rotation.x = Math.PI / 2;
+  ball(root, 0.09, '#ffca28', x - 0.16, 1.1, z);
+  ball(root, 0.09, '#ffca28', x + 0.16, 1.1, z);
+  box(root, 0.04, 0.12, 0.02, '#212121', x, 0.85, z + 0.09);
+  box(root, 0.1, 0.03, 0.02, '#212121', x + 0.04, 0.85, z + 0.09);
+  cyl(root, 0.04, 0.04, 0.15, '#212121', x - 0.14, 0.6, z, 6);
+  cyl(root, 0.04, 0.04, 0.15, '#212121', x + 0.14, 0.6, z, 6);
 }
 
 function landForSale(root: THREE.Group, T: Theme, i: number, j: number) {
