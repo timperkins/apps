@@ -60,6 +60,8 @@ The Bomber flies one enemy plane at a time (red marker and name over it). The pl
 
 Touching the cargo plane wears it down until it falls. The Bomber's plane takes three hits; when it goes down the phone says "You died" and a new plane comes in 5 seconds later. The game ends when the main turret falls, as usual, and the results show the Bomber's damage, planes lost and upgrades stolen. Co-op keeps its own high scores.
 
+Both phones also show the map above their buttons: the host sends a snapshot of the game about 20 times a second and the phone draws it with the same renderer (`src/coop/mirror.ts`). The Base's phone sees what the big screen sees; the Bomber's phone stays level and follows its own plane. The Bomber's missiles and nukes are always aimed at the standing building nearest their path, so they land on the base.
+
 The phones talk to the host screen directly over WebRTC; the free public PeerJS server only introduces them (as in Scorched). Code is in `src/coop/` (`host.ts` lobby and players, `controller.ts` the phone, `pad.ts` the Bomber's buttons, `net.ts` PeerJS) and the Bomber's rules are in `src/game.ts` under "co-op". `src/boot.ts` sends a `?join=CODE` link to the phone controller. For local testing without the public server, run a PeerJS server and start Vite with `VITE_PEER_HOST=127.0.0.1:9000`.
 
 ## Enemies

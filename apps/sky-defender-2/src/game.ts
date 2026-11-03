@@ -328,6 +328,8 @@ export class Game {
   bomberName = 'Bomber'; bomber: Bomber | null = null;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false;
+  /** co-op: flak bursts and explosions since the last snapshot, so the phones can draw them too ([0 flak | 1 air | 2 ground, x, y, size]) */
+  fxLog: [number, number, number, number][] | null = null;
 
   constructor(private hooks: Hooks) {
     this.reset();
@@ -566,28 +568,31 @@ export class Game {
     }
     return false;
   }
-  /** A normal missile, aimed at the standing building nearest where it would come down (or at `aimX`). */
+  /** Where the Bomber's shots go: the standing building nearest to where a drop from here would come down, so every attack lands on the base. */
+  bomberTarget(p: Plane, T: number) {
+    const land = p.x + p.dir * Math.max(45, p.speed) / 2 * (1 - Math.exp(-MISSILE_DRAG * T)) / MISSILE_DRAG;
+    let tx = 0, best = Infinity;
+    for (const bb of this.buildings) {
+      if (bb.ruined) continue;
+      const d = Math.abs(land - bb.x);
+      if (d < best) { best = d; tx = bb.x; }
+    }
+    return tx;
+  }
+  /** The throw that brings a drop from the plane down on `tx`. */
+  bomberThrow(p: Plane, tx: number, T: number, wa: number) { return (tx - p.x - .5 * wa * T * T) * MISSILE_DRAG / (1 - Math.exp(-MISSILE_DRAG * T)); }
+  /** A normal missile at the base (or at `aimX`). */
   bomberMissile(p: Plane, aimX: number | null = null) {
     const T = clamp(24 * (GROUND_Y - p.y) / 460, 7, 24), wa = this.wind;
-    const vx = p.dir * Math.max(45, p.speed) / 2;
-    const land = p.x + vx * (1 - Math.exp(-MISSILE_DRAG * T)) / MISSILE_DRAG + .5 * wa * T * T;
-    let tx = aimX;
-    if (tx === null) {
-      let best = 140;
-      for (const bb of this.buildings) {
-        if (bb.ruined) continue;
-        const d = Math.abs(land - bb.x) - bb.half;
-        if (d < best) { best = d; tx = bb.x; }
-      }
-    }
-    const vx0 = tx === null ? vx : (tx - p.x - .5 * wa * T * T) * MISSILE_DRAG / (1 - Math.exp(-MISSILE_DRAG * T));
-    this.dropBomb(p, 'missile', T, vx0, MISSILE_DRAG, wa).byBomber = true;
+    const tx = aimX ?? this.bomberTarget(p, T);
+    this.dropBomb(p, 'missile', T, this.bomberThrow(p, tx, T, wa), MISSILE_DRAG, wa).byBomber = true;
     Sound.missile();
   }
   /** A nuke: a big slow bomb that takes three hits to shoot down (five for a mega nuke) and wrecks most of the base if it lands. */
   bomberNuke(p: Plane, mega: boolean) {
-    const T = clamp(16 * (GROUND_Y - p.y) / 520, 6, 16);
-    const bomb = this.dropBomb(p, 'nuke', T, p.dir * Math.max(45, p.speed) * .35, BOMB_DRAG, this.wind * .04);
+    const T = clamp(16 * (GROUND_Y - p.y) / 520, 6, 16), wa = this.wind * .04;
+    // it glides down onto the base, aimed at the building nearest its path
+    const bomb = this.dropBomb(p, 'nuke', T, this.bomberThrow(p, this.bomberTarget(p, T), T, wa), MISSILE_DRAG, wa);
     bomb.byBomber = true; bomb.hp = mega ? 5 : 3; bomb.mega = mega;
     this.labels.push({ text: mega ? 'Mega nuke incoming!' : 'Nuke incoming!', x: this.gunX, y: GROUND_Y - 80, t: 0, life: 2.6, color: '#ff8a7a', big: true });
     this.tip('bomberNuke', 'The Bomber dropped a nuke. It takes three hits: shoot it down before it lands.');
@@ -2175,11 +2180,13 @@ export class Game {
   }
   addFire(x: number, y: number, s: number) { this.particles.push({ k: 'fire', x, y, r: s, life: .35, t: 0, vx: rand(-4, 4), vy: -12 }); }
   flak(x: number, y: number, k: number) {
+    this.fxLog?.push([0, x, y, k]);
     for (let i = 0; i < 7; i++) { const a = Math.random() * 6.28, d = Math.random() * 3 * k; this.addPuff(x + Math.cos(a) * d, y + Math.sin(a) * d * .7, 'flak', (2.6 + Math.random() * 2) * k, 1.2, .9, Math.cos(a) * 4, Math.sin(a) * 4, rand(3, 4.5)); }
     this.particles.push({ k: 'flash', x, y, r: 9 * k, life: .18, t: 0, vx: 0, vy: 0 });
     for (let i = 0; i < 6; i++) { const a = Math.random() * 6.28; this.particles.push({ k: 'spark', x, y, vx: Math.cos(a) * rand(30, 60), vy: Math.sin(a) * rand(30, 60), life: .35, t: 0, r: .5 }); }
   }
   explosion(x: number, y: number, k: number, ground: boolean) {
+    this.fxLog?.push([ground ? 2 : 1, x, y, k]);
     this.particles.push({ k: 'flash', x, y, r: 16 * k, life: .3, t: 0, vx: 0, vy: 0 });
     for (let i = 0; i < 10 * k; i++) this.addFire(x + rand(-5, 5) * k, y + rand(-4, 2) * k, rand(.6, 1.1) * k);
     for (let i = 0; i < 14 * k; i++) this.addPuff(x + rand(-6, 6) * k, y + rand(-5, 2) * k, i % 3 ? 'smokeDark' : 'smokeBlack', rand(2, 4) * k, 3, .8, rand(-10, 10) + this.wind * 6, rand(-18, -4), rand(2.5, 4.5));

@@ -209,3 +209,11 @@ button:disabled { opacity: .45; cursor: default; }
 #cFire.down { background: rgba(255, 207, 140, .4); }
 button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #cPaused { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 20px; font-size: 16px; }
+/* the map on a phone that is playing */
+#cMapWrap { flex: 0 0 44%; margin: 0 -16px 10px; position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+#cMapWrap canvas { position: absolute; inset: 0; display: block; }
+#ctl.playing header { display: none; }
+#ctl.playing { padding-top: max(0px, env(safe-area-inset-top)); }
+#ctl.playing .pad-acts button { min-height: 48px; }
+#ctl.playing #cFire { min-height: 110px; }
+#ctl.playing section[data-s="base"] { gap: 8px; justify-content: flex-start; }

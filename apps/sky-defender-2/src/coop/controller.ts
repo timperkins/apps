@@ -7,6 +7,8 @@ import { PROTOCOL, type ClientMsg, type HostMsg, type Role, type LobbyPlayer } f
 import { cleanName, randomName } from './names';
 import { BomberPad } from './pad';
 import { Tilt } from '../input';
+import { loadArt } from '../art';
+import { Mirror } from './mirror';
 
 const store = {
   get(k: string) { try { return localStorage.getItem('skydef.coop.' + k); } catch { return null; } },
@@ -18,6 +20,7 @@ export function runController(code: string) {
   document.body.innerHTML = `
   <div id="ctl">
     <header><b>Sky Defender 2</b><span>Co-op · room ${code}</span></header>
+    <div id="cMapWrap" hidden><canvas id="cMap"></canvas></div>
     <section data-s="status"><p class="lead" id="cStatus">Joining…</p><button class="primary" id="cRetry" hidden>Try again</button></section>
     <section data-s="lobby">
       <p class="fine">Your name</p>
@@ -49,7 +52,14 @@ export function runController(code: string) {
   let name = cleanName(store.get('name') || randomName());
   store.set('name', name);
   let link: Link | null = null, role: Role | null = null, aiming = false, screen = 'status';
-  const go = (s: string) => { screen = s; show(s); };
+  const go = (s: string) => {
+    screen = s; show(s);
+    // the map shows above the buttons while playing
+    const map = s === 'bomber' || s === 'base';
+    $('cMapWrap').hidden = !map;
+    document.getElementById('ctl')!.classList.toggle('playing', map);
+    if (map) { mirror.follow = s === 'bomber'; fitMap(); }
+  };
   const send = (m: ClientMsg) => link?.send(m);
 
   function status(text: string, retry = false) { $('cStatus').textContent = text; $('cRetry').hidden = !retry; go('status'); }
@@ -80,6 +90,16 @@ export function runController(code: string) {
     $('cRole').textContent = me?.role === 'base' ? 'You will defend the base.' : me?.role === 'bomber' ? 'You will fly the Bomber.' : '';
   }
 
+  // ---- the map: the game drawn from the big screen's snapshots ----
+  const mirror = new Mirror($<HTMLCanvasElement>('cMap'));
+  let artReady = false;
+  void loadArt().then(() => { artReady = true; fitMap(); });
+  function fitMap() {
+    const w = $('cMapWrap'), r = w.getBoundingClientRect();
+    if (r.width && r.height) mirror.resize(Math.round(r.width), Math.round(r.height));
+  }
+  addEventListener('resize', fitMap);
+
   // ---- Bomber ----
   const pad = new BomberPad({ hold: (dir, on) => send({ t: 'hold', dir, on }), act: a => { send({ t: 'act', a }); buzz(12); } });
   $('cPad').appendChild(pad.el);
@@ -92,6 +112,7 @@ export function runController(code: string) {
     Tilt.calibrate();
     aiming = true;
     $('cAim').hidden = true; $('cBaseLive').hidden = false;
+    document.querySelector('#ctl [data-s="base"] h2')!.setAttribute('hidden', '');
     $('cBaseLead').textContent = Tilt.keyboard ? 'Arrow keys aim, space bar fires.' : 'Turn your phone like a steering wheel to aim.';
   });
   $('cRecal').addEventListener('click', () => Tilt.calibrate());
@@ -155,6 +176,7 @@ export function runController(code: string) {
         break;
       }
       case 'paused': $('cPaused').hidden = !m.on; break;
+      case 'snap': mirror.apply(m.s); break;
       case 'over':
         $('cOverTitle').textContent = m.title;
         $('cOverScore').textContent = `${m.score.toLocaleString('en-US')} · wave ${m.wave}`;
@@ -168,6 +190,7 @@ export function runController(code: string) {
   function frame(now: number) {
     requestAnimationFrame(frame);
     const dt = Math.min(.05, (now - last) / 1000); last = now;
+    if (artReady && !$('cMapWrap').hidden) mirror.frame(dt);
     if (role !== 'base' || !aiming) return;
     const r = Tilt.update(now / 1000, dt);
     if (now - sent > 33 && (Math.abs(r - lastR) > .001 || now - sent > 250)) { sent = now; lastR = r; send({ t: 'tilt', r }); }

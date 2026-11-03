@@ -1,8 +1,9 @@
 // Messages between the host screen and the phones in co-op.
 import type { BomberAct, BomberView, UpgradeId } from '../game';
+import type { Snap } from './mirror';
 
 /** Bumped whenever messages change shape, so an old phone page is told to reload. */
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 export type Role = 'base' | 'bomber';
 
 /** Phone to host. */
@@ -31,4 +32,6 @@ export type HostMsg =
   | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number }
   | { t: 'cards'; title: string; cards: CardInfo[] }
   | { t: 'paused'; on: boolean }
+  /** the map, about 20 times a second */
+  | { t: 'snap'; s: Snap }
   | { t: 'over'; title: string; score: number; wave: number };

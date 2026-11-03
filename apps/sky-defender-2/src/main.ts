@@ -10,6 +10,7 @@ import { CoopHost, LOCAL, type Player } from './coop/host';
 import { BomberPad } from './coop/pad';
 import { randomName } from './coop/names';
 import type { ClientMsg, Role } from './coop/protocol';
+import { takeSnap } from './coop/mirror';
 
 type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; reduceMotion: boolean; }
@@ -453,7 +454,7 @@ let localRole: Role | null = null;
 let remoteRoll = 0;
 /** A crate the Base's phone is choosing from, and its choices. */
 let pendingCards: { crate: Crate; ids: UpgradeId[] } | null = null;
-let snapT = 0, drawnQr = '';
+let snapT = 0, mapT = 0, drawnQr = '';
 const padHost = new BomberPad({ hold: (d, on) => game.bomberHold(d, on), act: a => game.bomberAct(a) }, { keys: isComputer(), compact: true });
 padHost.el.hidden = true;
 // under the menus and the pause screen
@@ -487,6 +488,7 @@ function openLobby() {
 }
 function backToLobby() {
   Sound.stopAllEngines();
+  game.fxLog = null;
   game.reset(); game.phase = 'idle';
   localRole = null; padHost.el.hidden = true;
   coop?.stop();
@@ -533,6 +535,7 @@ async function startCoop() {
   }
   game.bomberName = bomber.name;
   game.start();
+  game.fxLog = [];
   remoteRoll = 0; pendingCards = null;
   coop.start();
   show(null); setHud(true); mode = 'play';
@@ -565,6 +568,14 @@ function coopInput(p: Player, m: ClientMsg) {
 /** About ten times a second, each phone hears how its side is doing. */
 function coopSnapshots(dt: number) {
   if (!coop) return;
+  // the map, for both phones, about 20 times a second
+  mapT -= dt;
+  if (mapT <= 0) {
+    mapT = .05;
+    const phones = coop.players.filter(p => p.link);
+    if (phones.length) { const s = takeSnap(game); for (const p of phones) coop.send(p, { t: 'snap', s }); }
+    else game.fxLog = [];
+  }
   snapT -= dt;
   if (snapT > 0) return;
   snapT = .1;
