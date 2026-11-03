@@ -277,7 +277,7 @@ export interface Bomber {
 }
 /** The Bomber's numbers: heights are shares of the sky from the ground (0) to SKY_TOP (1). */
 export const BOMBER = {
-  climb: 55, hp: 3, respawn: 5, missileCD: 8, nukeCD: 12, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
+  climb: 55, hp: 6, respawn: 5, missileCD: 8, nukeCD: 12, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
   armTime: 12, armRange: Infinity, touch: 24, cargoDps: 10, highDps: 4, lowDps: 8, shield: 10,
 };
 /** The top of the sky the Bomber can fly to, and the lowest it can go. */
@@ -659,7 +659,7 @@ export class Game {
     if (b.plane && b.plane !== p) this.unpossess(b.plane);
     this.dropArm();
     p.player = true; p.chaseCargo = false; p.burning = false;
-    // a plane the Bomber flies takes three hits (a boss keeps its own health)
+    // a plane the Bomber flies takes six hits (a boss keeps its own health)
     if (p.max === 1) p.max = p.hp = BOMBER.hp;
     if (p.state !== 'turn') { p.state = 'fly'; p.stateT = 0; }
     p.alt = p.y;

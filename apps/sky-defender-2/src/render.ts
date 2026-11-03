@@ -464,7 +464,7 @@ export class Renderer {
     // health bar, shown once it has been hit; the boss always shows its own, bigger one
     const boss = type === 'boss';
     if (!falling && p.max > 1 && (boss || p.hp < p.max)) {
-      const w = boss ? 44 : type === 'heavy' ? 26 : 18, y = p.y - (boss ? 22 : p.player ? 19 : 15), fr = Math.max(0, p.hp / p.max);
+      const w = boss ? 44 : p.player ? 26 : type === 'heavy' ? 26 : 18, y = p.y - (boss ? 22 : p.player ? 19 : 15), fr = Math.max(0, p.hp / p.max);
       ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(p.x - w / 2 - .5, y - .5, w + 1, 2.6, 1.3); ctx.fill();
       ctx.fillStyle = fr > .5 ? P.amber : P.red; ctx.beginPath(); ctx.roundRect(p.x - w / 2, y, w * fr, 1.6, .8); ctx.fill();
     }
