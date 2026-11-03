@@ -130,7 +130,7 @@ export class Mirror {
       const crate = bp.armCrate >= 0 ? g.crates[bp.armCrate] : null;
       g.bomber = {
         name: bp.name, plane, deadT: bp.deadT, up: false, down: false, missileCD: 0, nukeCD: 0, diveCD: 0, switchCD: 0, diveT: 0, dive: null, returnY: null,
-        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, damage: 0, deaths: 0, steals: 0,
+        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, turboT: 0, rapidT: 0, damage: 0, deaths: 0, steals: 0,
       };
       if (crate) crate.held = true;
     } else g.bomber = null;

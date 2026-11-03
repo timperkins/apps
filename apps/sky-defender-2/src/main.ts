@@ -325,10 +325,10 @@ function tappedCrate(e: PointerEvent) {
   }
   return null;
 }
-/** Co-op: a falling pack a tap is on, for the Bomber's arm. */
+/** Co-op: a pack (falling or on the pad) a tap is on, for the Bomber's arm. */
 function tappedFalling(e: PointerEvent) {
   for (const c of game.crates) {
-    if (c.landed || c.dead || c.held) continue;
+    if (c.dead || c.held) continue;
     const [x, y] = renderer.worldToScreen(game, c.x, c.y - 3);
     if (Math.hypot(e.offsetX - x, e.offsetY - y) < 30 + 10 * renderer.s) return c;
   }

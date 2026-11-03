@@ -46,7 +46,8 @@ export class BomberPad {
   update(v: BomberView) {
     this.q('.pad-name').textContent = v.name;
     this.q('.pad-hp').textContent = v.alive ? '♥'.repeat(Math.ceil(v.hp)) + '♡'.repeat(Math.max(0, Math.ceil(v.max - v.hp))) : '';
-    this.q('.pad-note').textContent = v.shieldT > 0 ? `Shield ${Math.ceil(v.shieldT)}` : v.diving ? 'Firing!' : v.arm >= 0 ? `Arm ${Math.round(v.arm * 100)}%` : '';
+    this.q('.pad-note').textContent = [v.shieldT > 0 ? `Shield ${Math.ceil(v.shieldT)}` : '', v.turboT > 0 ? `Turbo ${Math.ceil(v.turboT)}` : '', v.rapidT > 0 ? `Rapid ${Math.ceil(v.rapidT)}` : '',
+      v.diving ? 'Firing!' : '', v.arm >= 0 ? `Arm ${Math.round(v.arm * 100)}%` : ''].filter(Boolean).join(' · ');
     const alt = this.q('.alt');
     (alt.querySelector('i') as HTMLElement).style.height = `${Math.round(v.height * 100)}%`;
     (alt.querySelector('em') as HTMLElement).style.bottom = `${Math.round(v.height * 100)}%`;
