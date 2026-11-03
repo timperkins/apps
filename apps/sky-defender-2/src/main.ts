@@ -304,9 +304,11 @@ function openCrate(c = game.readyCrate()) {
   mode = 'cards';
   game.release(); pointers.clear();
   Sound.ui();
-  $('cardsTitle').textContent = pack === 'diamond' ? 'Diamond pack: choose an upgrade' : pack === 'gold' ? 'Gold pack: choose an upgrade' : 'Choose an upgrade';
+  $('cardsTitle').textContent = pack === 'diamond' ? 'Diamond pack' : pack === 'gold' ? 'Gold pack' : 'Choose an upgrade';
   $('cards').classList.toggle('gold', pack === 'gold');
   $('cards').classList.toggle('diamond', pack === 'diamond');
+  // every pack upgrade is permanent, so the line under the title says so instead of each card
+  $('cards').querySelector('.lead')!.textContent = pack === 'plain' ? 'It takes effect right away.' : 'Choose a permanent upgrade. It takes effect right away.';
   const list = $('cardList');
   list.innerHTML = '';
   for (const id of game.offers(pack)) {
