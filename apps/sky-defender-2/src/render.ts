@@ -1,7 +1,7 @@
 // Canvas renderer. The world is drawn rotated around the turret pivot so the game's
 // horizon tracks the real one; the barrel and HUD are drawn in screen space. In war mode the
 // camera also slides sideways to whichever turret is in use (game.viewX).
-import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, LIGHTS, BASE_SCALE, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
+import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, HALF, LIGHTS, BASE_SCALE, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
 import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } from './palettes';
 import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
 
@@ -195,9 +195,17 @@ export class Renderer {
     for (const b of game.bombs) {
       ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.angle);
       if (b.kind === 'missile') this.drawEnemyMissile(P, b);
-      else { ctx.scale(.62, .62); this.sprite(P, s => s.bombs.big); }
+      else if (b.kind === 'nuke') {
+        // the Bomber's nuke: a big bomb with a pulsing red glow
+        const k = b.mega ? 1.35 : 1;
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .35 + .25 * Math.sin(this.time * 9);
+        ctx.drawImage(puff('#ff5a3a'), -12 * k, -12 * k, 24 * k, 24 * k);
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+        ctx.scale(k, k); this.sprite(P, s => s.bombs.big);
+      } else { ctx.scale(.62, .62); this.sprite(P, s => s.bombs.big); }
       ctx.restore();
     }
+    this.drawArm(game);
     this.drawShots(game, P);
     this.drawParticles(game, P);
     this.drawShield(game);
@@ -442,13 +450,54 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     if (p.burning && !falling) { const f = SHARED.fire, k = .5; ctx.drawImage(f.img, p.x - 10 * k, p.y - 14 * k, 20 * k, 21 * k); }
+    // co-op: the plane the Bomber flies wears a red marker, and a bubble while its shield is up
+    if (p.player && !falling) {
+      const y = p.y - 13 - .8 * Math.sin(this.time * 3);
+      ctx.strokeStyle = '#ff6b5a'; ctx.lineWidth = 1.1; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = .95;
+      ctx.beginPath(); ctx.moveTo(p.x - 3.4, y - 2.6); ctx.lineTo(p.x, y); ctx.lineTo(p.x + 3.4, y - 2.6); ctx.stroke();
+      if ((game.bomber?.shieldT ?? 0) > 0) {
+        ctx.globalAlpha = .45 + .2 * Math.sin(this.time * 6); ctx.strokeStyle = '#7fe9ff';
+        ctx.beginPath(); ctx.ellipse(p.x, p.y, HALF[type] * SC[type] + 4, 9, 0, 0, 7); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
     // health bar, shown once it has been hit; the boss always shows its own, bigger one
     const boss = type === 'boss';
     if (!falling && p.max > 1 && (boss || p.hp < p.max)) {
-      const w = boss ? 44 : type === 'heavy' ? 26 : 18, y = p.y - (boss ? 22 : 15), fr = Math.max(0, p.hp / p.max);
+      const w = boss ? 44 : type === 'heavy' ? 26 : 18, y = p.y - (boss ? 22 : p.player ? 19 : 15), fr = Math.max(0, p.hp / p.max);
       ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(p.x - w / 2 - .5, y - .5, w + 1, 2.6, 1.3); ctx.fill();
       ctx.fillStyle = fr > .5 ? P.amber : P.red; ctx.beginPath(); ctx.roundRect(p.x - w / 2, y, w * fr, 1.6, .8); ctx.fill();
     }
+  }
+
+  /** Co-op: the Bomber's metal arm, a jointed rod from the plane to the pack it is reeling in, with its health. */
+  drawArm(game: Game) {
+    const a = game.bomber?.arm;
+    if (!a || !game.bomber?.plane) return;
+    const ctx = this.ctx, n = 6;
+    const pts: [number, number][] = [];
+    for (let i = 0; i <= n; i++) {
+      const [x, y] = game.armPoint(i / n);
+      // a slight sag in the middle
+      pts.push([x, y + Math.sin(Math.PI * i / n) * 4]);
+    }
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#2a2a30'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    ctx.strokeStyle = '#b8bcc6'; ctx.lineWidth = .9;
+    ctx.beginPath(); pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); ctx.stroke();
+    ctx.fillStyle = '#d8dce4';
+    for (const [x, y] of pts.slice(1, -1)) { ctx.beginPath(); ctx.arc(x, y, .9, 0, 7); ctx.fill(); }
+    // the claw around the pack
+    const [cx, cy] = pts[n];
+    ctx.strokeStyle = '#d8dce4'; ctx.lineWidth = .8;
+    ctx.beginPath(); ctx.moveTo(cx - 4, cy - 3); ctx.lineTo(cx - 4.5, cy + 2); ctx.moveTo(cx + 4, cy - 3); ctx.lineTo(cx + 4.5, cy + 2); ctx.stroke();
+    // its health, over the middle of the arm
+    const [mx, my] = pts[n >> 1], w = 20, fr = Math.max(0, a.hp / a.max);
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(mx - w / 2 - .5, my - 8.5, w + 1, 2.6, 1.3); ctx.fill();
+    ctx.fillStyle = '#c9ced8'; ctx.beginPath(); ctx.roundRect(mx - w / 2, my - 8, w * fr, 1.6, .8); ctx.fill();
+    ctx.restore();
   }
 
   // The crate's landing zone on the pad, shown while a drop is on its way: corner marks, pulsing while the crate comes down.
@@ -728,6 +777,14 @@ export class Renderer {
       ctx.fillStyle = l.color; ctx.fillText(l.text, x, y - k * 22 * s);
     }
     ctx.globalAlpha = 1;
+    // co-op: the Bomber's name over its plane
+    const bp = game.bomber?.plane;
+    if (bp && !bp.dead) {
+      const [x, y] = this.worldToScreen(game, bp.x, bp.y - 26);
+      ctx.font = `500 ${10 * Math.max(.9, s)}px Jost, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillText(game.bomber!.name, x + 1, y + 1);
+      ctx.fillStyle = '#ff8a7a'; ctx.fillText(game.bomber!.name, x, y);
+    }
     // arrows at the screen edge for planes out of view, while the radar stands
     if (game.alive('radar') && game.phase !== 'over') {
       const m = 12, top = this.safeTop + 92, bottom = this.H - 34 * s;
@@ -745,7 +802,7 @@ export class Renderer {
         ctx.save(); ctx.translate(ax, ay); ctx.rotate(ang);
         const green = p.type === 'cargo' || p.friend;
         ctx.globalAlpha = green ? .9 : .8;
-        ctx.strokeStyle = p.gold ? '#ffd34a' : green ? '#9dffb8' : P.hud;
+        ctx.strokeStyle = p.gold ? '#ffd34a' : green ? '#9dffb8' : p.player ? '#ff6b5a' : P.hud;
         ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(0, 0); ctx.lineTo(-6, 6); ctx.stroke();
         if (p.type === 'fighter' && (p.state === 'warn' || p.state === 'dive')) { ctx.strokeStyle = P.red; ctx.beginPath(); ctx.moveTo(-11, -6); ctx.lineTo(-5, 0); ctx.lineTo(-11, 6); ctx.stroke(); }
         ctx.restore();
@@ -787,6 +844,14 @@ export class Renderer {
         const left = game.planesLeft();
         ctx.fillText(game.phase === 'clear' ? 'cleared' : `${left} plane${left === 1 ? '' : 's'} left`, W / 2, top + 26 * u);
         ctx.globalAlpha = 1;
+        // co-op: how the Bomber is doing
+        const bm = game.bomber;
+        if (bm) {
+          ctx.font = `500 ${9 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = '#ff8a7a';
+          const st = bm.plane ? (bm.arm ? 'stealing an upgrade' : bm.perk ? 'has an upgrade' : 'flying') : `back in ${Math.ceil(bm.deadT)}`;
+          ctx.fillText(`BOMBER ${bm.name.toUpperCase()} · ${st}`, W / 2, top + (game.difficulty === 'hard' ? 50 : 40) * u);
+          ctx.fillStyle = P.hud;
+        }
       }
     }
     // pinned base status strip

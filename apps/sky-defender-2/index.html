@@ -48,6 +48,7 @@
     <div class="seg" role="radiogroup" aria-label="Game mode">
       <button role="radio" data-mode="original" aria-checked="true">Original</button>
       <button role="radio" data-mode="war" aria-checked="false">War</button>
+      <button role="radio" data-mode="coop" aria-checked="false">Co-op</button>
     </div>
     <div class="seg" role="radiogroup" aria-label="Difficulty">
       <button role="radio" data-diff="normal" aria-checked="true">Normal</button>
@@ -59,6 +60,21 @@
       <button class="ghost" data-open="scores">High scores</button>
     </div>
     <p class="fine" id="installTip"></p>
+  </section>
+
+  <section id="lobby" class="screen">
+    <h2>Co-op</h2>
+    <p class="fine">Scan with a phone to join</p>
+    <canvas id="qr" width="360" height="360" aria-label="QR code to join"></canvas>
+    <p class="fine" id="lobbyCode">Opening a room…</p>
+    <ul class="plist" id="lobbyPlayers"></ul>
+    <div class="row">
+      <button class="ghost" id="joinHere">Join</button>
+      <button class="ghost" id="diceHere" hidden>🎲 New name</button>
+    </div>
+    <button class="primary" id="coopStart" disabled>Start</button>
+    <p class="fine" id="lobbyNote"></p>
+    <button class="ghost small" id="lobbyBack">Back</button>
   </section>
 
   <section id="nosensor" class="screen">
@@ -114,6 +130,6 @@
     <button class="ghost" data-close>Done</button>
   </section>
 </div>
-<script type="module" src="/src/main.ts"></script>
+<script type="module" src="/src/boot.ts"></script>
 </body>
 </html>

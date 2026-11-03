@@ -7,8 +7,9 @@ import { Sound } from './audio';
 export type PlaneState = 'fly' | 'turn' | 'warn' | 'dive' | 'strafe' | 'climb' | 'chase' | 'falling';
 /** 'won' is only reached in war mode, when the level's clock runs out with the base still standing. */
 export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
-/** Original: endless waves defending one turret. War: hold out for a fixed time from several turrets, among friendly planes. */
-export type GameMode = 'original' | 'war';
+/** Original: endless waves defending one turret. War: hold out for a fixed time from several turrets, among friendly planes.
+ *  Co-op: the original waves for two players, one on the base and one flying the enemy planes as the Bomber. */
+export type GameMode = 'original' | 'war' | 'coop';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
 /** Perks: permanent gun improvements (dual, triple, reload, flak), leeching and the upgrade shifter (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
@@ -45,10 +46,14 @@ export interface Plane {
   dodgeT?: number; dodgeDir?: number;
   // war mode: a friendly plane, the turret it means to drop a crate at, and the short bursts planes fire at each other
   friend?: boolean; dropAt?: Building | null; gunCD?: number; gunT?: number; gunAt?: Plane | null;
+  /** co-op: the plane the Bomber is flying */
+  player?: boolean;
 }
-/** A heavy bomber's big bomb, or a light plane's missile (long and skinny, on the old bomb's arc). */
-export type BombKind = 'bomb' | 'missile';
-export interface Bomb { id: number; kind: BombKind; x: number; y: number; x0: number; y0: number; vx0: number; k: number; g: number; wa: number; t: number; T: number; hp: number; trail: TrailPoint[]; trailT: number; angle: number; dead?: boolean; }
+/** A heavy bomber's big bomb, or a light plane's missile (long and skinny, on the old bomb's arc). In co-op the Bomber can also drop a nuke. */
+export type BombKind = 'bomb' | 'missile' | 'nuke';
+export interface Bomb { id: number; kind: BombKind; x: number; y: number; x0: number; y0: number; vx0: number; k: number; g: number; wa: number; t: number; T: number; hp: number; trail: TrailPoint[]; trailT: number; angle: number; dead?: boolean;
+  /** co-op: dropped by the Bomber (so its damage counts for the Bomber), and a mega nuke */
+  byBomber?: boolean; mega?: boolean; }
 /** `ghost`: passes through enemy planes, hitting each once (the ones in `hit`). `fall`: a drop shot on its way back down. */
 export interface Shell { x: number; y: number; vx: number; vy: number; t: number; px: number; py: number; dead?: boolean; counted?: boolean; ghost?: boolean; fall?: boolean; hit?: Set<Plane | Bomb>; }
 export type ShotKind = 'missile' | 'rocket' | 'fireball' | 'nuke' | 'cluster' | 'bomblet';
@@ -64,7 +69,9 @@ export interface Bolt { pts: [number, number][]; life: number; }
 /** A gold crate is a gold pack: opening it gives every permanent upgrade at once. */
 export interface Crate { x: number; y: number; vx: number; vy: number; lz: number; landed: boolean; t: number; sway: number; dead?: boolean; gold?: boolean; diamond?: boolean;
   /** upgrade shifter: seconds left of a sideways dodge, which way, and how far it is off its path right now */
-  dodgeT?: number; dodgeDir?: number; dodgeX?: number; }
+  dodgeT?: number; dodgeDir?: number; dodgeX?: number;
+  /** co-op: held by the Bomber's metal arm, which is reeling it in */
+  held?: boolean; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
 /** `outpost` marks a war mode turret standing on its own away from the base. */
 export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
@@ -74,6 +81,8 @@ export interface Results {
   mode: GameMode; difficulty: Difficulty; score: number; wave: number; accuracy: number; kills: number; intercepts: number;
   /** war mode: whether the level was passed, why it was lost, seconds survived and friendly planes shot down */
   won: boolean; reason: string; time: number; friendlies: number;
+  /** co-op: how the Bomber did */
+  bomber?: { name: string; damage: number; deaths: number; steals: number };
 }
 export interface Hooks {
   tip?: (key: string, text: string) => void;
@@ -232,6 +241,50 @@ function waveSpec(wave: number, d: Difficulty = 'normal'): WaveSpec {
   return { count: list.length + (boss ? 1 : 0), list, boss };
 }
 
+/* ---------- co-op: the Bomber ---------- */
+/** What the Bomber can do; up and down are held, the rest are taps. */
+export type BomberAct = 'missile' | 'nuke' | 'dive' | 'switch' | 'grab' | 'use';
+/** Upgrades the Bomber can steal with the metal arm. */
+export type BomberPerk = 'shield' | 'barrage' | 'reload' | 'armor' | 'mega';
+export const BOMBER_PERKS: Record<BomberPerk, { name: string; desc: string }> = {
+  shield: { name: 'Plane shield', desc: 'Your plane cannot be hurt for 10 seconds.' },
+  barrage: { name: 'Missile barrage', desc: 'Five missiles at once, spread across the base.' },
+  reload: { name: 'Quick reload', desc: 'Missile, nuke and dive are ready again at once.' },
+  armor: { name: 'Heavy armor', desc: 'Your plane is repaired and takes twice as many hits.' },
+  mega: { name: 'Mega nuke', desc: 'A nuke from any height, with twice the blast.' },
+};
+/** The metal arm that reels in a falling upgrade pack. */
+export interface Arm { crate: Crate; hp: number; max: number; t: number; x0: number; y0: number; }
+export interface Bomber {
+  name: string; plane: Plane | null;
+  /** seconds until a new plane after being shot down (0 while flying) */
+  deadT: number;
+  up: boolean; down: boolean;
+  missileCD: number; nukeCD: number; diveCD: number; switchCD: number;
+  /** a dive or strafing run in progress: seconds left, and whether it is the high strafe or the low dive */
+  diveT: number; dive: 'high' | 'low' | null;
+  /** after a low dive the plane climbs back to where it started, unless the player steers */
+  returnY: number | null;
+  arm: Arm | null; perk: BomberPerk | null; shieldT: number;
+  damage: number; deaths: number; steals: number;
+}
+/** The Bomber's numbers: heights are shares of the sky from the ground (0) to SKY_TOP (1). */
+export const BOMBER = {
+  climb: 55, hp: 3, respawn: 5, missileCD: 8, nukeCD: 12, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
+  armTime: 12, armRange: 300, touch: 24, cargoDps: 10, highDps: 4, lowDps: 8, shield: 10,
+};
+/** The top of the sky the Bomber can fly to, and the lowest it can go. */
+export const SKY_TOP = -680, SKY_LOW = -50;
+/** How high a point is, as a share of the sky: 0 on the ground, 1 at the top. */
+export const heightOf = (y: number) => (GROUND_Y - y) / (GROUND_Y - SKY_TOP);
+/** A snapshot of the Bomber for the controls (on a phone or on this screen). */
+export interface BomberView {
+  name: string; alive: boolean; deadT: number; height: number; hp: number; max: number;
+  missile: number; nuke: number; dive: number; diving: boolean; canNuke: boolean;
+  /** 0..1 of the arm's reel-in while one is out, else -1; whether a pack is in reach to grab */
+  arm: number; canGrab: boolean; perk: BomberPerk | null; shieldT: number;
+}
+
 export class Game {
   settings = { reduceMotion: false, vibration: true };
   /** set before start() (and before reset(), for the title screen's backdrop); they hold for the whole game */
@@ -271,6 +324,10 @@ export class Game {
   shake = 0; firing = false; tapEdge = false; oneShot = false; waveDamaged = false;
   palFrom: PaletteId = paletteForWave(1); palTo: PaletteId = this.palFrom; palT = 1;
   timeScale = 1; overT = 0; clearInfo: ClearInfo | null = null; lastVibe = 0;
+  /** co-op: the Bomber's name (set before start) and its state during a game */
+  bomberName = 'Bomber'; bomber: Bomber | null = null;
+  /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
+  blame = false;
 
   constructor(private hooks: Hooks) {
     this.reset();
@@ -315,6 +372,10 @@ export class Game {
     this.overT = 0;
     this.clearInfo = null;
     this.lastVibe = 0;
+    this.bomber = this.coop ? {
+      name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
+      diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, damage: 0, deaths: 0, steals: 0,
+    } : null;
   }
 
   get D() { return DIFFICULTY[this.difficulty]; }
@@ -324,6 +385,7 @@ export class Game {
   /** The turret the player is using. */
   post(): Building { return this.posts[this.postI]; }
   get war() { return this.mode === 'war'; }
+  get coop() { return this.mode === 'coop'; }
   get ended() { return this.phase === 'over' || this.phase === 'won'; }
   /** Planes U-turn (or, if friendly, leave) past this x. */
   get xe() { return this.war ? WAR_XE : XE; }
@@ -476,6 +538,309 @@ export class Game {
     if (done) setTimeout(() => done(this.results()), 3200);
   }
 
+  /* ---------- co-op: the Bomber ---------- */
+  /** Holding the up or down button. */
+  bomberHold(dir: 'up' | 'down', on: boolean) {
+    const b = this.bomber;
+    if (!b) return;
+    b[dir] = on;
+    if (on) b.returnY = null;
+  }
+  /** A Bomber button. `crate` is a falling pack that was clicked; otherwise grab takes the nearest one in reach. Returns whether anything happened. */
+  bomberAct(a: BomberAct, crate: Crate | null = null): boolean {
+    const b = this.bomber, p = b?.plane;
+    if (!b || !p || this.ended || this.phase === 'idle') return false;
+    switch (a) {
+      case 'missile':
+        if (b.missileCD > 0) return false;
+        b.missileCD = BOMBER.missileCD; this.bomberMissile(p);
+        return true;
+      case 'nuke':
+        if (b.nukeCD > 0 || heightOf(p.y) < BOMBER.nukeAlt) return false;
+        b.nukeCD = BOMBER.nukeCD; this.bomberNuke(p, false);
+        return true;
+      case 'dive': return this.bomberDive(p);
+      case 'switch': return this.bomberSwitch();
+      case 'grab': return this.bomberGrab(p, crate);
+      case 'use': return this.bomberUse(p);
+    }
+    return false;
+  }
+  /** A normal missile, aimed at the standing building nearest where it would come down (or at `aimX`). */
+  bomberMissile(p: Plane, aimX: number | null = null) {
+    const T = clamp(24 * (GROUND_Y - p.y) / 460, 7, 24), wa = this.wind;
+    const vx = p.dir * Math.max(45, p.speed) / 2;
+    const land = p.x + vx * (1 - Math.exp(-MISSILE_DRAG * T)) / MISSILE_DRAG + .5 * wa * T * T;
+    let tx = aimX;
+    if (tx === null) {
+      let best = 140;
+      for (const bb of this.buildings) {
+        if (bb.ruined) continue;
+        const d = Math.abs(land - bb.x) - bb.half;
+        if (d < best) { best = d; tx = bb.x; }
+      }
+    }
+    const vx0 = tx === null ? vx : (tx - p.x - .5 * wa * T * T) * MISSILE_DRAG / (1 - Math.exp(-MISSILE_DRAG * T));
+    this.dropBomb(p, 'missile', T, vx0, MISSILE_DRAG, wa).byBomber = true;
+    Sound.missile();
+  }
+  /** A nuke: a big slow bomb that takes three hits to shoot down (five for a mega nuke) and wrecks most of the base if it lands. */
+  bomberNuke(p: Plane, mega: boolean) {
+    const T = clamp(16 * (GROUND_Y - p.y) / 520, 6, 16);
+    const bomb = this.dropBomb(p, 'nuke', T, p.dir * Math.max(45, p.speed) * .35, BOMB_DRAG, this.wind * .04);
+    bomb.byBomber = true; bomb.hp = mega ? 5 : 3; bomb.mega = mega;
+    this.labels.push({ text: mega ? 'Mega nuke incoming!' : 'Nuke incoming!', x: this.gunX, y: GROUND_Y - 80, t: 0, life: 2.6, color: '#ff8a7a', big: true });
+    this.tip('bomberNuke', 'The Bomber dropped a nuke. It takes three hits: shoot it down before it lands.');
+    Sound.missile(); Sound.whine(1.5, this.panOf(p.x, p.y));
+  }
+  nukeLands(b: Bomb) {
+    const k = b.mega ? 2 : 1, R = b.mega ? 280 : 200;
+    this.explosion(b.x, GROUND_Y - 3, b.mega ? 4.5 : 3.5, true);
+    this.particles.push({ k: 'ring', x: b.x, y: GROUND_Y - 10, r: 10, grow: R / .55, life: .7, t: 0, vx: 0, vy: 0 });
+    this.particles.push({ k: 'flash', x: b.x, y: GROUND_Y - 10, r: R * .6, life: .9, t: 0, vx: 0, vy: 0 });
+    this.nukeFlash = 1;
+    if (!this.settings.reduceMotion) this.shake = Math.max(this.shake, 14);
+    Sound.nuke(this.panOf(b.x, GROUND_Y));
+    this.vibrate(250);
+    for (const bb of this.buildings) {
+      const d = Math.max(0, Math.abs(b.x - bb.x) - bb.half);
+      if (d < R) this.damageBuilding(bb, (d <= 0 ? 300 : 150 * (1 - .5 * d / R)) * k);
+    }
+  }
+  /** Above 7/15 of the sky: six seconds of strafing the base from up high. Below: a dive down close to the base, firing. */
+  bomberDive(p: Plane) {
+    const b = this.bomber!;
+    if (b.diveCD > 0 || b.diveT > 0) return false;
+    b.diveT = BOMBER.diveTime;
+    b.diveCD = BOMBER.diveCD + BOMBER.diveTime;
+    b.dive = heightOf(p.y) >= BOMBER.diveAlt ? 'high' : 'low';
+    if (b.dive === 'low') { b.returnY = p.y; Sound.whine(1.2, this.panOf(p.x, p.y)); }
+    Sound.minigun(this.panOf(p.x, p.y));
+    this.tip('bomberDive', b.dive === 'high' ? 'The Bomber is strafing your base from high up. Shoot it down!' : 'The Bomber is diving at your base. Now it is close: shoot it!');
+    return true;
+  }
+  /** A line of tracer fire walking along the base under the plane; every building it reaches takes damage. */
+  bomberStrafe(p: Plane, dt: number, impact: number, dps: number) {
+    if (Math.random() < dt * 20) {
+      const [nx, ny] = this.planePoint(p, 1, 0);
+      this.tracers.push({ x0: nx, y0: ny, x1: impact + rand(-8, 8), y1: GROUND_Y - rand(0, 6), life: .14 });
+      if (Math.random() < .5) this.addPuff(impact + rand(-8, 8), GROUND_Y - 2, 'dust', rand(1.5, 3), 3, .55, rand(-4, 4), -8);
+    }
+    const b = this.bomber!;
+    if (Math.floor(b.diveT / .45) !== Math.floor((b.diveT + dt) / .45)) Sound.minigun(this.panOf(p.x, p.y));
+    this.blame = true;
+    for (const bb of this.buildings) if (!bb.ruined && Math.abs(bb.x - impact) < bb.half + 10) this.damageBuilding(bb, dps * dt, true);
+    this.blame = false;
+  }
+  /** S: fly the next enemy plane along instead (to the right, wrapping round). */
+  bomberSwitch() {
+    const b = this.bomber!, cur = b.plane;
+    if (!cur || b.switchCD > 0) return false;
+    const foes = this.planes.filter(q => q !== cur && q.type !== 'cargo' && !q.friend && !q.dead && q.state !== 'falling').sort((a, c) => a.x - c.x);
+    if (!foes.length) return false;
+    this.possess(foes.find(q => q.x > cur.x) ?? foes[0]);
+    b.switchCD = .4;
+    return true;
+  }
+  possess(p: Plane) {
+    const b = this.bomber!;
+    if (b.plane && b.plane !== p) this.unpossess(b.plane);
+    this.dropArm();
+    p.player = true; p.chaseCargo = false; p.burning = false;
+    // a plane the Bomber flies takes three hits (a boss keeps its own health)
+    if (p.max === 1) p.max = p.hp = BOMBER.hp;
+    if (p.state !== 'turn') { p.state = 'fly'; p.stateT = 0; }
+    p.alt = p.y;
+    b.plane = p; b.dive = null; b.diveT = 0; b.returnY = null;
+  }
+  /** A plane the Bomber leaves goes back to flying itself. */
+  unpossess(p: Plane) {
+    p.player = false;
+    if (p.state !== 'turn' && p.state !== 'falling') { p.state = 'fly'; p.stateT = 0; }
+    p.alt = pick(TYPES[p.type].alts);
+    p.diveCD = rand(4, 9) * this.D.fire; p.dropCD = rand(2, 5) * this.D.fire;
+  }
+  /** A new plane for the Bomber, flying in from one side. */
+  spawnBomber() {
+    const b = this.bomber!;
+    const p = this.spawnPlane('light', 0);
+    p.y = p.alt = -450; p.speed = 55;
+    this.possess(p);
+    this.labels.push({ text: `${b.name} is back`, x: 0, y: GROUND_Y - 70, t: 0, life: 2, color: '#ff8a7a', big: true });
+  }
+  bomberDown(p: Plane) {
+    const b = this.bomber;
+    if (!b || b.plane !== p) return;
+    this.dropArm();
+    p.player = false;
+    b.plane = null; b.deadT = BOMBER.respawn; b.deaths++; b.dive = null; b.diveT = 0; b.returnY = null; b.shieldT = 0;
+    this.labels.push({ text: `${b.name} shot down`, x: p.x, y: p.y - 26, t: 0, life: 2.4, color: '#bff5cf', big: true });
+  }
+  /** The falling pack the arm can reach from the plane, nearest first. */
+  grabbable(p: Plane): Crate | null {
+    let best: Crate | null = null, bd = BOMBER.armRange;
+    for (const c of this.crates) {
+      if (c.landed || c.dead || c.held) continue;
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  bomberGrab(p: Plane, crate: Crate | null) {
+    const b = this.bomber!;
+    if (b.arm) return false;
+    const c = crate ? (!crate.landed && !crate.dead && !crate.held && Math.hypot(crate.x - p.x, crate.y - p.y) < BOMBER.armRange ? crate : null) : this.grabbable(p);
+    if (!c) return false;
+    this.startArm(c);
+    return true;
+  }
+  /** The metal arm closes on a falling pack. It has a fifth of a boss's health, and takes 12 seconds to reel the pack in. */
+  startArm(c: Crate) {
+    const b = this.bomber!;
+    const hp = Math.max(3, Math.round(bossHp(Math.max(BOSS_EVERY, this.wave), this.difficulty) / 5));
+    c.held = true;
+    b.arm = { crate: c, hp, max: hp, t: 0, x0: c.x, y0: c.y };
+    this.labels.push({ text: 'Metal arm!', x: c.x, y: c.y - 16, t: 0, life: 2, color: '#ff8a7a', big: true });
+    this.tip('arm', 'The Bomber has a metal arm on your upgrade. Shoot the arm to make it let go.');
+    Sound.whine(.6, this.panOf(c.x, c.y));
+  }
+  /** A point along the arm: 0 at the plane, 1 at the pack. */
+  armPoint(k: number): [number, number] {
+    const a = this.bomber?.arm, p = this.bomber?.plane;
+    if (!a || !p) return [NaN, NaN];
+    const hx = p.x, hy = p.y + 4;
+    return [hx + (a.crate.x - hx) * k, hy + (a.crate.y - 4 - hy) * k];
+  }
+  /** How far (x, y) is from the arm, or Infinity when there is no arm out. */
+  armDist(x: number, y: number) {
+    const a = this.bomber?.arm, p = this.bomber?.plane;
+    if (!a || !p) return Infinity;
+    const [x0, y0] = this.armPoint(0), [x1, y1] = this.armPoint(1);
+    const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
+    const t = clamp(((x - x0) * dx + (y - y0) * dy) / l2, 0, 1);
+    return Math.hypot(x - (x0 + dx * t), y - (y0 + dy * t));
+  }
+  hitArm(dmg: number) {
+    const a = this.bomber?.arm;
+    if (!a) return;
+    a.hp -= dmg;
+    const [mx, my] = this.armPoint(.5);
+    this.particles.push({ k: 'spark', x: mx, y: my, vx: rand(-40, 40), vy: rand(-40, 40), life: .3, t: 0, r: .6 });
+    if (a.hp > 0) { if (dmg >= 1) Sound.hitPlane(this.panOf(mx, my)); return; }
+    this.addScore(150, mx, my, 'Arm destroyed');
+    this.explosion(mx, my, .7, false);
+    Sound.boom(false, this.panOf(mx, my));
+    this.dropArm();
+  }
+  /** The arm lets go (it was shot off, or the plane went down or changed): the pack floats on down to the pad. */
+  dropArm() {
+    const b = this.bomber, a = b?.arm;
+    if (!b || !a) return;
+    b.arm = null;
+    const c = a.crate;
+    c.held = false;
+    if (!c.dead && !c.landed) { const left = clamp((LZ_Y - c.y) / 45, 3, CRATE_FALL); c.vy = (LZ_Y - c.y) / left; c.vx = 0; }
+  }
+  updateArm(dt: number) {
+    const b = this.bomber!, a = b.arm, p = b.plane;
+    if (!a || !p) return;
+    const c = a.crate;
+    if (c.dead) { b.arm = null; return; }
+    a.t += dt;
+    // the pack is reeled in from where the arm caught it up to the plane
+    const k = Math.min(1, a.t / BOMBER.armTime), e = k * k * (3 - 2 * k);
+    c.x = a.x0 + (p.x - a.x0) * e; c.y = a.y0 + (p.y + 9 - a.y0) * e;
+    c.sway = Math.sin(this.t * 2.3) * .25;
+    if (a.t < BOMBER.armTime) return;
+    c.dead = true; b.arm = null; b.steals++;
+    b.perk = c.diamond ? 'mega' : c.gold ? pick<BomberPerk>(['armor', 'mega']) : pick<BomberPerk>(['shield', 'barrage', 'reload']);
+    this.labels.push({ text: `${b.name} stole the upgrade`, x: p.x, y: p.y - 26, t: 0, life: 2.6, color: '#ff8a7a', big: true });
+    Sound.denied();
+  }
+  /** Uses the upgrade the arm brought in. */
+  bomberUse(p: Plane) {
+    const b = this.bomber!, k = b.perk;
+    if (!k) return false;
+    b.perk = null;
+    switch (k) {
+      case 'shield': b.shieldT = BOMBER.shield; Sound.shield(); break;
+      case 'barrage': {
+        const aims = this.buildings.filter(bb => !bb.ruined).map(bb => bb.x);
+        for (let i = 0; i < 5; i++) this.bomberMissile(p, (aims.length ? aims[i % aims.length] : 0) + rand(-6, 6));
+        break;
+      }
+      case 'reload': b.missileCD = b.nukeCD = b.diveCD = 0; Sound.pop(); break;
+      case 'armor': p.max = BOMBER.hp * 2; p.hp = p.max; p.hits = []; Sound.shield(); break;
+      case 'mega': this.bomberNuke(p, true); break;
+    }
+    this.labels.push({ text: BOMBER_PERKS[k].name, x: p.x, y: p.y - 24, t: 0, life: 2, color: '#ff8a7a', big: true });
+    return true;
+  }
+  /** The Bomber's plane flies itself left and right (turning at the edges); the player only climbs and dives. */
+  updateBomberPlane(p: Plane, dt: number) {
+    const b = this.bomber;
+    if (!b || b.plane !== p) { p.player = false; return; }
+    if (p.state === 'turn') { p.alt = p.y; this.updateTurn(p, dt); return; }
+    const v = Math.max(45, p.speed) * (b.arm ? .5 : 1);
+    let climb = 0;
+    if (b.dive === 'low') {
+      // down close to the base, firing as it goes
+      const ty = GROUND_Y - 90;
+      climb = clamp(ty - p.y, -160 * dt, 160 * dt);
+      p.x += p.dir * v * 1.3 * dt;
+      if (Math.abs(p.y + climb - ty) < 60) this.bomberStrafe(p, dt, p.x + p.dir * 55, BOMBER.lowDps);
+    } else {
+      p.x += p.dir * v * dt;
+      const steer = (b.down ? 1 : 0) - (b.up ? 1 : 0);
+      if (steer) climb = steer * BOMBER.climb * dt;
+      else if (b.returnY !== null) { climb = clamp(b.returnY - p.y, -80 * dt, 80 * dt); if (Math.abs(b.returnY - p.y) < 1) b.returnY = null; }
+      if (b.dive === 'high') this.bomberStrafe(p, dt, p.x + p.dir * 30, BOMBER.highDps);
+    }
+    const ny = clamp(p.y + climb, SKY_TOP, SKY_LOW);
+    climb = ny - p.y; p.y = ny; p.alt = ny;
+    p.pitch += (clamp((climb / dt) / v * .8, -.6, .7) - p.pitch) * Math.min(1, dt * 3);
+    if (p.dir > 0 ? p.x > this.xe : p.x < -this.xe) { this.beginTurn(p); p.alt = p.y; }
+  }
+  updateBomber(dt: number) {
+    const b = this.bomber!;
+    b.missileCD = Math.max(0, b.missileCD - dt); b.nukeCD = Math.max(0, b.nukeCD - dt); b.diveCD = Math.max(0, b.diveCD - dt);
+    b.switchCD = Math.max(0, b.switchCD - dt); b.shieldT = Math.max(0, b.shieldT - dt);
+    if (b.diveT > 0) { b.diveT -= dt; if (b.diveT <= 0) { b.diveT = 0; b.dive = null; } }
+    const p = b.plane;
+    if (p && (p.dead || p.state === 'falling' || !p.player)) { this.dropArm(); b.plane = null; }
+    if (!b.plane) {
+      if (b.deadT > 0) b.deadT = Math.max(0, b.deadT - dt);
+      else if (!this.ended && this.phase !== 'idle') this.spawnBomber();
+      return;
+    }
+    const q = b.plane;
+    // touching the cargo plane slowly wears it down
+    const c = this.cargo;
+    if (c && !c.dead && !c.hitByPlayer && c.state !== 'falling' && Math.hypot(c.x - q.x, c.y - q.y) < BOMBER.touch + 10) {
+      c.hp -= BOMBER.cargoDps * dt; c.hitFlash = .5;
+      if (Math.random() < dt * 8) this.particles.push({ k: 'spark', x: (c.x + q.x) / 2 + rand(-4, 4), y: (c.y + q.y) / 2 + rand(-3, 3), vx: rand(-30, 30), vy: rand(-30, 30), life: .3, t: 0, r: .5 });
+      this.tip('bomberCargo', 'The Bomber is ramming your cargo plane!');
+      if (c.hp <= 0) this.cargoLost(false);
+    }
+    // touching a falling pack puts the arm on it
+    if (!b.arm) for (const cr of this.crates) {
+      if (!cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - q.x, cr.y - q.y) < BOMBER.touch) { this.startArm(cr); break; }
+    }
+    this.updateArm(dt);
+  }
+  /** A snapshot of the Bomber for the controls. */
+  bomberView(): BomberView | null {
+    const b = this.bomber;
+    if (!b) return null;
+    const p = b.plane;
+    return {
+      name: b.name, alive: !!p, deadT: b.deadT, height: p ? heightOf(p.y) : 0, hp: p ? Math.max(0, p.hp) : 0, max: p?.max ?? BOMBER.hp,
+      missile: b.missileCD / BOMBER.missileCD, nuke: b.nukeCD / BOMBER.nukeCD, dive: Math.min(1, b.diveCD / BOMBER.diveCD), diving: b.diveT > 0,
+      canNuke: !!p && heightOf(p.y) >= BOMBER.nukeAlt, arm: b.arm ? Math.min(1, b.arm.t / BOMBER.armTime) : -1, canGrab: !!p && !b.arm && !!this.grabbable(p),
+      perk: b.perk, shieldT: b.shieldT,
+    };
+  }
+
   /* ---------- waves ---------- */
   startWave(n: number) {
     this.wave = n;
@@ -508,7 +873,7 @@ export class Game {
   currentPalId(): PaletteId { return this.palT >= .5 ? this.palTo : this.palFrom; }
   planesLeft() {
     let n = 0;
-    for (const p of this.planes) if (p.type !== 'cargo' && p.state !== 'falling') n++;
+    for (const p of this.planes) if (p.type !== 'cargo' && p.state !== 'falling' && !p.player) n++;
     for (const g of this.spawnQueue) n += g.types.length;
     return n;
   }
@@ -576,6 +941,7 @@ export class Game {
     this.lasing = false;
     if (!this.ended) this.updateGun(dt);
     this.updatePlanes(dt);
+    if (this.bomber) this.updateBomber(dt);
     this.updateBombs(dt);
     this.updateShells(dt);
     this.updateMissiles(dt);
@@ -787,7 +1153,12 @@ export class Game {
     }
     for (const cr of this.crates) {
       const c = near(cr.x, cr.y - 4);
-      if (c && !cr.landed && !cr.dead && Math.hypot(cr.x - c[0], cr.y - 4 - c[1]) < 7 && !this.dodge(cr)) this.crateLost(cr);
+      if (c && !cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - c[0], cr.y - 4 - c[1]) < 7 && !this.dodge(cr)) this.crateLost(cr);
+    }
+    const arm = this.bomber?.arm;
+    if (arm) for (let k = .2; k < 1; k += .2) {
+      const [ax, ay] = this.armPoint(k), c = near(ax, ay);
+      if (c && Math.hypot(ax - c[0], ay - c[1]) < 4) { this.hitArm(LASER_DPS * dt); break; }
     }
     this.laserSnd -= dt;
     if (this.laserSnd <= 0) { this.laserSnd = .09; Sound.laser(); }
@@ -822,6 +1193,7 @@ export class Game {
         if (p.burnT >= 2) { p.burnT = 0; this.damagePlane(p, 1, null); if ((p.state as PlaneState) === 'falling') continue; }
       }
       if (p.friend) { this.updateFriend(p, dt); if (p.dead) continue; }
+      else if (p.player) this.updateBomberPlane(p, dt);
       else {
         // Headwind: enemy planes fly (and so drop and dive) a fifth slower
         const pdt = this.perks.has('headwind') ? dt * .8 : dt;
@@ -1023,17 +1395,19 @@ export class Game {
   dropBomb(p: Plane, kind: Bomb['kind'], T: number, vx0: number, k: number, wa: number, dx = 0) {
     const x0 = p.x + dx, y0 = p.y + 1.5 + (p.type === 'boss' ? 3 : 0);
     const g = 2 * (GROUND_Y - y0) / (T * T);
-    this.bombs.push({ id: nextId++, kind, x: x0, y: y0, x0, y0, vx0, k, g, wa, t: 0, T, hp: 1, trail: [], trailT: 0, angle: 0 });
+    const bomb: Bomb = { id: nextId++, kind, x: x0, y: y0, x0, y0, vx0, k, g, wa, t: 0, T, hp: 1, trail: [], trailT: 0, angle: 0 };
+    this.bombs.push(bomb);
     if (kind === 'missile') {
       for (let i = 0; i < 4; i++) this.addPuff(x0 + rand(-2, 2), y0 + rand(-1, 1), 'smokeLight', rand(1.2, 2), 2, .5, rand(-4, 4), rand(-2, 2), 1.4);
-      if (p.type !== 'boss') this.tip('enemyMissile', 'Light planes fire missiles at your base. Shoot them down before they land.');
-    } else this.tip('bomb', 'Heavy bombs hit very hard. Shoot them before they land.');
+      if (p.type !== 'boss' && !p.player) this.tip('enemyMissile', 'Light planes fire missiles at your base. Shoot them down before they land.');
+    } else if (kind === 'bomb') this.tip('bomb', 'Heavy bombs hit very hard. Shoot them before they land.');
+    return bomb;
   }
   bombX(b: Bomb, t: number) { return b.x0 + b.vx0 * (1 - Math.exp(-b.k * t)) / b.k + .5 * b.wa * t * t; }
   bombLandX(b: Bomb) { return this.bombX(b, b.T); }
-  bombR(b: Bomb) { return b.kind === 'bomb' ? 3.2 : 1.8; }
+  bombR(b: Bomb) { return b.kind === 'nuke' ? 5 : b.kind === 'bomb' ? 3.2 : 1.8; }
   // the tail, where the smoke trail comes out: the sprite's nose points along the fall, so the tail is behind it
-  bombTail(b: Bomb) { const L = b.kind === 'bomb' ? 5.3 : 4.8; return { x: b.x + Math.sin(b.angle) * L, y: b.y - Math.cos(b.angle) * L }; }
+  bombTail(b: Bomb) { const L = b.kind === 'nuke' ? 8 : b.kind === 'bomb' ? 5.3 : 4.8; return { x: b.x + Math.sin(b.angle) * L, y: b.y - Math.cos(b.angle) * L }; }
 
   updateFalling(p: Plane, dt: number) {
     p.vx *= Math.pow(.85, dt);
@@ -1068,6 +1442,8 @@ export class Game {
   damagePlane(p: Plane, dmg: number, at: [number, number] | null) {
     if (p.dead) return false;
     if (p.state === 'falling') { this.disintegrate(p); return true; }
+    // co-op: the Bomber's plane shield turns every hit away
+    if (p.player && this.bomber && this.bomber.shieldT > 0) { this.particles.push({ k: 'ring', x: p.x, y: p.y, r: 6, grow: 40, life: .25, t: 0, vx: 0, vy: 0 }); return true; }
     if (p.type === 'boss' && this.perks.has('breaker')) dmg *= 3;
     p.hp -= dmg; p.hitFlash = 1;
     if (at && p.hits.length < 3) {
@@ -1095,6 +1471,7 @@ export class Game {
         this.vibrate(120);
       }
       if (this.lock.target === p) this.lock = { target: null, t: 0, step: 0, locked: false };
+      if (p.player) this.bomberDown(p);
       if (this.leech) this.leechHeal();
       if (!this.chaining) this.chainKill(p);
       this.maybeDiamond(p);
@@ -1123,7 +1500,7 @@ export class Game {
       b.trailT -= dt;
       if (b.trailT <= 0) { b.trailT = .08; const tl = this.bombTail(b); b.trail.push([tl.x, tl.y, this.t]); if (b.trail.length > 90) b.trail.shift(); }
       if (this.shieldT > 0 && this.inDome(b.x, b.y)) { this.domeHit(b); continue; }
-      if (b.y >= GROUND_Y - 2) { b.dead = true; this.bombLands(b); }
+      if (b.y >= GROUND_Y - 2) { b.dead = true; this.blame = !!b.byBomber; this.bombLands(b); this.blame = false; }
     }
     this.bombs = this.bombs.filter(b => !b.dead);
     // keep finished trails fading in the sky
@@ -1132,6 +1509,7 @@ export class Game {
   }
   bombLands(b: Bomb) {
     this.trails.push({ pts: b.trail, t: 0 });
+    if (b.kind === 'nuke') { this.nukeLands(b); return; }
     const big = b.kind === 'bomb';
     // the heavy bomb hits twice as hard as it used to; the missile hits like the old small bomb
     const direct = big ? 320 : 70, splash = big ? 140 : 30, radius = big ? 90 : 52;
@@ -1232,8 +1610,9 @@ export class Game {
         if (this.planeDist(p, x, y) < pad) return [x, y];
       }
       for (const b of this.bombs) if (Math.hypot(b.x - x, b.y - y) - this.bombR(b) < pad) return [x, y];
+      if (!safe && this.armDist(x, y) < pad + 1.5) return [x, y];
       for (const c of this.crates) {
-        if (c.landed || c.dead || safe) continue;
+        if (c.landed || c.dead || c.held || safe) continue;
         if (this.shifter) { if (Math.hypot(c.x - x, c.y - 4 - y) < 6 + pad + DODGE_PAD) this.dodge(c); continue; }
         if (Math.hypot(c.x - x, c.y - 4 - y) < 6 + pad) return [x, y];
       }
@@ -1271,7 +1650,8 @@ export class Game {
         if (b.hp <= 0) this.killBomb(b);
       }
     }
-    if (!safe) for (const c of this.crates) if (!c.landed && !c.dead && Math.hypot(c.x - x, c.y - 4 - y) < R + 5 && !this.dodge(c)) this.crateLost(c);
+    if (!safe) for (const c of this.crates) if (!c.landed && !c.dead && !c.held && Math.hypot(c.x - x, c.y - 4 - y) < R + 5 && !this.dodge(c)) this.crateLost(c);
+    if (!safe && this.armDist(x, y) < R) { this.hitArm(dmg); hitEnemy = true; }
     if (s.counted !== false) this.scoreShot(hitEnemy);
     this.flak(x, y, R / 9);
     Sound.flak(Math.min(1, Math.hypot(x, y) / 800), this.panOf(x, y));
@@ -1284,9 +1664,9 @@ export class Game {
   killBomb(b: Bomb) {
     b.dead = true;
     this.trails.push({ pts: b.trail, t: 0 });
-    const big = b.kind === 'bomb';
+    const big = b.kind !== 'missile';
     const upper = b.y < (b.y0 + GROUND_Y) / 2;
-    this.addScore((big ? 50 : 25) * (upper ? 2 : 1), b.x, b.y, upper ? 'High intercept' : null);
+    this.addScore((b.kind === 'nuke' ? 200 : big ? 50 : 25) * (upper ? 2 : 1), b.x, b.y, b.kind === 'nuke' ? 'Nuke stopped' : upper ? 'High intercept' : null);
     this.stats.intercepts++;
     // the bomb goes off in the air: a bigger blast, which still scorches the base if it was close
     this.explosion(b.x, b.y, big ? 1.7 : 1.25, false);
@@ -1433,7 +1813,7 @@ export class Game {
       this.labels.push({ text: 'Gold plane incoming', x: 0, y: GROUND_Y - 70, t: 0, life: 2.6, color: '#ffd34a', big: true });
       this.tip('gold', "A gold plane! Its gold pack lets you choose any permanent upgrade, even the gold-only ones. Don't shoot it.");
     }
-    for (const p of this.planes) if (p.type === 'fighter' && p.state === 'fly' && Math.random() < .35) p.chaseCargo = true;
+    for (const p of this.planes) if (p.type === 'fighter' && p.state === 'fly' && !p.player && Math.random() < .35) p.chaseCargo = true;
     this.tip('cargo', "An upgrade is on its way. Don't shoot the cargo plane or its crate.");
     this.hooks.hud && this.hooks.hud();
   }
@@ -1525,7 +1905,8 @@ export class Game {
     for (const cr of this.crates) {
       cr.t += dt;
       if (cr.dodgeT && cr.dodgeT > 0) { cr.dodgeT = Math.max(0, cr.dodgeT - dt); cr.dodgeX = (cr.dodgeDir ?? 1) * 16 * Math.sin(Math.PI * (1 - cr.dodgeT / DODGE_TIME)); }
-      if (cr.landed) continue;
+      // a crate in the Bomber's metal arm goes where the arm takes it
+      if (cr.landed || cr.held) continue;
       // fall at a steady rate and steer toward the landing zone, arriving as it touches down
       cr.y = Math.min(LZ_Y, cr.y + cr.vy * dt);
       const left = Math.max(.3, (LZ_Y - cr.y) / cr.vy);
@@ -1677,9 +2058,9 @@ export class Game {
   domeHit(b: Bomb) {
     b.dead = true;
     this.trails.push({ pts: b.trail, t: 0 });
-    this.explosion(b.x, b.y, b.kind === 'bomb' ? 1.4 : 1, false);
+    this.explosion(b.x, b.y, b.kind !== 'missile' ? 1.4 : 1, false);
     this.particles.push({ k: 'ring', x: b.x, y: b.y, r: 4, grow: 90, life: .35, t: 0, vx: 0, vy: 0 });
-    Sound.boom(b.kind === 'bomb', this.panOf(b.x, b.y));
+    Sound.boom(b.kind !== 'missile', this.panOf(b.x, b.y));
     this.shieldFlash = 1;
   }
   updateShield(dt: number) {
@@ -1692,7 +2073,9 @@ export class Game {
   damageBuilding(b: Building, amt: number, quiet = false) {
     if (b.ruined || this.phase === 'idle') return;
     if (this.shieldT > 0) { this.shieldFlash = Math.max(this.shieldFlash, .5); return; }
-    b.hp -= amt * this.D.damage * (this.perks.has('armor') ? .75 : 1); b.hit = 1;
+    const dealt = amt * this.D.damage * (this.perks.has('armor') ? .75 : 1);
+    if (this.blame && this.bomber) this.bomber.damage += Math.min(Math.max(0, b.hp), dealt);
+    b.hp -= dealt; b.hit = 1;
     // Last stand: once a game, the turret in use holds on at half strength instead of falling
     if (b.hp <= 0 && b.id === 'turret' && b === this.post() && this.perks.has('laststand') && !this.lastStandUsed) {
       this.lastStandUsed = true; this.perks.delete('laststand');
@@ -1775,6 +2158,7 @@ export class Game {
     return {
       mode: this.mode, difficulty: this.difficulty, score: this.score, wave: this.wave, accuracy: this.stats.shots ? this.stats.hitShots / this.stats.shots : 0, kills: this.stats.kills, intercepts: this.stats.intercepts,
       won: this.phase === 'won', reason: this.endReason, time: Math.min(WAR_TIME, this.warT), friendlies: this.strikes,
+      bomber: this.bomber ? { name: this.bomber.name, damage: Math.round(this.bomber.damage), deaths: this.bomber.deaths, steals: this.bomber.steals } : undefined,
     };
   }
 

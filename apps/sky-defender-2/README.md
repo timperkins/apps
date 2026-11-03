@@ -44,6 +44,24 @@ Both are picked on the title screen and remembered, and every mode and difficult
 - **War** (level 1): the base sits in the middle of a wider map with three turrets: the base's own, where you start, and one out on its own either side. Swipe left or right to move to the turret on that side (in debug, `z` and `x`); the camera slides over and the gun fires again once it arrives. A touch waits 90 ms before it fires so the start of a swipe doesn't loose a shot. Enemy planes come in from beyond either edge, so they can be shot on the way in. They mostly go for the base, but fighters and light planes sometimes hit an outlying turret; if the turret in use falls you move to the nearest one left. Friendly planes (olive green with a roundel and a green marker above them) fly through often, and the challenge is not to hit them: three friendly planes shot down loses the level, and the HUD shows the three marks. Some friendly planes drop an upgrade crate beside a turret; move there and tap it to open it. Friendly and enemy planes trade bursts of fire for show; it does no real damage. Survive 3 minutes to pass. The level is also lost if every base building or every turret is destroyed. The numbers are near `WAR_TIME` in `src/game.ts`, and the turret positions are `WAR_POSTS` in `src/art.ts`.
 - **Hard** (was Expert) has about twice the planes per wave, mixes in fighters and heavy bombers from the start, sends them in bigger groups with shorter gaps, and they drop, fire and dive more often. Everything that hits the base does 1.6x the damage. Points are worth 1.5x. In War it means bigger, more frequent enemy groups. The numbers are in `DIFFICULTY` in `src/game.ts`.
 
+## Co-op
+
+Pick **Co-op** on the title screen and tap to open the lobby. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates) or **Bomber**. Start needs one of each.
+
+The Bomber flies one enemy plane at a time (red marker and name over it). The plane flies left and right by itself and turns at the edges; the Bomber's buttons (on the phone, or beside the game when the host plays the Bomber, with keys in brackets):
+
+- **Up** / **Down** (held; ↑ or W, ↓): climb or descend slowly.
+- **Missile** (M): drops a normal missile at the building below, every 8 seconds.
+- **Nuke** (N): only at 3/4 of the sky's height or higher, every 12 seconds. A big slow bomb that takes three hits to shoot down and wrecks most of the base if it lands.
+- **Dive** (D): 6 seconds of firing, then a 15 second cooldown. At 7/15 of the sky or higher the plane stays up high and strafes the base as it flies; lower down it dives close to the base and fires, then climbs back.
+- **Switch plane** (S): take over the next enemy plane along. The old plane flies itself again.
+- **Grab** (G, or click a falling pack on the host screen): a metal arm closes on a falling upgrade pack and reels it in over 12 seconds. Touching a falling pack does the same. The arm has a fifth of a boss's health; shoot it and it lets go, and the pack floats on down. A stolen pack becomes a Bomber upgrade: plane shield, missile barrage or quick reload from a plain crate, heavy armor or a mega nuke from a gold pack, a mega nuke from a diamond pack.
+- **Upgrade** (U): use it.
+
+Touching the cargo plane wears it down until it falls. The Bomber's plane takes three hits; when it goes down the phone says "You died" and a new plane comes in 5 seconds later. The game ends when the main turret falls, as usual, and the results show the Bomber's damage, planes lost and upgrades stolen. Co-op keeps its own high scores.
+
+The phones talk to the host screen directly over WebRTC; the free public PeerJS server only introduces them (as in Scorched). Code is in `src/coop/` (`host.ts` lobby and players, `controller.ts` the phone, `pad.ts` the Bomber's buttons, `net.ts` PeerJS) and the Bomber's rules are in `src/game.ts` under "co-op". `src/boot.ts` sends a `?join=CODE` link to the phone controller. For local testing without the public server, run a PeerJS server and start Vite with `VITE_PEER_HOST=127.0.0.1:9000`.
+
 ## Enemies
 
 Every plane goes down with one hit, so waves grow quickly (`waveSpec` in `src/game.ts`). A falling plane can be hit once more, which blows it apart in the air so it does no damage when it would have hit the base. Heavy bombers drop big bombs over the middle of the base that soon fall almost straight down and hit very hard; light planes fire long, skinny missiles on a slower arc aimed at standing buildings; fighters dive and strafe.
@@ -58,7 +76,8 @@ Every fourth wave (4, 8, 12, ...) has a boss: a much bigger dark bomber with red
 - `src/game.ts` rules and entity types: waves, planes, bombs, fighter dives, shells, missiles, upgrades, scoring
 - `src/render.ts` canvas renderer (world rotates around the turret; barrel and HUD stay in screen space)
 - `src/audio.ts` synthesised sound and music (no audio files)
-- `src/main.ts` screens, settings, high scores, portrait handling, game loop
+- `src/main.ts` screens, settings, high scores, portrait handling, game loop, and the co-op lobby on the host screen
+- `src/coop/` co-op: rooms and players, the phone controller, the Bomber's buttons
 - `public/` service worker, web manifest and icons, copied into the build as-is
 - `app.json`, `firebase.json` deploy config (Hosting site `trom-sky-defender-2`)
 
