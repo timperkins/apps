@@ -2,11 +2,13 @@
 // Scaffolds apps/<name>/ from a template and writes its deploy config.
 //
 //   node scripts/new-app.mjs <name> [--template static-vite] [--type hosting|apphosting]
-//                                   [--domain <host>] [--firestore] [--ttl-collections "<group> ..."]
-//                                   [--config-only]
+//                                   [--domain <host>] [--firestore] [--no-preview-db]
+//                                   [--ttl-collections "<group> ..."] [--config-only]
 //
 // --config-only writes app.json and the Firebase config into an existing folder (for apps
 // copied in from another repo) without copying a template.
+// --no-preview-db (with --firestore) creates only the prod database. Previews of such an app read and
+// write the prod database, so use it only for tools with a single user.
 // The Google-side resources (site, backends, databases, DNS) are created by the create-app workflow.
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -22,6 +24,7 @@ const { values: opts, positionals } = parseArgs({
     type: { type: 'string', default: 'hosting' },
     domain: { type: 'string' },
     firestore: { type: 'boolean', default: false },
+    'no-preview-db': { type: 'boolean', default: false },
     'ttl-collections': { type: 'string' },
     'config-only': { type: 'boolean', default: false },
   },
@@ -74,7 +77,7 @@ if (opts.type === 'hosting') {
   app.previewBackend = `${name}-preview`;
 }
 if (opts.firestore) {
-  app.firestore = { prod: name, preview: `${name}-preview` };
+  app.firestore = opts['no-preview-db'] ? { prod: name } : { prod: name, preview: `${name}-preview` };
   // Collection groups whose documents carry an expiresAt timestamp; create-app adds a TTL policy for each.
   const ttl = (opts['ttl-collections'] ?? '').split(/[\s,]+/).filter(Boolean);
   if (ttl.length) app.ttlCollections = ttl;
@@ -90,7 +93,7 @@ if (opts.type === 'hosting') {
   };
 }
 if (opts.firestore) {
-  firebase.firestore = [app.firestore.prod, app.firestore.preview].map((database) => ({
+  firebase.firestore = [app.firestore.prod, app.firestore.preview].filter(Boolean).map((database) => ({
     database,
     rules: 'firestore.rules',
     indexes: 'firestore.indexes.json',
