@@ -66,7 +66,10 @@ jobs:
             echo "site=$(jq -r '.hostingSite // empty' app.json)"
             echo "backend=$(jq -r '.backend // empty' app.json)"
             echo "preview_backend=$(jq -r '.previewBackend // empty' app.json)"
-            echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
+            # An app without a preview database (single-user tools) builds its previews against prod.
+            echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // .firestore.prod // empty' app.json)"
+            # The database that belongs to this target. Rules are deployed only to this one.
+            echo "own_database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
           # Preview channel ID from the branch name: lowercase, dashes, short enough for a DNS label.
@@ -107,9 +110,9 @@ jobs:
 
       # Rules and indexes go only to the database for this target, so a branch never changes prod rules.
       - name: Deploy Firestore rules (preview database)
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.database != ''
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.own_database != ''
         run: |
-          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.database }}' \
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
             --project "$FIREBASE_PROJECT" --force
 
       - name: Deploy preview channel
@@ -142,10 +145,10 @@ jobs:
       # An App Hosting app without a previewBackend in app.json gets no preview.
       - name: Deploy Firestore rules (App Hosting)
         if: >-
-          steps.app.outputs.type == 'apphosting' && steps.app.outputs.database != ''
+          steps.app.outputs.type == 'apphosting' && steps.app.outputs.own_database != ''
           && (inputs.target == 'prod' || steps.app.outputs.preview_backend != '')
         run: |
-          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.database }}' \
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
             --project "$FIREBASE_PROJECT" --force
 
       - name: Roll out App Hosting

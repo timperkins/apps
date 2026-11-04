@@ -201,7 +201,7 @@ jobs:
         run: |
           dbs="$NAME $NAME-preview"
           if [ -f "apps/$NAME/app.json" ] && jq -e .firestore "apps/$NAME/app.json" > /dev/null; then
-            dbs=$(jq -r '.firestore.prod + " " + .firestore.preview' "apps/$NAME/app.json")
+            dbs=$(jq -r '[.firestore.prod, .firestore.preview] | map(select(.)) | join(" ")' "apps/$NAME/app.json")
           fi
           for db in $dbs; do
             if npx -y "$FIREBASE_TOOLS" firestore:databases:get "$db" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
@@ -219,7 +219,7 @@ jobs:
         run: |
           dbs="$NAME $NAME-preview"
           if [ -f "apps/$NAME/app.json" ] && jq -e .firestore "apps/$NAME/app.json" > /dev/null; then
-            dbs=$(jq -r '.firestore.prod + " " + .firestore.preview' "apps/$NAME/app.json")
+            dbs=$(jq -r '[.firestore.prod, .firestore.preview] | map(select(.)) | join(" ")' "apps/$NAME/app.json")
           fi
           for group in $TTL_COLLECTIONS; do
             [[ "$group" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]] || { echo "::error::Bad collection group: $group"; exit 1; }
