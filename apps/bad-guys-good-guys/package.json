@@ -1,0 +1,25 @@
+{
+  "name": "bad-guys-good-guys",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "qrcode-generator": "^2.0.4",
+    "three": "^0.170.0"
+  },
+  "description": "Co-op 3D street brawler: kids vs. grown-ups, 1-4 players over peer-to-peer."
+}
