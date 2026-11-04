@@ -24,7 +24,7 @@ import {
 import { findPath, type Point } from './path';
 import { nextRandom, pick } from './rng';
 
-export const MAP_IDS = ['seaside', 'city', 'lodge'] as const;
+export const MAP_IDS = ['seaside', 'city', 'lodge', 'garden'] as const;
 export type MapId = (typeof MAP_IDS)[number];
 
 export const PLAYER_SPEED = 6;
@@ -41,6 +41,8 @@ export const CLERK_PRICE = 250;
 export const CLEANER_PRICE = 150; // each extra cleaner costs CLEANER_STEP more
 export const CLEANER_STEP = 50;
 export const VIP_EVERY = 60; // seconds between VIP visits
+/** Maps where VIPs never come. */
+export const NO_VIP_MAPS: readonly MapId[] = ['garden'];
 export const VIP_GIFT = 5_000;
 export const VIP_SPOT = { x: 4.6, z: 9.6 }; // next to the coin pile
 export const ALARM_SLEEP = 5; // seconds a guest sleeps in a room with an alarm clock
@@ -421,6 +423,7 @@ function spawnGuests(h: Hotel) {
 
 /** Every minute a VIP walks in, leaves a big gift on the coin pile and heads off. */
 function spawnVip(h: Hotel) {
+  if (NO_VIP_MAPS.includes(h.map)) return;
   h.nextVip ??= h.time + VIP_EVERY;
   if (h.time < h.nextVip) return;
   h.nextVip = h.time + VIP_EVERY;

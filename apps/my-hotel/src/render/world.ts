@@ -309,12 +309,40 @@ function outside(root: THREE.Group, h: Hotel, T: Theme, reserved: Set<string>, b
       box(root, 6 * s, hgt, 6 * s, ['#b0bec5', '#90a4ae', '#cfd8dc'][Math.floor(nextRandom(rng) * 3)], x, 0, z);
     }, -2);
     scatter(40, (x, z, s) => tree(root, x, z, s));
+  } else if (T.outside === 'garden') {
+    for (let k = 0; k < 5; k++) decal(root, 2.4, 0.9, mat('#d7ccc8'), ENTRANCE_X, 0.02, front + 1 + k * 1.6);
+    // a pond with lily pads off to one side of the path, and a picket fence along the front
+    const pondX = ENTRANCE_X + 12;
+    const pond = new THREE.Mesh(new THREE.CircleGeometry(4.2, 28), mat('#5fb3d9'));
+    pond.rotation.x = -Math.PI / 2;
+    pond.position.set(pondX, 0.01, front + 6);
+    root.add(pond);
+    for (const [dx, dz] of [[-1.5, -1], [1.2, 0.8], [0.2, -2.2]]) {
+      const pad = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), mat('#4caf50'));
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(pondX + dx, 0.02, front + 6 + dz);
+      root.add(pad);
+    }
+    for (let x = b.x0 - 20; x < b.x1 + 20; x += 1.2) {
+      if (Math.abs(x - ENTRANCE_X) < 2.2) continue;
+      box(root, 0.18, 0.8, 0.1, '#ffffff', x, 0, front + 10);
+    }
+    box(root, 400, 0.1, 0.08, '#ffffff', 0, 0.55, front + 10);
+    const petals = ['#ec6f9a', '#ffd54f', '#ffffff', '#ba68c8', '#ff8a65'];
+    scatter(45, (x, z, s) => tree(root, x, z, s));
+    scatter(160, (x, z) => flower(root, x, z, petals[Math.floor(nextRandom(rng) * petals.length)]), front + 9);
   } else {
     for (let k = 0; k < 5; k++) decal(root, 2.4, 0.9, mat('#b0bec5'), ENTRANCE_X, 0.02, front + 1 + k * 1.6);
     scatter(90, (x, z, s) => pine(root, x, z, s), front + 12);
     snowman(root, ENTRANCE_X + 5, front + 4);
   }
   void h;
+}
+
+function flower(root: THREE.Object3D, x: number, z: number, color: string) {
+  cyl(root, 0.03, 0.03, 0.35, '#558b2f', x, 0, z, 5);
+  ball(root, 0.14, color, x, 0.42, z);
+  ball(root, 0.06, '#fff176', x, 0.5, z);
 }
 
 function palm(root: THREE.Object3D, x: number, z: number, s: number) {

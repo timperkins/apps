@@ -391,6 +391,13 @@ describe('VIPs', () => {
   });
 });
 
+describe('the garden map', () => {
+  it('never gets VIPs', () => {
+    const h = createHotel('garden', 3);
+    expect(run(h, 130).some((e) => e.kind === 'vip')).toBe(false);
+  });
+});
+
 describe('determinism', () => {
   it('the same seed and inputs play out the same way', () => {
     const a = createHotel('lodge', 42);

@@ -5,7 +5,7 @@ A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev
 - Stand behind the desk to check guests in. Their coins pile up by the desk; walk over the pile to pick them up.
 - Guests sleep, then leave a messy room. Walk into it to clean it.
 - Stand on a pad to pay for it: new rooms, a desk clerk, a cleaner, or land outside the walls. Each plot of land you buy opens up the next one beyond it.
-- Pick a map (Seaside, City or Lodge) on the start screen. Each map keeps its own save in the browser.
+- Pick a map (Seaside, City, Lodge or Garden, which never gets VIPs) on the start screen. Each map keeps its own save in the browser.
 
 ## Code
 
