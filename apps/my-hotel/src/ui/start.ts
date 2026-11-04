@@ -2,6 +2,7 @@
 import { levelInfo, MAP_IDS, type MapId } from '../sim/hotel';
 import { deleteSave, hasSave, loadHotel } from '../save/save';
 import { THEMES } from '../render/theme';
+import { isValidCode, normalizeCode } from '../net/codes';
 
 const MODE_KEY = 'my-hotel:players';
 
@@ -13,7 +14,7 @@ function savedTwoPlayer(): boolean {
   }
 }
 
-export function showStart(onPick: (map: MapId, twoPlayer: boolean) => void) {
+export function showStart(onPick: (map: MapId, twoPlayer: boolean) => void, onJoin?: (code: string) => void) {
   let two = savedTwoPlayer();
   const el = document.createElement('div');
   el.className = 'start';
@@ -25,6 +26,11 @@ export function showStart(onPick: (map: MapId, twoPlayer: boolean) => void) {
     </div>
     <p class="tag">Pick a spot for your hotel</p>
     <div class="maps"></div>
+    <form class="join">
+      <label for="join-code">Joining a friend? Type their code:</label>
+      <input id="join-code" maxlength="4" autocomplete="off" autocapitalize="characters" placeholder="CODE" />
+      <button type="submit">Join</button>
+    </form>
     <p class="how two">2 players share one keyboard: player 1 walks with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, player 2 with the arrow keys. You share the coins.</p>
     <p class="how one">Walk with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys. Check guests in at the desk, pick up their coins, clean rooms, and stand on pads to build.</p>`;
   const showMode = () => {
@@ -43,6 +49,17 @@ export function showStart(onPick: (map: MapId, twoPlayer: boolean) => void) {
     }),
   );
   showMode();
+  const form = el.querySelector<HTMLFormElement>('.join')!;
+  const input = form.querySelector('input')!;
+  input.addEventListener('input', () => (input.value = normalizeCode(input.value)));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const code = normalizeCode(input.value);
+    if (!isValidCode(code) || !onJoin) return;
+    el.remove();
+    onJoin(code);
+  });
+  if (!onJoin) form.remove();
   const list = el.querySelector('.maps')!;
   for (const id of MAP_IDS) {
     const t = THEMES[id];

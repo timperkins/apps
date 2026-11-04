@@ -36,5 +36,17 @@
         ]
       }
     ]
-  }
+  },
+  "firestore": [
+    {
+      "database": "my-hotel",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "my-hotel-preview",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
 }

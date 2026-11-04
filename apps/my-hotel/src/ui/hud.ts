@@ -13,15 +13,18 @@ export class Hud {
   private toasts: HTMLElement;
   private last = { coins: -1, xp: -1, hint: '' };
 
-  constructor(h: Hotel, onMenu: () => void) {
+  constructor(h: Hotel, onMenu: () => void, opts: { onInvite?: () => void; guest?: boolean } = {}) {
     this.el = document.createElement('div');
     this.el.className = 'hud';
     this.el.innerHTML = `
       <div class="pill coins"><span class="coin"></span><b>0</b></div>
       <div class="pill level"><div class="star"><b>1</b></div><div class="bar"><span></span><em></em></div></div>
-      <button class="pill menu" type="button" title="Change map">${THEMES[h.map].name} · Maps</button>
+      <div class="top-right">
+        ${opts.onInvite ? '<button class="pill invite-btn" type="button">📱 Play on another device</button>' : ''}
+        <button class="pill menu" type="button" title="${opts.guest ? 'Leave' : 'Change map'}">${opts.guest ? 'Leave' : `${THEMES[h.map].name} · Maps`}</button>
+      </div>
       <div class="pill keys">${
-        h.player2
+        h.player2 && !opts.guest
           ? 'Player 1: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · Player 2: <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd>'
           : 'Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys'
       }</div>
@@ -35,6 +38,7 @@ export class Hud {
     this.keys = this.el.querySelector('.keys')!;
     this.toasts = this.el.querySelector('.toasts')!;
     this.el.querySelector('.menu')!.addEventListener('click', onMenu);
+    if (opts.onInvite) this.el.querySelector('.invite-btn')!.addEventListener('click', opts.onInvite);
     document.body.appendChild(this.el);
   }
 
@@ -71,7 +75,7 @@ export class Hud {
     }
   }
 
-  private toast(title: string, body: string) {
+  toast(title: string, body: string) {
     const t = document.createElement('div');
     t.className = 'pill toast';
     t.innerHTML = `<b></b><small></small>`;

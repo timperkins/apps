@@ -46,6 +46,8 @@ export class Renderer {
   private camTarget = new THREE.Vector3();
   private time = 0;
   private zoom = 1;
+  /** Which player the camera follows: both (one screen), or just one (each device has its own). */
+  follow: 'all' | 0 | 1 = 'all';
 
   constructor(canvas: HTMLCanvasElement, h: Hotel) {
     this.T = THEMES[h.map];
@@ -124,8 +126,9 @@ export class Renderer {
     this.updateDesk(h);
 
     // follow the player, or the middle of both players, pulling back when they're far apart
-    const p = h.player.pos;
-    const q = h.player2?.pos ?? p;
+    // on two devices each screen follows its own player
+    const p = this.follow === 1 && h.player2 ? h.player2.pos : h.player.pos;
+    const q = this.follow === 'all' ? (h.player2?.pos ?? p) : p;
     const mid = new THREE.Vector3((p.x + q.x) / 2, 0, (p.z + q.z) / 2);
     const apart = Math.hypot(p.x - q.x, (p.z - q.z) * 1.5);
     const zoom = Math.min(2.2, Math.max(1, 1 + (apart - 10) / 22));

@@ -1,6 +1,6 @@
 # My hotel
 
-A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev). You play the manager and walk around with WASD or the arrow keys (or drag on a touch screen). Pick "2 players" on the start screen to play with a friend on one keyboard: player 1 uses WASD, player 2 the arrow keys, and you share the coins.
+A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev). You play the manager and walk around with WASD or the arrow keys (or drag on a touch screen). Pick "2 players" on the start screen to play with a friend on one keyboard: player 1 uses WASD, player 2 the arrow keys, and you share the coins. Or press "📱 Play on another device" in the game and scan the QR code with a phone (or type the code on its start screen) to join as player 2 on that device.
 
 - Stand behind the desk to check guests in. Their coins pile up by the desk; walk over the pile to pick them up.
 - Guests sleep, then leave a messy room. Walk into it to clean it.
@@ -11,7 +11,8 @@ A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev
 
 - `src/sim/` game rules: plain TypeScript, fixed tick, seeded random numbers, no DOM. `layout.ts` is the floor plan (12x12 lots of 1x1 cells), `path.ts` is A*, `hotel.ts` is the game.
 - `src/render/` three.js scene: `world.ts` builds what only changes with the layout, `renderer.ts` draws people, pads, coins and bubbles each frame.
-- `src/ui/` start screen and HUD, `src/input.ts` keyboard and touch, `src/save/` browser saves.
+- `src/ui/` start screen, HUD and invite card, `src/input.ts` keyboard and touch, `src/save/` browser saves.
+- `src/net/` playing on two devices. The host's device runs the hotel. The joining device moves player 2 itself, sends where they are 20 times a second, and gets the whole hotel back (about 3 KB) 10 times a second over a WebRTC data channel. Firestore (`my-hotel` / `my-hotel-preview` databases) only carries the room code and the WebRTC handshake, and its documents expire after 6 hours. There's no TURN relay, so both devices usually need to be on the same Wi-Fi.
 
 ```
 npm run dev        # local server

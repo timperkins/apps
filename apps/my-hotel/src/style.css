@@ -135,3 +135,37 @@ kbd {
 .start .how.two { display: none; }
 .start.is-two .how.two { display: block; }
 .start.is-two .how.one { display: none; }
+
+/* ---------- playing on two devices ---------- */
+.top-right { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; pointer-events: auto; }
+.top-right .pill { position: static; }
+.invite-btn { font: inherit; font-size: 16px; border: 0; cursor: pointer; }
+.invite-btn:hover { background: #f5f5f5; }
+@media (max-width: 720px) {
+  .invite-btn { font-size: 0; padding: 8px 12px; }
+  .invite-btn::first-letter { font-size: 18px; }
+}
+.invite, .notice {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+  background: rgba(40, 30, 30, 0.45); z-index: 20;
+}
+.invite .card, .notice .card {
+  position: relative; width: min(380px, 100%); padding: 24px; border-radius: 26px;
+  background: #fff; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+.invite h2, .notice h2 { margin: 0 0 6px; }
+.invite p, .notice p { margin: 8px 0; }
+.invite .qr { display: grid; place-items: center; min-height: 220px; margin: 12px 0; }
+.invite .qr canvas { border-radius: 12px; }
+.invite .big { font-size: 1.6em; letter-spacing: 0.15em; color: #5e35b1; }
+.invite .status { font-weight: 600; min-height: 1.4em; }
+.invite .close { position: absolute; top: 10px; right: 12px; border: 0; background: none; font-size: 22px; cursor: pointer; color: inherit; }
+.notice button, .start .join button {
+  font: inherit; font-weight: 600; border: 0; cursor: pointer; border-radius: 16px;
+  padding: 10px 20px; background: #5e35b1; color: #fff;
+}
+.start .join { display: flex; gap: 8px; justify-content: center; align-items: center; margin: 18px 0 0; flex-wrap: wrap; font-weight: 600; }
+.start .join input {
+  font: inherit; font-size: 20px; width: 6.5em; padding: 8px 12px; border-radius: 14px; border: 2px solid #c9b8e8;
+  text-transform: uppercase; letter-spacing: 0.15em; text-align: center;
+}
