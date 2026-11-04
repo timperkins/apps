@@ -1,5 +1,5 @@
 // The heads-up display: coins, hotel level, hints, toasts and floating "+coins".
-import { levelInfo, padUnderPlayer, playerAtDesk, rating, type Hotel, type HotelEvent } from '../sim/hotel';
+import { levelInfo, padUnderPlayer, players, playerAtDesk, rating, type Hotel, type HotelEvent } from '../sim/hotel';
 import { THEMES } from '../render/theme';
 
 export class Hud {
@@ -20,7 +20,11 @@ export class Hud {
       <div class="pill coins"><span class="coin"></span><b>0</b></div>
       <div class="pill level"><div class="star"><b>1</b></div><div class="bar"><span></span><em></em></div></div>
       <button class="pill menu" type="button" title="Change map">${THEMES[h.map].name} · Maps</button>
-      <div class="pill keys">Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys</div>
+      <div class="pill keys">${
+        h.player2
+          ? 'Player 1: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · Player 2: <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd>'
+          : 'Move with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or the arrow keys'
+      }</div>
       <div class="hint"></div>
       <div class="toasts"></div>`;
     this.coins = this.el.querySelector('.coins b')!;
@@ -56,9 +60,9 @@ export class Hud {
     }
   }
 
-  events(ev: HotelEvent[], popAt: (text: string) => void) {
+  events(ev: HotelEvent[], popAt: (text: string, by?: number) => void) {
     for (const e of ev) {
-      if (e.kind === 'collect') popAt(`+${e.amount}`);
+      if (e.kind === 'collect') popAt(`+${e.amount}`, e.by);
       if (e.kind === 'review' && e.stars >= 4) this.toast(`${'★'.repeat(e.stars)} ${e.name}`, `“${e.text}”`);
       if (e.kind === 'unlocked') this.toast('🎉 Unlocked', e.what);
       if (e.kind === 'vip') this.toast(`👑 VIP ${e.name}`, `Left ${e.amount.toLocaleString('en-US')} coins at the desk!`);
@@ -85,7 +89,7 @@ export class Hud {
 }
 
 function hintFor(h: Hotel): string {
-  const pad = padUnderPlayer(h);
+  const pad = players(h).map((p) => padUnderPlayer(h, p)).find((x) => x) ?? null;
   if (pad && h.coins <= 0) return 'You need coins. Collect them at the desk!';
   if (pad) return 'Stay on the pad to pay';
   if (playerAtDesk(h)) {

@@ -105,4 +105,5 @@ export function turnTowards(obj: THREE.Object3D, heading: number, k = 0.25) {
   obj.rotation.y += d * k;
 }
 
+export const PLAYER2_LOOK: Look = { outfit: '#ef6c00', skin: '#a86b4c', hat: 'manager', hatColor: '#ef6c00', bowTie: '#81d4fa' };
 export const PLAYER_LOOK: Look = { outfit: '#5e35b1', skin: '#e8b48f', hat: 'manager', hatColor: '#5e35b1', bowTie: '#ffd54f' };

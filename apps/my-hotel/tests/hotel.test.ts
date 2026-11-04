@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  setTwoPlayer,
   MACHINE_STOCK,
   SODA_PRICE,
   createHotel,
@@ -337,6 +338,43 @@ describe('soda machines', () => {
     expect(ev.some((e) => e.kind === 'restocked' && !e.byPlayer)).toBe(true);
     expect(m.stock).toBe(MACHINE_STOCK);
     expect(h.pile).toBe(pile + 250);
+  });
+});
+
+describe('2 players', () => {
+  it('both players move on their own and share the coins', () => {
+    const h = createHotel('seaside', 3);
+    setTwoPlayer(h, true);
+    const start2 = { ...h.player2!.pos };
+    run(h, 0.5, { x: 0, z: 0 });
+    for (let t = 0; t < 0.5; t += DT) tick(h, DT, { x: 0, z: 0 }, { x: 1, z: 0 });
+    expect(h.player2!.pos.x).toBeGreaterThan(start2.x + 1);
+    expect(h.player.pos).toEqual({ x: 0.9, z: 9.5 });
+    // player 2 picks up the coins, player 1 spends them on a pad
+    h.pile = 300;
+    h.player2!.pos = { ...COIN_PILE };
+    tick(h, DT);
+    expect(h.coins).toBe(300);
+    const pad = pads(h).find((p) => p.kind === 'room')!;
+    walkTo(h, pad);
+    run(h, 3);
+    expect(h.coins).toBe(300 - pad.price);
+  });
+
+  it('either player can check guests in and clean', () => {
+    const h = createHotel('seaside', 3);
+    setTwoPlayer(h, true);
+    h.player2!.pos = { x: 1, z: 6 };
+    let paid = false;
+    for (let t = 0; t < 10 && !paid; t += DT) paid = tick(h, DT).some((e) => e.kind === 'paid');
+    expect(paid).toBe(true);
+  });
+
+  it('turning 2 players off removes player 2', () => {
+    const h = createHotel('seaside', 3);
+    setTwoPlayer(h, true);
+    setTwoPlayer(h, false);
+    expect(h.player2).toBeNull();
   });
 });
 

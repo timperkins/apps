@@ -127,3 +127,11 @@ kbd {
   .keys { display: none; }
   .hint { font-size: 15px; white-space: normal; text-align: center; width: max-content; max-width: 90vw; }
 }
+
+/* 1 or 2 players */
+.start .mode { display: inline-flex; gap: 6px; margin-top: 14px; padding: 5px; border-radius: 999px; background: rgba(255,255,255,0.7); }
+.start .mode button { font: inherit; font-weight: 600; font-size: 17px; border: 0; cursor: pointer; padding: 8px 16px; border-radius: 999px; background: transparent; color: inherit; }
+.start .mode button.on { background: #5e35b1; color: #fff; }
+.start .how.two { display: none; }
+.start.is-two .how.two { display: block; }
+.start.is-two .how.one { display: none; }

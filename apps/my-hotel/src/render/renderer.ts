@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { CLEAN_TIME, MACHINE_STOCK, pads, type Hotel, type Pad } from '../sim/hotel';
 import { COIN_PILE, DESK_ZONE, roomGeom } from '../sim/layout';
 import { Label, UI_FONT, ball, box, drawBubble, drawRing, mat, roundRect } from './kit';
-import { PLAYER_LOOK, animatePerson, makePerson, turnTowards, type Person } from './people';
+import { PLAYER2_LOOK, PLAYER_LOOK, animatePerson, makePerson, turnTowards, type Person } from './people';
 import { THEMES, type Theme } from './theme';
 import { buildWorld } from './world';
 
@@ -32,6 +32,9 @@ export class Renderer {
   private live = new THREE.Group();
   private player: Person;
   private playerRing: THREE.Mesh;
+  private player2: Person;
+  private player2Ring: THREE.Mesh;
+  private tags = [new Label(256, 128, 0.6), new Label(256, 128, 0.6)];
   private guests = new Map<number, GuestView>();
   private staff = new Map<string, Person>();
   private rooms = new Map<number, RoomView>();
@@ -42,6 +45,7 @@ export class Renderer {
   private deskRing = new Label(256, 256, 1.3);
   private camTarget = new THREE.Vector3();
   private time = 0;
+  private zoom = 1;
 
   constructor(canvas: HTMLCanvasElement, h: Hotel) {
     this.T = THEMES[h.map];
@@ -68,10 +72,30 @@ export class Renderer {
       new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.85 }),
     );
     this.playerRing.rotation.x = -Math.PI / 2;
-    this.live.add(this.player.root, this.playerRing, this.pile, this.deskRing.sprite);
+    this.player2 = makePerson(PLAYER2_LOOK, 1.15);
+    this.player2Ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.75, 0.95, 40),
+      new THREE.MeshBasicMaterial({ color: '#ffb74d', transparent: true, opacity: 0.9 }),
+    );
+    this.player2Ring.rotation.x = -Math.PI / 2;
+    this.tags.forEach((t, k) =>
+      t.draw(`p${k}`, (c, w, hh) => {
+        c.fillStyle = k ? '#ef6c00' : '#5e35b1';
+        roundRect(c, 64, 14, w - 128, hh - 28, 40);
+        c.fill();
+        c.fillStyle = '#fff';
+        c.font = `bold 64px ${UI_FONT}`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(`P${k + 1}`, w / 2, hh / 2 + 3);
+      }),
+    );
+    this.live.add(this.player.root, this.playerRing, this.player2.root, this.player2Ring, ...this.tags.map((t) => t.sprite));
+    this.live.add(this.pile, this.deskRing.sprite);
     this.deskRing.sprite.position.set((DESK_ZONE.x0 + DESK_ZONE.x1) / 2, 3.4, (DESK_ZONE.z0 + DESK_ZONE.z1) / 2);
 
     this.camTarget.set(h.player.pos.x, 0, h.player.pos.z);
+    if (h.player2) this.camTarget.set((h.player.pos.x + h.player2.pos.x) / 2, 0, (h.player.pos.z + h.player2.pos.z) / 2);
   }
 
   resize(w: number, h: number) {
@@ -99,12 +123,26 @@ export class Renderer {
     this.updatePile(h);
     this.updateDesk(h);
 
-    // follow the player
+    // follow the player, or the middle of both players, pulling back when they're far apart
     const p = h.player.pos;
-    this.camTarget.lerp(new THREE.Vector3(p.x, 0, p.z), 1 - Math.exp(-dt * 6));
-    this.camera.position.copy(this.camTarget).add(CAM_OFFSET);
+    const q = h.player2?.pos ?? p;
+    const mid = new THREE.Vector3((p.x + q.x) / 2, 0, (p.z + q.z) / 2);
+    const apart = Math.hypot(p.x - q.x, (p.z - q.z) * 1.5);
+    const zoom = Math.min(2.2, Math.max(1, 1 + (apart - 10) / 22));
+    this.zoom += (zoom - this.zoom) * (1 - Math.exp(-dt * 3));
+    this.camTarget.lerp(mid, 1 - Math.exp(-dt * 6));
+    this.camera.position.copy(this.camTarget).addScaledVector(CAM_OFFSET, this.zoom);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = 45 * this.zoom;
+    fog.far = 90 * this.zoom;
+    const reach = Math.round(26 * this.zoom);
+    const sc = this.sun.shadow.camera;
+    if (sc.right !== reach) {
+      Object.assign(sc, { left: -reach, right: reach, top: reach, bottom: -reach, far: 80 * this.zoom });
+      sc.updateProjectionMatrix();
+    }
     this.camera.lookAt(this.camTarget.x, 0, this.camTarget.z - 1.5);
-    this.sun.position.set(this.camTarget.x - 12, 26, this.camTarget.z + 10);
+    this.sun.position.set(this.camTarget.x - 12 * this.zoom, 26 * this.zoom, this.camTarget.z + 10 * this.zoom);
     this.sun.target.position.set(this.camTarget.x, 0, this.camTarget.z);
 
     this.renderer.render(this.scene, this.camera);
@@ -129,6 +167,17 @@ export class Renderer {
     if (h.player.moving) turnTowards(r, h.player.heading, 0.3);
     animatePerson(this.player, h.player.moving, this.time);
     this.playerRing.position.set(h.player.pos.x, 0.04, h.player.pos.z);
+    const two = h.player2;
+    this.player2.root.visible = this.player2Ring.visible = !!two;
+    this.tags.forEach((t) => (t.sprite.visible = !!two));
+    if (!two) return;
+    const r2 = this.player2.root;
+    r2.position.set(two.pos.x, 0, two.pos.z);
+    if (two.moving) turnTowards(r2, two.heading, 0.3);
+    animatePerson(this.player2, two.moving, this.time + 0.5);
+    this.player2Ring.position.set(two.pos.x, 0.04, two.pos.z);
+    this.tags[0].sprite.position.set(h.player.pos.x, 3.3, h.player.pos.z);
+    this.tags[1].sprite.position.set(two.pos.x, 3.3, two.pos.z);
   }
 
   private updateGuests(h: Hotel) {

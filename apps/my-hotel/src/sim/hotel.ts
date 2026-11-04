@@ -132,14 +132,31 @@ export interface Hotel {
   vending: Vending[];
   padPaid: Record<string, number>;
   nextVip?: number; // game time of the next VIP visit
-  padLock?: string | null; // a pad that was just bought from; it waits until the player steps off
   checkin: number; // 0..1 progress on the guest at the front
-  player: { pos: Point; heading: number; moving: boolean };
+  player: Player;
+  player2?: Player | null; // the second player in 2-player mode
   nextGuestId: number;
   nextRoomId: number;
   nextArrival: number;
   layoutVersion: number;
   rng: { seed: number };
+}
+
+export interface Player {
+  pos: Point;
+  heading: number;
+  moving: boolean;
+  lock?: string | null; // a pad this player just bought from; it waits until they step off
+}
+
+/** Everyone the keyboard controls: one player, or two in 2-player mode. */
+export const players = (h: Hotel): Player[] => (h.player2 ? [h.player, h.player2] : [h.player]);
+
+/** Turn 2-player mode on or off. Player 2 starts next to player 1. */
+export function setTwoPlayer(h: Hotel, on: boolean) {
+  if (!on) h.player2 = null;
+  else if (!h.player2) h.player2 = { pos: { x: h.player.pos.x + 0.9, z: h.player.pos.z }, heading: 0, moving: false };
+  if (h.player2 && isBlocked(grid(h), h.player2.pos.x, h.player2.pos.z)) h.player2.pos = { ...h.player.pos };
 }
 
 export interface Input {
@@ -148,7 +165,7 @@ export interface Input {
 }
 
 export type HotelEvent =
-  | { kind: 'collect'; amount: number }
+  | { kind: 'collect'; amount: number; by: number } // by = player index
   | { kind: 'paid'; amount: number; tip: number }
   | { kind: 'review'; name: string; stars: number; text: string }
   | { kind: 'cleaned'; roomId: number }
@@ -329,19 +346,20 @@ export function pads(h: Hotel): Pad[] {
   return out;
 }
 
-export function padUnderPlayer(h: Hotel): Pad | null {
-  const p = h.player.pos;
+export function padUnderPlayer(h: Hotel, who: Player = h.player): Pad | null {
+  const p = who.pos;
   return pads(h).find((pad) => Math.abs(p.x - pad.x) < pad.size / 2 && Math.abs(p.z - pad.z) < pad.size / 2) ?? null;
 }
 
-export const playerAtDesk = (h: Hotel) => inRect(DESK_ZONE, h.player.pos.x, h.player.pos.z);
+export const playerAtDesk = (h: Hotel) => players(h).some((p) => inRect(DESK_ZONE, p.pos.x, p.pos.z));
 
 // ---------- simulation ----------
 
-export function tick(h: Hotel, dt: number, input: Input = { x: 0, z: 0 }): HotelEvent[] {
+export function tick(h: Hotel, dt: number, input: Input = { x: 0, z: 0 }, input2: Input = { x: 0, z: 0 }): HotelEvent[] {
   const ev: HotelEvent[] = [];
   h.time += dt;
-  movePlayer(h, dt, input);
+  movePlayer(h, h.player, dt, input);
+  if (h.player2) movePlayer(h, h.player2, dt, input2);
   spawnGuests(h);
   spawnVip(h);
   arrangeQueue(h);
@@ -356,23 +374,23 @@ export function tick(h: Hotel, dt: number, input: Input = { x: 0, z: 0 }): Hotel
   return ev;
 }
 
-function movePlayer(h: Hotel, dt: number, input: Input) {
+function movePlayer(h: Hotel, who: Player, dt: number, input: Input) {
   let { x, z } = input;
   const len = Math.hypot(x, z);
-  h.player.moving = len > 0.05;
-  if (!h.player.moving) return;
+  who.moving = len > 0.05;
+  if (!who.moving) return;
   if (len > 1) {
     x /= len;
     z /= len;
   }
   const g = grid(h);
-  const p = h.player.pos;
+  const p = who.pos;
   const step = PLAYER_SPEED * dt;
   const nx = p.x + x * step;
   if (!hits(g, nx, p.z)) p.x = nx;
   const nz = p.z + z * step;
   if (!hits(g, p.x, nz)) p.z = nz;
-  h.player.heading = Math.atan2(x, z);
+  who.heading = Math.atan2(x, z);
 }
 
 function hits(g: Grid, x: number, z: number): boolean {
@@ -535,13 +553,13 @@ function turnTo(m: { pos: Point; heading: number }, v: Vending) {
   m.heading = Math.atan2(v.cell[0] + 0.5 - m.pos.x, v.cell[1] + 0.5 - m.pos.z);
 }
 
-function restock(h: Hotel, m: Vending, byPlayer: boolean, ev: HotelEvent[]) {
+function restock(h: Hotel, m: Vending, byPlayer: boolean, ev: HotelEvent[], by = 0) {
   const cash = m.cash;
   m.stock = MACHINE_STOCK;
   m.cash = 0;
   if (byPlayer) {
     h.coins += cash;
-    if (cash) ev.push({ kind: 'collect', amount: cash });
+    if (cash) ev.push({ kind: 'collect', amount: cash, by });
   } else {
     h.pile += cash; // the restocker brings the money to the desk
   }
@@ -550,12 +568,13 @@ function restock(h: Hotel, m: Vending, byPlayer: boolean, ev: HotelEvent[]) {
 
 /** Walking up to a machine refills it and takes out the soda money. */
 function playerRestock(h: Hotel, ev: HotelEvent[]) {
-  const p = h.player.pos;
-  for (const m of h.vending) {
-    if (m.stock >= MACHINE_STOCK && m.cash === 0) continue;
-    const f = machineFront(m);
-    if (Math.hypot(p.x - f.x, p.z - f.z) <= MACHINE_REACH) restock(h, m, true, ev);
-  }
+  players(h).forEach(({ pos: p }, by) => {
+    for (const m of h.vending) {
+      if (m.stock >= MACHINE_STOCK && m.cash === 0) continue;
+      const f = machineFront(m);
+      if (Math.hypot(p.x - f.x, p.z - f.z) <= MACHINE_REACH) restock(h, m, true, ev, by);
+    }
+  });
 }
 
 function sendHome(h: Hotel, g: Guest) {
@@ -619,7 +638,7 @@ function cleanRooms(h: Hotel, dt: number, ev: HotelEvent[]) {
     if (!room.built || room.state !== 'dirty') continue;
     const g = roomGeom(room.i, room.j, room.side);
     let rate = 0;
-    if (inRect(g.clean, h.player.pos.x, h.player.pos.z)) rate += 1 / CLEAN_TIME.player;
+    for (const p of players(h)) if (inRect(g.clean, p.pos.x, p.pos.z)) rate += 1 / CLEAN_TIME.player;
     for (const s of h.staff) {
       if (s.role === 'housekeeper' && s.roomId === room.id && s.path.length === 0) rate += 1 / CLEAN_TIME.staff;
     }
@@ -694,29 +713,33 @@ function updateRestocker(h: Hotel, s: Staff, dt: number, ev: HotelEvent[]) {
 
 function collectPile(h: Hotel, ev: HotelEvent[]) {
   if (h.pile <= 0) return;
-  const p = h.player.pos;
-  if (Math.hypot(p.x - COIN_PILE.x, p.z - COIN_PILE.z) > PILE_RADIUS) return;
-  ev.push({ kind: 'collect', amount: h.pile });
+  const by = players(h).findIndex((p) => Math.hypot(p.pos.x - COIN_PILE.x, p.pos.z - COIN_PILE.z) <= PILE_RADIUS);
+  if (by < 0) return;
+  ev.push({ kind: 'collect', amount: h.pile, by });
   h.coins += h.pile;
   h.pile = 0;
 }
 
 function payPads(h: Hotel, dt: number, ev: HotelEvent[]) {
-  const pad = padUnderPlayer(h);
-  if (h.padLock && pad?.id !== h.padLock) h.padLock = null;
-  if (!pad || h.coins <= 0 || pad.id === h.padLock) return;
+  for (const who of players(h)) payPad(h, who, dt, ev);
+}
+
+function payPad(h: Hotel, who: Player, dt: number, ev: HotelEvent[]) {
+  const pad = padUnderPlayer(h, who);
+  if (who.lock && pad?.id !== who.lock) who.lock = null;
+  if (!pad || h.coins <= 0 || pad.id === who.lock) return;
   const rate = Math.max(pad.price / 1.5, 40);
   const pay = Math.min(h.coins, pad.price - pad.paid, Math.ceil(rate * dt));
   h.coins -= pay;
   h.padPaid[pad.id] = pad.paid + pay;
   if (h.padPaid[pad.id] >= pad.price) {
     delete h.padPaid[pad.id];
-    h.padLock = pad.id; // a pad that stays (cleaners) doesn't start charging again until you step off
-    unlock(h, pad, ev);
+    who.lock = pad.id; // a pad that stays (cleaners) doesn't start charging again until you step off
+    unlock(h, pad, ev, who);
   }
 }
 
-function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
+function unlock(h: Hotel, pad: Pad, ev: HotelEvent[], who: Player) {
   const [kind, arg, extra] = pad.id.split(':');
   if (kind === 'room') {
     const room = h.rooms.find((r) => r.id === Number(arg));
@@ -724,7 +747,7 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
       room.built = true;
       room.paid = pad.price;
     }
-    h.padLock = `alarm:${arg}`; // the alarm clock pad appears under your feet; step off first
+    who.lock = `alarm:${arg}`; // the alarm clock pad appears under your feet; step off first
     ev.push({ kind: 'unlocked', what: 'New room! Add an alarm clock to make guests wake up faster.' });
   } else if (kind === 'alarm') {
     const room = h.rooms.find((r) => r.id === Number(arg));
@@ -775,7 +798,7 @@ function unlock(h: Hotel, pad: Pad, ev: HotelEvent[]) {
     const dest = m.path[m.path.length - 1];
     m.path = findPath(g, m.pos, dest) ?? m.path;
   }
-  if (isBlocked(g, h.player.pos.x, h.player.pos.z)) h.player.pos = { x: pad.x, z: pad.z + pad.size };
+  for (const p of players(h)) if (isBlocked(g, p.pos.x, p.pos.z)) p.pos = { x: pad.x, z: pad.z + pad.size };
 }
 
 function walk(m: { pos: Point; path: Point[]; heading: number }, speed: number, dt: number) {

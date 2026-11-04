@@ -31,13 +31,19 @@ export class Controls {
     addEventListener('pointercancel', this.onPointerUp);
   }
 
-  read(): Input {
+  /**
+   * 'all' reads every key (1 player). In 2-player mode player 1 ('p1') has WASD and the touch
+   * stick, and player 2 ('p2') has the arrow keys.
+   */
+  read(who: 'all' | 'p1' | 'p2' = 'all'): Input {
     let x = 0, z = 0;
     for (const k of this.down) {
+      const arrow = k.startsWith('Arrow');
+      if ((who === 'p1' && arrow) || (who === 'p2' && !arrow)) continue;
       x += KEYS[k][0];
       z += KEYS[k][1];
     }
-    if (this.touch) {
+    if (this.touch && who !== 'p2') {
       const dx = this.touch.x - this.touch.x0, dy = this.touch.y - this.touch.y0;
       const d = Math.hypot(dx, dy);
       if (d > 8) {

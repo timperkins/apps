@@ -2,14 +2,15 @@ import './style.css';
 import { Controls } from './input';
 import { Renderer } from './render/renderer';
 import { loadHotel, saveHotel } from './save/save';
-import { tick, type Hotel, type MapId } from './sim/hotel';
+import { players, setTwoPlayer, tick, type Hotel, type MapId } from './sim/hotel';
 import { Hud } from './ui/hud';
 import { showStart } from './ui/start';
 
 const STEP = 1 / 60;
 
-function play(map: MapId) {
+function play(map: MapId, twoPlayer: boolean) {
   const hotel: Hotel = loadHotel(map);
+  setTwoPlayer(hotel, twoPlayer);
   const canvas = document.createElement('canvas');
   canvas.className = 'game';
   document.body.appendChild(canvas);
@@ -40,8 +41,9 @@ function play(map: MapId) {
   document.addEventListener('visibilitychange', save);
   addEventListener('pagehide', save);
 
-  const popAt = (text: string) => {
-    const p = renderer.project(hotel.player.pos.x, 2.6, hotel.player.pos.z);
+  const popAt = (text: string, by = 0) => {
+    const who = players(hotel)[by] ?? hotel.player;
+    const p = renderer.project(who.pos.x, 2.6, who.pos.z);
     const el = document.createElement('div');
     el.className = 'pop';
     el.textContent = text;
@@ -58,9 +60,11 @@ function play(map: MapId) {
     const dt = Math.min(0.25, (now - last) / 1000);
     last = now;
     acc += dt;
-    const input = controls.read();
+    const two = !!hotel.player2;
+    const input = controls.read(two ? 'p1' : 'all');
+    const input2 = controls.read('p2');
     while (acc >= STEP) {
-      hud.events(tick(hotel, STEP, input), popAt);
+      hud.events(tick(hotel, STEP, input, input2), popAt);
       acc -= STEP;
     }
     hud.update(hotel, controls.used);
