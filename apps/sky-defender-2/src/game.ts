@@ -264,6 +264,9 @@ export interface Sniper {
   missileCD: number; nukeCD: number; aimX: number | null;
 }
 export type ArmOwner = 'bomber' | 'sniper';
+/** Co-op with two Base players: a second turret just east of the base, with its own aim and the plain gun. */
+export interface Gun2 { name: string; x: number; roll: number; aim: number; firing: boolean; oneShot: boolean; fireCD: number; recoil: number; flash: number; }
+export const GUN2_X = 168;
 /** where the Sniper's arm hangs from: the top of the sky, straight above where it caught the pack */
 const SNIPER_ARM_Y = -720;
 /** Upgrades the Bomber can steal with the metal arm. */
@@ -363,6 +366,10 @@ export class Game {
   bomberName: string | null = 'Bomber'; bomber: Bomber | null = null;
   /** co-op: the Sniper's lasers waiting to hit, and the damage they have done; the Base's Protection */
   sniperName: string | null = null; sniper: Sniper | null = null;
+  /** co-op: the second Base player's name (set before start) and turret */
+  secondBaseName: string | null = null; gun2: Gun2 | null = null;
+  /** which gun this screen's own fire button works: the second turret when the second Base plays here */
+  localGun: 1 | 2 = 1;
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false; blameSniper = false;
@@ -390,7 +397,14 @@ export class Game {
       const out = WAR_POSTS.filter(x => x !== 0).map(x => ({ ...make(def, x, x < 0 ? 'West turret' : 'East turret'), outpost: true }));
       this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
     }
-    this.posts = this.buildings.filter(b => b.id === 'turret');
+    this.gun2 = null;
+    if (!this.coop) this.localGun = 1;
+    if (this.coop && this.secondBaseName !== null) {
+      const def = BUILDINGS.find(d => d.id === 'turret')!;
+      this.buildings.push({ ...make(def, GUN2_X, 'Second turret'), outpost: true });
+      this.gun2 = { name: this.secondBaseName, x: GUN2_X, roll: 0, aim: 0, firing: false, oneShot: false, fireCD: 0, recoil: 0, flash: 0 };
+    }
+    this.posts = this.buildings.filter(b => b.id === 'turret' && (this.war || !b.outpost));
     this.postI = this.posts.findIndex(b => !b.outpost);
     this.gunX = this.viewX = this.post().x;
     this.warT = 0; this.strikes = 0; this.enemyT = 0; this.friendT = 0; this.endReason = '';
@@ -1112,9 +1126,27 @@ export class Game {
   }
 
   /* ---------- input ---------- */
-  press() { this.firing = true; this.tapEdge = true; }
-  tap() { this.tapEdge = true; this.oneShot = true; }
-  release() { this.firing = false; }
+  press(gun = this.localGun) { if (gun === 2) { if (this.gun2) this.gun2.firing = true; return; } this.firing = true; this.tapEdge = true; }
+  tap(gun = this.localGun) { if (gun === 2) { if (this.gun2) this.gun2.oneShot = true; return; } this.tapEdge = true; this.oneShot = true; }
+  release(gun = this.localGun) { if (gun === 2) { if (this.gun2) this.gun2.firing = false; return; } this.firing = false; }
+  /** The second turret's building. */
+  gun2Post(): Building | null { return this.gun2 ? this.buildings.find(b => b.outpost && b.x === this.gun2!.x) ?? null : null; }
+  /** The second turret: it turns with its player's phone and fires the plain gun. */
+  updateGun2(dt: number) {
+    const g = this.gun2;
+    if (!g) return;
+    g.aim = clamp(g.roll * AIM_GAIN, -AIM_MAX, AIM_MAX);
+    g.fireCD -= dt; g.recoil = Math.max(0, g.recoil - dt * 6); g.flash = Math.max(0, g.flash - dt * 8);
+    if (this.ended || this.gun2Post()?.ruined || !this.settled) return;
+    if ((!g.firing && !g.oneShot) || g.fireCD > 0) return;
+    g.oneShot = false; g.fireCD = FIRE_INTERVAL;
+    const [dx, dy] = this.aimDir(g.aim);
+    this.shells.push({ x: g.x + dx * BARREL, y: dy * BARREL, vx: dx * SHELL_V0, vy: dy * SHELL_V0, t: 0, px: 0, py: 0 });
+    this.stats.shots++;
+    g.recoil = 1; g.flash = 1;
+    Sound.thump();
+    for (let i = 0; i < 3; i++) this.addPuff(g.x + dx * (BARREL + 2) + rand(-3, 3), dy * (BARREL + 2) + rand(-3, 3), 'smokeLight', rand(2, 3.5), 1.1, .45, dx * 15 + rand(-5, 5), dy * 15 + rand(-5, 5));
+  }
 
   /* ---------- main update ---------- */
   update(dtReal: number, tiltRoll: number) {
@@ -1151,6 +1183,7 @@ export class Game {
     if (this.war) this.updateWar(dt);
     this.lasing = false;
     if (!this.ended) this.updateGun(dt);
+    this.updateGun2(dt);
     this.updatePlanes(dt);
     if (this.bomber) this.updateBomber(dt);
     if (this.coop) this.updateCoop(dt);

@@ -31,6 +31,8 @@ export interface Snap {
   bomber: { name: string; plane: number; armHp: number; armMax: number; armCrate: number; shieldT: number; protectT: number; deadT: number; perk: BomberPerk | null } | null;
   sniper: { name: string; armHp: number; armMax: number; armCrate: number; x0: number; armT: number; perk: SniperPerk | null } | null;
   snipes: [number, number, number, number][]; protectT: number;
+  /** the second Base player's turret: name, aim, recoil, flash */
+  gun2: [string, number, number, number] | null;
   fx: [number, number, number, number][];
 }
 
@@ -57,7 +59,8 @@ export function takeSnap(g: Game): Snap {
     clear: g.clearInfo,
     bomber: b ? { name: b.name, plane: b.plane?.id ?? 0, armHp: b.arm?.hp ?? 0, armMax: b.arm?.max ?? 0, armCrate: b.arm ? g.crates.filter(c => !c.dead).indexOf(b.arm.crate) : -1, shieldT: r1(b.shieldT), protectT: r1(b.protectT), deadT: r1(b.deadT), perk: b.perk } : null,
     sniper: g.sniper ? { name: g.sniper.name, armHp: g.sniper.arm?.hp ?? 0, armMax: g.sniper.arm?.max ?? 0, armCrate: g.sniper.arm ? g.crates.filter(c => !c.dead).indexOf(g.sniper.arm.crate) : -1, x0: g.sniper.arm?.x0 ?? 0, armT: r1(g.sniper.arm?.t ?? 0), perk: g.sniper.perk } : null,
-    snipes: g.snipes.map(x => [r1(x.x), r1(x.y), r3(x.t), x.d]), protectT: r1(g.protectT),
+    snipes: g.snipes.map(x => [r1(x.x), r1(x.y), r3(x.t), x.d]),
+    gun2: g.gun2 ? [g.gun2.name, r3(g.gun2.aim), r3(g.gun2.recoil), r3(g.gun2.flash)] : null, protectT: r1(g.protectT),
     fx,
   };
 }
@@ -85,7 +88,9 @@ export class Mirror {
 
   apply(s: Snap) {
     const g = this.game;
-    if (g.mode !== s.mode) { g.mode = s.mode; g.reset(); }
+    // a second turret changes the list of buildings, so the map starts over when it comes or goes
+    if (g.mode !== s.mode || !!s.gun2 !== (g.secondBaseName !== null)) { g.mode = s.mode; g.secondBaseName = s.gun2 ? s.gun2[0] : null; g.reset(); }
+    if (s.gun2 && g.gun2) [g.gun2.name, g.gun2.aim, g.gun2.recoil, g.gun2.flash] = s.gun2;
     g.difficulty = s.diff; g.phase = s.phase; g.phaseT = s.phaseT; g.wave = s.wave; g.score = s.score; g.mult = s.mult;
     g.planesLeft = () => s.left;
     g.aim = s.aim; g.gunX = s.gunX; [g.palFrom, g.palTo, g.palT] = s.pal; g.wind = s.wind;

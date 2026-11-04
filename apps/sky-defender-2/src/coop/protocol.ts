@@ -3,7 +3,7 @@ import type { BomberAct, BomberView, UpgradeId } from '../game';
 import type { Snap } from './mirror';
 
 /** Bumped whenever messages change shape, so an old phone page is told to reload. */
-export const PROTOCOL = 4;
+export const PROTOCOL = 5;
 export type Role = 'base' | 'bomber' | 'sniper';
 
 /** Phone to host. */
@@ -31,7 +31,8 @@ export type HostMsg =
   | { t: 'lobby'; you: string; players: LobbyPlayer[]; playing: boolean }
   | { t: 'full' }
   | { t: 'old' }
-  | { t: 'start'; role: Role }
+  /** `second`: this phone is the second Base, on the extra turret */
+  | { t: 'start'; role: Role; second?: boolean }
   | { t: 'bomber'; v: BomberView }
   | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number; protect: number; protectT: number }
   | { t: 'sniper'; ready: boolean; damage: number; canGrab: boolean; arming: boolean; grabCD: number; perk: string | null; perkDesc: string; status: string; missile: number; nuke: number }

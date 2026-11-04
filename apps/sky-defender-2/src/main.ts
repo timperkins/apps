@@ -462,6 +462,8 @@ let coop: CoopHost | null = null;
 let localRole: Role | null = null;
 /** The Base's aim from its phone, when the Base plays on a phone. */
 let remoteRoll = 0;
+/** The second Base's aim from its phone. */
+let remoteRoll2 = 0;
 /** A crate the Base's phone is choosing from, and its choices. */
 let pendingCards: { crate: Crate; ids: UpgradeId[] } | null = null;
 let snapT = 0, mapT = 0, drawnQr = '';
@@ -525,7 +527,7 @@ function renderLobby() {
   $<HTMLButtonElement>('joinHere').disabled = !coop.local && coop.players.length >= MAX_PLAYERS;
   $('diceHere').hidden = !coop.local;
   $<HTMLButtonElement>('coopStart').disabled = !coop.canStart();
-  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two or three players: a Base against a Bomber, a Sniper, or both. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
+  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two or three players: a Base against a Bomber, a Sniper, or both, or two Bases with an extra turret. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
 }
 $('joinHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (!coop) return; if (coop.local) coop.leaveLocal(); else coop.joinLocal(randomName(store.get('coopName', ''))); });
 $('diceHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); const n = coop?.renameLocal(); if (n) store.set('coopName', n); });
@@ -534,7 +536,7 @@ $('lobbyBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui();
 
 async function startCoop() {
   if (!coop || !coop.canStart()) return;
-  const bomber = coop.byRole('bomber'), sniper = coop.byRole('sniper');
+  const bomber = coop.byRole('bomber'), sniper = coop.byRole('sniper'), second = coop.secondBase();
   localRole = coop.local?.role ?? null;
   Sound.init();
   if (localRole === 'base') {
@@ -545,9 +547,11 @@ async function startCoop() {
   }
   game.bomberName = bomber?.name ?? null;
   game.sniperName = sniper?.name ?? null;
+  game.secondBaseName = second?.name ?? null;
+  game.localGun = second && second === coop.local ? 2 : 1;
   game.start();
   game.fxLog = [];
-  remoteRoll = 0; pendingCards = null;
+  remoteRoll = remoteRoll2 = 0; pendingCards = null;
   coop.start();
   show(null); setHud(true); mode = 'play';
   padHost.el.hidden = localRole !== 'bomber';
@@ -555,12 +559,14 @@ async function startCoop() {
 /** A button on a player's phone. */
 function coopInput(p: Player, m: ClientMsg) {
   if (p.role === 'base') {
+    const gun = p === coop?.secondBase() ? 2 : 1;
     if (m.t === 'protect') { if (mode === 'play') game.baseProtect(); }
-    else if (m.t === 'tilt' && Number.isFinite(m.r)) remoteRoll = Math.max(-2, Math.min(2, m.r));
+    else if (m.t === 'tilt' && Number.isFinite(m.r)) { const r = Math.max(-2, Math.min(2, m.r)); if (gun === 2) remoteRoll2 = r; else remoteRoll = r; }
     else if (m.t === 'fire') {
       if (mode !== 'play') return;
-      if (m.on) { game.press(); if (game.phase === 'clear') game.skipClear(); } else game.release();
-    } else if (m.t === 'open') {
+      if (m.on) { game.press(gun); if (game.phase === 'clear') game.skipClear(); } else game.release(gun);
+    } else if (gun === 2) return; // crates are opened from the main turret
+    else if (m.t === 'open') {
       const c = game.readyCrate();
       if (!c || mode !== 'play') return;
       const pack: PackKind = c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain';
@@ -603,6 +609,8 @@ function coopSnapshots(dt: number) {
   }
   const bomber = coop.byRole('bomber'), base = coop.byRole('base');
   if (v && bomber?.link) coop.send(bomber, { t: 'bomber', v });
+  const base2 = coop.secondBase();
+  if (base2?.link) coop.send(base2, { t: 'base', crate: false, weapon: null, score: game.score, wave: game.wave, protect: Math.min(1, game.protectCD / PROTECT.cd), protectT: game.protectT });
   if (base?.link) coop.send(base, { t: 'base', crate: !!game.readyCrate(), weapon: game.weapon ? `${UPGRADES[game.weapon].name} (${Math.ceil(game.ammo)})` : null, score: game.score, wave: game.wave, protect: Math.min(1, game.protectCD / PROTECT.cd), protectT: game.protectT });
   const sn = coop.byRole('sniper');
   const sp = game.sniper;
@@ -645,7 +653,10 @@ function frame(now: number) {
   const tiltRoll = Tilt.update(now / 1000, dt);
   // co-op: the Base aims from its phone unless it plays on this screen
   const localAim = !game.coop || localRole === 'base';
-  const roll = localAim ? tiltRoll : remoteRoll;
+  // with two Bases, this screen's player may be on the second turret
+  const localSecond = localAim && game.localGun === 2;
+  const roll = localAim && !localSecond ? tiltRoll : remoteRoll;
+  if (game.gun2) game.gun2.roll = localSecond ? tiltRoll : remoteRoll2;
   if (mode === 'play') {
     if (localAim && !Tilt.keyboard && Tilt.flatness > .9) { flatT += dt; if (flatT > .4) pause('flat'); } else flatT = 0;
     if (localAim && Tilt.stale()) pause('sensor');

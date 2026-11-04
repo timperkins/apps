@@ -66,20 +66,25 @@ export class CoopHost {
   setRole(id: string, role: Role) {
     const p = this.players.find(q => q.id === id);
     if (!p || p.role === role) return;
-    const other = this.players.find(q => q !== p && q.role === role);
+    // two players can be the Base (the second one gets an extra turret); every other role is one player's
+    const others = this.players.filter(q => q !== p && q.role === role);
+    const other = role === 'base' ? (others.length >= 2 ? others[1] : null) : others[0];
     if (other) other.role = p.role ?? ROLES.find(r => !this.players.some(q => q.role === r)) ?? null;
     p.role = role;
     this.changed();
   }
   byRole(role: Role) { return this.players.find(p => p.role === role) ?? null; }
-  /** A Base is needed, against a Bomber, a Sniper, or both. */
-  canStart() { return !!this.byRole('base') && (!!this.byRole('bomber') || !!this.byRole('sniper')) && this.players.every(p => p.role && (p.id === LOCAL || p.link)); }
+  /** The second Base player, on the extra turret. */
+  secondBase() { return this.players.filter(p => p.role === 'base')[1] ?? null; }
+  /** A Base is needed, against a Bomber, a Sniper, or both; or two Bases side by side. */
+  canStart() { return !!this.byRole('base') && (!!this.byRole('bomber') || !!this.byRole('sniper') || !!this.secondBase()) && this.players.every(p => p.role && (p.id === LOCAL || p.link)); }
 
   send(p: Player | null, msg: HostMsg) { p?.link?.send(msg); }
   broadcast(msg: HostMsg) { for (const p of this.players) p.link?.send(msg); }
   start() {
     this.playing = true;
-    for (const p of this.players) if (p.role) this.send(p, { t: 'start', role: p.role });
+    const second = this.secondBase();
+    for (const p of this.players) if (p.role) this.send(p, { t: 'start', role: p.role, second: p === second });
   }
   stop() { this.playing = false; this.changed(); }
 
@@ -111,7 +116,7 @@ export class CoopHost {
           this.autoRoles();
         }
         this.changed();
-        if (this.playing && me.role) this.send(me, { t: 'start', role: me.role });
+        if (this.playing && me.role) this.send(me, { t: 'start', role: me.role, second: me === this.secondBase() });
         return;
       }
       if (!me || me.link !== link) return;

@@ -58,6 +58,8 @@ export function runController(code: string) {
   let link: Link | null = null, role: Role | null = null, aiming = false, screen = 'status';
   /** The Base aims by dragging on the map instead of tilting (no motion sensors, or motion access turned down). */
   let touchAim = false, touchR = 0;
+  /** this phone is the second Base, on the extra turret: its map holds still over the whole base */
+  let second = false;
   const go = (s: string) => {
     screen = s; show(s);
     // the map shows above the buttons while playing
@@ -66,7 +68,7 @@ export function runController(code: string) {
     const ctl = document.getElementById('ctl')!;
     ctl.classList.toggle('playing', map);
     ctl.classList.toggle('sniping', s === 'sniper');
-    if (map) { mirror.view = s === 'bomber' ? 'follow' : s === 'sniper' ? 'fixed' : touchAim ? 'level' : 'base'; fitMap(); }
+    if (map) { mirror.view = s === 'bomber' ? 'follow' : s === 'sniper' || second ? 'fixed' : touchAim ? 'level' : 'base'; fitMap(); }
   };
   const send = (m: ClientMsg) => link?.send(m);
 
@@ -152,7 +154,7 @@ export function runController(code: string) {
     document.querySelector('#ctl [data-s="base"] h2')!.setAttribute('hidden', '');
     $('cBaseLead').textContent = lead;
   }
-  function setTouch(on: boolean) { touchAim = on; if (screen === 'base') mirror.view = on ? 'level' : 'base'; }
+  function setTouch(on: boolean) { touchAim = on; if (screen === 'base' && !second) mirror.view = on ? 'level' : 'base'; }
   function startTouchAim(why: string) {
     setTouch(true); touchR = 0;
     goLive(why ? why + 'drag left and right on the map to aim.' : 'Drag left and right on the map to aim.');
@@ -191,7 +193,9 @@ export function runController(code: string) {
       case 'full': status('This game is already full.', true); break;
       case 'lobby': lobby(m.players, m.you); if (!m.playing) { role = null; go('lobby'); } break;
       case 'start':
-        role = m.role;
+        role = m.role; second = !!m.second;
+        document.querySelector('#ctl [data-s="base"] h2')!.textContent = second ? 'You are the second Base' : 'You are the Base';
+        if (second) $('cBaseLead').textContent = 'You work the extra turret on the right. Turn your phone like a steering wheel to aim it.';
         go(m.role);
         break;
       case 'bomber':

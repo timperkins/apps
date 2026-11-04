@@ -131,6 +131,7 @@ export class Renderer {
     ctx.rotate(-game.cam);
     ctx.translate(-game.viewX, 0);
     this.drawWorld(game, P);
+    this.drawGun2(game, P);
     ctx.restore();
 
     ctx.save();
@@ -737,6 +738,32 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Co-op: the second Base player's turret, drawn in the world at its own aim, with its player's name. */
+  drawGun2(game: Game, P: BlendedPalette) {
+    const g = game.gun2, post = game.gun2Post();
+    if (!g || !post || post.ruined) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(g.x, 0); ctx.rotate(g.aim);
+    ctx.fillStyle = P.bMetal;
+    ctx.fillRect(-2.6, -18, 1.6, 16); ctx.fillRect(1, -18, 1.6, 16);
+    const bar = ctx.createLinearGradient(-1.5, 0, 1.5, 0);
+    bar.addColorStop(0, P.bLit); bar.addColorStop(.4, P.bMetal); bar.addColorStop(1, P.bDark);
+    ctx.translate(0, g.recoil * 3);
+    ctx.fillStyle = bar; ctx.fillRect(-1.5, -44, 3, 44);
+    ctx.fillStyle = P.bMetal; ctx.beginPath(); ctx.roundRect(-1.9, -48, 3.8, 5, .6); ctx.fill();
+    if (g.flash > 0) {
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = g.flash;
+      ctx.drawImage(puff('#ffb04a'), -9, -63, 18, 18);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.font = `500 7px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#9dd8ff'; ctx.globalAlpha = .9;
+    ctx.fillText(g.name, g.x, GROUND_Y + 9);
+    ctx.restore();
   }
 
   /* ---------- screen space ---------- */
