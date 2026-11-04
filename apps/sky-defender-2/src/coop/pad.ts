@@ -6,7 +6,7 @@ export interface PadHandlers { hold(dir: 'up' | 'down', on: boolean): void; act(
 
 const ACTS: [BomberAct, string, string][] = [
   ['missile', 'Missile', 'M'], ['nuke', 'Nuke', 'N'], ['dive', 'Dive', 'D'],
-  ['switch', 'Switch plane', 'S'], ['grab', 'Grab', 'G'], ['use', 'Upgrade', 'U'],
+  ['switch', 'Switch plane', 'S'], ['grab', 'Grab', 'G'], ['use', 'Upgrade', 'U'], ['protect', 'Protection', 'R'],
 ];
 
 export class BomberPad {
@@ -64,6 +64,7 @@ export class BomberPad {
     set('switch', 0, true);
     set('grab', v.arm >= 0 ? 1 - v.arm : 0, v.canGrab, v.arm >= 0 ? 'Reeling in' : 'Grab');
     set('use', 0, !!v.perk, v.perk ? BOMBER_PERKS[v.perk].name : 'Upgrade');
+    set('protect', v.protectT > 0 ? 1 : v.protect, v.protectT <= 0 && v.protect <= 0, v.protectT > 0 ? `Protected ${Math.ceil(v.protectT)}` : 'Protection');
     const dead = this.q('.pad-dead');
     dead.hidden = v.alive;
     if (!v.alive) (dead.querySelector('span') as HTMLElement).textContent = v.deadT > 0 ? `Back in ${Math.ceil(v.deadT)}` : '';

@@ -2,11 +2,11 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT } from './game';
 import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
-import { CoopHost, LOCAL, type Player } from './coop/host';
+import { CoopHost, LOCAL, MAX_PLAYERS, type Player } from './coop/host';
 import { BomberPad } from './coop/pad';
 import { randomName } from './coop/names';
 import type { ClientMsg, Role } from './coop/protocol';
@@ -235,6 +235,8 @@ fz.addEventListener('pointerdown', e => {
   // co-op: the Bomber on this screen clicks a falling pack to grab it; only the Base fires from here
   if (game.coop && localRole !== 'base') {
     if (localRole === 'bomber') { const c = tappedFalling(e); if (c) game.bomberAct('grab', c); }
+    // the Sniper on this screen points the laser wherever they click
+    if (localRole === 'sniper') { const [x, y] = renderer.screenToWorld(game, e.offsetX, e.offsetY); game.snipe(x, y); }
     return;
   }
   const tapped = tappedCrate(e);
@@ -288,7 +290,9 @@ for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e =
 // keyboard for desktop testing
 addEventListener('keydown', e => {
   if (game.coop && localRole === 'bomber') { bomberKey(e, true); return; }
-  if (game.coop && localRole !== 'base') return;
+  if (game.coop && localRole !== 'base') { if ((e.key === 'p' || e.key === 'Escape') && mode === 'play') pause(); return; }
+  // co-op: Q is the Base's Protection
+  if (game.coop && (e.key === 'q' || e.key === 'Q') && mode === 'play' && !e.repeat) game.baseProtect();
   if (e.code === 'Space' && mode === 'play') { if (!e.repeat) { game.press(); hintProgress('fire'); } e.preventDefault(); }
   // Enter opens a crate waiting on the pad
   if (e.key === 'Enter' && mode === 'play' && !e.repeat && game.readyCrate()) openCrate();
@@ -301,7 +305,7 @@ addEventListener('keyup', e => {
   if (e.code === 'Space' && (!game.coop || localRole === 'base')) game.release();
 });
 /** Co-op, with this screen playing the Bomber: arrow keys climb and dive, S changes planes, and a letter for each button. */
-const BOMBER_KEYS: Record<string, BomberAct> = { s: 'switch', m: 'missile', '1': 'missile', n: 'nuke', '2': 'nuke', d: 'dive', '3': 'dive', g: 'grab', '4': 'grab', u: 'use', '5': 'use' };
+const BOMBER_KEYS: Record<string, BomberAct> = { s: 'switch', m: 'missile', '1': 'missile', n: 'nuke', '2': 'nuke', d: 'dive', '3': 'dive', g: 'grab', '4': 'grab', u: 'use', '5': 'use', r: 'protect', '6': 'protect' };
 function bomberKey(e: KeyboardEvent, down: boolean) {
   if (e.key === 'p' || e.key === 'Escape') { if (down && mode === 'play') pause(); return; }
   if (mode !== 'play') return;
@@ -312,7 +316,8 @@ function bomberKey(e: KeyboardEvent, down: boolean) {
 }
 
 /* ---------- HUD buttons ---------- */
-function setHud(on: boolean) { $('pauseBtn').hidden = !on; }
+function setHud(on: boolean) { $('pauseBtn').hidden = !on; $('protectBtn').hidden = !on || !game.coop || localRole !== 'base'; }
+$('protectBtn').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (mode === 'play') game.baseProtect(); });
 $('pauseBtn').addEventListener('click', e => { e.stopPropagation(); if (mode === 'play') pause(); });
 
 /* ---------- upgrade crate ---------- */
@@ -415,7 +420,8 @@ function showResults(r: Results) {
   scores.sort((a, b) => b.score - a.score);
   scores = scores.slice(0, 5);
   store.set(scoreKey(r.mode, r.difficulty), scores);
-  $('rTitle').textContent = r.bomber ? `${r.bomber.name} wins` : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
+  const sniper = coop?.byRole('sniper');
+  $('rTitle').textContent = r.bomber ? (sniper ? `${r.bomber.name} and ${sniper.name} win` : `${r.bomber.name} wins`) : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
   $('rReason').textContent = war && !r.won ? r.reason : '';
   $('rReason').hidden = !(war && !r.won && r.reason);
   const tags = [war ? 'War, level 1' : r.mode === 'coop' ? 'Co-op' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
@@ -430,6 +436,7 @@ function showResults(r: Results) {
     ['Best score', best().toLocaleString('en-US')],
   ];
   if (r.bomber) stats.splice(4, 0, ['Bomber damage', String(r.bomber.damage)], ['Bomber planes lost', String(r.bomber.deaths)], ['Upgrades stolen', String(r.bomber.steals)]);
+  if (r.bomber && sniper) stats.splice(7, 0, ['Sniper damage', String(Math.round(game.sniperDamage))]);
   $('rStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   $('newBest').hidden = !(r.score > prevBest && r.score > 0);
   Sound.stopAllEngines();
@@ -506,16 +513,16 @@ function renderLobby() {
   for (const p of coop.players) {
     const li = document.createElement('li');
     const where = p.id === LOCAL ? 'this screen' : p.link ? 'phone' : 'reconnecting…';
-    li.innerHTML = `<span><b>${p.name}</b><small>${where}</small></span><div class="seg small" role="radiogroup" aria-label="Role"><button role="radio" data-role="base" aria-checked="${p.role === 'base'}">Base</button><button role="radio" data-role="bomber" aria-checked="${p.role === 'bomber'}">Bomber</button></div>`;
+    li.innerHTML = `<span><b>${p.name}</b><small>${where}</small></span><div class="seg small" role="radiogroup" aria-label="Role"><button role="radio" data-role="base" aria-checked="${p.role === 'base'}">Base</button><button role="radio" data-role="bomber" aria-checked="${p.role === 'bomber'}">Bomber</button><button role="radio" data-role="sniper" aria-checked="${p.role === 'sniper'}">Sniper</button></div>`;
     li.querySelectorAll<HTMLElement>('[data-role]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); Sound.ui(); coop?.setRole(p.id, b.dataset.role as Role); }));
     list.appendChild(li);
   }
   if (!coop.players.length) list.innerHTML = '<li class="empty">No players yet</li>';
   $('joinHere').textContent = coop.local ? 'Leave' : 'Join';
-  $<HTMLButtonElement>('joinHere').disabled = !coop.local && coop.players.length >= 2;
+  $<HTMLButtonElement>('joinHere').disabled = !coop.local && coop.players.length >= MAX_PLAYERS;
   $('diceHere').hidden = !coop.local;
   $<HTMLButtonElement>('coopStart').disabled = !coop.canStart();
-  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two players: one on the Base, one flying the Bomber. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
+  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two or three players: a Base, a Bomber, and a Sniper on the Bomber\'s side if you like. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
 }
 $('joinHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (!coop) return; if (coop.local) coop.leaveLocal(); else coop.joinLocal(randomName(store.get('coopName', ''))); });
 $('diceHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); const n = coop?.renameLocal(); if (n) store.set('coopName', n); });
@@ -524,8 +531,8 @@ $('lobbyBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui();
 
 async function startCoop() {
   if (!coop || !coop.canStart()) return;
-  const base = coop.byRole('base')!, bomber = coop.byRole('bomber')!;
-  localRole = base.id === LOCAL ? 'base' : bomber.id === LOCAL ? 'bomber' : null;
+  const bomber = coop.byRole('bomber')!;
+  localRole = coop.local?.role ?? null;
   Sound.init();
   if (localRole === 'base') {
     const r = await Tilt.start();
@@ -544,7 +551,8 @@ async function startCoop() {
 /** A button on a player's phone. */
 function coopInput(p: Player, m: ClientMsg) {
   if (p.role === 'base') {
-    if (m.t === 'tilt' && Number.isFinite(m.r)) remoteRoll = Math.max(-2, Math.min(2, m.r));
+    if (m.t === 'protect') { if (mode === 'play') game.baseProtect(); }
+    else if (m.t === 'tilt' && Number.isFinite(m.r)) remoteRoll = Math.max(-2, Math.min(2, m.r));
     else if (m.t === 'fire') {
       if (mode !== 'play') return;
       if (m.on) { game.press(); if (game.phase === 'clear') game.skipClear(); } else game.release();
@@ -560,6 +568,8 @@ function coopInput(p: Player, m: ClientMsg) {
       pendingCards = null;
       if (pc && m.id && pc.ids.includes(m.id) && !pc.crate.dead && !game.ended) game.chooseUpgrade(m.id, pc.crate);
     }
+  } else if (p.role === 'sniper' && mode === 'play') {
+    if (m.t === 'snipe') game.snipe(Number(m.x), Number(m.y));
   } else if (p.role === 'bomber' && mode === 'play') {
     if (m.t === 'hold' && (m.dir === 'up' || m.dir === 'down')) game.bomberHold(m.dir, !!m.on);
     else if (m.t === 'act') game.bomberAct(m.a);
@@ -581,9 +591,16 @@ function coopSnapshots(dt: number) {
   snapT = .1;
   const v = game.bomberView();
   if (v) padHost.update(v);
+  if (localRole === 'base') {
+    const pb = $('protectBtn');
+    pb.innerHTML = game.protectT > 0 ? `Protected<br><small>${Math.ceil(game.protectT)}</small>` : game.protectCD > 0 ? `Protect<br><small>${Math.ceil(game.protectCD)}</small>` : 'Protect<br><small>Q</small>';
+    pb.classList.toggle('off', game.protectCD > 0 && game.protectT <= 0);
+  }
   const bomber = coop.byRole('bomber'), base = coop.byRole('base');
   if (v && bomber?.link) coop.send(bomber, { t: 'bomber', v });
-  if (base?.link) coop.send(base, { t: 'base', crate: !!game.readyCrate(), weapon: game.weapon ? `${UPGRADES[game.weapon].name} (${Math.ceil(game.ammo)})` : null, score: game.score, wave: game.wave });
+  if (base?.link) coop.send(base, { t: 'base', crate: !!game.readyCrate(), weapon: game.weapon ? `${UPGRADES[game.weapon].name} (${Math.ceil(game.ammo)})` : null, score: game.score, wave: game.wave, protect: Math.min(1, game.protectCD / PROTECT.cd), protectT: game.protectT });
+  const sn = coop.byRole('sniper');
+  if (sn?.link) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage) });
 }
 
 /* ---------- tips and first-run hint ---------- */

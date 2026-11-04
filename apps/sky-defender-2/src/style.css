@@ -217,3 +217,9 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #ctl.playing .pad-acts button { min-height: 48px; }
 #ctl.playing #cFire { min-height: 110px; }
 #ctl.playing section[data-s="base"] { gap: 8px; justify-content: flex-start; }
+/* co-op: the Base's Protection button on the host screen, and the Sniper's big map */
+#protectBtn { right: 6px; top: 52px; width: 64px; height: 44px; font: 500 12px/1.1 var(--font-b); border: 1px solid rgba(255, 211, 74, .6); border-radius: 12px; color: #ffd34a; background: rgba(20, 16, 34, .45); }
+#protectBtn small { font-size: 10px; opacity: .8; }
+#protectBtn.off { opacity: .45; }
+#ctl.sniping #cMapWrap { flex: 1 1 auto; }
+#ctl.sniping section[data-s="sniper"] { flex: 0 0 auto; padding-bottom: 6px; }

@@ -28,7 +28,8 @@ export interface Snap {
   bolts: [[number, number][], number][];
   labels: [string, number, number, number, number, string, number][];
   clear: ClearInfo | null;
-  bomber: { name: string; plane: number; armHp: number; armMax: number; armCrate: number; shieldT: number; deadT: number; perk: BomberPerk | null } | null;
+  bomber: { name: string; plane: number; armHp: number; armMax: number; armCrate: number; shieldT: number; protectT: number; deadT: number; perk: BomberPerk | null } | null;
+  snipes: [number, number, number][]; protectT: number;
   fx: [number, number, number, number][];
 }
 
@@ -53,7 +54,8 @@ export function takeSnap(g: Game): Snap {
     bolts: g.bolts.map(x => [x.pts.map(([px, py]) => [r1(px), r1(py)] as [number, number]), r3(x.life)]),
     labels: g.labels.map(l => [l.text, r1(l.x), r1(l.y), r3(l.t), l.life, l.color, l.big ? 1 : 0]),
     clear: g.clearInfo,
-    bomber: b ? { name: b.name, plane: b.plane?.id ?? 0, armHp: b.arm?.hp ?? 0, armMax: b.arm?.max ?? 0, armCrate: b.arm ? g.crates.filter(c => !c.dead).indexOf(b.arm.crate) : -1, shieldT: r1(b.shieldT), deadT: r1(b.deadT), perk: b.perk } : null,
+    bomber: b ? { name: b.name, plane: b.plane?.id ?? 0, armHp: b.arm?.hp ?? 0, armMax: b.arm?.max ?? 0, armCrate: b.arm ? g.crates.filter(c => !c.dead).indexOf(b.arm.crate) : -1, shieldT: r1(b.shieldT), protectT: r1(b.protectT), deadT: r1(b.deadT), perk: b.perk } : null,
+    snipes: g.snipes.map(x => [r1(x.x), r1(x.y), r3(x.t)]), protectT: r1(g.protectT),
     fx,
   };
 }
@@ -69,8 +71,8 @@ export class Mirror {
   private bombs = new Map<number, Bomb & { sm: Smooth }>();
   private snap: Snap | null = null;
   private since = 0;
-  /** the Bomber's phone follows its own plane; the Base's phone sees what the big screen sees */
-  follow = false;
+  /** the Bomber's phone follows its own plane; the Base's phone sees what the big screen sees; the Sniper's holds still over the base */
+  view: 'base' | 'follow' | 'fixed' = 'base';
   private viewX = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -87,6 +89,7 @@ export class Mirror {
     g.shieldT = s.shieldT; g.shieldFlash = s.shieldFlash; g.nukeFlash = Math.max(g.nukeFlash, s.nukeFlash); g.shake = Math.max(g.shake, s.shake * .6);
     g.weapon = s.weapon; g.ammo = s.ammo; g.guns = s.guns; g.recoil = s.recoil; g.flash = s.flash; g.lasing = s.lasing;
     g.clearInfo = s.clear;
+    g.snipes = (s.snipes ?? []).map(([x, y, t]) => ({ x, y, t })); g.protectT = s.protectT ?? 0;
     // planes: keep each one's object (and its contrail) from snapshot to snapshot, and glide it to its new place
     const seen = new Set<number>();
     g.planes = s.planes.map(([id, type, x, y, dir, pitch, flip, state, hp, max, f]) => {
@@ -130,7 +133,7 @@ export class Mirror {
       const crate = bp.armCrate >= 0 ? g.crates[bp.armCrate] : null;
       g.bomber = {
         name: bp.name, plane, deadT: bp.deadT, up: false, down: false, missileCD: 0, nukeCD: 0, diveCD: 0, switchCD: 0, diveT: 0, dive: null, returnY: null,
-        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, turboT: 0, rapidT: 0, damage: 0, deaths: 0, steals: 0,
+        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, turboT: 0, rapidT: 0, protectT: bp.protectT, protectCD: 0, damage: 0, deaths: 0, steals: 0,
       };
       if (crate) crate.held = true;
     } else g.bomber = null;
@@ -171,6 +174,7 @@ export class Mirror {
     g.shells = s.shells.map(([x, y, vx, vy, ghost]) => ({ x: x + vx * e, y: y + vy * e, vx, vy, t: 1, px: x, py: y, ghost: !!ghost || undefined }));
     g.missiles = s.missiles.map(([kind, x, y, vx, vy]) => ({ kind, x: x + vx * e, y: y + vy * e, vx, vy, t: 1, target: null, smokeT: 0 }));
     for (const t of g.tracers) t.life -= dt;
+    for (const sn of g.snipes) sn.t = Math.max(0, sn.t - dt);
     g.tracers = g.tracers.filter(t => t.life > 0);
     for (const l of g.labels) l.t += dt;
     g.labels = g.labels.filter(l => l.t < l.life);
@@ -180,7 +184,8 @@ export class Mirror {
     g.shake = Math.max(0, g.shake - dt * 10);
     // camera: the Base's view, or level and following the Bomber's own plane
     const bp = g.bomber?.plane;
-    if (this.follow) {
+    if (this.view === 'fixed') { g.cam = 0; g.viewX = 0; }
+    else if (this.view === 'follow') {
       g.cam = 0;
       if (bp) this.viewX += (Math.max(-430, Math.min(430, bp.x)) - this.viewX) * Math.min(1, dt * 2.5);
       g.viewX = this.viewX;

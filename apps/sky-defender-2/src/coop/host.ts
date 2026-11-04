@@ -6,7 +6,8 @@ import { cleanName, randomName } from './names';
 
 /** This device's own player, when the host joins in. */
 export const LOCAL = 'local';
-export const MAX_PLAYERS = 2;
+export const MAX_PLAYERS = 3;
+const ROLES: Role[] = ['base', 'bomber', 'sniper'];
 
 export interface Player { id: string; name: string; role: Role | null; link: Link | null; }
 
@@ -61,16 +62,18 @@ export class CoopHost {
     this.changed();
     return me.name;
   }
-  /** The host picks a role for a player; the other player takes the other role. */
+  /** The host picks a role for a player; whoever had that role swaps to the player's old one. */
   setRole(id: string, role: Role) {
     const p = this.players.find(q => q.id === id);
-    if (!p) return;
+    if (!p || p.role === role) return;
+    const other = this.players.find(q => q !== p && q.role === role);
+    if (other) other.role = p.role ?? ROLES.find(r => !this.players.some(q => q.role === r)) ?? null;
     p.role = role;
-    for (const q of this.players) if (q !== p) q.role = role === 'base' ? 'bomber' : 'base';
     this.changed();
   }
   byRole(role: Role) { return this.players.find(p => p.role === role) ?? null; }
-  canStart() { return !!this.byRole('base') && !!this.byRole('bomber') && this.players.every(p => p.id === LOCAL || p.link); }
+  /** A Base and a Bomber are needed; a Sniper is a third player if there is one. */
+  canStart() { return !!this.byRole('base') && !!this.byRole('bomber') && this.players.every(p => p.role && (p.id === LOCAL || p.link)); }
 
   send(p: Player | null, msg: HostMsg) { p?.link?.send(msg); }
   broadcast(msg: HostMsg) { for (const p of this.players) p.link?.send(msg); }
@@ -80,11 +83,9 @@ export class CoopHost {
   }
   stop() { this.playing = false; this.changed(); }
 
-  /** Fills in roles nobody has picked: the first player defends the base, the second flies the Bomber. */
+  /** Fills in roles nobody has picked, in order: Base, then Bomber, then Sniper. */
   private autoRoles() {
-    const [a, b] = this.players;
-    if (a && !a.role) a.role = b?.role === 'base' ? 'bomber' : 'base';
-    if (b && !b.role) b.role = a.role === 'base' ? 'bomber' : 'base';
+    for (const p of this.players) if (!p.role) p.role = ROLES.find(r => !this.players.some(q => q.role === r)) ?? null;
   }
   private changed() {
     const list: LobbyPlayer[] = this.players.map(p => ({ id: p.id, name: p.name, role: p.role, here: p.id === LOCAL || !!p.link }));

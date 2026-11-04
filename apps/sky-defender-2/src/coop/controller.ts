@@ -35,12 +35,13 @@ export function runController(code: string) {
       <button class="primary" id="cAim">Start aiming</button>
       <div id="cBaseLive" hidden>
         <p class="fine" id="cBaseInfo"></p>
-        <div class="row"><button class="ghost" id="cRecal">Recenter</button><button class="ghost gold" id="cOpen" hidden>Open crate</button></div>
+        <div class="row"><button class="ghost" id="cRecal">Recenter</button><button class="ghost" id="cProtect">Protection</button><button class="ghost gold" id="cOpen" hidden>Open crate</button></div>
         <button id="cFire">FIRE</button>
       </div>
     </section>
     <section data-s="cards"><h2 id="cCardsTitle">Choose an upgrade</h2><div class="cards" id="cCards"></div><button class="ghost small" id="cCardsBack">Not now</button></section>
     <section data-s="bomber"><div id="cPad"></div></section>
+    <section data-s="sniper"><p class="lead" id="cSnipeInfo">Tap the map to aim your laser. Three seconds later it hits that spot.</p></section>
     <section data-s="over"><h2 id="cOverTitle"></h2><div class="big" id="cOverScore"></div><p class="fine">Waiting for the host…</p></section>
     <div id="cPaused" hidden>Paused on the big screen</div>
   </div>`;
@@ -55,10 +56,12 @@ export function runController(code: string) {
   const go = (s: string) => {
     screen = s; show(s);
     // the map shows above the buttons while playing
-    const map = s === 'bomber' || s === 'base';
+    const map = s === 'bomber' || s === 'base' || s === 'sniper';
     $('cMapWrap').hidden = !map;
-    document.getElementById('ctl')!.classList.toggle('playing', map);
-    if (map) { mirror.follow = s === 'bomber'; fitMap(); }
+    const ctl = document.getElementById('ctl')!;
+    ctl.classList.toggle('playing', map);
+    ctl.classList.toggle('sniping', s === 'sniper');
+    if (map) { mirror.view = s === 'bomber' ? 'follow' : s === 'sniper' ? 'fixed' : 'base'; fitMap(); }
   };
   const send = (m: ClientMsg) => link?.send(m);
 
@@ -84,10 +87,10 @@ export function runController(code: string) {
   });
 
   function lobby(players: LobbyPlayer[], you: string) {
-    const roleName = (r: Role | null) => r === 'base' ? 'Base' : r === 'bomber' ? 'Bomber' : '…';
+    const roleName = (r: Role | null) => r === 'base' ? 'Base' : r === 'bomber' ? 'Bomber' : r === 'sniper' ? 'Sniper' : '…';
     $('cPlayers').innerHTML = players.map(p => `<li${p.id === you ? ' class="me"' : ''}><span>${p.name}${p.id === you ? ' (you)' : ''}</span><b>${roleName(p.role)}</b></li>`).join('');
     const me = players.find(p => p.id === you);
-    $('cRole').textContent = me?.role === 'base' ? 'You will defend the base.' : me?.role === 'bomber' ? 'You will fly the Bomber.' : '';
+    $('cRole').textContent = me?.role === 'base' ? 'You will defend the base.' : me?.role === 'bomber' ? 'You will fly the Bomber.' : me?.role === 'sniper' ? "You will snipe the base, on the Bomber's side." : '';
   }
 
   // ---- the map: the game drawn from the big screen's snapshots ----
@@ -99,6 +102,13 @@ export function runController(code: string) {
     if (r.width && r.height) mirror.resize(Math.round(r.width), Math.round(r.height));
   }
   addEventListener('resize', fitMap);
+  // the Sniper taps the map to point the laser there
+  $('cMap').addEventListener('pointerdown', e => {
+    if (role !== 'sniper') return;
+    e.preventDefault();
+    const [x, y] = mirror.renderer.screenToWorld(mirror.game, e.offsetX, e.offsetY);
+    send({ t: 'snipe', x, y }); buzz(15);
+  });
 
   // ---- Bomber ----
   const pad = new BomberPad({ hold: (dir, on) => send({ t: 'hold', dir, on }), act: a => { send({ t: 'act', a }); buzz(12); } });
@@ -124,6 +134,7 @@ export function runController(code: string) {
   addEventListener('keydown', e => { if (e.code === 'Space' && role === 'base' && !e.repeat) { send({ t: 'fire', on: true }); e.preventDefault(); } });
   addEventListener('keyup', e => { if (e.code === 'Space' && role === 'base') send({ t: 'fire', on: false }); });
   $('cOpen').addEventListener('click', () => send({ t: 'open' }));
+  $('cProtect').addEventListener('click', () => { send({ t: 'protect' }); buzz(15); });
   $('cCardsBack').addEventListener('click', () => { send({ t: 'pick', id: null }); go('base'); });
 
   // the Bomber can play from a computer's keyboard too
@@ -159,6 +170,8 @@ export function runController(code: string) {
       case 'base':
         $('cOpen').hidden = !m.crate;
         $('cBaseInfo').textContent = `Wave ${m.wave} · ${m.score.toLocaleString('en-US')} points${m.weapon ? ' · ' + m.weapon : ''}`;
+        $('cProtect').textContent = m.protectT > 0 ? `Protected ${Math.ceil(m.protectT)}` : m.protect > 0 ? `Protection (${Math.ceil(m.protect * 20)})` : 'Protection';
+        ($('cProtect') as HTMLButtonElement).disabled = m.protect > 0 || m.protectT > 0;
         break;
       case 'cards': {
         $('cCardsTitle').textContent = m.title;
@@ -177,6 +190,9 @@ export function runController(code: string) {
       }
       case 'paused': $('cPaused').hidden = !m.on; break;
       case 'snap': mirror.apply(m.s); break;
+      case 'sniper':
+        $('cSnipeInfo').textContent = (m.ready ? 'Tap the map to aim your laser.' : 'Laser on target…') + ` Damage so far: ${m.damage}`;
+        break;
       case 'over':
         $('cOverTitle').textContent = m.title;
         $('cOverScore').textContent = `${m.score.toLocaleString('en-US')} · wave ${m.wave}`;

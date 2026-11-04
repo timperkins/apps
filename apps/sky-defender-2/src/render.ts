@@ -3,7 +3,7 @@
 // camera also slides sideways to whichever turret is in use (game.viewX).
 import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, HALF, LIGHTS, BASE_SCALE, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
 import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } from './palettes';
-import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
+import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, SNIPER, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 /** The glow color of a crate. */
@@ -66,6 +66,12 @@ export class Renderer {
     const c = Math.cos(game.cam), sn = Math.sin(game.cam);
     x -= game.viewX;
     return [this.px + this.s * (x * c + y * sn) + this.sx, this.py + this.s * (-x * sn + y * c) + this.sy];
+  }
+  /** The world point under a point on the screen (the inverse of worldToScreen, without shake). */
+  screenToWorld(game: Game, sx: number, sy: number): [number, number] {
+    const c = Math.cos(game.cam), sn = Math.sin(game.cam);
+    const a = (sx - this.px) / this.s, b = (sy - this.py) / this.s;
+    return [a * c - b * sn + game.viewX, a * sn + b * c];
   }
   sprite(P: BlendedPalette, get: (s: PaletteSprites) => Sprite, x?: number, y?: number, w?: number, h?: number) {
     // draw a palette sprite, cross-fading between the two palettes being blended
@@ -206,6 +212,7 @@ export class Renderer {
       ctx.restore();
     }
     this.drawArm(game);
+    this.drawSnipes(game);
     this.drawShots(game, P);
     this.drawParticles(game, P);
     this.drawShield(game);
@@ -470,6 +477,34 @@ export class Renderer {
     }
   }
 
+  /** Co-op: the Sniper's laser, a thin red beam down to a dot, with a ring closing in until it hits. */
+  drawSnipes(game: Game) {
+    const ctx = this.ctx;
+    for (const sn of game.snipes) {
+      const k = Math.max(0, sn.t / SNIPER.delay);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = '#ff3a2a'; ctx.lineWidth = .6; ctx.globalAlpha = .35 + .25 * Math.sin(this.time * 20);
+      ctx.beginPath(); ctx.moveTo(sn.x - 500, sn.y - 1200); ctx.lineTo(sn.x, sn.y); ctx.stroke();
+      ctx.globalAlpha = .9; ctx.drawImage(puff('#ff3a2a'), sn.x - 4, sn.y - 4, 8, 8);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = .85; ctx.lineWidth = .8;
+      ctx.beginPath(); ctx.arc(sn.x, sn.y, 4 + 14 * k, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
+    // Protection: a gold shimmer along the base, or round the Bomber's plane
+    if (game.protectT > 0) {
+      ctx.save(); ctx.strokeStyle = '#ffd34a'; ctx.lineWidth = 1; ctx.globalAlpha = .35 + .2 * Math.sin(this.time * 6);
+      for (const b of game.buildings) if (!b.ruined) { ctx.beginPath(); ctx.roundRect(b.x - b.half - 2, GROUND_Y - 30, b.half * 2 + 4, 30, 4); ctx.stroke(); }
+      ctx.restore();
+    }
+    const bp = game.bomber?.plane;
+    if (bp && (game.bomber?.protectT ?? 0) > 0) {
+      ctx.save(); ctx.strokeStyle = '#ffd34a'; ctx.lineWidth = 1.1; ctx.globalAlpha = .5 + .2 * Math.sin(this.time * 6);
+      ctx.beginPath(); ctx.ellipse(bp.x, bp.y, HALF[bp.type] * SC[bp.type] + 6, 11, 0, 0, 7); ctx.stroke();
+      ctx.restore();
+    }
+  }
   /** Co-op: the Bomber's metal arm, a jointed rod from the plane to the pack it is reeling in, with its health. */
   drawArm(game: Game) {
     const a = game.bomber?.arm;

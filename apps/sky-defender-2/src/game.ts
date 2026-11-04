@@ -243,7 +243,12 @@ function waveSpec(wave: number, d: Difficulty = 'normal'): WaveSpec {
 
 /* ---------- co-op: the Bomber ---------- */
 /** What the Bomber can do; up and down are held, the rest are taps. */
-export type BomberAct = 'missile' | 'nuke' | 'dive' | 'switch' | 'grab' | 'use';
+export type BomberAct = 'missile' | 'nuke' | 'dive' | 'switch' | 'grab' | 'use' | 'protect';
+/** Protection: for a few seconds the Base's buildings, or the Bomber's plane, take 65% less damage. */
+export const PROTECT = { time: 5, cd: 20, cut: .65 };
+/** The Sniper (on the Bomber's side) points a harmless laser anywhere; after 3 seconds it hits there for 8% of a building's full strength. */
+export const SNIPER = { delay: 3, share: .08, radius: 16 };
+export interface Snipe { x: number; y: number; t: number; }
 /** Upgrades the Bomber can steal with the metal arm. */
 export type BomberPerk = 'shield' | 'barrage' | 'reload' | 'turbo' | 'armor' | 'rapid' | 'mega' | 'storm';
 export const BOMBER_PERKS: Record<BomberPerk, { name: string; desc: string }> = {
@@ -273,6 +278,8 @@ export interface Bomber {
   arm: Arm | null; perk: BomberPerk | null; shieldT: number;
   /** seconds left of Turbo and Rapid missiles */
   turboT: number; rapidT: number;
+  /** Protection: seconds left, and until it can be used again */
+  protectT: number; protectCD: number;
   damage: number; deaths: number; steals: number;
 }
 /** The Bomber's numbers: heights are shares of the sky from the ground (0) to SKY_TOP (1). */
@@ -290,6 +297,8 @@ export interface BomberView {
   missile: number; nuke: number; dive: number; diving: boolean; canNuke: boolean;
   /** 0..1 of the arm's reel-in while one is out, else -1; whether a pack is in reach to grab */
   arm: number; canGrab: boolean; perk: BomberPerk | null; shieldT: number; turboT: number; rapidT: number;
+  /** Protection: cooldown share left, and seconds left while it is on */
+  protect: number; protectT: number;
 }
 
 export class Game {
@@ -333,6 +342,8 @@ export class Game {
   timeScale = 1; overT = 0; clearInfo: ClearInfo | null = null; lastVibe = 0;
   /** co-op: the Bomber's name (set before start) and its state during a game */
   bomberName = 'Bomber'; bomber: Bomber | null = null;
+  /** co-op: the Sniper's lasers waiting to hit, and the damage they have done; the Base's Protection */
+  snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false;
   /** co-op: flak bursts and explosions since the last snapshot, so the phones can draw them too ([0 flak | 1 air | 2 ground, x, y, size]) */
@@ -383,8 +394,9 @@ export class Game {
     this.lastVibe = 0;
     this.bomber = this.coop ? {
       name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
-      diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, damage: 0, deaths: 0, steals: 0,
+      diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
     } : null;
+    this.snipes = []; this.protectT = 0; this.protectCD = 0; this.sniperDamage = 0;
   }
 
   get D() { return DIFFICULTY[this.difficulty]; }
@@ -572,6 +584,11 @@ export class Game {
       case 'switch': return this.bomberSwitch();
       case 'grab': return this.bomberGrab(p, crate);
       case 'use': return this.bomberUse(p);
+      case 'protect':
+        if (b.protectCD > 0) return false;
+        b.protectT = PROTECT.time; b.protectCD = PROTECT.cd + PROTECT.time; Sound.shield();
+        this.labels.push({ text: 'Protection', x: p.x, y: p.y - 24, t: 0, life: 1.6, color: '#ffd34a', big: true });
+        return true;
     }
     return false;
   }
@@ -829,6 +846,7 @@ export class Game {
     b.missileCD = Math.max(0, b.missileCD - dt); b.nukeCD = Math.max(0, b.nukeCD - dt); b.diveCD = Math.max(0, b.diveCD - dt);
     b.switchCD = Math.max(0, b.switchCD - dt); b.shieldT = Math.max(0, b.shieldT - dt);
     b.turboT = Math.max(0, b.turboT - dt); b.rapidT = Math.max(0, b.rapidT - dt);
+    b.protectT = Math.max(0, b.protectT - dt); b.protectCD = Math.max(0, b.protectCD - dt);
     if (b.diveT > 0) { b.diveT -= dt; if (b.diveT <= 0) { b.diveT = 0; b.dive = null; } }
     const p = b.plane;
     if (p && (p.dead || p.state === 'falling' || !p.player)) { this.dropArm(); b.plane = null; }
@@ -862,7 +880,43 @@ export class Game {
       missile: b.missileCD / BOMBER.missileCD, nuke: b.nukeCD / BOMBER.nukeCD, dive: Math.min(1, b.diveCD / BOMBER.diveCD), diving: b.diveT > 0,
       canNuke: !!p && heightOf(p.y) >= BOMBER.nukeAlt, arm: b.arm ? Math.min(1, b.arm.t / BOMBER.armTime) : -1, canGrab: !!p && !b.arm && !!this.grabbable(p),
       perk: b.perk, shieldT: b.shieldT, turboT: b.turboT, rapidT: b.rapidT,
+      protect: Math.min(1, b.protectCD / PROTECT.cd), protectT: b.protectT,
     };
+  }
+  /** The Base's Protection button. */
+  baseProtect() {
+    if (!this.coop || this.protectCD > 0 || this.ended || this.phase === 'idle') return false;
+    this.protectT = PROTECT.time; this.protectCD = PROTECT.cd + PROTECT.time;
+    Sound.shield();
+    this.labels.push({ text: 'Protection', x: this.gunX, y: GROUND_Y - 70, t: 0, life: 1.8, color: '#ffd34a', big: true });
+    return true;
+  }
+  /** The Sniper points the laser at (x, y). One laser at a time. */
+  snipe(x: number, y: number) {
+    if (!this.coop || this.snipes.length || this.ended || this.phase === 'idle' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    this.snipes.push({ x: clamp(x, -this.xe, this.xe), y: clamp(y, SKY_TOP - 100, GROUND_Y), t: SNIPER.delay });
+    this.tip('sniper', "A red dot is the Sniper's laser. Three seconds later it hits that spot.");
+    return true;
+  }
+  updateCoop(dt: number) {
+    this.protectT = Math.max(0, this.protectT - dt); this.protectCD = Math.max(0, this.protectCD - dt);
+    for (const s of this.snipes) {
+      s.t -= dt;
+      if (s.t > 0) continue;
+      // the shot: 8% of full strength off any building at the spot, and off the cargo plane if it is there
+      this.particles.push({ k: 'flash', x: s.x, y: s.y, r: 14, life: .25, t: 0, vx: 0, vy: 0 });
+      this.flak(s.x, s.y, 1);
+      for (const b of this.buildings) {
+        if (b.ruined || Math.abs(s.x - b.x) > b.half + SNIPER.radius || s.y < GROUND_Y - 60) continue;
+        const before = b.hp;
+        this.damageBuilding(b, b.max * SNIPER.share / this.D.damage);
+        this.sniperDamage += Math.max(0, before - Math.max(0, b.hp));
+      }
+      const c = this.cargo;
+      if (c && !c.dead && !c.hitByPlayer && this.planeDist(c, s.x, s.y) < SNIPER.radius) { c.hp -= 100 * SNIPER.share; c.hitFlash = 1; if (c.hp <= 0) this.cargoLost(false); }
+      Sound.flak(.5, this.panOf(s.x, s.y));
+    }
+    this.snipes = this.snipes.filter(s => s.t > 0);
   }
 
   /* ---------- waves ---------- */
@@ -966,6 +1020,7 @@ export class Game {
     if (!this.ended) this.updateGun(dt);
     this.updatePlanes(dt);
     if (this.bomber) this.updateBomber(dt);
+    if (this.coop) this.updateCoop(dt);
     this.updateBombs(dt);
     this.updateShells(dt);
     this.updateMissiles(dt);
@@ -1469,6 +1524,7 @@ export class Game {
     // co-op: the Bomber's plane shield turns every hit away
     if (p.player && this.bomber && this.bomber.shieldT > 0) { this.particles.push({ k: 'ring', x: p.x, y: p.y, r: 6, grow: 40, life: .25, t: 0, vx: 0, vy: 0 }); return true; }
     if (p.type === 'boss' && this.perks.has('breaker')) dmg *= 3;
+    if (p.player && this.bomber && this.bomber.protectT > 0) dmg *= 1 - PROTECT.cut;
     p.hp -= dmg; p.hitFlash = 1;
     if (at && p.hits.length < 3) {
       // remember where it was hit, in the plane's own frame, so smoke trails from there
@@ -2097,7 +2153,7 @@ export class Game {
   damageBuilding(b: Building, amt: number, quiet = false) {
     if (b.ruined || this.phase === 'idle') return;
     if (this.shieldT > 0) { this.shieldFlash = Math.max(this.shieldFlash, .5); return; }
-    const dealt = amt * this.D.damage * (this.perks.has('armor') ? .75 : 1);
+    const dealt = amt * this.D.damage * (this.perks.has('armor') ? .75 : 1) * (this.protectT > 0 ? 1 - PROTECT.cut : 1);
     if (this.blame && this.bomber) this.bomber.damage += Math.min(Math.max(0, b.hp), dealt);
     b.hp -= dealt; b.hit = 1;
     // Last stand: once a game, the turret in use holds on at half strength instead of falling

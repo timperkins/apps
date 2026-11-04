@@ -3,8 +3,8 @@ import type { BomberAct, BomberView, UpgradeId } from '../game';
 import type { Snap } from './mirror';
 
 /** Bumped whenever messages change shape, so an old phone page is told to reload. */
-export const PROTOCOL = 2;
-export type Role = 'base' | 'bomber';
+export const PROTOCOL = 3;
+export type Role = 'base' | 'bomber' | 'sniper';
 
 /** Phone to host. */
 export type ClientMsg =
@@ -14,6 +14,10 @@ export type ClientMsg =
   | { t: 'tilt'; r: number }
   | { t: 'fire'; on: boolean }
   | { t: 'open' }
+  /** Base or Bomber: Protection */
+  | { t: 'protect' }
+  /** Sniper: point the laser at this world point */
+  | { t: 'snipe'; x: number; y: number }
   | { t: 'pick'; id: UpgradeId | null }
   /** Bomber: up and down are held; everything else is a tap */
   | { t: 'hold'; dir: 'up' | 'down'; on: boolean }
@@ -29,7 +33,8 @@ export type HostMsg =
   | { t: 'old' }
   | { t: 'start'; role: Role }
   | { t: 'bomber'; v: BomberView }
-  | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number }
+  | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number; protect: number; protectT: number }
+  | { t: 'sniper'; ready: boolean; damage: number }
   | { t: 'cards'; title: string; cards: CardInfo[] }
   | { t: 'paused'; on: boolean }
   /** the map, about 20 times a second */

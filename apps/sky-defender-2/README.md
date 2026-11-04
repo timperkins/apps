@@ -46,7 +46,7 @@ Both are picked on the title screen and remembered, and every mode and difficult
 
 ## Co-op
 
-Pick **Co-op** on the title screen and tap to open the lobby. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates) or **Bomber**. Start needs one of each.
+Pick **Co-op** on the title screen and tap to open the lobby. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates), **Bomber** or **Sniper**. Up to three players can join; Start needs a Base and a Bomber, and the Sniper is optional.
 
 The Bomber flies one enemy plane at a time (red marker and name over it). The plane flies left and right by itself and turns at the edges; the Bomber's buttons (on the phone, or beside the game when the host plays the Bomber, with keys in brackets):
 
@@ -59,6 +59,8 @@ The Bomber flies one enemy plane at a time (red marker and name over it). The pl
 - **Upgrade** (U): use it.
 
 Touching the cargo plane wears it down until it falls. The Bomber's plane takes six hits (twelve with heavy armor); when it goes down the phone says "You died" and a new plane comes in 5 seconds later. The game ends when the main turret falls, as usual, and the results show the Bomber's damage, planes lost and upgrades stolen. Co-op keeps its own high scores.
+
+The **Sniper** plays on the Bomber's side. They see the whole map on their phone (or click on the host screen) and tap anywhere to point a red laser there. The laser does nothing for 3 seconds, then fires and takes 8% of the strength of any building under it. **Protection** cuts the damage you take by 65% for 5 seconds, with a 20 second wait after. The Base uses it with Q, the shield button or the phone's Protection button, and the Bomber with R or the pad.
 
 Both phones also show the map above their buttons: the host sends a snapshot of the game about 20 times a second and the phone draws it with the same renderer (`src/coop/mirror.ts`). The Base's phone sees what the big screen sees; the Bomber's phone stays level and follows its own plane. The Bomber's missiles and nukes are always aimed at the standing building nearest their path, so they land on the base.
 
