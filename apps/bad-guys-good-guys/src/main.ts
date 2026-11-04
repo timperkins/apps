@@ -11,6 +11,20 @@ import { Hud } from './ui/hud';
 import { Controls } from './ui/input';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
+
+// iOS Safari ignores user-scalable=no, so block pinch and double-tap zoom by hand.
+for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener(
+  'touchend',
+  (e) => {
+    const now = performance.now();
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (now - lastTouchEnd < 350 && tag !== 'INPUT') e.preventDefault();
+    lastTouchEnd = now;
+  },
+  { passive: false },
+);
 app.innerHTML = `<div class="stage"></div><div class="ui"></div><div class="rotate">Turn your phone sideways to play</div>`;
 const stage = app.querySelector<HTMLElement>('.stage')!;
 const ui = app.querySelector<HTMLElement>('.ui')!;
@@ -146,7 +160,6 @@ async function host(look: Look): Promise<void> {
   const draw = () => {
     el.innerHTML = `<div class="panel host">
       <div class="join-info">
-        <p>Friends join at <b>${location.host}</b> with code</p>
         <div class="code">${s.room}</div>
         <div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })}</div>
         <p class="small">or scan to join</p>
