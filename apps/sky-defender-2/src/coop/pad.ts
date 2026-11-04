@@ -62,7 +62,7 @@ export class BomberPad {
     set('nuke', v.nuke, v.nuke <= 0 && v.canNuke);
     set('dive', v.diving ? 1 : v.dive, !v.diving && v.dive <= 0, v.diving ? 'Firing' : v.height >= BOMBER.diveAlt ? 'Strafe' : 'Dive');
     set('switch', 0, true);
-    set('grab', v.arm >= 0 ? 1 - v.arm : 0, v.canGrab, v.arm >= 0 ? 'Reeling in' : 'Grab');
+    set('grab', v.arm >= 0 ? 1 - v.arm : v.grabCD / BOMBER.grabCD, v.canGrab, v.arm >= 0 ? 'Reeling in' : v.grabCD > 0 ? `Grab ${Math.ceil(v.grabCD)}` : 'Grab');
     set('use', 0, !!v.perk, v.perk ? BOMBER_PERKS[v.perk].name : 'Upgrade');
     set('protect', v.protectT > 0 ? 1 : v.protect, v.protectT <= 0 && v.protect <= 0, v.protectT > 0 ? `Protected ${Math.ceil(v.protectT)}` : 'Protection');
     const dead = this.q('.pad-dead');

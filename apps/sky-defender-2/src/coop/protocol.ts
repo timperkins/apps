@@ -34,7 +34,7 @@ export type HostMsg =
   | { t: 'start'; role: Role }
   | { t: 'bomber'; v: BomberView }
   | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number; protect: number; protectT: number }
-  | { t: 'sniper'; ready: boolean; damage: number; canGrab: boolean; arming: boolean; perk: string | null; perkDesc: string; status: string; missile: number; nuke: number }
+  | { t: 'sniper'; ready: boolean; damage: number; canGrab: boolean; arming: boolean; grabCD: number; perk: string | null; perkDesc: string; status: string; missile: number; nuke: number }
   | { t: 'cards'; title: string; cards: CardInfo[] }
   | { t: 'paused'; on: boolean }
   /** the map, about 20 times a second */

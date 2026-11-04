@@ -136,14 +136,14 @@ export class Mirror {
       const crate = bp.armCrate >= 0 ? g.crates[bp.armCrate] : null;
       g.bomber = {
         name: bp.name, plane, deadT: bp.deadT, up: false, down: false, missileCD: 0, nukeCD: 0, diveCD: 0, switchCD: 0, diveT: 0, dive: null, returnY: null,
-        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, turboT: 0, rapidT: 0, protectT: bp.protectT, protectCD: 0, damage: 0, deaths: 0, steals: 0,
+        arm: crate ? { crate, hp: bp.armHp, max: bp.armMax, t: 0, x0: crate.x, y0: crate.y } : null, perk: bp.perk, shieldT: bp.shieldT, grabCD: 0, turboT: 0, rapidT: 0, protectT: bp.protectT, protectCD: 0, damage: 0, deaths: 0, steals: 0,
       };
       if (crate) crate.held = true;
     } else g.bomber = null;
     const sp = s.sniper;
     if (sp) {
       const crate = sp.armCrate >= 0 ? g.crates[sp.armCrate] : null;
-      g.sniper = { name: sp.name, arm: crate ? { crate, hp: sp.armHp, max: sp.armMax, t: sp.armT, x0: sp.x0, y0: crate.y } : null, perk: sp.perk, quickN: 0, heavyN: 0, volley: false, steals: 0, missileCD: 0, nukeCD: 0, aimX: null };
+      g.sniper = { name: sp.name, arm: crate ? { crate, hp: sp.armHp, max: sp.armMax, t: sp.armT, x0: sp.x0, y0: crate.y } : null, perk: sp.perk, quickN: 0, heavyN: 0, volley: false, steals: 0, grabCD: 0, missileCD: 0, nukeCD: 0, aimX: null };
       if (crate) crate.held = true;
     } else g.sniper = null;
     for (const [kind, x, y, k] of s.fx) { if (kind === 0) g.flak(x, y, k); else g.explosion(x, y, k, kind === 2); }

@@ -606,7 +606,7 @@ function coopSnapshots(dt: number) {
   if (base?.link) coop.send(base, { t: 'base', crate: !!game.readyCrate(), weapon: game.weapon ? `${UPGRADES[game.weapon].name} (${Math.ceil(game.ammo)})` : null, score: game.score, wave: game.wave, protect: Math.min(1, game.protectCD / PROTECT.cd), protectT: game.protectT });
   const sn = coop.byRole('sniper');
   const sp = game.sniper;
-  if (sn?.link && sp) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage), canGrab: !sp.arm && !!game.sniperGrabbable(), arming: !!sp.arm,
+  if (sn?.link && sp) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage), canGrab: !sp.arm && sp.grabCD <= 0 && !!game.sniperGrabbable(), arming: !!sp.arm, grabCD: Math.ceil(sp.grabCD),
     perk: sp.perk ? SNIPER_PERKS[sp.perk].name : null, perkDesc: sp.perk ? SNIPER_PERKS[sp.perk].desc : '', status: game.sniperStatus(), missile: Math.ceil(sp.missileCD), nuke: Math.ceil(sp.nukeCD) });
 }
 

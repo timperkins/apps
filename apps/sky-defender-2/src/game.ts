@@ -259,7 +259,7 @@ export const SNIPER_PERKS: Record<SniperPerk, { name: string; desc: string }> = 
 };
 const SNIPER_PACKS: Record<'plain' | 'gold' | 'diamond', SniperPerk> = { plain: 'quick', gold: 'heavy', diamond: 'volley' };
 export interface Sniper {
-  name: string; arm: Arm | null; perk: SniperPerk | null; quickN: number; heavyN: number; volley: boolean; steals: number;
+  name: string; arm: Arm | null; perk: SniperPerk | null; quickN: number; heavyN: number; volley: boolean; steals: number; grabCD: number;
   /** Missile and Nuke from the top of the sky, at the last spot the laser pointed */
   missileCD: number; nukeCD: number; aimX: number | null;
 }
@@ -293,6 +293,8 @@ export interface Bomber {
   /** after a low dive the plane climbs back to where it started, unless the player steers */
   returnY: number | null;
   arm: Arm | null; perk: BomberPerk | null; shieldT: number;
+  /** seconds before the arm can go out again, after it brought a pack in or was shot off */
+  grabCD: number;
   /** seconds left of Turbo and Rapid missiles */
   turboT: number; rapidT: number;
   /** Protection: seconds left, and until it can be used again */
@@ -302,7 +304,7 @@ export interface Bomber {
 /** The Bomber's numbers: heights are shares of the sky from the ground (0) to SKY_TOP (1). */
 export const BOMBER = {
   climb: 55, hp: 6, respawn: 5, missileCD: 8, nukeCD: 12, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
-  armTime: 12, armRange: Infinity, touch: 24, cargoDps: 10, highDps: 4, lowDps: 8, shield: 10,
+  armTime: 12, grabCD: 10, armRange: Infinity, touch: 24, cargoDps: 10, highDps: 4, lowDps: 8, shield: 10,
 };
 /** The top of the sky the Bomber can fly to, and the lowest it can go. */
 export const SKY_TOP = -680, SKY_LOW = -50;
@@ -313,7 +315,7 @@ export interface BomberView {
   name: string; alive: boolean; deadT: number; height: number; hp: number; max: number;
   missile: number; nuke: number; dive: number; diving: boolean; canNuke: boolean;
   /** 0..1 of the arm's reel-in while one is out, else -1; whether a pack is in reach to grab */
-  arm: number; canGrab: boolean; perk: BomberPerk | null; shieldT: number; turboT: number; rapidT: number;
+  arm: number; canGrab: boolean; grabCD: number; perk: BomberPerk | null; shieldT: number; turboT: number; rapidT: number;
   /** Protection: cooldown share left, and seconds left while it is on */
   protect: number; protectT: number;
 }
@@ -412,9 +414,9 @@ export class Game {
     this.lastVibe = 0;
     this.bomber = this.coop && this.bomberName !== null ? {
       name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
-      diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
+      diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, grabCD: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
     } : null;
-    this.sniper = this.coop && this.sniperName !== null ? { name: this.sniperName, arm: null, perk: null, quickN: 0, heavyN: 0, volley: false, steals: 0, missileCD: 2, nukeCD: 4, aimX: null } : null;
+    this.sniper = this.coop && this.sniperName !== null ? { name: this.sniperName, arm: null, perk: null, quickN: 0, heavyN: 0, volley: false, steals: 0, grabCD: 0, missileCD: 2, nukeCD: 4, aimX: null } : null;
     this.snipes = []; this.protectT = 0; this.protectCD = 0; this.sniperDamage = 0;
   }
 
@@ -736,7 +738,7 @@ export class Game {
   }
   bomberGrab(p: Plane, crate: Crate | null) {
     const b = this.bomber!;
-    if (b.arm) return false;
+    if (b.arm || b.grabCD > 0) return false;
     const c = crate ? (!crate.dead && !crate.held ? crate : null) : this.grabbable(p);
     if (!c) return false;
     this.startArm(c, 'bomber');
@@ -757,7 +759,7 @@ export class Game {
     const s = this.sniper;
     if (!s || this.ended || this.phase === 'idle') return false;
     if (a === 'grab') {
-      if (s.arm) return false;
+      if (s.arm || s.grabCD > 0) return false;
       const c = crate && !crate.dead && !crate.held ? crate : this.sniperGrabbable();
       if (!c) return false;
       this.startArm(c, 'sniper');
@@ -858,7 +860,7 @@ export class Game {
   dropArm(who: ArmOwner = 'bomber') {
     const b = who === 'sniper' ? this.sniper : this.bomber, a = b?.arm;
     if (!b || !a) return;
-    b.arm = null;
+    b.arm = null; b.grabCD = BOMBER.grabCD;
     const c = a.crate;
     c.held = false;
     if (!c.dead && !c.landed) { const left = clamp((LZ_Y - c.y) / 45, 3, CRATE_FALL); c.vy = (LZ_Y - c.y) / left; c.vx = 0; }
@@ -874,7 +876,7 @@ export class Game {
     c.x = a.x0 + (p.x - a.x0) * e; c.y = a.y0 + (p.y + 9 - a.y0) * e;
     c.sway = Math.sin(this.t * 2.3) * .25;
     if (a.t < BOMBER.armTime) return;
-    c.dead = true; b.arm = null; b.steals++;
+    c.dead = true; b.arm = null; b.steals++; b.grabCD = BOMBER.grabCD;
     b.perk = pick(BOMBER_PACKS[c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain']);
     this.labels.push({ text: `${b.name} stole the upgrade`, x: p.x, y: p.y - 26, t: 0, life: 2.6, color: '#ff8a7a', big: true });
     Sound.denied();
@@ -887,7 +889,7 @@ export class Game {
   /** The Sniper's arm reels its pack up into the sky in the same 12 seconds. */
   updateSniperArm(dt: number) {
     const s = this.sniper;
-    if (s) { s.missileCD = Math.max(0, s.missileCD - dt); s.nukeCD = Math.max(0, s.nukeCD - dt); }
+    if (s) { s.grabCD = Math.max(0, s.grabCD - dt); s.missileCD = Math.max(0, s.missileCD - dt); s.nukeCD = Math.max(0, s.nukeCD - dt); }
     const a = s?.arm;
     if (!s || !a) return;
     const c = a.crate;
@@ -897,7 +899,7 @@ export class Game {
     c.x = a.x0; c.y = a.y0 + (SNIPER_ARM_Y + 40 - a.y0) * e;
     c.sway = Math.sin(this.t * 2.3) * .25;
     if (a.t < BOMBER.armTime) return;
-    c.dead = true; s.arm = null; s.steals++;
+    c.dead = true; s.arm = null; s.steals++; s.grabCD = BOMBER.grabCD;
     s.perk = SNIPER_PACKS[c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain'];
     this.labels.push({ text: `${s.name} stole the upgrade`, x: this.gunX, y: GROUND_Y - 90, t: 0, life: 2.6, color: '#ff8a7a', big: true });
     Sound.denied();
@@ -959,7 +961,7 @@ export class Game {
   updateBomber(dt: number) {
     const b = this.bomber!;
     b.missileCD = Math.max(0, b.missileCD - dt); b.nukeCD = Math.max(0, b.nukeCD - dt); b.diveCD = Math.max(0, b.diveCD - dt);
-    b.switchCD = Math.max(0, b.switchCD - dt); b.shieldT = Math.max(0, b.shieldT - dt);
+    b.switchCD = Math.max(0, b.switchCD - dt); b.grabCD = Math.max(0, b.grabCD - dt); b.shieldT = Math.max(0, b.shieldT - dt);
     b.turboT = Math.max(0, b.turboT - dt); b.rapidT = Math.max(0, b.rapidT - dt);
     b.protectT = Math.max(0, b.protectT - dt); b.protectCD = Math.max(0, b.protectCD - dt);
     if (b.diveT > 0) { b.diveT -= dt; if (b.diveT <= 0) { b.diveT = 0; b.dive = null; } }
@@ -980,7 +982,7 @@ export class Game {
       if (c.hp <= 0) this.cargoLost(false);
     }
     // touching a falling pack puts the arm on it
-    if (!b.arm) for (const cr of this.crates) {
+    if (!b.arm && b.grabCD <= 0) for (const cr of this.crates) {
       if (!cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - q.x, cr.y - q.y) < BOMBER.touch) { this.startArm(cr, 'bomber'); break; }
     }
     this.updateArm(dt);
@@ -993,7 +995,7 @@ export class Game {
     return {
       name: b.name, alive: !!p, deadT: b.deadT, height: p ? heightOf(p.y) : 0, hp: p ? Math.max(0, p.hp) : 0, max: p?.max ?? BOMBER.hp,
       missile: b.missileCD / BOMBER.missileCD, nuke: b.nukeCD / BOMBER.nukeCD, dive: Math.min(1, b.diveCD / BOMBER.diveCD), diving: b.diveT > 0,
-      canNuke: !!p && heightOf(p.y) >= BOMBER.nukeAlt, arm: b.arm ? Math.min(1, b.arm.t / BOMBER.armTime) : -1, canGrab: !!p && !b.arm && !!this.grabbable(p),
+      canNuke: !!p && heightOf(p.y) >= BOMBER.nukeAlt, arm: b.arm ? Math.min(1, b.arm.t / BOMBER.armTime) : -1, canGrab: !!p && !b.arm && b.grabCD <= 0 && !!this.grabbable(p), grabCD: b.grabCD,
       perk: b.perk, shieldT: b.shieldT, turboT: b.turboT, rapidT: b.rapidT,
       protect: Math.min(1, b.protectCD / PROTECT.cd), protectT: b.protectT,
     };

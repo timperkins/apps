@@ -230,7 +230,7 @@ export function runController(code: string) {
         ($('cSNuke') as HTMLButtonElement).disabled = m.nuke > 0;
         $('cSNuke').textContent = m.nuke > 0 ? `Nuke ${m.nuke}` : 'Nuke';
         ($('cSGrab') as HTMLButtonElement).disabled = !m.canGrab;
-        $('cSGrab').textContent = m.arming ? 'Reeling in…' : 'Grab';
+        $('cSGrab').textContent = m.arming ? 'Reeling in…' : m.grabCD > 0 ? `Grab ${m.grabCD}` : 'Grab';
         ($('cSUse') as HTMLButtonElement).disabled = !m.perk;
         $('cSUse').textContent = m.perk ? `Use ${m.perk}` : 'Use upgrade';
         $('cSStatus').textContent = m.perk ? m.perkDesc : m.status || (m.canGrab ? 'An upgrade is falling: Grab sends your metal arm down for it.' : '');
