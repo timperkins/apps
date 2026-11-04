@@ -137,7 +137,8 @@ async function host(look: Look): Promise<void> {
   }
   session = s;
   const url = new URL(location.href);
-  url.search = `?join=${s.room}`;
+  const peerhost = new URLSearchParams(location.search).get('peerhost');
+  url.search = `?join=${s.room}${peerhost ? `&peerhost=${peerhost}` : ''}`;
   url.hash = '';
   const qr = qrcode(0, 'M');
   qr.addData(url.toString());

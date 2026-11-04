@@ -1,4 +1,4 @@
-import { Peer, type DataConnection } from 'peerjs';
+import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { randomRoomCode } from './protocol';
 import type { HostTransport, JoinRoom, Link, OpenRoom } from './transport';
 
@@ -10,6 +10,14 @@ import type { HostTransport, JoinRoom, Link, OpenRoom } from './transport';
 /** Prefix so our room codes don't collide with other apps on the shared PeerJS server. */
 const PREFIX = 'bad-guys-good-guys-room-';
 const OPEN_TIMEOUT = 12000;
+
+/** Test hook: `?peerhost=localhost:9000` points at a local PeerJS server instead of the public one. */
+function peerOptions(): PeerOptions {
+  const host = new URLSearchParams(location.search).get('peerhost');
+  if (!host) return {};
+  const [hostname, port] = host.split(':');
+  return { host: hostname, port: Number(port) || 9000, path: '/', secure: false };
+}
 
 function wrap(conn: DataConnection): Link {
   const closeCbs: (() => void)[] = [];
@@ -57,7 +65,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 
 function tryOpen(code: string): Promise<Peer> {
   return new Promise((resolve, reject) => {
-    const peer = new Peer(PREFIX + code);
+    const peer = new Peer(PREFIX + code, peerOptions());
     peer.once('open', () => resolve(peer));
     peer.once('error', (err) => {
       peer.destroy();
@@ -105,7 +113,7 @@ export const openPeerRoom: OpenRoom = async () => {
 export const joinPeerRoom: JoinRoom = (room) =>
   withTimeout(
     new Promise<Link>((resolve, reject) => {
-      const peer = new Peer();
+      const peer = new Peer(peerOptions());
       peer.once('error', (err) => {
         peer.destroy();
         reject(err);

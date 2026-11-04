@@ -431,8 +431,11 @@ export class GameView {
     const hand = s.f > 0 ? 0 : 1;
     if (v.toolHand !== hand) {
       v.rig.hands[hand].add(v.tool);
-      v.tool.rotation.set(s.k === 'guard' ? 1.5 : 1.4, 0, 0);
-      if (s.k === 'guard') v.tool.position.y = -0.3;
+      // The stop sign stands upright beside the guard; hand tools point forward.
+      if (s.k === 'guard') {
+        v.tool.rotation.set(0.15, 0, 0);
+        v.tool.position.set(0, -0.55, 0.1);
+      } else v.tool.rotation.set(1.4, 0, 0);
       v.toolHand = hand;
     }
   }
