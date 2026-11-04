@@ -226,7 +226,7 @@ function join(code: string) {
     })
     .catch((err) => {
       console.error(err);
-      leave("Couldn't join", `Make sure the other device has "Play on another device" open with the code ${code}, and both are online.`);
+      leave("Couldn't join", `Make sure the other device has the 📱 Invite card open with the code ${code}, and both are online.`);
     });
 }
 

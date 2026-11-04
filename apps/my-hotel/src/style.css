@@ -141,10 +141,6 @@ kbd {
 .top-right .pill { position: static; }
 .invite-btn { font: inherit; font-size: 16px; border: 0; cursor: pointer; }
 .invite-btn:hover { background: #f5f5f5; }
-@media (max-width: 720px) {
-  .invite-btn { font-size: 0; padding: 8px 12px; }
-  .invite-btn::first-letter { font-size: 18px; }
-}
 .invite, .notice {
   position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
   background: rgba(40, 30, 30, 0.45); z-index: 20;

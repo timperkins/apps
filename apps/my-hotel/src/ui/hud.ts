@@ -20,7 +20,7 @@ export class Hud {
       <div class="pill coins"><span class="coin"></span><b>0</b></div>
       <div class="pill level"><div class="star"><b>1</b></div><div class="bar"><span></span><em></em></div></div>
       <div class="top-right">
-        ${opts.onInvite ? '<button class="pill invite-btn" type="button">📱 Play on another device</button>' : ''}
+        ${opts.onInvite ? '<button class="pill invite-btn" type="button">📱 Invite</button>' : ''}
         <button class="pill menu" type="button" title="${opts.guest ? 'Leave' : 'Change map'}">${opts.guest ? 'Leave' : `${THEMES[h.map].name} · Maps`}</button>
       </div>
       <div class="pill keys">${

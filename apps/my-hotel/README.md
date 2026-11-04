@@ -1,6 +1,6 @@
 # My hotel
 
-A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev). You play the manager and walk around with WASD or the arrow keys (or drag on a touch screen). Pick "2 players" on the start screen to play with a friend on one keyboard: player 1 uses WASD, player 2 the arrow keys, and you share the coins. Or press "📱 Play on another device" in the game and scan the QR code with a phone (or type the code on its start screen) to join as player 2 on that device.
+A 3D hotel game for the browser at [my-hotel.trom.dev](https://my-hotel.trom.dev). You play the manager and walk around with WASD or the arrow keys (or drag on a touch screen). Pick "2 players" on the start screen to play with a friend on one keyboard: player 1 uses WASD, player 2 the arrow keys, and you share the coins. Or press "📱 Invite" in the game and scan the QR code with a phone (or type the code on its start screen) to join as player 2 on that device.
 
 - Stand behind the desk to check guests in. Their coins pile up by the desk; walk over the pile to pick them up.
 - Guests sleep, then leave a messy room. Walk into it to clean it.
