@@ -248,7 +248,20 @@ export type BomberAct = 'missile' | 'nuke' | 'dive' | 'switch' | 'grab' | 'use' 
 export const PROTECT = { time: 5, cd: 20, cut: .65 };
 /** The Sniper (on the Bomber's side) points a harmless laser anywhere; after 3 seconds it hits there for 8% of a building's full strength. */
 export const SNIPER = { delay: 3, share: .08, radius: 16 };
-export interface Snipe { x: number; y: number; t: number; }
+/** A laser: where it points, seconds until it hits, how long it waits in all, and the share of a building it takes */
+export interface Snipe { x: number; y: number; t: number; d: number; share: number; }
+/** Upgrades the Sniper's own metal arm can bring in: all of them make the laser better. */
+export type SniperPerk = 'quick' | 'heavy' | 'volley';
+export const SNIPER_PERKS: Record<SniperPerk, { name: string; desc: string }> = {
+  quick: { name: 'Quick laser', desc: 'The next 3 lasers hit after 1 second' },
+  heavy: { name: 'Heavy laser', desc: 'The next 3 lasers take 20%' },
+  volley: { name: 'Laser volley', desc: 'The next laser is 5 lasers in a row' },
+};
+const SNIPER_PACKS: Record<'plain' | 'gold' | 'diamond', SniperPerk> = { plain: 'quick', gold: 'heavy', diamond: 'volley' };
+export interface Sniper { name: string; arm: Arm | null; perk: SniperPerk | null; quickN: number; heavyN: number; volley: boolean; steals: number; }
+export type ArmOwner = 'bomber' | 'sniper';
+/** where the Sniper's arm hangs from: the top of the sky, straight above where it caught the pack */
+const SNIPER_ARM_Y = -720;
 /** Upgrades the Bomber can steal with the metal arm. */
 export type BomberPerk = 'shield' | 'barrage' | 'reload' | 'turbo' | 'armor' | 'rapid' | 'mega' | 'storm';
 export const BOMBER_PERKS: Record<BomberPerk, { name: string; desc: string }> = {
@@ -343,6 +356,7 @@ export class Game {
   /** co-op: the Bomber's name (set before start) and its state during a game */
   bomberName: string | null = 'Bomber'; bomber: Bomber | null = null;
   /** co-op: the Sniper's lasers waiting to hit, and the damage they have done; the Base's Protection */
+  sniperName: string | null = null; sniper: Sniper | null = null;
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false;
@@ -396,6 +410,7 @@ export class Game {
       name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
       diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
     } : null;
+    this.sniper = this.coop && this.sniperName !== null ? { name: this.sniperName, arm: null, perk: null, quickN: 0, heavyN: 0, volley: false, steals: 0 } : null;
     this.snipes = []; this.protectT = 0; this.protectCD = 0; this.sniperDamage = 0;
   }
 
@@ -720,51 +735,103 @@ export class Game {
     if (b.arm) return false;
     const c = crate ? (!crate.dead && !crate.held ? crate : null) : this.grabbable(p);
     if (!c) return false;
-    this.startArm(c);
+    this.startArm(c, 'bomber');
     return true;
   }
+  /** The pack the Sniper's arm goes for: the best one anywhere (diamond, then gold), the newest first. */
+  sniperGrabbable(): Crate | null {
+    let best: Crate | null = null, bv = -1;
+    for (const c of this.crates) {
+      if (c.dead || c.held) continue;
+      const v = c.diamond ? 2 : c.gold ? 1 : 0;
+      if (v >= bv) { bv = v; best = c; }
+    }
+    return best;
+  }
+  /** The Sniper's buttons: send the arm down for a pack, or use the upgrade it brought in. */
+  sniperAct(a: BomberAct, crate: Crate | null = null): boolean {
+    const s = this.sniper;
+    if (!s || this.ended || this.phase === 'idle') return false;
+    if (a === 'grab') {
+      if (s.arm) return false;
+      const c = crate && !crate.dead && !crate.held ? crate : this.sniperGrabbable();
+      if (!c) return false;
+      this.startArm(c, 'sniper');
+      return true;
+    }
+    if (a === 'use' && s.perk) {
+      const k = s.perk;
+      s.perk = null;
+      if (k === 'quick') s.quickN = 3; else if (k === 'heavy') s.heavyN = 3; else s.volley = true;
+      Sound.pop();
+      this.labels.push({ text: SNIPER_PERKS[k].name, x: this.gunX, y: GROUND_Y - 90, t: 0, life: 2, color: '#ff8a7a', big: true });
+      return true;
+    }
+    return false;
+  }
   /** The metal arm closes on a falling pack. It has a fifth of a boss's health, and takes 12 seconds to reel the pack in. */
-  startArm(c: Crate) {
-    const b = this.bomber!;
+  startArm(c: Crate, who: ArmOwner) {
+    const owner = who === 'sniper' ? this.sniper : this.bomber;
+    if (!owner) return;
     const hp = Math.max(3, Math.round(bossHp(Math.max(BOSS_EVERY, this.wave), this.difficulty) / 5));
     // a pack already waiting on the pad is lifted back off it
     c.held = true; c.landed = false;
-    b.arm = { crate: c, hp, max: hp, t: 0, x0: c.x, y0: c.y };
-    this.labels.push({ text: 'Metal arm!', x: c.x, y: c.y - 16, t: 0, life: 2, color: '#ff8a7a', big: true });
-    this.tip('arm', 'The Bomber has a metal arm on your upgrade. Shoot the arm to make it let go.');
+    owner.arm = { crate: c, hp, max: hp, t: 0, x0: c.x, y0: c.y };
+    this.labels.push({ text: who === 'sniper' ? 'Sniper arm!' : 'Metal arm!', x: c.x, y: c.y - 16, t: 0, life: 2, color: '#ff8a7a', big: true });
+    this.tip('arm', `The ${who === 'sniper' ? 'Sniper' : 'Bomber'} has a metal arm on your upgrade. Shoot the arm to make it let go.`);
     Sound.whine(.6, this.panOf(c.x, c.y));
   }
-  /** A point along the arm: 0 at the plane, 1 at the pack. */
-  armPoint(k: number): [number, number] {
-    const a = this.bomber?.arm, p = this.bomber?.plane;
-    if (!a || !p) return [NaN, NaN];
-    const hx = p.x, hy = p.y + 4;
+  /** An arm that is out: the Bomber's (while it has a plane) or the Sniper's. */
+  armOf(who: ArmOwner): Arm | null {
+    if (who === 'sniper') return this.sniper?.arm ?? null;
+    return this.bomber?.plane ? this.bomber.arm : null;
+  }
+  /** Where an arm hangs from: under the Bomber's plane, or from the top of the sky for the Sniper's. */
+  armHead(who: ArmOwner): [number, number] | null {
+    const a = this.armOf(who);
+    if (!a) return null;
+    if (who === 'sniper') return [a.x0, SNIPER_ARM_Y];
+    const p = this.bomber!.plane!;
+    return [p.x, p.y + 4];
+  }
+  /** A point along the arm: 0 at the plane (or sky), 1 at the pack. */
+  armPoint(k: number, who: ArmOwner = 'bomber'): [number, number] {
+    const a = this.armOf(who), h = this.armHead(who);
+    if (!a || !h) return [NaN, NaN];
+    const [hx, hy] = h;
     return [hx + (a.crate.x - hx) * k, hy + (a.crate.y - 4 - hy) * k];
   }
-  /** How far (x, y) is from the arm, or Infinity when there is no arm out. */
+  /** which arm the last armDist was nearest to */
+  private armNear: ArmOwner = 'bomber';
+  /** How far (x, y) is from the nearest arm, or Infinity when there is no arm out. */
   armDist(x: number, y: number) {
-    const a = this.bomber?.arm, p = this.bomber?.plane;
-    if (!a || !p) return Infinity;
-    const [x0, y0] = this.armPoint(0), [x1, y1] = this.armPoint(1);
-    const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
-    const t = clamp(((x - x0) * dx + (y - y0) * dy) / l2, 0, 1);
-    return Math.hypot(x - (x0 + dx * t), y - (y0 + dy * t));
+    let best = Infinity;
+    for (const who of ['bomber', 'sniper'] as const) {
+      if (!this.armOf(who)) continue;
+      const [x0, y0] = this.armPoint(0, who), [x1, y1] = this.armPoint(1, who);
+      const dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy || 1;
+      const t = clamp(((x - x0) * dx + (y - y0) * dy) / l2, 0, 1);
+      const d = Math.hypot(x - (x0 + dx * t), y - (y0 + dy * t));
+      if (d < best) { best = d; this.armNear = who; }
+    }
+    return best;
   }
-  hitArm(dmg: number) {
-    const a = this.bomber?.arm;
+  hitArm(dmg: number, who: ArmOwner = this.armNear) {
+    const a = this.armOf(who);
     if (!a) return;
     a.hp -= dmg;
-    const [mx, my] = this.armPoint(.5);
+    // the Sniper's arm is hit low down, near the pack, where the gun can see it
+    const [mx, my] = this.armPoint(who === 'sniper' ? .9 : .5, who);
     this.particles.push({ k: 'spark', x: mx, y: my, vx: rand(-40, 40), vy: rand(-40, 40), life: .3, t: 0, r: .6 });
     if (a.hp > 0) { if (dmg >= 1) Sound.hitPlane(this.panOf(mx, my)); return; }
     this.addScore(150, mx, my, 'Arm destroyed');
     this.explosion(mx, my, .7, false);
     Sound.boom(false, this.panOf(mx, my));
-    this.dropArm();
+    this.dropArm(who);
   }
   /** The arm lets go (it was shot off, or the plane went down or changed): the pack floats on down to the pad. */
-  dropArm() {
-    const b = this.bomber, a = b?.arm;
+  dropArm(who: ArmOwner = 'bomber') {
+    const b = who === 'sniper' ? this.sniper : this.bomber, a = b?.arm;
     if (!b || !a) return;
     b.arm = null;
     const c = a.crate;
@@ -785,6 +852,22 @@ export class Game {
     c.dead = true; b.arm = null; b.steals++;
     b.perk = pick(BOMBER_PACKS[c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain']);
     this.labels.push({ text: `${b.name} stole the upgrade`, x: p.x, y: p.y - 26, t: 0, life: 2.6, color: '#ff8a7a', big: true });
+    Sound.denied();
+  }
+  /** The Sniper's arm reels its pack up into the sky in the same 12 seconds. */
+  updateSniperArm(dt: number) {
+    const s = this.sniper, a = s?.arm;
+    if (!s || !a) return;
+    const c = a.crate;
+    if (c.dead) { s.arm = null; return; }
+    a.t += dt;
+    const k = Math.min(1, a.t / BOMBER.armTime), e = k * k * (3 - 2 * k);
+    c.x = a.x0; c.y = a.y0 + (SNIPER_ARM_Y + 40 - a.y0) * e;
+    c.sway = Math.sin(this.t * 2.3) * .25;
+    if (a.t < BOMBER.armTime) return;
+    c.dead = true; s.arm = null; s.steals++;
+    s.perk = SNIPER_PACKS[c.diamond ? 'diamond' : c.gold ? 'gold' : 'plain'];
+    this.labels.push({ text: `${s.name} stole the upgrade`, x: this.gunX, y: GROUND_Y - 90, t: 0, life: 2.6, color: '#ff8a7a', big: true });
     Sound.denied();
   }
   /** Uses the upgrade the arm brought in. */
@@ -866,7 +949,7 @@ export class Game {
     }
     // touching a falling pack puts the arm on it
     if (!b.arm) for (const cr of this.crates) {
-      if (!cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - q.x, cr.y - q.y) < BOMBER.touch) { this.startArm(cr); break; }
+      if (!cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - q.x, cr.y - q.y) < BOMBER.touch) { this.startArm(cr, 'bomber'); break; }
     }
     this.updateArm(dt);
   }
@@ -883,6 +966,15 @@ export class Game {
       protect: Math.min(1, b.protectCD / PROTECT.cd), protectT: b.protectT,
     };
   }
+  /** A few words on the Sniper's arm and upgrades, or '' when there is nothing to say. */
+  sniperStatus(): string {
+    const s = this.sniper;
+    if (!s) return '';
+    if (s.arm) return `stealing an upgrade (${Math.round(Math.min(1, s.arm.t / BOMBER.armTime) * 100)}%)`;
+    const on = [s.quickN ? `quick laser ×${s.quickN}` : '', s.heavyN ? `heavy laser ×${s.heavyN}` : '', s.volley ? 'volley ready' : ''].filter(Boolean);
+    if (on.length) return on.join(' · ');
+    return s.perk ? `has ${SNIPER_PERKS[s.perk].name}` : '';
+  }
   /** The Base's Protection button. */
   baseProtect() {
     if (!this.coop || this.protectCD > 0 || this.ended || this.phase === 'idle') return false;
@@ -894,7 +986,12 @@ export class Game {
   /** The Sniper points the laser at (x, y). One laser at a time. */
   snipe(x: number, y: number) {
     if (!this.coop || this.snipes.length || this.ended || this.phase === 'idle' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
-    this.snipes.push({ x: clamp(x, -this.xe, this.xe), y: clamp(y, SKY_TOP - 100, GROUND_Y), t: SNIPER.delay });
+    const s = this.sniper;
+    const d = s && s.quickN > 0 ? 1 : SNIPER.delay, share = s && s.heavyN > 0 ? .2 : SNIPER.share;
+    if (s) { s.quickN = Math.max(0, s.quickN - 1); s.heavyN = Math.max(0, s.heavyN - 1); }
+    const xs = s?.volley ? [-48, -24, 0, 24, 48] : [0];
+    if (s) s.volley = false;
+    for (const dx of xs) this.snipes.push({ x: clamp(x + dx, -this.xe, this.xe), y: clamp(y, SKY_TOP - 100, GROUND_Y), t: d, d, share });
     this.tip('sniper', "A red dot is the Sniper's laser. Three seconds later it hits that spot.");
     return true;
   }
@@ -909,14 +1006,15 @@ export class Game {
       for (const b of this.buildings) {
         if (b.ruined || Math.abs(s.x - b.x) > b.half + SNIPER.radius || s.y < GROUND_Y - 60) continue;
         const before = b.hp;
-        this.damageBuilding(b, b.max * SNIPER.share / this.D.damage);
+        this.damageBuilding(b, b.max * s.share / this.D.damage);
         this.sniperDamage += Math.max(0, before - Math.max(0, b.hp));
       }
       const c = this.cargo;
-      if (c && !c.dead && !c.hitByPlayer && this.planeDist(c, s.x, s.y) < SNIPER.radius) { c.hp -= 100 * SNIPER.share; c.hitFlash = 1; if (c.hp <= 0) this.cargoLost(false); }
+      if (c && !c.dead && !c.hitByPlayer && this.planeDist(c, s.x, s.y) < SNIPER.radius) { c.hp -= 100 * s.share; c.hitFlash = 1; if (c.hp <= 0) this.cargoLost(false); }
       Sound.flak(.5, this.panOf(s.x, s.y));
     }
     this.snipes = this.snipes.filter(s => s.t > 0);
+    this.updateSniperArm(dt);
   }
 
   /* ---------- waves ---------- */
@@ -1234,10 +1332,9 @@ export class Game {
       const c = near(cr.x, cr.y - 4);
       if (c && !cr.landed && !cr.dead && !cr.held && Math.hypot(cr.x - c[0], cr.y - 4 - c[1]) < 7 && !this.dodge(cr)) this.crateLost(cr);
     }
-    const arm = this.bomber?.arm;
-    if (arm) for (let k = .2; k < 1; k += .2) {
-      const [ax, ay] = this.armPoint(k), c = near(ax, ay);
-      if (c && Math.hypot(ax - c[0], ay - c[1]) < 4) { this.hitArm(LASER_DPS * dt); break; }
+    for (const who of ['bomber', 'sniper'] as const) if (this.armOf(who)) for (let k = .2; k < 1; k += .2) {
+      const [ax, ay] = this.armPoint(k, who), c = near(ax, ay);
+      if (c && Math.hypot(ax - c[0], ay - c[1]) < 4) { this.hitArm(LASER_DPS * dt, who); break; }
     }
     this.laserSnd -= dt;
     if (this.laserSnd <= 0) { this.laserSnd = .09; Sound.laser(); }

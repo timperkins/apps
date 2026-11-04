@@ -41,7 +41,9 @@ export function runController(code: string) {
     </section>
     <section data-s="cards"><h2 id="cCardsTitle">Choose an upgrade</h2><div class="cards" id="cCards"></div><button class="ghost small" id="cCardsBack">Not now</button></section>
     <section data-s="bomber"><div id="cPad"></div></section>
-    <section data-s="sniper"><p class="lead" id="cSnipeInfo">Tap the map to aim your laser. Three seconds later it hits that spot.</p></section>
+    <section data-s="sniper"><p class="lead" id="cSnipeInfo">Tap the map to aim your laser. Three seconds later it hits that spot.</p>
+      <div class="row"><button class="ghost" id="cSGrab" disabled>Grab</button><button class="ghost gold" id="cSUse" disabled>Use upgrade</button></div>
+      <p class="fine" id="cSStatus"></p></section>
     <section data-s="over"><h2 id="cOverTitle"></h2><div class="big" id="cOverScore"></div><p class="fine">Waiting for the host…</p></section>
     <div id="cPaused" hidden>Paused on the big screen</div>
   </div>`;
@@ -124,6 +126,10 @@ export function runController(code: string) {
   const dragEnd = () => { dragX = null; };
   addEventListener('pointerup', dragEnd); addEventListener('pointercancel', dragEnd);
 
+  // the Sniper's own metal arm, and the laser upgrades it brings in
+  $('cSGrab').addEventListener('click', () => { send({ t: 'act', a: 'grab' }); buzz(12); });
+  $('cSUse').addEventListener('click', () => { send({ t: 'act', a: 'use' }); buzz(12); });
+
   // ---- Bomber ----
   const pad = new BomberPad({ hold: (dir, on) => send({ t: 'hold', dir, on }), act: a => { send({ t: 'act', a }); buzz(12); } });
   $('cPad').appendChild(pad.el);
@@ -179,7 +185,7 @@ export function runController(code: string) {
   function onMsg(m: HostMsg) {
     switch (m.t) {
       case 'old': status('The big screen runs a newer version. Reload this page.', true); break;
-      case 'full': status('This game already has two players.', true); break;
+      case 'full': status('This game is already full.', true); break;
       case 'lobby': lobby(m.players, m.you); if (!m.playing) { role = null; go('lobby'); } break;
       case 'start':
         role = m.role;
@@ -216,6 +222,11 @@ export function runController(code: string) {
       case 'snap': mirror.apply(m.s); break;
       case 'sniper':
         $('cSnipeInfo').textContent = (m.ready ? 'Tap the map to aim your laser.' : 'Laser on target…') + ` Damage so far: ${m.damage}`;
+        ($('cSGrab') as HTMLButtonElement).disabled = !m.canGrab;
+        $('cSGrab').textContent = m.arming ? 'Reeling in…' : 'Grab';
+        ($('cSUse') as HTMLButtonElement).disabled = !m.perk;
+        $('cSUse').textContent = m.perk ? `Use ${m.perk}` : 'Use upgrade';
+        $('cSStatus').textContent = m.perk ? m.perkDesc : m.status || (m.canGrab ? 'An upgrade is falling: Grab sends your metal arm down for it.' : '');
         break;
       case 'over':
         $('cOverTitle').textContent = m.title;

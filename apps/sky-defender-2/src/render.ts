@@ -3,7 +3,7 @@
 // camera also slides sideways to whichever turret is in use (game.viewX).
 import { SPRITES, SHARED, LAND, GROUND_Y, PIVOT_Y, B, G, SC, HALF, LIGHTS, BASE_SCALE, puff, mockToWorld, RAYS, CLOUD_RINGS, type Sprite, type PaletteSprites, type BuildingId } from './art';
 import { PALETTES, blendPalette, withAlpha, type BlendedPalette, type Palette } from './palettes';
-import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, SNIPER, type Game, type Plane, type Crate, type Bomb, type Building } from './game';
+import { UPGRADES, DOME_RX, DOME_RY, WAR_TIME, WAR_STRIKES, SNIPER, type Game, type ArmOwner, type Plane, type Crate, type Bomb, type Building } from './game';
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 /** The glow color of a crate. */
@@ -481,7 +481,7 @@ export class Renderer {
   drawSnipes(game: Game) {
     const ctx = this.ctx;
     for (const sn of game.snipes) {
-      const k = Math.max(0, sn.t / SNIPER.delay);
+      const k = Math.max(0, sn.t / (sn.d || SNIPER.delay));
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.strokeStyle = '#ff3a2a'; ctx.lineWidth = .6; ctx.globalAlpha = .35 + .25 * Math.sin(this.time * 20);
@@ -506,13 +506,15 @@ export class Renderer {
     }
   }
   /** Co-op: the Bomber's metal arm, a jointed rod from the plane to the pack it is reeling in, with its health. */
-  drawArm(game: Game) {
-    const a = game.bomber?.arm;
-    if (!a || !game.bomber?.plane) return;
-    const ctx = this.ctx, n = 6;
+  drawArm(game: Game) { this.drawOneArm(game, 'bomber'); this.drawOneArm(game, 'sniper'); }
+  /** The Sniper's arm is the same rod, hanging straight down from the top of the sky. */
+  drawOneArm(game: Game, who: ArmOwner) {
+    const a = game.armOf(who);
+    if (!a) return;
+    const ctx = this.ctx, n = who === 'sniper' ? 12 : 6;
     const pts: [number, number][] = [];
     for (let i = 0; i <= n; i++) {
-      const [x, y] = game.armPoint(i / n);
+      const [x, y] = game.armPoint(i / n, who);
       // a slight sag in the middle
       pts.push([x, y + Math.sin(Math.PI * i / n) * 4]);
     }
@@ -529,7 +531,7 @@ export class Renderer {
     ctx.strokeStyle = '#d8dce4'; ctx.lineWidth = .8;
     ctx.beginPath(); ctx.moveTo(cx - 4, cy - 3); ctx.lineTo(cx - 4.5, cy + 2); ctx.moveTo(cx + 4, cy - 3); ctx.lineTo(cx + 4.5, cy + 2); ctx.stroke();
     // its health, over the middle of the arm
-    const [mx, my] = pts[n >> 1], w = 20, fr = Math.max(0, a.hp / a.max);
+    const [mx, my] = pts[who === 'sniper' ? n - 2 : n >> 1], w = 20, fr = Math.max(0, a.hp / a.max);
     ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.roundRect(mx - w / 2 - .5, my - 8.5, w + 1, 2.6, 1.3); ctx.fill();
     ctx.fillStyle = '#c9ced8'; ctx.beginPath(); ctx.roundRect(mx - w / 2, my - 8, w * fr, 1.6, .8); ctx.fill();
     ctx.restore();
@@ -885,6 +887,13 @@ export class Renderer {
           ctx.font = `500 ${9 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = '#ff8a7a';
           const st = bm.plane ? (bm.arm ? 'stealing an upgrade' : bm.perk ? 'has an upgrade' : 'flying') : `back in ${Math.ceil(bm.deadT)}`;
           ctx.fillText(`BOMBER ${bm.name.toUpperCase()} · ${st}`, W / 2, top + (game.difficulty === 'hard' ? 50 : 40) * u);
+          ctx.fillStyle = P.hud;
+        }
+        // and the Sniper, when they have an arm out or an upgrade
+        const sn = game.sniper, sst = sn ? game.sniperStatus() : '';
+        if (sn && sst) {
+          ctx.font = `500 ${9 * u}px Jost, system-ui, sans-serif`; ctx.fillStyle = '#ff8a7a';
+          ctx.fillText(`SNIPER ${sn.name.toUpperCase()} · ${sst}`, W / 2, top + ((game.difficulty === 'hard' ? 50 : 40) + (bm ? 12 : 0)) * u);
           ctx.fillStyle = P.hud;
         }
       }

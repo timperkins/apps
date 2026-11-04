@@ -2,7 +2,7 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT, SNIPER_PERKS } from './game';
 import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
@@ -236,7 +236,7 @@ fz.addEventListener('pointerdown', e => {
   if (game.coop && localRole !== 'base') {
     if (localRole === 'bomber') { const c = tappedFalling(e); if (c) game.bomberAct('grab', c); }
     // the Sniper on this screen points the laser wherever they click
-    if (localRole === 'sniper') { const [x, y] = renderer.screenToWorld(game, e.offsetX, e.offsetY); game.snipe(x, y); }
+    if (localRole === 'sniper') { const c = tappedFalling(e); if (c && game.sniperAct('grab', c)) return; const [x, y] = renderer.screenToWorld(game, e.offsetX, e.offsetY); game.snipe(x, y); }
     return;
   }
   const tapped = tappedCrate(e);
@@ -290,6 +290,8 @@ for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e =
 // keyboard for desktop testing
 addEventListener('keydown', e => {
   if (game.coop && localRole === 'bomber') { bomberKey(e, true); return; }
+  // co-op: the Sniper on this screen sends the arm with G and uses an upgrade with U
+  if (game.coop && localRole === 'sniper' && mode === 'play' && !e.repeat) { const k = e.key.toLowerCase(); if (k === 'g') game.sniperAct('grab'); else if (k === 'u') game.sniperAct('use'); }
   if (game.coop && localRole !== 'base') { if ((e.key === 'p' || e.key === 'Escape') && mode === 'play') pause(); return; }
   // co-op: Q is the Base's Protection
   if (game.coop && (e.key === 'q' || e.key === 'Q') && mode === 'play' && !e.repeat) game.baseProtect();
@@ -532,7 +534,7 @@ $('lobbyBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui();
 
 async function startCoop() {
   if (!coop || !coop.canStart()) return;
-  const bomber = coop.byRole('bomber');
+  const bomber = coop.byRole('bomber'), sniper = coop.byRole('sniper');
   localRole = coop.local?.role ?? null;
   Sound.init();
   if (localRole === 'base') {
@@ -542,6 +544,7 @@ async function startCoop() {
     Tilt.calibrate();
   }
   game.bomberName = bomber?.name ?? null;
+  game.sniperName = sniper?.name ?? null;
   game.start();
   game.fxLog = [];
   remoteRoll = 0; pendingCards = null;
@@ -571,6 +574,7 @@ function coopInput(p: Player, m: ClientMsg) {
     }
   } else if (p.role === 'sniper' && mode === 'play') {
     if (m.t === 'snipe') game.snipe(Number(m.x), Number(m.y));
+    else if (m.t === 'act' && (m.a === 'grab' || m.a === 'use')) game.sniperAct(m.a);
   } else if (p.role === 'bomber' && mode === 'play') {
     if (m.t === 'hold' && (m.dir === 'up' || m.dir === 'down')) game.bomberHold(m.dir, !!m.on);
     else if (m.t === 'act') game.bomberAct(m.a);
@@ -601,7 +605,9 @@ function coopSnapshots(dt: number) {
   if (v && bomber?.link) coop.send(bomber, { t: 'bomber', v });
   if (base?.link) coop.send(base, { t: 'base', crate: !!game.readyCrate(), weapon: game.weapon ? `${UPGRADES[game.weapon].name} (${Math.ceil(game.ammo)})` : null, score: game.score, wave: game.wave, protect: Math.min(1, game.protectCD / PROTECT.cd), protectT: game.protectT });
   const sn = coop.byRole('sniper');
-  if (sn?.link) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage) });
+  const sp = game.sniper;
+  if (sn?.link && sp) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage), canGrab: !sp.arm && !!game.sniperGrabbable(), arming: !!sp.arm,
+    perk: sp.perk ? SNIPER_PERKS[sp.perk].name : null, perkDesc: sp.perk ? SNIPER_PERKS[sp.perk].desc : '', status: game.sniperStatus() });
 }
 
 /* ---------- tips and first-run hint ---------- */

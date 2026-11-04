@@ -3,7 +3,7 @@ import type { BomberAct, BomberView, UpgradeId } from '../game';
 import type { Snap } from './mirror';
 
 /** Bumped whenever messages change shape, so an old phone page is told to reload. */
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 export type Role = 'base' | 'bomber' | 'sniper';
 
 /** Phone to host. */
@@ -34,7 +34,7 @@ export type HostMsg =
   | { t: 'start'; role: Role }
   | { t: 'bomber'; v: BomberView }
   | { t: 'base'; crate: boolean; weapon: string | null; score: number; wave: number; protect: number; protectT: number }
-  | { t: 'sniper'; ready: boolean; damage: number }
+  | { t: 'sniper'; ready: boolean; damage: number; canGrab: boolean; arming: boolean; perk: string | null; perkDesc: string; status: string }
   | { t: 'cards'; title: string; cards: CardInfo[] }
   | { t: 'paused'; on: boolean }
   /** the map, about 20 times a second */

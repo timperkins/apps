@@ -2,7 +2,7 @@
 // snapshot of everything on the map; the phone copies it into a local Game that it never runs,
 // smooths the planes and bombs between snapshots, adds its own smoke, contrails and explosion
 // effects, and draws it with the same renderer as the big screen.
-import { Game, type Plane, type Bomb, type Crate, type GameMode, type Difficulty, type Phase, type WeaponId, type BombKind, type ShotKind, type PlaneState, type Label, type ClearInfo, type BomberPerk } from '../game';
+import { Game, type Plane, type Bomb, type Crate, type GameMode, type Difficulty, type Phase, type WeaponId, type BombKind, type ShotKind, type PlaneState, type Label, type ClearInfo, type BomberPerk, type SniperPerk } from '../game';
 import type { AnyPlaneType } from '../art';
 import type { PaletteId } from '../palettes';
 import { Renderer } from '../render';
@@ -29,7 +29,8 @@ export interface Snap {
   labels: [string, number, number, number, number, string, number][];
   clear: ClearInfo | null;
   bomber: { name: string; plane: number; armHp: number; armMax: number; armCrate: number; shieldT: number; protectT: number; deadT: number; perk: BomberPerk | null } | null;
-  snipes: [number, number, number][]; protectT: number;
+  sniper: { name: string; armHp: number; armMax: number; armCrate: number; x0: number; armT: number; perk: SniperPerk | null } | null;
+  snipes: [number, number, number, number][]; protectT: number;
   fx: [number, number, number, number][];
 }
 
@@ -55,7 +56,8 @@ export function takeSnap(g: Game): Snap {
     labels: g.labels.map(l => [l.text, r1(l.x), r1(l.y), r3(l.t), l.life, l.color, l.big ? 1 : 0]),
     clear: g.clearInfo,
     bomber: b ? { name: b.name, plane: b.plane?.id ?? 0, armHp: b.arm?.hp ?? 0, armMax: b.arm?.max ?? 0, armCrate: b.arm ? g.crates.filter(c => !c.dead).indexOf(b.arm.crate) : -1, shieldT: r1(b.shieldT), protectT: r1(b.protectT), deadT: r1(b.deadT), perk: b.perk } : null,
-    snipes: g.snipes.map(x => [r1(x.x), r1(x.y), r3(x.t)]), protectT: r1(g.protectT),
+    sniper: g.sniper ? { name: g.sniper.name, armHp: g.sniper.arm?.hp ?? 0, armMax: g.sniper.arm?.max ?? 0, armCrate: g.sniper.arm ? g.crates.filter(c => !c.dead).indexOf(g.sniper.arm.crate) : -1, x0: g.sniper.arm?.x0 ?? 0, armT: r1(g.sniper.arm?.t ?? 0), perk: g.sniper.perk } : null,
+    snipes: g.snipes.map(x => [r1(x.x), r1(x.y), r3(x.t), x.d]), protectT: r1(g.protectT),
     fx,
   };
 }
@@ -90,7 +92,7 @@ export class Mirror {
     g.shieldT = s.shieldT; g.shieldFlash = s.shieldFlash; g.nukeFlash = Math.max(g.nukeFlash, s.nukeFlash); g.shake = Math.max(g.shake, s.shake * .6);
     g.weapon = s.weapon; g.ammo = s.ammo; g.guns = s.guns; g.recoil = s.recoil; g.flash = s.flash; g.lasing = s.lasing;
     g.clearInfo = s.clear;
-    g.snipes = (s.snipes ?? []).map(([x, y, t]) => ({ x, y, t })); g.protectT = s.protectT ?? 0;
+    g.snipes = (s.snipes ?? []).map(([x, y, t, d]) => ({ x, y, t, d, share: 0 })); g.protectT = s.protectT ?? 0;
     // planes: keep each one's object (and its contrail) from snapshot to snapshot, and glide it to its new place
     const seen = new Set<number>();
     g.planes = s.planes.map(([id, type, x, y, dir, pitch, flip, state, hp, max, f]) => {
@@ -138,6 +140,12 @@ export class Mirror {
       };
       if (crate) crate.held = true;
     } else g.bomber = null;
+    const sp = s.sniper;
+    if (sp) {
+      const crate = sp.armCrate >= 0 ? g.crates[sp.armCrate] : null;
+      g.sniper = { name: sp.name, arm: crate ? { crate, hp: sp.armHp, max: sp.armMax, t: sp.armT, x0: sp.x0, y0: crate.y } : null, perk: sp.perk, quickN: 0, heavyN: 0, volley: false, steals: 0 };
+      if (crate) crate.held = true;
+    } else g.sniper = null;
     for (const [kind, x, y, k] of s.fx) { if (kind === 0) g.flak(x, y, k); else g.explosion(x, y, k, kind === 2); }
     this.snap = s; this.since = 0;
   }
