@@ -42,6 +42,7 @@ export function runController(code: string) {
     <section data-s="cards"><h2 id="cCardsTitle">Choose an upgrade</h2><div class="cards" id="cCards"></div><button class="ghost small" id="cCardsBack">Not now</button></section>
     <section data-s="bomber"><div id="cPad"></div></section>
     <section data-s="sniper"><p class="lead" id="cSnipeInfo">Tap the map to aim your laser. Three seconds later it hits that spot.</p>
+      <div class="row"><button class="ghost" id="cSMissile">Missile</button><button class="ghost" id="cSNuke">Nuke</button></div>
       <div class="row"><button class="ghost" id="cSGrab" disabled>Grab</button><button class="ghost gold" id="cSUse" disabled>Use upgrade</button></div>
       <p class="fine" id="cSStatus"></p></section>
     <section data-s="over"><h2 id="cOverTitle"></h2><div class="big" id="cOverScore"></div><p class="fine">Waiting for the host…</p></section>
@@ -128,6 +129,8 @@ export function runController(code: string) {
 
   // the Sniper's own metal arm, and the laser upgrades it brings in
   $('cSGrab').addEventListener('click', () => { send({ t: 'act', a: 'grab' }); buzz(12); });
+  $('cSMissile').addEventListener('click', () => { send({ t: 'act', a: 'missile' }); buzz(12); });
+  $('cSNuke').addEventListener('click', () => { send({ t: 'act', a: 'nuke' }); buzz(20); });
   $('cSUse').addEventListener('click', () => { send({ t: 'act', a: 'use' }); buzz(12); });
 
   // ---- Bomber ----
@@ -222,6 +225,10 @@ export function runController(code: string) {
       case 'snap': mirror.apply(m.s); break;
       case 'sniper':
         $('cSnipeInfo').textContent = (m.ready ? 'Tap the map to aim your laser.' : 'Laser on target…') + ` Damage so far: ${m.damage}`;
+        ($('cSMissile') as HTMLButtonElement).disabled = m.missile > 0;
+        $('cSMissile').textContent = m.missile > 0 ? `Missile ${m.missile}` : 'Missile';
+        ($('cSNuke') as HTMLButtonElement).disabled = m.nuke > 0;
+        $('cSNuke').textContent = m.nuke > 0 ? `Nuke ${m.nuke}` : 'Nuke';
         ($('cSGrab') as HTMLButtonElement).disabled = !m.canGrab;
         $('cSGrab').textContent = m.arming ? 'Reeling in…' : 'Grab';
         ($('cSUse') as HTMLButtonElement).disabled = !m.perk;

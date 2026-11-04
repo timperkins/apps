@@ -143,7 +143,7 @@ export class Mirror {
     const sp = s.sniper;
     if (sp) {
       const crate = sp.armCrate >= 0 ? g.crates[sp.armCrate] : null;
-      g.sniper = { name: sp.name, arm: crate ? { crate, hp: sp.armHp, max: sp.armMax, t: sp.armT, x0: sp.x0, y0: crate.y } : null, perk: sp.perk, quickN: 0, heavyN: 0, volley: false, steals: 0 };
+      g.sniper = { name: sp.name, arm: crate ? { crate, hp: sp.armHp, max: sp.armMax, t: sp.armT, x0: sp.x0, y0: crate.y } : null, perk: sp.perk, quickN: 0, heavyN: 0, volley: false, steals: 0, missileCD: 0, nukeCD: 0, aimX: null };
       if (crate) crate.held = true;
     } else g.sniper = null;
     for (const [kind, x, y, k] of s.fx) { if (kind === 0) g.flak(x, y, k); else g.explosion(x, y, k, kind === 2); }

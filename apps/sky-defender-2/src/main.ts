@@ -291,7 +291,7 @@ for (const ev of ['gesturestart', 'dblclick']) document.addEventListener(ev, e =
 addEventListener('keydown', e => {
   if (game.coop && localRole === 'bomber') { bomberKey(e, true); return; }
   // co-op: the Sniper on this screen sends the arm with G and uses an upgrade with U
-  if (game.coop && localRole === 'sniper' && mode === 'play' && !e.repeat) { const k = e.key.toLowerCase(); if (k === 'g') game.sniperAct('grab'); else if (k === 'u') game.sniperAct('use'); }
+  if (game.coop && localRole === 'sniper' && mode === 'play' && !e.repeat) { const k = e.key.toLowerCase(); if (k === 'g') game.sniperAct('grab'); else if (k === 'u') game.sniperAct('use'); else if (k === 'm') game.sniperAct('missile'); else if (k === 'n') game.sniperAct('nuke'); }
   if (game.coop && localRole !== 'base') { if ((e.key === 'p' || e.key === 'Escape') && mode === 'play') pause(); return; }
   // co-op: Q is the Base's Protection
   if (game.coop && (e.key === 'q' || e.key === 'Q') && mode === 'play' && !e.repeat) game.baseProtect();
@@ -574,7 +574,7 @@ function coopInput(p: Player, m: ClientMsg) {
     }
   } else if (p.role === 'sniper' && mode === 'play') {
     if (m.t === 'snipe') game.snipe(Number(m.x), Number(m.y));
-    else if (m.t === 'act' && (m.a === 'grab' || m.a === 'use')) game.sniperAct(m.a);
+    else if (m.t === 'act' && (m.a === 'grab' || m.a === 'use' || m.a === 'missile' || m.a === 'nuke')) game.sniperAct(m.a);
   } else if (p.role === 'bomber' && mode === 'play') {
     if (m.t === 'hold' && (m.dir === 'up' || m.dir === 'down')) game.bomberHold(m.dir, !!m.on);
     else if (m.t === 'act') game.bomberAct(m.a);
@@ -607,7 +607,7 @@ function coopSnapshots(dt: number) {
   const sn = coop.byRole('sniper');
   const sp = game.sniper;
   if (sn?.link && sp) coop.send(sn, { t: 'sniper', ready: !game.snipes.length, damage: Math.round(game.sniperDamage), canGrab: !sp.arm && !!game.sniperGrabbable(), arming: !!sp.arm,
-    perk: sp.perk ? SNIPER_PERKS[sp.perk].name : null, perkDesc: sp.perk ? SNIPER_PERKS[sp.perk].desc : '', status: game.sniperStatus() });
+    perk: sp.perk ? SNIPER_PERKS[sp.perk].name : null, perkDesc: sp.perk ? SNIPER_PERKS[sp.perk].desc : '', status: game.sniperStatus(), missile: Math.ceil(sp.missileCD), nuke: Math.ceil(sp.nukeCD) });
 }
 
 /* ---------- tips and first-run hint ---------- */

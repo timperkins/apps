@@ -53,7 +53,7 @@ export interface Plane {
 export type BombKind = 'bomb' | 'missile' | 'nuke';
 export interface Bomb { id: number; kind: BombKind; x: number; y: number; x0: number; y0: number; vx0: number; k: number; g: number; wa: number; t: number; T: number; hp: number; trail: TrailPoint[]; trailT: number; angle: number; dead?: boolean;
   /** co-op: dropped by the Bomber (so its damage counts for the Bomber), and a mega nuke */
-  byBomber?: boolean; mega?: boolean; }
+  byBomber?: boolean; bySniper?: boolean; mega?: boolean; }
 /** `ghost`: passes through enemy planes, hitting each once (the ones in `hit`). `fall`: a drop shot on its way back down. */
 export interface Shell { x: number; y: number; vx: number; vy: number; t: number; px: number; py: number; dead?: boolean; counted?: boolean; ghost?: boolean; fall?: boolean; hit?: Set<Plane | Bomb>; }
 export type ShotKind = 'missile' | 'rocket' | 'fireball' | 'nuke' | 'cluster' | 'bomblet';
@@ -258,7 +258,11 @@ export const SNIPER_PERKS: Record<SniperPerk, { name: string; desc: string }> = 
   volley: { name: 'Laser volley', desc: 'The next laser is 5 lasers in a row' },
 };
 const SNIPER_PACKS: Record<'plain' | 'gold' | 'diamond', SniperPerk> = { plain: 'quick', gold: 'heavy', diamond: 'volley' };
-export interface Sniper { name: string; arm: Arm | null; perk: SniperPerk | null; quickN: number; heavyN: number; volley: boolean; steals: number; }
+export interface Sniper {
+  name: string; arm: Arm | null; perk: SniperPerk | null; quickN: number; heavyN: number; volley: boolean; steals: number;
+  /** Missile and Nuke from the top of the sky, at the last spot the laser pointed */
+  missileCD: number; nukeCD: number; aimX: number | null;
+}
 export type ArmOwner = 'bomber' | 'sniper';
 /** where the Sniper's arm hangs from: the top of the sky, straight above where it caught the pack */
 const SNIPER_ARM_Y = -720;
@@ -359,7 +363,7 @@ export class Game {
   sniperName: string | null = null; sniper: Sniper | null = null;
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
-  blame = false;
+  blame = false; blameSniper = false;
   /** co-op: flak bursts and explosions since the last snapshot, so the phones can draw them too ([0 flak | 1 air | 2 ground, x, y, size]) */
   fxLog: [number, number, number, number][] | null = null;
 
@@ -410,7 +414,7 @@ export class Game {
       name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
       diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
     } : null;
-    this.sniper = this.coop && this.sniperName !== null ? { name: this.sniperName, arm: null, perk: null, quickN: 0, heavyN: 0, volley: false, steals: 0 } : null;
+    this.sniper = this.coop && this.sniperName !== null ? { name: this.sniperName, arm: null, perk: null, quickN: 0, heavyN: 0, volley: false, steals: 0, missileCD: 2, nukeCD: 4, aimX: null } : null;
     this.snipes = []; this.protectT = 0; this.protectCD = 0; this.sniperDamage = 0;
   }
 
@@ -759,6 +763,27 @@ export class Game {
       this.startArm(c, 'sniper');
       return true;
     }
+    if (a === 'missile' || a === 'nuke') {
+      const nuke = a === 'nuke';
+      if (nuke ? s.nukeCD > 0 : s.missileCD > 0) return false;
+      if (nuke) s.nukeCD = BOMBER.nukeCD; else s.missileCD = BOMBER.missileCD;
+      // it falls from high up to one side of the last laser spot (or the middle of the base)
+      const tx = s.aimX ?? 0, side = Math.random() < .5 ? -1 : 1;
+      const from = { x: clamp(tx + side * rand(80, 160), -this.xe, this.xe), y: SKY_TOP, type: 'light', player: true, dir: -side, speed: 0 } as unknown as Plane;
+      if (nuke) {
+        const T = 16, wa = this.wind * .04;
+        const bomb = this.dropBomb(from, 'nuke', T, this.bomberThrow(from, this.nearestBuildingX(tx), T, wa), MISSILE_DRAG, wa);
+        bomb.bySniper = true; bomb.hp = 3;
+        this.labels.push({ text: 'Nuke incoming!', x: this.gunX, y: GROUND_Y - 80, t: 0, life: 2.6, color: '#ff8a7a', big: true });
+        this.tip('sniperNuke', 'The Sniper called in a nuke. It takes three hits: shoot it down before it lands.');
+        Sound.missile(); Sound.whine(1.5, this.panOf(from.x, from.y));
+      } else {
+        const T = 24, wa = this.wind;
+        this.dropBomb(from, 'missile', T, this.bomberThrow(from, tx, T, wa), MISSILE_DRAG, wa).bySniper = true;
+        Sound.missile();
+      }
+      return true;
+    }
     if (a === 'use' && s.perk) {
       const k = s.perk;
       s.perk = null;
@@ -854,9 +879,16 @@ export class Game {
     this.labels.push({ text: `${b.name} stole the upgrade`, x: p.x, y: p.y - 26, t: 0, life: 2.6, color: '#ff8a7a', big: true });
     Sound.denied();
   }
+  nearestBuildingX(x: number) {
+    let tx = x, best = Infinity;
+    for (const bb of this.buildings) if (!bb.ruined && Math.abs(bb.x - x) < best) { best = Math.abs(bb.x - x); tx = bb.x; }
+    return tx;
+  }
   /** The Sniper's arm reels its pack up into the sky in the same 12 seconds. */
   updateSniperArm(dt: number) {
-    const s = this.sniper, a = s?.arm;
+    const s = this.sniper;
+    if (s) { s.missileCD = Math.max(0, s.missileCD - dt); s.nukeCD = Math.max(0, s.nukeCD - dt); }
+    const a = s?.arm;
     if (!s || !a) return;
     const c = a.crate;
     if (c.dead) { s.arm = null; return; }
@@ -987,6 +1019,7 @@ export class Game {
   snipe(x: number, y: number) {
     if (!this.coop || this.snipes.length || this.ended || this.phase === 'idle' || !Number.isFinite(x) || !Number.isFinite(y)) return false;
     const s = this.sniper;
+    if (s) s.aimX = clamp(x, -this.xe, this.xe);
     const d = s && s.quickN > 0 ? 1 : SNIPER.delay, share = s && s.heavyN > 0 ? .2 : SNIPER.share;
     if (s) { s.quickN = Math.max(0, s.quickN - 1); s.heavyN = Math.max(0, s.heavyN - 1); }
     const xs = s?.volley ? [-48, -24, 0, 24, 48] : [0];
@@ -1677,7 +1710,7 @@ export class Game {
       b.trailT -= dt;
       if (b.trailT <= 0) { b.trailT = .08; const tl = this.bombTail(b); b.trail.push([tl.x, tl.y, this.t]); if (b.trail.length > 90) b.trail.shift(); }
       if (this.shieldT > 0 && this.inDome(b.x, b.y)) { this.domeHit(b); continue; }
-      if (b.y >= GROUND_Y - 2) { b.dead = true; this.blame = !!b.byBomber; this.bombLands(b); this.blame = false; }
+      if (b.y >= GROUND_Y - 2) { b.dead = true; this.blame = !!b.byBomber; this.blameSniper = !!b.bySniper; this.bombLands(b); this.blame = this.blameSniper = false; }
     }
     this.bombs = this.bombs.filter(b => !b.dead);
     // keep finished trails fading in the sky
@@ -2252,6 +2285,7 @@ export class Game {
     if (this.shieldT > 0) { this.shieldFlash = Math.max(this.shieldFlash, .5); return; }
     const dealt = amt * this.D.damage * (this.perks.has('armor') ? .75 : 1) * (this.protectT > 0 ? 1 - PROTECT.cut : 1);
     if (this.blame && this.bomber) this.bomber.damage += Math.min(Math.max(0, b.hp), dealt);
+    if (this.blameSniper) this.sniperDamage += Math.min(Math.max(0, b.hp), dealt);
     b.hp -= dealt; b.hit = 1;
     // Last stand: once a game, the turret in use holds on at half strength instead of falling
     if (b.hp <= 0 && b.id === 'turret' && b === this.post() && this.perks.has('laststand') && !this.lastStandUsed) {
