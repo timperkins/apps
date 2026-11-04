@@ -90,7 +90,7 @@ export function runController(code: string) {
     const roleName = (r: Role | null) => r === 'base' ? 'Base' : r === 'bomber' ? 'Bomber' : r === 'sniper' ? 'Sniper' : '…';
     $('cPlayers').innerHTML = players.map(p => `<li${p.id === you ? ' class="me"' : ''}><span>${p.name}${p.id === you ? ' (you)' : ''}</span><b>${roleName(p.role)}</b></li>`).join('');
     const me = players.find(p => p.id === you);
-    $('cRole').textContent = me?.role === 'base' ? 'You will defend the base.' : me?.role === 'bomber' ? 'You will fly the Bomber.' : me?.role === 'sniper' ? "You will snipe the base, on the Bomber's side." : '';
+    $('cRole').textContent = me?.role === 'base' ? 'You will defend the base.' : me?.role === 'bomber' ? 'You will fly the Bomber.' : me?.role === 'sniper' ? "You will snipe the base." : '';
   }
 
   // ---- the map: the game drawn from the big screen's snapshots ----

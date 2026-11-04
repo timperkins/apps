@@ -341,7 +341,7 @@ export class Game {
   palFrom: PaletteId = paletteForWave(1); palTo: PaletteId = this.palFrom; palT = 1;
   timeScale = 1; overT = 0; clearInfo: ClearInfo | null = null; lastVibe = 0;
   /** co-op: the Bomber's name (set before start) and its state during a game */
-  bomberName = 'Bomber'; bomber: Bomber | null = null;
+  bomberName: string | null = 'Bomber'; bomber: Bomber | null = null;
   /** co-op: the Sniper's lasers waiting to hit, and the damage they have done; the Base's Protection */
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
@@ -392,7 +392,7 @@ export class Game {
     this.overT = 0;
     this.clearInfo = null;
     this.lastVibe = 0;
-    this.bomber = this.coop ? {
+    this.bomber = this.coop && this.bomberName !== null ? {
       name: this.bomberName, plane: null, deadT: 0, up: false, down: false, missileCD: 2, nukeCD: 4, diveCD: 4, switchCD: 0,
       diveT: 0, dive: null, returnY: null, arm: null, perk: null, shieldT: 0, turboT: 0, rapidT: 0, protectT: 0, protectCD: 0, damage: 0, deaths: 0, steals: 0,
     } : null;

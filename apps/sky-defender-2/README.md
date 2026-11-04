@@ -46,7 +46,7 @@ Both are picked on the title screen and remembered, and every mode and difficult
 
 ## Co-op
 
-Pick **Co-op** on the title screen and tap to open the lobby. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates), **Bomber** or **Sniper**. Up to three players can join; Start needs a Base and a Bomber, and the Sniper is optional.
+Pick **Co-op** on the title screen and tap to open the lobby. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates), **Bomber** or **Sniper**. Up to three players can join; Start needs a Base and at least one of Bomber or Sniper, so Base and Sniper alone is a two-player game too (with no Bomber plane, just the usual waves).
 
 The Bomber flies one enemy plane at a time (red marker and name over it). The plane flies left and right by itself and turns at the edges; the Bomber's buttons (on the phone, or beside the game when the host plays the Bomber, with keys in brackets):
 

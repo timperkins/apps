@@ -72,8 +72,8 @@ export class CoopHost {
     this.changed();
   }
   byRole(role: Role) { return this.players.find(p => p.role === role) ?? null; }
-  /** A Base and a Bomber are needed; a Sniper is a third player if there is one. */
-  canStart() { return !!this.byRole('base') && !!this.byRole('bomber') && this.players.every(p => p.role && (p.id === LOCAL || p.link)); }
+  /** A Base is needed, against a Bomber, a Sniper, or both. */
+  canStart() { return !!this.byRole('base') && (!!this.byRole('bomber') || !!this.byRole('sniper')) && this.players.every(p => p.role && (p.id === LOCAL || p.link)); }
 
   send(p: Player | null, msg: HostMsg) { p?.link?.send(msg); }
   broadcast(msg: HostMsg) { for (const p of this.players) p.link?.send(msg); }

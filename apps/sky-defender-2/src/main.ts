@@ -421,7 +421,8 @@ function showResults(r: Results) {
   scores = scores.slice(0, 5);
   store.set(scoreKey(r.mode, r.difficulty), scores);
   const sniper = coop?.byRole('sniper');
-  $('rTitle').textContent = r.bomber ? (sniper ? `${r.bomber.name} and ${sniper.name} win` : `${r.bomber.name} wins`) : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
+  const attackers = r.mode === 'coop' ? [r.bomber?.name, sniper?.name].filter(Boolean) : [];
+  $('rTitle').textContent = attackers.length ? (attackers.length > 1 ? `${attackers.join(' and ')} win` : `${attackers[0]} wins`) : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
   $('rReason').textContent = war && !r.won ? r.reason : '';
   $('rReason').hidden = !(war && !r.won && r.reason);
   const tags = [war ? 'War, level 1' : r.mode === 'coop' ? 'Co-op' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
@@ -436,7 +437,7 @@ function showResults(r: Results) {
     ['Best score', best().toLocaleString('en-US')],
   ];
   if (r.bomber) stats.splice(4, 0, ['Bomber damage', String(r.bomber.damage)], ['Bomber planes lost', String(r.bomber.deaths)], ['Upgrades stolen', String(r.bomber.steals)]);
-  if (r.bomber && sniper) stats.splice(7, 0, ['Sniper damage', String(Math.round(game.sniperDamage))]);
+  if (sniper) stats.splice(r.bomber ? 7 : 4, 0, ['Sniper damage', String(Math.round(game.sniperDamage))]);
   $('rStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   $('newBest').hidden = !(r.score > prevBest && r.score > 0);
   Sound.stopAllEngines();
@@ -522,7 +523,7 @@ function renderLobby() {
   $<HTMLButtonElement>('joinHere').disabled = !coop.local && coop.players.length >= MAX_PLAYERS;
   $('diceHere').hidden = !coop.local;
   $<HTMLButtonElement>('coopStart').disabled = !coop.canStart();
-  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two or three players: a Base, a Bomber, and a Sniper on the Bomber\'s side if you like. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
+  $('lobbyNote').textContent = coop.players.length < 2 ? 'Two or three players: a Base against a Bomber, a Sniper, or both. Tap Join to play on this screen.' : 'Pick a role for each player, then start.';
 }
 $('joinHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (!coop) return; if (coop.local) coop.leaveLocal(); else coop.joinLocal(randomName(store.get('coopName', ''))); });
 $('diceHere').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); const n = coop?.renameLocal(); if (n) store.set('coopName', n); });
@@ -531,7 +532,7 @@ $('lobbyBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui();
 
 async function startCoop() {
   if (!coop || !coop.canStart()) return;
-  const bomber = coop.byRole('bomber')!;
+  const bomber = coop.byRole('bomber');
   localRole = coop.local?.role ?? null;
   Sound.init();
   if (localRole === 'base') {
@@ -540,7 +541,7 @@ async function startCoop() {
     if (Tilt.keyboard) keyboardText(); else tryLockPortrait();
     Tilt.calibrate();
   }
-  game.bomberName = bomber.name;
+  game.bomberName = bomber?.name ?? null;
   game.start();
   game.fxLog = [];
   remoteRoll = 0; pendingCards = null;
