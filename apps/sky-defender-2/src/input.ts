@@ -109,7 +109,7 @@ class TiltInput {
 
   update(t: number, dt: number): number {
     // held keys turn the gun steadily; it stops at the same limit tilting does
-    if (this.keyboard && this.keys) this.raw = Math.max(-1.2, Math.min(1.2, this.raw + this.keys * dt * 1.1));
+    if (this.keyboard && this.keys) this.raw = this.offset + Math.max(-1.2, Math.min(1.2, this.raw - this.offset + this.keys * dt * 1.1));
     this.value = this.filter.filter(this.raw - this.offset, t);
     return this.value;
   }

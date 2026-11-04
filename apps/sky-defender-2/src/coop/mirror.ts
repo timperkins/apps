@@ -72,7 +72,8 @@ export class Mirror {
   private snap: Snap | null = null;
   private since = 0;
   /** the Bomber's phone follows its own plane; the Base's phone sees what the big screen sees; the Sniper's holds still over the base */
-  view: 'base' | 'follow' | 'fixed' = 'base';
+  /** base: turns with the gun (the phone is turned too); level: the Base's view kept level, for aiming by touch */
+  view: 'base' | 'level' | 'follow' | 'fixed' = 'base';
   private viewX = 0;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -189,7 +190,7 @@ export class Mirror {
       g.cam = 0;
       if (bp) this.viewX += (Math.max(-430, Math.min(430, bp.x)) - this.viewX) * Math.min(1, dt * 2.5);
       g.viewX = this.viewX;
-    } else { g.cam = s.cam; g.viewX = s.viewX; }
+    } else { g.cam = this.view === 'level' ? 0 : s.cam; g.viewX = s.viewX; }
     this.renderer.frame(g, dt);
   }
 }

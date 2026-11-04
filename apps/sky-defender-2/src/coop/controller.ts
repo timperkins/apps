@@ -6,7 +6,7 @@ import { joinRoom, type Link } from './net';
 import { PROTOCOL, type ClientMsg, type HostMsg, type Role, type LobbyPlayer } from './protocol';
 import { cleanName, randomName } from './names';
 import { BomberPad } from './pad';
-import { Tilt } from '../input';
+import { Tilt, isComputer } from '../input';
 import { loadArt } from '../art';
 import { Mirror } from './mirror';
 
@@ -53,6 +53,8 @@ export function runController(code: string) {
   let name = cleanName(store.get('name') || randomName());
   store.set('name', name);
   let link: Link | null = null, role: Role | null = null, aiming = false, screen = 'status';
+  /** The Base aims by dragging on the map instead of tilting (no motion sensors, or motion access turned down). */
+  let touchAim = false, touchR = 0;
   const go = (s: string) => {
     screen = s; show(s);
     // the map shows above the buttons while playing
@@ -61,7 +63,7 @@ export function runController(code: string) {
     const ctl = document.getElementById('ctl')!;
     ctl.classList.toggle('playing', map);
     ctl.classList.toggle('sniping', s === 'sniper');
-    if (map) { mirror.view = s === 'bomber' ? 'follow' : s === 'sniper' ? 'fixed' : 'base'; fitMap(); }
+    if (map) { mirror.view = s === 'bomber' ? 'follow' : s === 'sniper' ? 'fixed' : touchAim ? 'level' : 'base'; fitMap(); }
   };
   const send = (m: ClientMsg) => link?.send(m);
 
@@ -103,12 +105,24 @@ export function runController(code: string) {
   }
   addEventListener('resize', fitMap);
   // the Sniper taps the map to point the laser there
+  // the Base can drag left and right on the map to turn the gun
+  let dragX: number | null = null;
   $('cMap').addEventListener('pointerdown', e => {
+    if (role === 'base') { e.preventDefault(); dragX = e.clientX; if (!aiming) startTouchAim(''); else setTouch(true); return; }
     if (role !== 'sniper') return;
     e.preventDefault();
     const [x, y] = mirror.renderer.screenToWorld(mirror.game, e.offsetX, e.offsetY);
     send({ t: 'snipe', x, y }); buzz(15);
   });
+
+  addEventListener('pointermove', e => {
+    if (dragX === null || role !== 'base') return;
+    // a drag across the whole map turns the gun from one side to the other
+    touchR = Math.max(-1.25, Math.min(1.25, touchR + (e.clientX - dragX) / Math.max(200, innerWidth) * 2.5));
+    dragX = e.clientX;
+  });
+  const dragEnd = () => { dragX = null; };
+  addEventListener('pointerup', dragEnd); addEventListener('pointercancel', dragEnd);
 
   // ---- Bomber ----
   const pad = new BomberPad({ hold: (dir, on) => send({ t: 'hold', dir, on }), act: a => { send({ t: 'act', a }); buzz(12); } });
@@ -118,14 +132,24 @@ export function runController(code: string) {
   // ---- Base ----
   $('cAim').addEventListener('click', async () => {
     const r = await Tilt.start();
-    if (r !== 'ok') { $('cBaseLead').textContent = r === 'denied' ? 'Motion access was turned down. Allow it (you may need to reload) and try again.' : 'This phone has no motion sensors, so it cannot aim.'; return; }
+    // without motion sensors (or with motion access turned down) a phone aims by dragging on the map
+    if (r !== 'ok' || (Tilt.keyboard && !isComputer())) { startTouchAim(r === 'denied' ? 'Motion access was turned down, so ' : ''); return; }
     Tilt.calibrate();
+    goLive(Tilt.keyboard ? 'Arrow keys aim, space bar fires.' : 'Turn your phone like a steering wheel to aim, or drag on the map.');
+  });
+  function goLive(lead: string) {
     aiming = true;
     $('cAim').hidden = true; $('cBaseLive').hidden = false;
     document.querySelector('#ctl [data-s="base"] h2')!.setAttribute('hidden', '');
-    $('cBaseLead').textContent = Tilt.keyboard ? 'Arrow keys aim, space bar fires.' : 'Turn your phone like a steering wheel to aim.';
-  });
-  $('cRecal').addEventListener('click', () => Tilt.calibrate());
+    $('cBaseLead').textContent = lead;
+  }
+  function setTouch(on: boolean) { touchAim = on; if (screen === 'base') mirror.view = on ? 'level' : 'base'; }
+  function startTouchAim(why: string) {
+    setTouch(true); touchR = 0;
+    goLive(why ? why + 'drag left and right on the map to aim.' : 'Drag left and right on the map to aim.');
+  }
+  // Recenter goes back to tilting when the phone can
+  $('cRecal').addEventListener('click', () => { Tilt.calibrate(); touchR = 0; if (Tilt.available && !Tilt.keyboard) setTouch(false); });
   const fire = $('cFire');
   const fireOn = (e: Event) => { e.preventDefault(); fire.classList.add('down'); send({ t: 'fire', on: true }); buzz(8); };
   const fireOff = () => { if (!fire.classList.contains('down')) return; fire.classList.remove('down'); send({ t: 'fire', on: false }); };
@@ -202,13 +226,15 @@ export function runController(code: string) {
   }
 
   // the Base's aim goes to the big screen about 30 times a second
+  const TILT_GAIN = 1.6;
   let last = performance.now(), sent = 0, lastR = NaN;
   function frame(now: number) {
     requestAnimationFrame(frame);
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     if (artReady && !$('cMapWrap').hidden) mirror.frame(dt);
     if (role !== 'base' || !aiming) return;
-    const r = Tilt.update(now / 1000, dt);
+    // tilting turns the gun further than in the solo game, so the phone stays easy to see
+    const r = touchAim ? touchR : Tilt.update(now / 1000, dt) * (Tilt.keyboard ? 1 : TILT_GAIN);
     if (now - sent > 33 && (Math.abs(r - lastR) > .001 || now - sent > 250)) { sent = now; lastR = r; send({ t: 'tilt', r }); }
   }
   requestAnimationFrame(frame);
