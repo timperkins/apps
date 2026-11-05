@@ -27,6 +27,20 @@ function formatBytes(bytes: number): string {
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
 
+function clipState(c: Clip): string {
+  if (c.status !== "uploaded") return "Not finished";
+  switch (c.processing?.status) {
+    case "done":
+      return "Processed";
+    case "queued":
+      return "Processing…";
+    case "failed":
+      return "Processing failed";
+    default:
+      return "Uploaded";
+  }
+}
+
 function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const { authedFetch } = useAuth();
@@ -110,6 +124,12 @@ function ProjectView() {
   function retry(index: number) {
     update(index, { state: "waiting", error: undefined });
     run();
+  }
+
+  async function startProcessing(clipId: string) {
+    const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/process`, { method: "POST" });
+    if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start processing.");
+    load();
   }
 
   async function saveNotes() {
@@ -211,11 +231,21 @@ function ProjectView() {
         ) : (
           <ul className="list plain">
             {clips.map((c) => (
-              <li key={c.id} className="row between">
-                <span className="name">{c.fileName}</span>
-                <span className="muted small">
-                  {formatBytes(c.size)} · {c.status === "uploaded" ? "Uploaded" : "Not finished"}
-                </span>
+              <li key={c.id}>
+                <div className="row between">
+                  <span className="name">{c.fileName}</span>
+                  <span className="muted small">
+                    {formatBytes(c.size)} · {clipState(c)}
+                  </span>
+                </div>
+                {c.status === "uploaded" && c.processing?.status !== "done" && c.processing?.status !== "queued" && (
+                  <p className="small">
+                    {c.processing?.error && <span className="error">{c.processing.error} </span>}
+                    <button className="link" onClick={() => startProcessing(c.id)}>
+                      Process
+                    </button>
+                  </p>
+                )}
               </li>
             ))}
           </ul>

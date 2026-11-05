@@ -79,6 +79,15 @@ CLAUDE.md
 
 For App Hosting apps: `"type": "apphosting"`, `"backend": "news"`, `"previewBackend": "news-preview"`.
 
+Apps can also list Cloud Run jobs, for work too long for a request (video processing, renders):
+`"jobServiceAccount": "<app>-jobs@apps-97595.iam.gserviceaccount.com"` and
+`"jobs": [{ "name": "process", "cpu": "4", "memory": "16Gi", "timeout": "3600s", "maxRetries": 1, "env": { ... } }]`.
+`deploy-app.yml` builds each from `jobs/<name>/Dockerfile`, pushes it to the `apps` Artifact Registry
+repository and deploys it as `<app>-<name>` (prod) or `<app>-<name>-preview` (previews), before the app
+rolls out. The app starts executions through the Cloud Run Admin API. Run `scripts/setup-jobs.sh <app>
+<deploy service account> [bucket]` once per app first; it creates the job service account and the
+permissions the deploy account, the jobs and App Hosting need.
+
 ## Deploy flow
 
 **Preview: on push to any branch other than `main`**

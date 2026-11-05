@@ -6,6 +6,7 @@ Turns iPhone footage of home projects into narrated YouTube videos. This is phas
 - **Uploads:** the browser asks the server for a resumable upload session, then sends the file to Cloud Storage in 16 MB chunks. If the phone sleeps or loses signal, the upload retries and continues from what Cloud Storage already has. If the page is closed, picking the same file again (same name and size) continues the same upload.
 - **Screen:** the page keeps the screen awake with the Wake Lock API while uploads run.
 - **Data:** Firestore database `video`, with `projects/{id}` and `projects/{id}/clips/{clipId}`. All reads and writes go through the API, and `firestore.rules` denies direct client access.
+- **Processing:** when an upload completes, the server starts an execution of the `video-process` Cloud Run job (`jobs/process`, deployed by CI) for that clip. Phase 2's job is a hello-world that checks FFmpeg, Firestore and Cloud Storage access and marks the clip processed. A clip whose job couldn't start shows a Process button.
 - **Storage:** originals go to `gs://apps-97595-video/video/projects/{projectId}/originals/{clipId}.{ext}`, a bucket just for this app.
 
 ## Setup
@@ -24,6 +25,8 @@ Runs on Firebase App Hosting in project `apps-97595`, from the `apps` repo:
     --member=serviceAccount:firebase-app-hosting-compute@apps-97595.iam.gserviceaccount.com \
     --role=roles/storage.objectAdmin
   ```
+
+- Cloud Run jobs need a one-time setup: `scripts/setup-jobs.sh video <deploy service account> apps-97595-video` from the repo root.
 
 ## Local development
 

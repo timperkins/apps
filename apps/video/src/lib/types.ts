@@ -10,6 +10,11 @@ export interface Project {
   updatedAt: number;
 }
 
+export interface ClipProcessing {
+  status: "queued" | "done" | "failed";
+  error: string | null;
+}
+
 export interface Clip {
   id: string;
   fileName: string;
@@ -18,6 +23,7 @@ export interface Clip {
   status: ClipStatus;
   createdAt: number;
   uploadedAt: number | null;
+  processing: ClipProcessing | null;
 }
 
 /** What the server hands the browser to upload one file. */
