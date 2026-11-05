@@ -1,0 +1,38 @@
+# Firebase App Hosting settings for Video Deluxe Maker.
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  minInstances: 0
+  maxInstances: 2
+
+env:
+  # Google accounts allowed to use the app, separated by commas.
+  - variable: ALLOWED_EMAILS
+    value: tjp503@gmail.com
+    availability: [RUNTIME]
+
+  # Footage lives in a dedicated bucket for this app, under this prefix.
+  - variable: STORAGE_BUCKET
+    value: apps-97595-video
+    availability: [RUNTIME]
+  - variable: STORAGE_PREFIX
+    value: video
+    availability: [RUNTIME]
+
+  - variable: FIRESTORE_DATABASE_ID
+    value: video
+    availability: [RUNTIME]
+
+  # Web app config from Firebase console > Project settings > Your apps. These are public values.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyDqgldIcbiEGPtlDoVVohbwuyKBiWZq3Qc
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: apps-97595.firebaseapp.com
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: apps-97595
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:769532990756:web:db61ccd442333d635c8fb1"
+    availability: [BUILD, RUNTIME]

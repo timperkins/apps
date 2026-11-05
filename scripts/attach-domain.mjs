@@ -89,13 +89,20 @@ async function requiredRecords() {
   }
   report(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
 
-  for (let attempt = 0; attempt < 30; attempt++) {
+  // A domain set up by an earlier run (every push re-runs create-app until the app merges) can
+  // report no DNS records once they are in place. Give it a short wait, then keep what's there.
+  const attempts = created.ok ? 30 : 3;
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const res = await api('GET', `${base}/${domain}`);
     if (res.ok) {
       const records = read(res.json)
         .flatMap((u) => u?.desired ?? [])
         .flatMap((set) => set.records ?? []);
       if (records.length) return records;
+      if (!created.ok && attempt === attempts - 1) {
+        report(`No DNS changes reported for existing domain ${domain}; keeping current records`);
+        return [];
+      }
     }
     await sleep(10_000);
   }
