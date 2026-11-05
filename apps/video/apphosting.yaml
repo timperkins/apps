@@ -11,9 +11,9 @@ env:
     value: tjp503@gmail.com
     availability: [RUNTIME]
 
-  # Footage lives in the project's default Firebase Storage bucket under this prefix.
+  # Footage lives in a dedicated bucket for this app, under this prefix.
   - variable: STORAGE_BUCKET
-    value: apps-97595.firebasestorage.app
+    value: apps-97595-video
     availability: [RUNTIME]
   - variable: STORAGE_PREFIX
     value: video
