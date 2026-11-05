@@ -1,8 +1,9 @@
 import { requireUser } from "@/lib/firebase/admin";
+import { withErrors } from "@/lib/server/http";
 import { startUpload } from "@/lib/server/store";
 
 /** Starts or resumes one file's upload and returns its resumable session URL. */
-export async function POST(request: Request, ctx: RouteContext<"/api/projects/[id]/clips">) {
+export const POST = withErrors(async (request: Request, ctx: RouteContext<"/api/projects/[id]/clips">) => {
   const user = await requireUser(request);
   if (user instanceof Response) return user;
   const { id } = await ctx.params;
@@ -21,4 +22,4 @@ export async function POST(request: Request, ctx: RouteContext<"/api/projects/[i
   const ticket = await startUpload(id, { fileName, size, contentType }, origin, body.restart === true);
   if (!ticket) return Response.json({ error: "Project not found." }, { status: 404 });
   return Response.json(ticket);
-}
+});

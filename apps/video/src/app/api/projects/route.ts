@@ -1,13 +1,14 @@
 import { requireUser } from "@/lib/firebase/admin";
+import { withErrors } from "@/lib/server/http";
 import { createProject, listProjects } from "@/lib/server/store";
 
-export async function GET(request: Request) {
+export const GET = withErrors(async (request: Request) => {
   const user = await requireUser(request);
   if (user instanceof Response) return user;
   return Response.json({ projects: await listProjects() });
-}
+});
 
-export async function POST(request: Request) {
+export const POST = withErrors(async (request: Request) => {
   const user = await requireUser(request);
   if (user instanceof Response) return user;
   const body = (await request.json().catch(() => ({}))) as { name?: unknown; notes?: unknown };
@@ -15,4 +16,4 @@ export async function POST(request: Request) {
   const notes = typeof body.notes === "string" ? body.notes.slice(0, 5000) : "";
   if (!name) return Response.json({ error: "Give the project a name." }, { status: 400 });
   return Response.json({ project: await createProject(name, notes, user.uid) }, { status: 201 });
-}
+});

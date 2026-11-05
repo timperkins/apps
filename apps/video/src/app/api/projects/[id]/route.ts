@@ -1,16 +1,17 @@
 import { requireUser } from "@/lib/firebase/admin";
+import { withErrors } from "@/lib/server/http";
 import { getProject, updateProject } from "@/lib/server/store";
 
-export async function GET(request: Request, ctx: RouteContext<"/api/projects/[id]">) {
+export const GET = withErrors(async (request: Request, ctx: RouteContext<"/api/projects/[id]">) => {
   const user = await requireUser(request);
   if (user instanceof Response) return user;
   const { id } = await ctx.params;
   const result = await getProject(id);
   if (!result) return Response.json({ error: "Project not found." }, { status: 404 });
   return Response.json(result);
-}
+});
 
-export async function PATCH(request: Request, ctx: RouteContext<"/api/projects/[id]">) {
+export const PATCH = withErrors(async (request: Request, ctx: RouteContext<"/api/projects/[id]">) => {
   const user = await requireUser(request);
   if (user instanceof Response) return user;
   const { id } = await ctx.params;
@@ -21,4 +22,4 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/projects/[
   if (!(await getProject(id))) return Response.json({ error: "Project not found." }, { status: 404 });
   await updateProject(id, patch);
   return Response.json({ ok: true });
-}
+});
