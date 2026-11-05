@@ -11,9 +11,9 @@
   "jobs": [
     {
       "name": "process",
-      "cpu": "4",
-      "memory": "16Gi",
-      "timeout": "3600s",
+      "cpu": "8",
+      "memory": "32Gi",
+      "timeout": "10800s",
       "maxRetries": 1,
       "env": {
         "FIRESTORE_DATABASE_ID": "video",
