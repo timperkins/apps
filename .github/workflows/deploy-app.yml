@@ -70,6 +70,8 @@ jobs:
             echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // .firestore.prod // empty' app.json)"
             # The database that belongs to this target. Rules are deployed only to this one.
             echo "own_database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
+            echo "jobs=$(jq -c '.jobs // []' app.json)"
+            echo "job_service_account=$(jq -r '.jobServiceAccount // empty' app.json)"
             echo "sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
           # Preview channel ID from the branch name: lowercase, dashes, short enough for a DNS label.
@@ -150,6 +152,45 @@ jobs:
         run: |
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
             --project "$FIREBASE_PROJECT" --force
+
+      # Cloud Run jobs listed in app.json's "jobs" (see docs/PLAN.md). Each is built from
+      # jobs/<name>/Dockerfile, pushed to Artifact Registry and deployed as <app>-<name> for prod or
+      # <app>-<name>-preview for previews, before the app rolls out so the app can start it.
+      # One-time setup per app: scripts/setup-jobs.sh.
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.app.outputs.jobs != '[]'
+
+      - name: Cloud Run jobs
+        if: steps.app.outputs.jobs != '[]'
+        env:
+          APP: ${{ inputs.app }}
+          JOBS: ${{ steps.app.outputs.jobs }}
+          JOB_SA: ${{ steps.app.outputs.job_service_account }}
+          SHA: ${{ steps.app.outputs.sha }}
+          SUFFIX: ${{ inputs.target == 'preview' && '-preview' || '' }}
+          REGION: us-central1
+        run: |
+          echo "::notice title=jobs::deploying as $(gcloud config get-value account 2>/dev/null)"
+          [ -n "$JOB_SA" ] || { echo "::error::app.json has jobs but no jobServiceAccount"; exit 1; }
+          registry="$REGION-docker.pkg.dev"
+          "$RUN" gcloud auth configure-docker "$registry" --quiet
+          for row in $(echo "$JOBS" | jq -c '.[]'); do
+            job=$(jq -r '.name' <<< "$row")
+            [[ "$job" =~ ^[a-z][a-z0-9-]{0,30}$ ]] || { echo "::error::Bad job name: $job"; exit 1; }
+            [ -f "jobs/$job/Dockerfile" ] || { echo "::error::jobs/$job/Dockerfile not found"; exit 1; }
+            image="$registry/$FIREBASE_PROJECT/apps/$APP-$job:$SHA"
+            env_vars=$(jq -r --arg t '${{ inputs.target }}' \
+              '(.env // {}) + {APP_ENV: $t} | to_entries | map("\(.key)=\(.value)") | join(",")' <<< "$row")
+            "$RUN" docker build -t "$image" "jobs/$job"
+            "$RUN" docker push "$image"
+            "$RUN" gcloud run jobs deploy "$APP-$job$SUFFIX" --image "$image" \
+              --region "$REGION" --project "$FIREBASE_PROJECT" --service-account "$JOB_SA" \
+              --cpu "$(jq -r '.cpu // "1"' <<< "$row")" --memory "$(jq -r '.memory // "2Gi"' <<< "$row")" \
+              --task-timeout "$(jq -r '.timeout // "3600s"' <<< "$row")" \
+              --tasks 1 --max-retries "$(jq -r '.maxRetries // 1' <<< "$row")" \
+              --set-env-vars "$env_vars" --quiet
+            echo "::notice title=jobs::$APP-$job$SUFFIX deployed from $image"
+          done
 
       - name: Roll out App Hosting
         id: apphosting

@@ -19,6 +19,14 @@ env:
     value: video
     availability: [RUNTIME]
 
+  # Cloud Run job started for each uploaded clip (deployed from jobs/process by CI).
+  - variable: PROCESS_JOB
+    value: video-process
+    availability: [RUNTIME]
+  - variable: JOBS_REGION
+    value: us-central1
+    availability: [RUNTIME]
+
   - variable: FIRESTORE_DATABASE_ID
     value: video
     availability: [RUNTIME]

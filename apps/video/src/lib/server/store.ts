@@ -1,8 +1,9 @@
 import "server-only";
 import { FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb, footageBucket, storagePrefix } from "../firebase/admin";
+import { startProcessJob } from "./jobs";
 import { clipKey, offsetFromRange, originalPath } from "../resumable";
-import type { Clip, Project, UploadTicket } from "../types";
+import type { Clip, ClipProcessing, Project, UploadTicket } from "../types";
 
 const projects = () => adminDb().collection("projects");
 const clips = (projectId: string) => projects().doc(projectId).collection("clips");
@@ -36,6 +37,9 @@ function toClip(snap: DocumentSnapshot): Clip {
     status: d.status ?? "uploading",
     createdAt: millis(d.createdAt),
     uploadedAt: d.uploadedAt ? millis(d.uploadedAt) : null,
+    processing: d.processing
+      ? { status: d.processing.status ?? "queued", error: d.processing.error ?? null }
+      : null,
   };
 }
 
@@ -165,5 +169,28 @@ export async function completeUpload(projectId: string, clipId: string): Promise
   await projects()
     .doc(projectId)
     .update({ uploadedCount: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() });
+  await processClip(projectId, clipId);
   return toClip(await ref.get());
+}
+
+/**
+ * Starts the processing job for an uploaded clip and records that on the clip. A job that can't
+ * be started doesn't fail the upload: the clip shows the error and can be processed again.
+ */
+export async function processClip(projectId: string, clipId: string): Promise<ClipProcessing | null> {
+  const ref = clips(projectId).doc(clipId);
+  const snap = await ref.get();
+  if (!snap.exists || snap.data()!.status !== "uploaded") return null;
+  let processing: { status: ClipProcessing["status"]; error: string | null; execution: string | null };
+  try {
+    const execution = await startProcessJob(projectId, clipId);
+    processing = execution
+      ? { status: "queued", error: null, execution }
+      : { status: "failed", error: "No processing job is configured (PROCESS_JOB).", execution: null };
+  } catch (error) {
+    console.error("Couldn't start the processing job", error);
+    processing = { status: "failed", error: `Couldn't start processing: ${(error as Error).message}`, execution: null };
+  }
+  await ref.update({ processing: { ...processing, startedAt: FieldValue.serverTimestamp() } });
+  return { status: processing.status, error: processing.error };
 }
