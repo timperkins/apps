@@ -1,0 +1,4 @@
+# Overrides for the preview backend (environment name: preview).
+# This app has no preview database: previews use the same `video` database and storage prefix,
+# since Tim is the only user.
+env: []

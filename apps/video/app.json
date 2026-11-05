@@ -1,0 +1,10 @@
+{
+  "name": "video",
+  "type": "apphosting",
+  "domain": "video.trom.dev",
+  "backend": "video",
+  "previewBackend": "video-preview",
+  "firestore": {
+    "prod": "video"
+  }
+}

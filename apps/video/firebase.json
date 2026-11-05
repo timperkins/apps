@@ -1,0 +1,9 @@
+{
+  "firestore": [
+    {
+      "database": "video",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
+}
