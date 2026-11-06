@@ -8,8 +8,9 @@ export type PlaneState = 'fly' | 'turn' | 'warn' | 'dive' | 'strafe' | 'climb' |
 /** 'won' is only reached in war mode, when the level's clock runs out with the base still standing. */
 export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
 /** Original: endless waves defending one turret. War: hold out for a fixed time from several turrets, among friendly planes.
- *  Co-op: the original waves for two players, one on the base and one flying the enemy planes as the Bomber. */
-export type GameMode = 'original' | 'war' | 'coop';
+ *  Co-op: the original waves for two players, one on the base and one flying the enemy planes as the Bomber.
+ *  Adventure: the original waves with a weak turret; every enemy plane shot down earns 1 iron, spent in the iron shop. */
+export type GameMode = 'original' | 'war' | 'coop' | 'adventure';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
 /** Perks: permanent gun improvements (dual, triple, reload, flak), leeching and the upgrade shifter (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
@@ -91,6 +92,8 @@ export interface Hooks {
   waveClear?: (info: ClearInfo) => void;
   gameOver?: (r: Results) => void;
   label?: (text: string) => void;
+  /** adventure: the iron count changed */
+  iron?: () => void;
 }
 interface Lock { target: Plane | null; t: number; step: number; locked: boolean; }
 
@@ -102,6 +105,21 @@ const SHELL_V0 = 480, SHELL_K = .583, SHELL_G = 22, SHELL_LIFE = 3.3;
 const MISSILE_DRAG = .06, BOMB_DRAG = 1.1;
 const BARREL = 48;
 const FIRE_INTERVAL = 1 / 3;
+
+/* ---------- adventure mode ---------- */
+/** Iron shop items. Levels are kept between games; repair is a one-off during a game. */
+export type ShopId = 'health' | 'damage' | 'rate' | 'repair';
+export interface ShopItem { name: string; desc: string; max: number; cost: (lv: number) => number; }
+/** The adventure turret starts at this share of the normal turret's health; each Max health level adds ADV_HP_STEP more. */
+export const ADV_HP_START = .2, ADV_HP_STEP = .1;
+export const SHOP: Record<ShopId, ShopItem> = {
+  health: { name: 'Max health', desc: `+${ADV_HP_STEP * 100}% turret health (of a normal turret).`, max: 10, cost: lv => 3 + lv * 2 },
+  damage: { name: 'Damage', desc: 'Shells hit 25% harder. Helps against bosses and nukes.', max: 8, cost: lv => 5 + lv * 3 },
+  rate: { name: 'Fire rate', desc: 'The gun fires 15% faster.', max: 6, cost: lv => 4 + lv * 3 },
+  repair: { name: 'Repair turret', desc: 'Patch the turret back to full health now.', max: Infinity, cost: () => 3 },
+};
+export interface Adventure { iron: number; health: number; damage: number; rate: number; }
+export const newAdventure = (): Adventure => ({ iron: 0, health: 0, damage: 0, rate: 0 });
 /** Where the crate can land on the pad: the gap left of the depot or right of the hangar, picked at random each drop. */
 const LZ_SPOTS = [-77, 86];
 export const LZ_Y = GROUND_Y - 3.4;
@@ -373,6 +391,8 @@ export class Game {
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false; blameSniper = false;
+  /** adventure: iron and shop levels (main.ts loads and saves them) */
+  adv: Adventure = newAdventure();
   /** co-op: flak bursts and explosions since the last snapshot, so the phones can draw them too ([0 flak | 1 air | 2 ground, x, y, size]) */
   fxLog: [number, number, number, number][] | null = null;
 
@@ -397,6 +417,7 @@ export class Game {
       const out = WAR_POSTS.filter(x => x !== 0).map(x => ({ ...make(def, x, x < 0 ? 'West turret' : 'East turret'), outpost: true }));
       this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
     }
+    if (this.adventure) { const t = this.b('turret'); t.max = t.hp = t.def.hp * this.advHpShare; }
     this.gun2 = null;
     if (!this.coop) this.localGun = 1;
     if (this.coop && this.secondBaseName !== null) {
@@ -442,6 +463,34 @@ export class Game {
   post(): Building { return this.posts[this.postI]; }
   get war() { return this.mode === 'war'; }
   get coop() { return this.mode === 'coop'; }
+  get adventure() { return this.mode === 'adventure'; }
+  get advHpShare() { return ADV_HP_START + ADV_HP_STEP * this.adv.health; }
+  /** adventure: shell damage and the gun's reload with the shop's levels (1 elsewhere) */
+  get shellDmg() { return this.adventure ? 1 + .25 * this.adv.damage : 1; }
+  get rateMul() { return this.adventure ? 1 / (1 + .15 * this.adv.rate) : 1; }
+  /** Whether a shop item can be bought now, and why not. */
+  shopBlock(id: ShopId): string | null {
+    const it = SHOP[id];
+    if (id === 'repair') {
+      const t = this.b('turret');
+      if (this.phase === 'idle' || this.ended) return 'During a game';
+      if (t.hp >= t.max) return 'Full health';
+    } else if (this.adv[id] >= it.max) return 'Maxed';
+    return this.adv.iron < this.shopCost(id) ? 'Not enough iron' : null;
+  }
+  shopCost(id: ShopId) { return SHOP[id].cost(id === 'repair' ? 0 : this.adv[id]); }
+  buy(id: ShopId) {
+    if (this.shopBlock(id)) return false;
+    this.adv.iron -= this.shopCost(id);
+    const t = this.b('turret');
+    if (id === 'repair') t.hp = t.max;
+    else {
+      this.adv[id]++;
+      // more max health also adds that much health to a standing turret
+      if (id === 'health' && this.adventure && !t.ruined) { const m = t.def.hp * this.advHpShare; t.hp += m - t.max; t.max = m; }
+    }
+    return true;
+  }
   get ended() { return this.phase === 'over' || this.phase === 'won'; }
   /** Planes U-turn (or, if friendly, leave) past this x. */
   get xe() { return this.war ? WAR_XE : XE; }
@@ -1232,7 +1281,7 @@ export class Game {
       case 'nuke': this.fireNuke(); this.fireCD = 1; break;
       case 'lightning': this.fireLightning(); this.fireCD = .4; break;
       case 'cluster': this.fireCluster(); this.fireCD = .5; break;
-      default: this.fireShell(); this.fireCD = (w === 'rapid' ? FIRE_INTERVAL / 3 : FIRE_INTERVAL) * (this.fastLoad ? 2 / 3 : 1);
+      default: this.fireShell(); this.fireCD = (w === 'rapid' ? FIRE_INTERVAL / 3 : FIRE_INTERVAL) * (this.fastLoad ? 2 / 3 : 1) * this.rateMul;
     }
   }
   /** Spend ammo (or seconds) of the special weapon; the plain gun comes back when it runs out. */
@@ -1706,6 +1755,7 @@ export class Game {
       if (!p.hits.length) p.hits.push({ u: 0, v: 0 });
       this.addScore(TYPES[p.type].points * (this.perks.has('bounty') ? 2 : 1), p.x, p.y);
       this.stats.kills++;
+      if (this.adventure) { this.adv.iron++; this.labels.push({ text: '+1 iron', x: p.x, y: p.y + 4, t: 0, life: 1.3, color: '#c9d3dc' }); this.hooks.iron?.(); }
       const boss = p.type === 'boss';
       this.explosion(p.x, p.y, boss ? 2 : .8, false);
       Sound.boom(boss, this.panOf(p.x, p.y));
@@ -1800,7 +1850,7 @@ export class Game {
         if (s.ghost) this.ghostSweep(s, pad);
         else {
           const hit = this.sweepContact(s.px, s.py, s.x, s.y, pad, !!s.fall);
-          if (hit) { this.burst(s, hit, 1, R, false, !!s.fall); break; }
+          if (hit) { this.burst(s, hit, this.shellDmg, R, false, !!s.fall); break; }
         }
         // drop shot: where the shell would have burst at the top of its flight, it turns over and falls
         if (this.dropShot && !s.fall && s.t >= SHELL_LIFE && s.y < DROP_FLOOR) {
@@ -1812,7 +1862,7 @@ export class Game {
         if (!end) continue;
         // a falling drop shot or a ghost shell fades out without a burst, so it can't touch the base or a friendly plane
         if (s.ghost || s.fall) { this.fizzle(s); break; }
-        this.burst(s, null, 1, R);
+        this.burst(s, null, this.shellDmg, R);
         break;
       }
     }

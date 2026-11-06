@@ -2,7 +2,7 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT, SNIPER_PERKS } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT, SNIPER_PERKS, SHOP, newAdventure, type ShopId, type Adventure } from './game';
 import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
@@ -12,7 +12,7 @@ import { randomName } from './coop/names';
 import type { ClientMsg, Role } from './coop/protocol';
 import { takeSnap } from './coop/mirror';
 
-type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
+type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'shop' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; reduceMotion: boolean; }
 /** `wave` is the wave reached; war mode keeps the level instead, and `time` is the seconds survived. */
 interface ScoreEntry { score: number; wave: number; date: number; time?: number; won?: boolean; }
@@ -31,11 +31,12 @@ const store = {
 const settings: Settings = Object.assign({ sound: true, music: true, vibration: true, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }, store.get('settings', {}));
 const seenTips = new Set<string>(store.get<string[]>('tips', []));
 // every mode and difficulty keeps its own high scores; hard was once called expert, and its scores keep that key
-const scoreKey = (m: GameMode, d: Difficulty) => m === 'coop' ? 'scores.coop' + (d === 'hard' ? '.hard' : '') : (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
+const scoreKey = (m: GameMode, d: Difficulty) => m === 'adventure' ? 'scores.adventure' + (d === 'hard' ? '.hard' : '') : m === 'coop' ? 'scores.coop' + (d === 'hard' ? '.hard' : '') : (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
 const savedDiff = store.get<string>('difficulty', 'normal');
 let difficulty: Difficulty = savedDiff === 'hard' || savedDiff === 'expert' ? 'hard' : 'normal';
 const savedMode = store.get<string>('mode', 'original');
-let gameMode: GameMode = savedMode === 'war' || savedMode === 'coop' ? savedMode : 'original';
+const isMode = (m: unknown): m is GameMode => m === 'original' || m === 'war' || m === 'coop' || m === 'adventure';
+let gameMode: GameMode = isMode(savedMode) ? savedMode : 'original';
 let scores = store.get<ScoreEntry[]>(scoreKey(gameMode, difficulty), []);
 
 let mode: Mode = 'loading';   // loading | start | play | paused | cards | countdown | results | recal | nosensor
@@ -53,7 +54,11 @@ const game = new Game({
   waveClear: () => { if (hintState) endHint(); },
   gameOver: showResults,
   label: () => { },
+  iron: () => { saveAdventure(); ironHud(); },
 });
+// adventure: iron and shop levels are kept on this device between games
+game.adv = Object.assign(newAdventure(), store.get<Partial<Adventure>>('adventure', {}));
+function saveAdventure() { store.set('adventure', game.adv); }
 applySettings();
 game.difficulty = difficulty;
 game.mode = gameMode;
@@ -147,15 +152,17 @@ function setChoice(m: GameMode, d: Difficulty) {
   const hard = 'About twice the planes, firing more often and hitting harder. Points are worth 1.5x.';
   $('diffNote').textContent = m === 'war'
     ? `Hold out for ${WAR_TIME / 60} minutes. Swipe left or right to move between three turrets, and don't shoot down ${WAR_STRIKES} friendly planes.` + (d === 'hard' ? ' Hard: more enemy planes, hitting harder.' : '')
+    : m === 'adventure' ? 'Your turret starts at 20% health. Every plane you shoot down earns 1 iron; spend it in the iron shop on upgrades that you keep between games.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : m === 'coop' ? 'Two players: one defends the base, the other flies the enemy planes as the Bomber. Phones join with a QR code.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : d === 'hard' ? hard : 'The standard game.';
+  $('startShop').hidden = m !== 'adventure';
   const b = best();
   $('bestLine').textContent = b ? `Best ${b.toLocaleString('en-US')}` : '';
 }
 document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => b.addEventListener('click', e => {
   e.stopPropagation(); Sound.ui();
   const m = b.dataset.mode;
-  setChoice(m === 'war' || m === 'coop' ? m : 'original', difficulty);
+  setChoice(isMode(m) ? m : 'original', difficulty);
 }));
 document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.addEventListener('click', e => {
   e.stopPropagation(); Sound.ui();
@@ -163,7 +170,7 @@ document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.addEventLis
 }));
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 function renderScores() {
-  $('scoresTitle').textContent = `${gameMode === 'war' ? 'War' : gameMode === 'coop' ? 'Co-op' : 'Original'}${difficulty === 'hard' ? ', hard' : ''}: high scores`;
+  $('scoresTitle').textContent = `${gameMode === 'war' ? 'War' : gameMode === 'coop' ? 'Co-op' : gameMode === 'adventure' ? 'Adventure' : 'Original'}${difficulty === 'hard' ? ', hard' : ''}: high scores`;
   const ol = $('scoreList');
   const detail = (s: ScoreEntry) => gameMode === 'war' ? (s.won ? 'passed' : clock(s.time ?? 0)) : `wave ${s.wave}`;
   ol.innerHTML = scores.length ? scores.map((s: ScoreEntry) => `<li><span>${s.score.toLocaleString('en-US')}</span><span>${detail(s)}</span></li>`).join('') : '<li class="empty">No scores yet</li>';
@@ -200,10 +207,11 @@ async function begin() {
   }
   if (Tilt.keyboard) keyboardText(); else tryLockPortrait();
   Tilt.calibrate();
-  game.start();
-  show(null);
-  setHud(true);
-  mode = 'play';
+  startGame();
+}
+function startGame() {
+  ironAtStart = game.adv.iron;
+  game.start(); show(null); setHud(true); mode = 'play';
 }
 /** On a computer the on-screen help talks about keys, not tilting and tapping. */
 function keyboardText() {
@@ -318,7 +326,55 @@ function bomberKey(e: KeyboardEvent, down: boolean) {
 }
 
 /* ---------- HUD buttons ---------- */
-function setHud(on: boolean) { $('pauseBtn').hidden = !on; $('protectBtn').hidden = !on || !game.coop || localRole !== 'base'; }
+function setHud(on: boolean) { $('pauseBtn').hidden = !on; $('protectBtn').hidden = !on || !game.coop || localRole !== 'base'; $('ironBtn').hidden = !on || !game.adventure; ironHud(); }
+$('ironBtn').addEventListener('click', e => { e.stopPropagation(); if (mode === 'play') openShop('play'); });
+
+/* ---------- adventure: iron and the iron shop ---------- */
+let ironAtStart = 0;
+let shopFrom: 'play' | 'start' | 'results' = 'start';
+function ironHud() { $('ironCount').textContent = String(game.adv.iron); }
+function openShop(from: typeof shopFrom) {
+  shopFrom = from;
+  if (from === 'play') { game.release(); pointers.clear(); Sound.stopAllEngines(); }
+  Sound.ui();
+  mode = 'shop';
+  renderShop();
+  show('shop');
+}
+function renderShop() {
+  $('shopIron').textContent = String(game.adv.iron);
+  const list = $('shopList');
+  list.innerHTML = '';
+  for (const id of Object.keys(SHOP) as ShopId[]) {
+    const it = SHOP[id];
+    if (id === 'repair' && shopFrom !== 'play') continue;
+    const block = game.shopBlock(id);
+    const lv = id === 'repair' ? '' : `<span class="kind">Level ${game.adv[id]} of ${it.max}</span>`;
+    const b = document.createElement('button');
+    b.className = 'card shopitem';
+    b.disabled = !!block;
+    b.innerHTML = `${lv}<b>${it.name}</b><span class="desc">${it.desc}</span><span class="price">${block === 'Maxed' || block === 'Full health' || block === 'During a game' ? block : `${game.shopCost(id)} iron`}</span>`;
+    b.addEventListener('click', e => { e.stopPropagation(); if (game.buy(id)) { Sound.pop(); saveAdventure(); ironHud(); renderShop(); } });
+    list.appendChild(b);
+  }
+  const t = game.b('turret');
+  $('shopNote').textContent = shopFrom === 'play'
+    ? `Turret ${Math.round(Math.max(0, t.hp))} of ${Math.round(t.max)} health. The game is paused.`
+    : `Your turret starts games at ${Math.round(game.advHpShare * 100)}% health.`;
+}
+function closeShop() {
+  Sound.ui();
+  if (shopFrom === 'play') { show(null); mode = 'play'; last = performance.now(); return; }
+  show(shopFrom); mode = shopFrom;
+}
+$('shopDone').addEventListener('click', e => { e.stopPropagation(); closeShop(); });
+$('shopReset').addEventListener('click', e => {
+  e.stopPropagation();
+  if (!confirm('Start adventure over? This sets iron and every upgrade back to 0.')) return;
+  game.adv = newAdventure(); saveAdventure(); ironHud(); renderShop();
+});
+$('startShop').addEventListener('click', e => { e.stopPropagation(); if (mode === 'start') openShop('start'); });
+$('resultsShop').addEventListener('click', e => { e.stopPropagation(); if (mode === 'results') openShop('results'); });
 $('protectBtn').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (mode === 'play') game.baseProtect(); });
 $('pauseBtn').addEventListener('click', e => { e.stopPropagation(); if (mode === 'play') pause(); });
 
@@ -427,7 +483,7 @@ function showResults(r: Results) {
   $('rTitle').textContent = attackers.length ? (attackers.length > 1 ? `${attackers.join(' and ')} win` : `${attackers[0]} wins`) : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
   $('rReason').textContent = war && !r.won ? r.reason : '';
   $('rReason').hidden = !(war && !r.won && r.reason);
-  const tags = [war ? 'War, level 1' : r.mode === 'coop' ? 'Co-op' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
+  const tags = [war ? 'War, level 1' : r.mode === 'coop' ? 'Co-op' : r.mode === 'adventure' ? 'Adventure' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
   $('rMode').textContent = tags.join(' · ');
   $('rMode').hidden = !tags.length;
   $('rScore').textContent = r.score.toLocaleString('en-US');
@@ -438,6 +494,7 @@ function showResults(r: Results) {
     war ? ['Friendly planes hit', `${r.friendlies} of ${WAR_STRIKES}`] : ['Bombs intercepted', String(r.intercepts)],
     ['Best score', best().toLocaleString('en-US')],
   ];
+  if (r.mode === 'adventure') stats.splice(4, 0, ['Iron earned', String(game.adv.iron - ironAtStart)], ['Iron', String(game.adv.iron)]);
   if (r.bomber) stats.splice(4, 0, ['Bomber damage', String(r.bomber.damage)], ['Bomber planes lost', String(r.bomber.deaths)], ['Upgrades stolen', String(r.bomber.steals)]);
   if (sniper) stats.splice(r.bomber ? 7 : 4, 0, ['Sniper damage', String(Math.round(game.sniperDamage))]);
   $('rStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -446,13 +503,14 @@ function showResults(r: Results) {
   setHud(false);
   show('results'); mode = 'results';
   $('titleBtn').textContent = coop ? 'Back to lobby' : 'Title screen';
+  $('resultsShop').hidden = r.mode !== 'adventure';
   padHost.el.hidden = true;
   coop?.broadcast({ t: 'over', title: $('rTitle').textContent ?? '', score: r.score, wave: r.wave });
 }
 $('againBtn').addEventListener('click', e => {
   e.stopPropagation(); Sound.ui();
   if (coop) { if (coop.canStart()) void startCoop(); else backToLobby(); return; }
-  Tilt.calibrate(); game.start(); show(null); setHud(true); mode = 'play';
+  Tilt.calibrate(); startGame();
 });
 $('titleBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (coop) backToLobby(); else startScreen(); });
 
