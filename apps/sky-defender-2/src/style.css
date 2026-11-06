@@ -242,3 +242,5 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #shop .card:disabled { opacity: .62; }
 #shop .shophead { grid-column: 1 / -1; margin: 8px 0 0; font: 600 13px/1 var(--font-b); letter-spacing: .08em; text-transform: uppercase; color: #c9d3dc; text-align: left; }
 #shop { justify-content: flex-start; overflow-y: auto; }
+#coopToggle { margin-left: 4px; border-left: 1px solid var(--line); border-radius: 0 999px 999px 0; }
+#coopToggle[aria-checked="true"] { background: #9fe6ff; color: #1a1424; border-radius: 999px; }

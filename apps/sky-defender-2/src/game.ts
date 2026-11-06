@@ -75,7 +75,7 @@ export interface Crate { x: number; y: number; vx: number; vy: number; lz: numbe
   held?: boolean; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
 /** `outpost` marks a war mode turret standing on its own away from the base. */
-export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
+export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; /** an extra adventure turret, which fires with the main gun */ extra?: boolean; }
 export interface WaveSpec { count: number; list: PlaneType[]; boss: boolean; }
 export interface ClearInfo { bonus: number; health: number; perfect: number; }
 export interface Results {
@@ -132,6 +132,8 @@ export interface Adventure { iron: number; health: number; damage: number; rate:
 export const newAdventure = (): Adventure => ({ iron: 0, health: 0, damage: 0, rate: 0, turret: 0, parts: [] });
 /** Where the extra adventure turrets stand: the first east of the base, the second west. */
 export const ADV_TURRET_X = [168, -196];
+/** ...and where they stand when a second Base player's turret already has the east spot. */
+const ADV_TURRET_X2 = [-196, 232];
 /** A diamond pack can't be shot down for this many seconds after it drops. */
 export const DIAMOND_SAFE = 5;
 /** Where the crate can land on the pad: the gap left of the depot or right of the hangar, picked at random each drop. */
@@ -445,7 +447,10 @@ export class Game {
       const def = BUILDINGS.find(d => d.id === 'turret')!;
       this.buildings.push({ ...make(def, GUN2_X, 'Second turret'), outpost: true });
       this.gun2 = { name: this.secondBaseName, x: GUN2_X, roll: 0, aim: 0, firing: false, oneShot: false, fireCD: 0, recoil: 0, flash: 0 };
+      if (this.adventure) { const t = this.buildings[this.buildings.length - 1]; t.max = t.hp = t.def.hp * this.advHpShare; }
     }
+    // left to right, so a phone's copy (and a building bought mid-game) lines up with the host's list
+    this.buildings.sort((a, b) => a.x - b.x);
     this.posts = this.buildings.filter(b => b.id === 'turret' && (this.war || !b.outpost));
     this.postI = this.posts.findIndex(b => !b.outpost);
     this.gunX = this.viewX = this.post().x;
@@ -487,7 +492,9 @@ export class Game {
   /** The turret the player is using. */
   post(): Building { return this.posts[this.postI]; }
   get war() { return this.mode === 'war'; }
-  get coop() { return this.mode === 'coop'; }
+  /** co-op in adventure mode: mode stays 'adventure' and this is set (mode 'coop' is co-op with the original waves) */
+  coopAdv = false;
+  get coop() { return this.mode === 'coop' || this.adventure && this.coopAdv; }
   get adventure() { return this.mode === 'adventure'; }
   get advHpShare() { return ADV_HP_START + ADV_HP_STEP * this.adv.health; }
   /** adventure: shell damage and the gun's reload with the shop's levels (1 elsewhere) */
@@ -521,10 +528,11 @@ export class Game {
   }
   /** Adventure: every turret (the main one and any extra ones), and the extra ones still standing. */
   advTurrets() { return this.buildings.filter(b => b.id === 'turret'); }
-  advGuns() { return this.adventure ? this.buildings.filter(b => b.id === 'turret' && b.outpost && !b.ruined) : []; }
+  advGuns() { return this.adventure ? this.buildings.filter(b => b.extra && !b.ruined) : []; }
   addAdvTurret(i: number) {
     const d = BUILDINGS.find(d => d.id === 'turret')!;
-    const t: Building = { ...makeBuilding(d, ADV_TURRET_X[i], i ? 'West turret' : 'East turret'), outpost: true };
+    const x = (this.secondBaseName !== null && this.coop ? ADV_TURRET_X2 : ADV_TURRET_X)[i];
+    const t: Building = { ...makeBuilding(d, x, x < 0 ? 'West turret' : 'East turret'), outpost: true, extra: true };
     t.max = t.hp = d.hp * this.advHpShare;
     this.buildings.push(t);
     this.buildings.sort((a, b) => a.x - b.x);

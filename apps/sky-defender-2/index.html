@@ -52,12 +52,12 @@
     <div class="seg modes" role="radiogroup" aria-label="Game mode">
       <button role="radio" data-mode="original" aria-checked="true">Original</button>
       <button role="radio" data-mode="war" aria-checked="false">War</button>
-      <button role="radio" data-mode="coop" aria-checked="false">Co-op</button>
       <button role="radio" data-mode="adventure" aria-checked="false">Adventure</button>
     </div>
-    <div class="seg" role="radiogroup" aria-label="Difficulty">
+    <div class="seg" role="group" aria-label="Difficulty and co-op">
       <button role="radio" data-diff="normal" aria-checked="true">Normal</button>
       <button role="radio" data-diff="hard" aria-checked="false">Hard</button>
+      <button role="switch" id="coopToggle" aria-checked="false">Co-op</button>
     </div>
     <p class="fine" id="diffNote"></p>
     <div class="row">

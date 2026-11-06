@@ -31,13 +31,20 @@ const store = {
 const settings: Settings = Object.assign({ sound: true, music: true, vibration: true, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }, store.get('settings', {}));
 const seenTips = new Set<string>(store.get<string[]>('tips', []));
 // every mode and difficulty keeps its own high scores; hard was once called expert, and its scores keep that key
-const scoreKey = (m: GameMode, d: Difficulty) => m === 'adventure' ? 'scores.adventure' + (d === 'hard' ? '.hard' : '') : m === 'coop' ? 'scores.coop' + (d === 'hard' ? '.hard' : '') : (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
+const scoreKey = (m: GameMode, d: Difficulty, together = false) => m === 'adventure' ? 'scores.adventure' + (together ? '.coop' : '') + (d === 'hard' ? '.hard' : '') : m === 'coop' ? 'scores.coop' + (d === 'hard' ? '.hard' : '') : (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
 const savedDiff = store.get<string>('difficulty', 'normal');
 let difficulty: Difficulty = savedDiff === 'hard' || savedDiff === 'expert' ? 'hard' : 'normal';
 const savedMode = store.get<string>('mode', 'original');
-const isMode = (m: unknown): m is GameMode => m === 'original' || m === 'war' || m === 'coop' || m === 'adventure';
-let gameMode: GameMode = isMode(savedMode) ? savedMode : 'original';
-let scores = store.get<ScoreEntry[]>(scoreKey(gameMode, difficulty), []);
+/** The title screen picks a mode (original, war or adventure) and, beside the difficulty, whether to play co-op. */
+type MenuMode = 'original' | 'war' | 'adventure';
+const isMode = (m: unknown): m is MenuMode => m === 'original' || m === 'war' || m === 'adventure';
+// co-op used to be a mode of its own; it is now Original with co-op on
+let coopOn = store.get<boolean>('coop', savedMode === 'coop');
+let gameMode: MenuMode = isMode(savedMode) ? savedMode : 'original';
+if (gameMode === 'war') coopOn = false;
+/** The game's own mode: co-op with the original waves is 'coop'; co-op adventure stays 'adventure' with game.coopAdv set. */
+const gameModeFor = (m: MenuMode, c: boolean): GameMode => c && m === 'original' ? 'coop' : m;
+let scores = store.get<ScoreEntry[]>(scoreKey(gameModeFor(gameMode, coopOn), difficulty, coopOn), []);
 
 let mode: Mode = 'loading';   // loading | start | play | paused | cards | countdown | results | recal | nosensor
 let toastTimer = 0;
@@ -62,7 +69,7 @@ if (!Array.isArray(game.adv.parts)) game.adv.parts = [];
 function saveAdventure() { store.set('adventure', game.adv); }
 applySettings();
 game.difficulty = difficulty;
-game.mode = gameMode;
+game.mode = gameModeFor(gameMode, coopOn); game.coopAdv = coopOn && gameMode === 'adventure';
 if (Tilt.debug) (window as unknown as { __sd: unknown }).__sd = { game, Tilt, renderer };
 
 /* ---------- layout: keep the game physically portrait even if the screen rotates ---------- */
@@ -141,20 +148,25 @@ function applySettings() {
 buildSettings();
 
 /** Picks the game mode and difficulty for the next game; the title screen's backdrop shows that mode's map. */
-function setChoice(m: GameMode, d: Difficulty) {
+function setChoice(m: MenuMode, d: Difficulty, c = coopOn) {
+  // war has no co-op: picking one turns the other off
+  if (c && m === 'war') { if (gameMode === 'war') m = 'original'; else c = false; }
   const remap = m !== gameMode;
-  gameMode = m; game.mode = m;
+  gameMode = m; coopOn = c;
+  game.mode = gameModeFor(m, c); game.coopAdv = c && m === 'adventure';
   difficulty = d; game.difficulty = d;
-  store.set('mode', m); store.set('difficulty', d);
-  scores = store.get<ScoreEntry[]>(scoreKey(m, d), []);
+  store.set('mode', m); store.set('difficulty', d); store.set('coop', c);
+  scores = store.get<ScoreEntry[]>(scoreKey(game.mode, d, c), []);
+  $('coopToggle').setAttribute('aria-checked', String(c));
   if (remap && mode === 'start') { game.reset(); game.phase = 'idle'; }
   document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === m)));
   document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.diff === d)));
   const hard = 'About twice the planes, firing more often and hitting harder. Points are worth 1.5x.';
   $('diffNote').textContent = m === 'war'
     ? `Hold out for ${WAR_TIME / 60} minutes. Swipe left or right to move between three turrets, and don't shoot down ${WAR_STRIKES} friendly planes.` + (d === 'hard' ? ' Hard: more enemy planes, hitting harder.' : '')
+    : m === 'adventure' && c ? 'Co-op adventure: the base is one turret at 20% health, and a friend joins as the Bomber or Sniper with a QR code. Every plane shot down earns 1 iron for the iron shop.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : m === 'adventure' ? 'Just you and one turret, starting at 20% health. Every plane you shoot down earns 1 iron; spend it in the iron shop on upgrades that you keep between games.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
-    : m === 'coop' ? 'Two players: one defends the base, the other flies the enemy planes as the Bomber. Phones join with a QR code.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
+    : c ? 'Two players: one defends the base, the other flies the enemy planes as the Bomber. Phones join with a QR code.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : d === 'hard' ? hard : 'The standard game.';
   $('startShop').hidden = m !== 'adventure';
   const b = best();
@@ -165,13 +177,14 @@ document.querySelectorAll<HTMLElement>('[data-mode]').forEach(b => b.addEventLis
   const m = b.dataset.mode;
   setChoice(isMode(m) ? m : 'original', difficulty);
 }));
+$('coopToggle').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); setChoice(gameMode, difficulty, !coopOn); });
 document.querySelectorAll<HTMLElement>('[data-diff]').forEach(b => b.addEventListener('click', e => {
   e.stopPropagation(); Sound.ui();
   setChoice(gameMode, b.dataset.diff === 'hard' ? 'hard' : 'normal');
 }));
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 function renderScores() {
-  $('scoresTitle').textContent = `${gameMode === 'war' ? 'War' : gameMode === 'coop' ? 'Co-op' : gameMode === 'adventure' ? 'Adventure' : 'Original'}${difficulty === 'hard' ? ', hard' : ''}: high scores`;
+  $('scoresTitle').textContent = `${gameMode === 'war' ? 'War' : gameMode === 'adventure' ? (coopOn ? 'Co-op adventure' : 'Adventure') : coopOn ? 'Co-op' : 'Original'}${difficulty === 'hard' ? ', hard' : ''}: high scores`;
   const ol = $('scoreList');
   const detail = (s: ScoreEntry) => gameMode === 'war' ? (s.won ? 'passed' : clock(s.time ?? 0)) : `wave ${s.wave}`;
   ol.innerHTML = scores.length ? scores.map((s: ScoreEntry) => `<li><span>${s.score.toLocaleString('en-US')}</span><span>${detail(s)}</span></li>`).join('') : '<li class="empty">No scores yet</li>';
@@ -197,7 +210,7 @@ $('retrySensor').addEventListener('click', e => { e.stopPropagation(); begin(); 
 async function begin() {
   if (mode !== 'start' && mode !== 'nosensor') return;
   Sound.init();
-  if (gameMode === 'coop') { openLobby(); return; }
+  if (coopOn) { openLobby(); return; }
   const r = await Tilt.start();
   if (r !== 'ok') {
     $('nosensorMsg').textContent = r === 'denied'
@@ -337,7 +350,7 @@ const BUILDING_NAMES: Record<string, string> = { search: 'Searchlight', radar: '
 function ironHud() { $('ironCount').textContent = String(game.adv.iron); }
 function openShop(from: typeof shopFrom) {
   shopFrom = from;
-  if (from === 'play') { game.release(); pointers.clear(); Sound.stopAllEngines(); }
+  if (from === 'play') { game.release(); pointers.clear(); Sound.stopAllEngines(); coop?.broadcast({ t: 'paused', on: true }); }
   Sound.ui();
   mode = 'shop';
   renderShop();
@@ -377,7 +390,7 @@ function renderShop() {
 }
 function closeShop() {
   Sound.ui();
-  if (shopFrom === 'play') { show(null); mode = 'play'; last = performance.now(); return; }
+  if (shopFrom === 'play') { show(null); mode = 'play'; last = performance.now(); coop?.broadcast({ t: 'paused', on: false }); return; }
   show(shopFrom); mode = shopFrom;
 }
 $('shopDone').addEventListener('click', e => { e.stopPropagation(); closeShop(); });
@@ -490,13 +503,13 @@ function showResults(r: Results) {
   scores.push({ score: r.score, wave: r.wave, date: Date.now(), ...(war ? { time: Math.round(r.time), won: r.won } : {}) });
   scores.sort((a, b) => b.score - a.score);
   scores = scores.slice(0, 5);
-  store.set(scoreKey(r.mode, r.difficulty), scores);
+  store.set(scoreKey(r.mode, r.difficulty, game.coop), scores);
   const sniper = coop?.byRole('sniper');
-  const attackers = r.mode === 'coop' ? [r.bomber?.name, sniper?.name].filter(Boolean) : [];
+  const attackers = game.coop ? [r.bomber?.name, sniper?.name].filter(Boolean) : [];
   $('rTitle').textContent = attackers.length ? (attackers.length > 1 ? `${attackers.join(' and ')} win` : `${attackers[0]} wins`) : !war ? 'Base lost' : r.won ? 'Level 1 complete' : 'Mission failed';
   $('rReason').textContent = war && !r.won ? r.reason : '';
   $('rReason').hidden = !(war && !r.won && r.reason);
-  const tags = [war ? 'War, level 1' : r.mode === 'coop' ? 'Co-op' : r.mode === 'adventure' ? 'Adventure' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
+  const tags = [war ? 'War, level 1' : r.mode === 'adventure' ? (game.coop ? 'Co-op adventure' : 'Adventure') : game.coop ? 'Co-op' : '', r.difficulty === 'hard' ? 'Hard' : ''].filter(Boolean);
   $('rMode').textContent = tags.join(' · ');
   $('rMode').hidden = !tags.length;
   $('rScore').textContent = r.score.toLocaleString('en-US');
@@ -620,6 +633,7 @@ async function startCoop() {
   game.sniperName = sniper?.name ?? null;
   game.secondBaseName = second?.name ?? null;
   game.localGun = second && second === coop.local ? 2 : 1;
+  ironAtStart = game.adv.iron;
   game.start();
   game.fxLog = [];
   remoteRoll = remoteRoll2 = 0; pendingCards = null;
