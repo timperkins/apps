@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInGate, useAuth } from "@/components/AuthProvider";
+import { FootageBrowser } from "@/components/FootageBrowser";
 import type { Clip, ClipMediaUrls, Project } from "@/lib/types";
 import { keepScreenOn, uploadFile, type Progress } from "@/lib/uploader";
 
@@ -72,6 +73,23 @@ function mediaSummary(c: Clip): string {
   return parts.filter(Boolean).join(" · ");
 }
 
+function indexState(c: Clip): string {
+  switch (c.index?.status) {
+    case "done": {
+      const n = c.index.segments.length;
+      return `Indexed: ${n} ${n === 1 ? "segment" : "segments"}`;
+    }
+    case "running":
+      return "Indexing with Gemini…";
+    case "failed":
+      return `Indexing failed: ${c.index.error ?? "unknown error"}`;
+    case "skipped":
+      return c.index.error ?? "Not indexed";
+    default:
+      return "Not indexed";
+  }
+}
+
 function ProjectView() {
   const { id } = useParams<{ id: string }>();
   const { authedFetch } = useAuth();
@@ -113,7 +131,9 @@ function ProjectView() {
   }, [fetchProject, apply]);
 
   // While a clip is processing, check on it every 10 seconds.
-  const processing = clips.some((c) => c.processing?.status === "queued" || c.processing?.status === "running");
+  const processing = clips.some(
+    (c) => c.processing?.status === "queued" || c.processing?.status === "running" || c.index?.status === "running",
+  );
   useEffect(() => {
     if (!processing) return;
     const timer = setInterval(load, 10_000);
@@ -172,15 +192,34 @@ function ProjectView() {
     load();
   }
 
+  const loadUrls = useCallback(
+    async (clipId: string): Promise<ClipMediaUrls | null> => {
+      const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/media`);
+      const body = (await res.json().catch(() => ({}))) as ClipMediaUrls & { error?: string };
+      if (res.ok) return body;
+      setError(body.error ?? "Couldn't load the clip.");
+      return null;
+    },
+    [authedFetch, id],
+  );
+
   async function watch(clipId: string) {
     if (watching?.clipId === clipId) {
       setWatching(null);
       return;
     }
-    const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/media`);
-    const body = (await res.json().catch(() => ({}))) as ClipMediaUrls & { error?: string };
-    if (!res.ok) setError(body.error ?? "Couldn't load the clip.");
-    else setWatching({ clipId, urls: body });
+    const urls = await loadUrls(clipId);
+    if (urls) setWatching({ clipId, urls });
+  }
+
+  async function reindex(clipId: string) {
+    const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/process`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ indexOnly: true }),
+    });
+    if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start indexing.");
+    load();
   }
 
   async function saveNotes() {
@@ -275,6 +314,8 @@ function ProjectView() {
         </button>
       </section>
 
+      <FootageBrowser clips={clips} loadUrls={loadUrls} />
+
       <section className="card">
         <h2>Clips</h2>
         {clips.length === 0 ? (
@@ -297,6 +338,17 @@ function ProjectView() {
                     </button>
                   </p>
                 )}
+                {c.processing?.status === "done" && c.media && (
+                  <p className="small">
+                    <span className={c.index?.status === "failed" ? "error" : "muted"}>{indexState(c)} </span>
+                    {c.index?.status !== "running" && (
+                      <button className="link" onClick={() => reindex(c.id)}>
+                        {c.index?.status === "done" ? "Index again" : "Index"}
+                      </button>
+                    )}
+                  </p>
+                )}
+                {c.index?.status === "done" && c.index.summary && <p className="small">{c.index.summary}</p>}
                 {watching?.clipId === c.id && (
                   <div className="player">
                     {watching.urls.proxy ? (

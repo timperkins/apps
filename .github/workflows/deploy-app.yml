@@ -181,6 +181,10 @@ jobs:
             image="$registry/$FIREBASE_PROJECT/apps/$APP-$job:$SHA"
             env_vars=$(jq -r --arg t '${{ inputs.target }}' \
               '(.env // {}) + {APP_ENV: $t} | to_entries | map("\(.key)=\(.value)") | join(",")' <<< "$row")
+            # Secret Manager secrets as env vars: {"GEMINI_API_KEY": "video-gemini-api-key"}.
+            secrets=$(jq -r '(.secrets // {}) | to_entries | map("\(.key)=\(.value):latest") | join(",")' <<< "$row")
+            secret_flag=(--clear-secrets)
+            [ -z "$secrets" ] || secret_flag=(--set-secrets "$secrets")
             "$RUN" docker build -t "$image" "jobs/$job"
             "$RUN" docker push "$image"
             "$RUN" gcloud run jobs deploy "$APP-$job$SUFFIX" --image "$image" \
@@ -188,7 +192,7 @@ jobs:
               --cpu "$(jq -r '.cpu // "1"' <<< "$row")" --memory "$(jq -r '.memory // "2Gi"' <<< "$row")" \
               --task-timeout "$(jq -r '.timeout // "3600s"' <<< "$row")" \
               --tasks 1 --max-retries "$(jq -r '.maxRetries // 1' <<< "$row")" \
-              --set-env-vars "$env_vars" --quiet
+              --set-env-vars "$env_vars" "${secret_flag[@]}" --quiet
             echo "::notice title=jobs::$APP-$job$SUFFIX deployed from $image"
           done
 

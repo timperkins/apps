@@ -4,5 +4,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /job
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY index.mjs lib.mjs ./
+COPY index.mjs lib.mjs gemini.mjs ./
 CMD ["node", "index.mjs"]

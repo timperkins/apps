@@ -3,7 +3,7 @@ import { FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb, footageBucket, storagePrefix } from "../firebase/admin";
 import { startProcessJob } from "./jobs";
 import { clipKey, offsetFromRange, originalPath } from "../resumable";
-import type { Clip, ClipMedia, ClipMediaUrls, ClipProcessing, Project, UploadTicket } from "../types";
+import type { Clip, ClipIndex, ClipMedia, ClipMediaUrls, ClipProcessing, Project, UploadTicket } from "../types";
 
 const projects = () => adminDb().collection("projects");
 const clips = (projectId: string) => projects().doc(projectId).collection("clips");
@@ -46,6 +46,19 @@ function toClip(snap: DocumentSnapshot): Clip {
         }
       : null,
     media: toMedia(d.media),
+    index: toIndex(d.index),
+  };
+}
+
+function toIndex(x: Partial<ClipIndex> | undefined): ClipIndex | null {
+  if (!x?.status) return null;
+  return {
+    status: x.status,
+    error: x.error ?? null,
+    summary: x.summary ?? "",
+    segments: Array.isArray(x.segments) ? x.segments : [],
+    model: x.model ?? null,
+    modelVersion: x.modelVersion ?? null,
   };
 }
 
@@ -206,10 +219,27 @@ export async function completeUpload(projectId: string, clipId: string): Promise
  * Starts the processing job for an uploaded clip and records that on the clip. A job that can't
  * be started doesn't fail the upload: the clip shows the error and can be processed again.
  */
-export async function processClip(projectId: string, clipId: string): Promise<ClipProcessing | null> {
+export async function processClip(
+  projectId: string,
+  clipId: string,
+  { indexOnly = false }: { indexOnly?: boolean } = {},
+): Promise<ClipProcessing | null> {
   const ref = clips(projectId).doc(clipId);
   const snap = await ref.get();
   if (!snap.exists || snap.data()!.status !== "uploaded") return null;
+  if (indexOnly) {
+    // Only Gemini runs again; the media stays as it is.
+    if (!snap.data()!.media?.proxy?.path) return null;
+    await ref.update({ index: { status: "running", error: null, startedAt: FieldValue.serverTimestamp() } });
+    try {
+      if (!(await startProcessJob(projectId, clipId, { indexOnly: true }))) {
+        await ref.update({ index: { status: "failed", error: "No processing job is configured (PROCESS_JOB)." } });
+      }
+    } catch (error) {
+      await ref.update({ index: { status: "failed", error: `Couldn't start indexing: ${(error as Error).message}` } });
+    }
+    return toClip(await ref.get()).processing;
+  }
   // Queued is written before the job starts, so it can't overwrite what a fast job reports.
   await ref.update({
     processing: { status: "queued", error: null, step: null, percent: null, execution: null, startedAt: FieldValue.serverTimestamp() },

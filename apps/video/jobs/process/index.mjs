@@ -6,6 +6,9 @@
 // proxy, save a poster frame, upload the outputs next to the original and record it all on the
 // clip's Firestore document.
 //
+// Then Gemini indexes the proxy into labeled segments (see gemini.mjs) and writes `index`.
+// With INDEX_ONLY=1 the job skips straight to indexing, using the proxy already in storage.
+//
 // Cloud Run's /tmp is in memory, so the original and both outputs have to fit in the job's 16 GiB.
 import { execFile, spawn } from "node:child_process";
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -25,6 +28,7 @@ import {
   sceneArgs,
   transcodeArgs,
 } from "./lib.mjs";
+import { indexClip, indexModel } from "./gemini.mjs";
 
 const run = promisify(execFile);
 const { VIDEO_PROJECT_ID, VIDEO_CLIP_ID, FIRESTORE_DATABASE_ID = "video", STORAGE_BUCKET } = process.env;
@@ -84,19 +88,16 @@ async function probe(file) {
 
 const work = await mkdtemp(join(tmpdir(), "process-"));
 const started = Date.now();
+const local = {
+  original: join(work, "original"),
+  proxy: join(work, "proxy.mp4"),
+  mezzanine: join(work, "mezzanine.mp4"),
+  poster: join(work, "poster.jpg"),
+};
 
-try {
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error("clip not found in Firestore");
-  const { path } = snap.data();
+/** Makes the proxy, mezzanine, scene list and poster, uploads them and records `media`. */
+async function processMedia(path) {
   const paths = outputPaths(path);
-  const local = {
-    original: join(work, "original"),
-    proxy: join(work, "proxy.mp4"),
-    mezzanine: join(work, "mezzanine.mp4"),
-    poster: join(work, "poster.jpg"),
-  };
-
   await ref.update({
     processing: { status: "running", step: "downloading", percent: null, execution, error: null },
   });
@@ -125,10 +126,8 @@ try {
     upload(local.poster, paths.poster, "image/jpeg"),
   ]);
   const mezzanineInfo = describeSource(await probe(local.mezzanine));
-  const sizes = {
-    proxy: (await stat(local.proxy)).size,
-    mezzanine: (await stat(local.mezzanine)).size,
-  };
+  const mezzanineSize = (await stat(local.mezzanine)).size;
+  await rm(local.mezzanine);
 
   const output = (info, size, storagePath) => ({
     path: storagePath,
@@ -138,17 +137,17 @@ try {
     durationSec: info.durationSec,
     size,
   });
-  const result = {
+  const media = {
     source,
-    proxy: output(proxyInfo, sizes.proxy, paths.proxy),
-    mezzanine: output(mezzanineInfo, sizes.mezzanine, paths.mezzanine),
+    proxy: output(proxyInfo, (await stat(local.proxy)).size, paths.proxy),
+    mezzanine: output(mezzanineInfo, mezzanineSize, paths.mezzanine),
     posterPath: paths.poster,
     scenes,
     // How far the proxy's length is from the original's. Near zero means timestamps line up.
     driftSec: Number(((proxyInfo.durationSec ?? 0) - (source.durationSec ?? 0)).toFixed(3)),
   };
   await ref.update({
-    media: result,
+    media,
     processing: {
       status: "done",
       step: null,
@@ -159,7 +158,54 @@ try {
       finishedAt: FieldValue.serverTimestamp(),
     },
   });
-  log("processed", { ...result, seconds: Math.round((Date.now() - started) / 1000) });
+  log("processed", { ...media, seconds: Math.round((Date.now() - started) / 1000) });
+  return media;
+}
+
+/**
+ * Labels the proxy's segments with Gemini and records `index`. A failure here is recorded on
+ * the clip but doesn't fail the job, so a retry doesn't transcode again.
+ */
+async function indexMedia(clip, media) {
+  if (!process.env.GEMINI_API_KEY) {
+    await ref.update({ index: { status: "skipped", error: "No Gemini key is configured (GEMINI_API_KEY)." } });
+    return;
+  }
+  const indexStarted = Date.now();
+  await ref.update({ index: { status: "running", error: null, model: indexModel(), startedAt: FieldValue.serverTimestamp() } });
+  try {
+    const project = (await ref.parent.parent.get()).data() ?? {};
+    const result = await indexClip(local.proxy, {
+      fileName: clip.fileName,
+      durationSec: media.proxy.durationSec ?? media.source.durationSec,
+      scenes: media.scenes,
+      projectName: project.name ?? "",
+      projectNotes: project.notes ?? "",
+    });
+    const seconds = Math.round((Date.now() - indexStarted) / 1000);
+    await ref.update({
+      index: { status: "done", error: null, ...result, seconds, indexedAt: FieldValue.serverTimestamp() },
+    });
+    log("indexed", { segments: result.segments.length, tokens: result.tokens, model: result.modelVersion, seconds });
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    log("indexing failed", { severity: "ERROR", error: message });
+    await ref.update({ index: { status: "failed", error: message, model: indexModel() } }).catch(() => {});
+  }
+}
+
+try {
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("clip not found in Firestore");
+  const clip = snap.data();
+  let media;
+  if (process.env.INDEX_ONLY === "1" && clip.media?.proxy?.path) {
+    media = clip.media;
+    await bucket.file(media.proxy.path).download({ destination: local.proxy });
+  } else {
+    media = await processMedia(clip.path);
+  }
+  await indexMedia(clip, media);
 } catch (error) {
   const message = String(error?.message ?? error);
   log("processing failed", { severity: "ERROR", error: message });
