@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Your doom</title>
+    <meta name="description" content="Head out into the snowy woods, chop wood, and sell it to the camp for eeeddd." />
+    <meta name="theme-color" content="#dfe9f2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Your doom" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='22' width='52' height='20' rx='10' fill='%23a0602f'/%3E%3Ccircle cx='48' cy='32' r='10' fill='%23f2c98b'/%3E%3Ccircle cx='48' cy='32' r='5' fill='none' stroke='%23c9934f' stroke-width='2'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud">
+      <div id="title">YOUR<span>DOOM</span></div>
+      <div id="money" aria-label="eeeddd">
+        <span class="coin">e</span><span id="moneyNum">0</span><span class="unit">eeeddd</span>
+      </div>
+    </div>
+    <div id="hint">Drag anywhere to walk</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
