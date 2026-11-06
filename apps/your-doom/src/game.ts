@@ -40,7 +40,7 @@ const BELT_PATH = [
 const BELT_SPEED = 1.9;
 const BELT_W = 0.5;
 
-type UpgradeId = 'belt' | 'bag' | 'axe';
+type UpgradeId = 'belt' | 'bag' | 'axe' | 'worker';
 interface Upgrade {
   id: UpgradeId;
   name: string;
@@ -55,6 +55,33 @@ interface Upgrade {
 }
 const BAG_STEP = 5; // extra logs per bag level
 const AXE_SPEED = [0.3, 0.24, 0.19, 0.15]; // seconds per swing
+
+// Hired woodcutters walk out through the nearest gate, chop, and bring wood to a drop-off.
+const WORKER_CAPACITY = 6;
+const WORKER_SPEED = 2.6;
+const WORKER_CHOP = 0.5;
+const GATES = [
+  { inner: { x: 0, y: -6.2 }, outer: { x: 0, y: -8 } },
+  { inner: { x: -6.2, y: 0 }, outer: { x: -8, y: 0 } },
+];
+const WORKER_HOME = { x: -4.9, y: 5.6 };
+
+interface Worker {
+  x: number;
+  y: number;
+  face: number;
+  walk: number;
+  moving: boolean;
+  stack: number;
+  state: 'toTree' | 'chop' | 'toDrop' | 'drop';
+  path: { x: number; y: number }[];
+  tree: Tree | null;
+  chopT: number;
+  swing: number;
+  dropT: number;
+  hat: string;
+  coat: string;
+}
 
 const BARK = '#a0602f';
 const BARK_DARK = '#7b4520';
@@ -207,7 +234,9 @@ export class Game {
     { id: 'belt', name: 'Wood belt', ...BELT_DROP, prices: [150], level: 0, paid: 0, payT: 0 },
     { id: 'bag', name: 'Bigger bag', x0: -3.3, y0: -3.6, x1: -1.7, y1: -2.0, prices: [40, 100, 220, 450], level: 0, paid: 0, payT: 0 },
     { id: 'axe', name: 'Sharper axe', x0: -5.5, y0: -3.6, x1: -3.9, y1: -2.0, prices: [60, 160, 380], level: 0, paid: 0, payT: 0 },
+    { id: 'worker', name: 'Hire woodcutter', x0: 0, y0: 2.4, x1: 1.6, y1: 4.0, prices: [80, 200, 400], level: 0, paid: 0, payT: 0 },
   ];
+  private workers: Worker[] = [];
   private pile = 0;
   private pileIncoming = 0;
   private spawnT = 0.6;
@@ -223,6 +252,7 @@ export class Game {
     this.g = canvas.getContext('2d')!;
     input.onGesture(() => sfx.unlockAudio());
     this.load();
+    for (let i = 0; i < this.upgrade('worker').level; i++) this.hireWorker(i);
     hooks.onMoney(this.money, false);
     this.buildWorld();
     this.resize();
@@ -300,10 +330,11 @@ export class Game {
       if (u.paid >= price) {
         u.paid = 0;
         u.level++;
+        if (u.id === 'worker') this.hireWorker(u.level - 1);
         sfx.upgrade();
         const cx = (u.x0 + u.x1) / 2;
         const cy = (u.y0 + u.y1) / 2;
-        this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : `${u.name} ${u.level + 1}!` });
+        this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : u.id === 'worker' ? 'Hired!' : `${u.name} ${u.level + 1}!` });
         for (let i = 0; i < 24; i++) {
           this.particles.push({
             x: cx, y: cy, z: 0.2,
@@ -416,6 +447,7 @@ export class Game {
     this.updateDropping(dt);
     this.updateBelt(dt);
     this.updateUpgrades(dt);
+    this.updateWorkers(dt);
     this.updateCustomers(dt);
     this.updateTrees(dt);
     this.updateEffects(dt);
@@ -526,6 +558,26 @@ export class Game {
     return best;
   }
 
+  /** Nearest tree counting the walk out through a gate. */
+  private nearestTreeByRoute(from: { x: number; y: number }): Tree | null {
+    let best: Tree | null = null;
+    let bd = Infinity;
+    for (const t of this.trees) {
+      if (t.stump || t.grow < 1) continue;
+      let d = 0;
+      let prev = from;
+      for (const q of this.route(from, t)) {
+        d += Math.hypot(q.x - prev.x, q.y - prev.y);
+        prev = q;
+      }
+      if (d < bd) {
+        bd = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
   private updateChopping(dt: number) {
     const p = this.player;
     p.swing = Math.max(0, p.swing - dt * 5);
@@ -617,40 +669,220 @@ export class Game {
       p.dropT -= 0.08;
       const from = { x: p.x, y: p.y, z: 1.0 + p.stack * 0.17 };
       p.stack--;
-      if (atBelt) {
-        const start = BELT_PATH[0];
-        this.flyers.push({
-          from,
-          to: () => ({ x: start.x, y: start.y, z: 0.25 }),
-          t: 0,
-          dur: 0.3,
-          delay: 0,
-          arc: 0.8,
-          spin: 1,
-          onArrive: () => {
-            this.beltItems.push({ d: 0 });
-            sfx.pop();
-          },
-        });
-        continue;
-      }
-      const slot = this.pile + this.pileIncoming;
-      this.pileIncoming++;
+      this.sendLog(from, atBelt);
+    }
+  }
+
+  /** Throw one log from a carrier onto the belt or the counter pile. */
+  private sendLog(from: V3, toBelt: boolean) {
+    if (toBelt) {
+      const start = BELT_PATH[0];
       this.flyers.push({
         from,
-        to: () => pileSlot(slot),
+        to: () => ({ x: start.x, y: start.y, z: 0.25 }),
         t: 0,
-        dur: 0.32,
+        dur: 0.3,
         delay: 0,
-        arc: 1,
+        arc: 0.8,
         spin: 1,
         onArrive: () => {
-          this.pileIncoming--;
-          this.pile++;
+          this.beltItems.push({ d: 0 });
           sfx.pop();
         },
       });
+      return;
     }
+    const slot = this.pile + this.pileIncoming;
+    this.pileIncoming++;
+    this.flyers.push({
+      from,
+      to: () => pileSlot(slot),
+      t: 0,
+      dur: 0.32,
+      delay: 0,
+      arc: 1,
+      spin: 1,
+      onArrive: () => {
+        this.pileIncoming--;
+        this.pile++;
+        sfx.pop();
+      },
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Woodcutters
+  // -------------------------------------------------------------------------
+
+  private hireWorker(i: number) {
+    const looks = [
+      { hat: '#e8862a', coat: '#3f8a4a' },
+      { hat: '#7a4fb5', coat: '#c0892c' },
+      { hat: '#d23f5c', coat: '#3c6fa8' },
+    ];
+    const look = looks[i % looks.length];
+    this.workers.push({
+      x: WORKER_HOME.x,
+      y: WORKER_HOME.y,
+      face: 1,
+      walk: 0,
+      moving: false,
+      stack: 0,
+      state: 'toTree',
+      path: [],
+      tree: null,
+      chopT: 0,
+      swing: 0,
+      dropT: 0,
+      ...look,
+    });
+  }
+
+  /** Waypoints from a to b, going through the best gate when crossing the fence. */
+  private route(a: { x: number; y: number }, b: { x: number; y: number }) {
+    const aIn = inCamp(a.x, a.y);
+    const bIn = inCamp(b.x, b.y);
+    if (aIn === bIn) return [b];
+    const dist = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y);
+    let best = GATES[0];
+    let bd = Infinity;
+    for (const g of GATES) {
+      const d = dist(a, aIn ? g.inner : g.outer) + dist(b, bIn ? g.inner : g.outer);
+      if (d < bd) {
+        bd = d;
+        best = g;
+      }
+    }
+    return aIn ? [best.inner, best.outer, b] : [best.outer, best.inner, b];
+  }
+
+  private pickTree(w: Worker): Tree | null {
+    const claimed = new Set(this.workers.map((o) => o.tree));
+    let best: Tree | null = null;
+    let bd = Infinity;
+    for (const t of this.trees) {
+      if (t.stump || t.grow < 1 || claimed.has(t) || Math.max(Math.abs(t.x), Math.abs(t.y)) > WORLD - 1) continue;
+      // Distance from the nearest gate, so workers stay close to camp.
+      let d = Infinity;
+      for (const g of GATES) d = Math.min(d, Math.hypot(t.x - g.outer.x, t.y - g.outer.y));
+      d += Math.hypot(t.x - w.x, t.y - w.y) * 0.15 + Math.random() * 0.5;
+      if (d < bd) {
+        bd = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  private workerDrop(w: Worker) {
+    const zones: { r: typeof DROP; belt: boolean }[] = [{ r: DROP, belt: false }];
+    if (this.hasBelt) zones.push({ r: BELT_DROP, belt: true });
+    let best = zones[0];
+    let bd = Infinity;
+    for (const z of zones) {
+      const c = { x: (z.r.x0 + z.r.x1) / 2, y: (z.r.y0 + z.r.y1) / 2 };
+      const d = this.route(w, c).reduce((acc, p, i, arr) => acc + Math.hypot(p.x - (i ? arr[i - 1].x : w.x), p.y - (i ? arr[i - 1].y : w.y)), 0);
+      if (d < bd) {
+        bd = d;
+        best = z;
+      }
+    }
+    return best;
+  }
+
+  private updateWorkers(dt: number) {
+    for (const w of this.workers) {
+      w.swing = Math.max(0, w.swing - dt * 4);
+      w.moving = false;
+      if (w.state === 'toTree') {
+        if (!w.tree || w.tree.stump) {
+          w.tree = this.pickTree(w);
+          if (!w.tree) continue;
+          const t = w.tree;
+          const ang = Math.atan2(w.y - t.y, w.x - t.x);
+          w.path = this.route(w, { x: t.x + Math.cos(ang) * 0.75, y: t.y + Math.sin(ang) * 0.75 });
+        }
+        if (this.walkPath(w, dt)) w.state = 'chop';
+      } else if (w.state === 'chop') {
+        const t = w.tree;
+        if (!t || t.stump) {
+          // Someone else felled it.
+          w.state = w.stack >= WORKER_CAPACITY ? 'toDrop' : 'toTree';
+          w.tree = null;
+          w.path = [];
+          continue;
+        }
+        const sx = t.x - t.y - (w.x - w.y);
+        if (Math.abs(sx) > 0.05) w.face = sx > 0 ? 1 : -1;
+        w.chopT += dt;
+        if (w.chopT < WORKER_CHOP) continue;
+        w.chopT = 0;
+        w.swing = 1;
+        t.hp--;
+        t.shake = 0.3;
+        if (this.onScreen(t.x, t.y, 0)) sfx.chop();
+        if (t.hp > 0) continue;
+        t.stump = true;
+        t.regrow = 22 + Math.random() * 8;
+        w.stack = Math.min(WORKER_CAPACITY, w.stack + LOGS_PER_TREE);
+        w.tree = null;
+        if (w.stack >= WORKER_CAPACITY) {
+          w.state = 'toDrop';
+          w.path = [];
+        } else {
+          w.state = 'toTree';
+        }
+      } else if (w.state === 'toDrop') {
+        if (!w.path.length) {
+          const z = this.workerDrop(w);
+          const jx = (Math.random() - 0.5) * 0.8;
+          const jy = (Math.random() - 0.5) * 0.8;
+          w.path = this.route(w, { x: (z.r.x0 + z.r.x1) / 2 + jx, y: (z.r.y0 + z.r.y1) / 2 + jy });
+        }
+        if (this.walkPath(w, dt)) {
+          w.state = 'drop';
+          w.dropT = 0;
+        }
+      } else {
+        const atBelt = this.hasBelt && w.x > BELT_DROP.x0 && w.x < BELT_DROP.x1 && w.y > BELT_DROP.y0 && w.y < BELT_DROP.y1;
+        w.dropT += dt;
+        while (w.dropT >= 0.12 && w.stack > 0) {
+          w.dropT -= 0.12;
+          this.sendLog({ x: w.x, y: w.y, z: 1.0 + w.stack * 0.17 }, atBelt);
+          w.stack--;
+        }
+        if (w.stack <= 0) {
+          w.state = 'toTree';
+          w.tree = null;
+        }
+      }
+    }
+  }
+
+  /** Move along the waypoint path; true once the last point is reached. */
+  private walkPath(w: Worker, dt: number): boolean {
+    let budget = WORKER_SPEED * dt;
+    while (w.path.length && budget > 0) {
+      const t = w.path[0];
+      const dx = t.x - w.x;
+      const dy = t.y - w.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= budget) {
+        w.x = t.x;
+        w.y = t.y;
+        budget -= d;
+        w.path.shift();
+        continue;
+      }
+      w.x += (dx / d) * budget;
+      w.y += (dy / d) * budget;
+      w.moving = true;
+      const sx = dx - dy;
+      if (Math.abs(sx) > 0.02) w.face = sx > 0 ? 1 : -1;
+      budget = 0;
+    }
+    if (w.moving) w.walk += dt * 12;
+    return w.path.length === 0;
   }
 
   private updateCustomers(dt: number) {
@@ -1013,6 +1245,9 @@ export class Game {
     for (const c of this.customers) items.push({ key: c.x + c.y + 0.01, draw: () => this.drawCustomer(c) });
     const p = this.player;
     items.push({ key: p.x + p.y + 0.02, draw: () => this.drawPlayer() });
+    for (const w of this.workers) {
+      if (this.onScreen(w.x, w.y)) items.push({ key: w.x + w.y + 0.015, draw: () => this.drawWorker(w) });
+    }
     for (const q of this.particles) items.push({ key: q.x + q.y + 0.05, draw: () => this.drawParticle(q) });
     items.sort((a, b) => a.key - b.key);
     for (const it of items) it.draw();
@@ -1168,6 +1403,15 @@ export class Game {
       g.closePath();
       g.fillStyle = '#c7ced8';
       g.fill();
+    } else if (u.id === 'worker') {
+      this.ellipse(0, s * 0.02, s * 0.2, s * 0.2, '#eebd94');
+      g.beginPath();
+      g.ellipse(0, -s * 0.03, s * 0.21, s * 0.19, 0, Math.PI, 0);
+      g.fillStyle = '#e8862a';
+      g.fill();
+      this.ellipse(0, -s * 0.25, s * 0.07, s * 0.07, '#f4f1ea');
+      this.ellipse(-s * 0.07, s * 0.04, s * 0.025, s * 0.035, '#2b2f3a');
+      this.ellipse(s * 0.07, s * 0.04, s * 0.025, s * 0.035, '#2b2f3a');
     } else if (u.id === 'bag') {
       this.roundRect(-s * 0.26, -s * 0.28, s * 0.52, s * 0.56, s * 0.14, '#8a5a2b');
       this.roundRect(-s * 0.18, -s * 0.05, s * 0.36, s * 0.22, s * 0.06, '#6f4520');
@@ -1477,6 +1721,43 @@ export class Game {
     }
   }
 
+  private drawAxe(bx: number, by: number, face: number, chopping: boolean, swing: number) {
+    const g = this.g;
+    const u = this.S;
+    const ang = chopping ? -1.2 + (1 - swing) * 2.0 : 0.5;
+    g.save();
+    g.translate(bx + face * u * 0.25, by - u * 0.5);
+    g.scale(face, 1);
+    g.rotate(ang);
+    g.fillStyle = '#7b4a24';
+    g.fillRect(-u * 0.03, -u * 0.5, u * 0.06, u * 0.55);
+    g.beginPath();
+    g.moveTo(u * 0.03, -u * 0.5);
+    g.lineTo(u * 0.22, -u * 0.56);
+    g.lineTo(u * 0.22, -u * 0.32);
+    g.lineTo(u * 0.03, -u * 0.38);
+    g.closePath();
+    g.fillStyle = '#c7ced8';
+    g.fill();
+    g.restore();
+  }
+
+  private drawWorker(w: Worker) {
+    const u = this.S;
+    this.drawPerson(
+      w.x,
+      w.y,
+      { face: w.face, walk: w.walk, moving: w.moving, coat: w.coat, coatDark: shade(w.coat, -0.22), skin: '#eebd94', hat: 'beanie', hatColor: w.hat },
+      (bx, by) => {
+        const sx = bx - w.face * u * 0.22;
+        for (let i = 0; i < w.stack; i++) this.logScreen(sx, by - u * 0.55 - i * u * 0.17, u * 0.72, u * 0.21, 0);
+      },
+      (bx, by) => {
+        if (w.state === 'chop') this.drawAxe(bx, by, w.face, true, w.swing);
+      },
+    );
+  }
+
   private drawCustomer(c: Customer) {
     this.drawPerson(c.x, c.y, {
       face: c.face,
@@ -1586,7 +1867,7 @@ export class Game {
       const cy = (up.y0 + up.y1) / 2;
       if (!this.onScreen(cx, cy)) continue;
       const s = this.project(cx, cy, 0.95);
-      const title = up.id === 'belt' ? up.name : `${up.name} ${up.level + 2}`;
+      const title = up.id === 'belt' || up.id === 'worker' ? up.name : `${up.name} ${up.level + 2}`;
       const fs = Math.max(11, u * 0.28);
       g.font = `${fs}px 'Lilita One', system-ui, sans-serif`;
       g.textAlign = 'center';
@@ -1612,7 +1893,7 @@ export class Game {
         if (Math.hypot(b.x - p.x, b.y - p.y) < Math.hypot(target.x - p.x, target.y - p.y)) target = b;
       }
     } else if (carrying === 0 || !inCamp(p.x, p.y)) {
-      target = this.nearestTree(p.x, p.y, 60);
+      target = inCamp(p.x, p.y) ? this.nearestTreeByRoute(p) : this.nearestTree(p.x, p.y, 60);
     }
     if (!target) return;
     const dx = target.x - p.x;
