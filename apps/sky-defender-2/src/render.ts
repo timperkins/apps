@@ -269,7 +269,7 @@ export class Renderer {
     ctx.translate(0, GROUND_Y); ctx.scale(1.15, 1.15); ctx.translate(-195, -800);
     if (P.lights > .02) {
       for (const [id, x, y, r] of LAMPS) {
-        if (game.b(id).ruined) continue;
+        if (!game.has(id) || game.b(id).ruined) continue;
         ctx.globalAlpha = P.lights * .55;
         ctx.drawImage(puff('#ffc56a'), x - r, y - r, r * 2, r * 2);
       }
@@ -336,7 +336,8 @@ export class Renderer {
         ctx.beginPath(); ctx.roundRect(fx - w / 2, y, w * frac, 1.6, .8); ctx.fill();
       }
       // the building's health in small white figures above it ("0%" once it is ruined)
-      const pct = b.ruined ? 0 : Math.max(1, Math.round(frac * 100));
+      // (in adventure the turret's is a share of a normal turret's, so a new adventure turret reads 20%)
+      const pct = game.adventure && b.id === 'turret' && !b.outpost ? game.turretPct() : b.ruined ? 0 : Math.max(1, Math.round(frac * 100));
       // the turret's sits beside the gun barrel, which would otherwise cross it
       const tx = b.id === 'turret' ? fx + 16 : fx, ty = b.id === 'turret' ? FIRE_Y.turret - 2 : b.def.box[1] - (!b.ruined && frac < 1 ? 5.5 : 2.5);
       ctx.font = `600 4.6px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';

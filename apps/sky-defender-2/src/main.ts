@@ -152,7 +152,7 @@ function setChoice(m: GameMode, d: Difficulty) {
   const hard = 'About twice the planes, firing more often and hitting harder. Points are worth 1.5x.';
   $('diffNote').textContent = m === 'war'
     ? `Hold out for ${WAR_TIME / 60} minutes. Swipe left or right to move between three turrets, and don't shoot down ${WAR_STRIKES} friendly planes.` + (d === 'hard' ? ' Hard: more enemy planes, hitting harder.' : '')
-    : m === 'adventure' ? 'Your turret starts at 20% health. Every plane you shoot down earns 1 iron; spend it in the iron shop on upgrades that you keep between games.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
+    : m === 'adventure' ? 'Just you and one turret, starting at 20% health. Every plane you shoot down earns 1 iron; spend it in the iron shop on upgrades that you keep between games.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : m === 'coop' ? 'Two players: one defends the base, the other flies the enemy planes as the Bomber. Phones join with a QR code.' + (d === 'hard' ? ' Hard: more planes, hitting harder.' : '')
     : d === 'hard' ? hard : 'The standard game.';
   $('startShop').hidden = m !== 'adventure';
@@ -357,9 +357,8 @@ function renderShop() {
     b.addEventListener('click', e => { e.stopPropagation(); if (game.buy(id)) { Sound.pop(); saveAdventure(); ironHud(); renderShop(); } });
     list.appendChild(b);
   }
-  const t = game.b('turret');
   $('shopNote').textContent = shopFrom === 'play'
-    ? `Turret ${Math.round(Math.max(0, t.hp))} of ${Math.round(t.max)} health. The game is paused.`
+    ? `Turret health ${game.turretPct()}% (max ${Math.round(game.advHpShare * 100)}%). The game is paused.`
     : `Your turret starts games at ${Math.round(game.advHpShare * 100)}% health.`;
 }
 function closeShop() {

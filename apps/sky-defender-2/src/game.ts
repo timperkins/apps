@@ -417,7 +417,8 @@ export class Game {
       const out = WAR_POSTS.filter(x => x !== 0).map(x => ({ ...make(def, x, x < 0 ? 'West turret' : 'East turret'), outpost: true }));
       this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
     }
-    if (this.adventure) { const t = this.b('turret'); t.max = t.hp = t.def.hp * this.advHpShare; }
+    // adventure: the turret stands on its own, weak to start
+    if (this.adventure) { this.buildings = this.buildings.filter(b => b.id === 'turret'); const t = this.b('turret'); t.max = t.hp = t.def.hp * this.advHpShare; }
     this.gun2 = null;
     if (!this.coop) this.localGun = 1;
     if (this.coop && this.secondBaseName !== null) {
@@ -458,7 +459,11 @@ export class Game {
   get D() { return DIFFICULTY[this.difficulty]; }
   /** The base's own building of this kind (in war mode the outposts are turrets too, but never this one). */
   b(id: BuildingId): Building { return this.buildings.find(b => b.id === id && !b.outpost)!; }
-  alive(id: BuildingId) { return !this.b(id).ruined; }
+  has(id: BuildingId) { return this.buildings.some(b => b.id === id && !b.outpost); }
+  /** Whether a building is standing. In adventure only the turret is built: radar warnings and supply drops still work, but there is no searchlight. */
+  alive(id: BuildingId) { return this.has(id) ? !this.b(id).ruined : this.adventure && id !== 'search'; }
+  /** The turret's health as a share of a normal turret's (in adventure it starts at 20%). */
+  turretPct() { const t = this.b('turret'); return t.ruined ? 0 : Math.max(1, Math.round(t.hp / t.def.hp * 100)); }
   /** The turret the player is using. */
   post(): Building { return this.posts[this.postI]; }
   get war() { return this.mode === 'war'; }
