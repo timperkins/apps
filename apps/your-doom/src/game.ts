@@ -64,7 +64,12 @@ const GATES = [
   { inner: { x: 0, y: -6.2 }, outer: { x: 0, y: -8 } },
   { inner: { x: -6.2, y: 0 }, outer: { x: -8, y: 0 } },
 ];
-const WORKER_HOME = { x: -4.9, y: 5.6 };
+const HIRE_SPOT = { x: 2.9, y: 2.4 };
+const WORKER_LOOKS = [
+  { hat: '#e8862a', coat: '#3f8a4a' },
+  { hat: '#7a4fb5', coat: '#c0892c' },
+  { hat: '#d23f5c', coat: '#3c6fa8' },
+];
 
 interface Worker {
   x: number;
@@ -715,15 +720,10 @@ export class Game {
   // -------------------------------------------------------------------------
 
   private hireWorker(i: number) {
-    const looks = [
-      { hat: '#e8862a', coat: '#3f8a4a' },
-      { hat: '#7a4fb5', coat: '#c0892c' },
-      { hat: '#d23f5c', coat: '#3c6fa8' },
-    ];
-    const look = looks[i % looks.length];
+    const look = WORKER_LOOKS[i % WORKER_LOOKS.length];
     this.workers.push({
-      x: WORKER_HOME.x,
-      y: WORKER_HOME.y,
+      x: HIRE_SPOT.x,
+      y: HIRE_SPOT.y,
       face: 1,
       walk: 0,
       moving: false,
@@ -1245,6 +1245,11 @@ export class Game {
     for (const c of this.customers) items.push({ key: c.x + c.y + 0.01, draw: () => this.drawCustomer(c) });
     const p = this.player;
     items.push({ key: p.x + p.y + 0.02, draw: () => this.drawPlayer() });
+    // A woodcutter waits by the hire pad until every slot is filled.
+    const hire = this.upgrade('worker');
+    if (hire.prices[hire.level] !== undefined) {
+      items.push({ key: HIRE_SPOT.x + HIRE_SPOT.y, draw: () => this.drawCandidate() });
+    }
     for (const w of this.workers) {
       if (this.onScreen(w.x, w.y)) items.push({ key: w.x + w.y + 0.015, draw: () => this.drawWorker(w) });
     }
@@ -1740,6 +1745,19 @@ export class Game {
     g.fillStyle = '#c7ced8';
     g.fill();
     g.restore();
+  }
+
+  private drawCandidate() {
+    const u = this.S;
+    const look = WORKER_LOOKS[this.upgrade('worker').level % WORKER_LOOKS.length];
+    const wave = Math.sin(this.time * 3);
+    this.drawPerson(
+      HIRE_SPOT.x,
+      HIRE_SPOT.y,
+      { face: -1, walk: 0, moving: false, coat: look.coat, coatDark: shade(look.coat, -0.22), skin: '#eebd94', hat: 'beanie', hatColor: look.hat },
+    );
+    const s = this.project(HIRE_SPOT.x, HIRE_SPOT.y, 1.6);
+    this.label(s.x, s.y - Math.abs(wave) * u * 0.08, 'Hire me!', 'rgba(63,138,74,0.95)');
   }
 
   private drawWorker(w: Worker) {
