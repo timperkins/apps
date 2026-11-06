@@ -111,3 +111,171 @@ body {
 #hint.hide {
   opacity: 0;
 }
+
+#hudRight {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+#menuBtn {
+  pointer-events: auto;
+  font: inherit;
+  font-size: 17px;
+  color: #5a3a00;
+  background: linear-gradient(#ffe27a, #f7c844);
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  box-shadow: 0 3px 0 #b8800f;
+  cursor: pointer;
+}
+
+#menuBtn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #b8800f;
+}
+
+#menu {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 38, 56, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 10;
+}
+
+#menu[hidden] {
+  display: none;
+}
+
+.sheet {
+  background: #fdf8ef;
+  width: 100%;
+  max-width: 460px;
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: 22px 22px 0 0;
+  padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px);
+  box-sizing: border-box;
+  color: var(--ink);
+}
+
+@media (min-width: 600px) {
+  #menu {
+    align-items: center;
+  }
+  .sheet {
+    border-radius: 22px;
+  }
+}
+
+.sheetHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sheet h2 {
+  margin: 0;
+  font-weight: 400;
+  font-size: 28px;
+}
+
+#menuClose {
+  font: inherit;
+  font-size: 20px;
+  background: #ece3d3;
+  color: var(--ink);
+  border: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+#upList {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#upList li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 10px 12px;
+  box-shadow: 0 2px 0 #e6dccb;
+}
+
+#upList .icon {
+  font-size: 30px;
+  width: 40px;
+  text-align: center;
+}
+
+#upList .info {
+  flex: 1;
+  min-width: 0;
+}
+
+#upList .name {
+  font-size: 19px;
+}
+
+#upList .lvl {
+  font-size: 13px;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+#upList .desc {
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+#upList .buy {
+  font: inherit;
+  font-size: 16px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  min-width: 84px;
+  background: linear-gradient(#ffe27a, #f7c844);
+  color: #5a3a00;
+  box-shadow: 0 3px 0 #b8800f;
+  cursor: pointer;
+}
+
+#upList .buy:disabled {
+  background: #e5e0d6;
+  color: #9a9284;
+  box-shadow: 0 3px 0 #cbc3b4;
+  cursor: default;
+}
+
+#resetBtn {
+  font: inherit;
+  font-size: 17px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f1e3e0;
+  color: #b0392a;
+  cursor: pointer;
+}
+
+#resetBtn.confirm {
+  background: #d8452f;
+  color: #fff;
+}

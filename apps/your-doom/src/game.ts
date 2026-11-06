@@ -40,7 +40,7 @@ const BELT_PATH = [
 const BELT_SPEED = 1.9;
 const BELT_W = 0.5;
 
-type UpgradeId = 'belt' | 'bag' | 'axe' | 'worker';
+export type UpgradeId = 'belt' | 'bag' | 'axe' | 'worker' | 'boots' | 'price' | 'crowd' | 'grow' | 'bigtree';
 interface Upgrade {
   id: UpgradeId;
   name: string;
@@ -52,6 +52,8 @@ interface Upgrade {
   level: number;
   paid: number;
   payT: number;
+  /** Menu-only upgrades have no pad in the camp. */
+  menuOnly?: boolean;
 }
 const BAG_STEP = 5; // extra logs per bag level
 const AXE_SPEED = [0.3, 0.24, 0.19, 0.15]; // seconds per swing
@@ -240,6 +242,11 @@ export class Game {
     { id: 'bag', name: 'Bigger bag', x0: -3.3, y0: -3.6, x1: -1.7, y1: -2.0, prices: [40, 100, 220, 450], level: 0, paid: 0, payT: 0 },
     { id: 'axe', name: 'Sharper axe', x0: -5.5, y0: -3.6, x1: -3.9, y1: -2.0, prices: [60, 160, 380], level: 0, paid: 0, payT: 0 },
     { id: 'worker', name: 'Hire woodcutter', x0: 0, y0: 2.4, x1: 1.6, y1: 4.0, prices: [80, 200, 400], level: 0, paid: 0, payT: 0 },
+    { id: 'boots', name: 'Snow boots', x0: 0, y0: 0, x1: 0, y1: 0, prices: [50, 150, 350], level: 0, paid: 0, payT: 0, menuOnly: true },
+    { id: 'price', name: 'Fancy wood', x0: 0, y0: 0, x1: 0, y1: 0, prices: [120, 300, 700], level: 0, paid: 0, payT: 0, menuOnly: true },
+    { id: 'crowd', name: 'Town sign', x0: 0, y0: 0, x1: 0, y1: 0, prices: [90], level: 0, paid: 0, payT: 0, menuOnly: true },
+    { id: 'grow', name: 'Tree fertilizer', x0: 0, y0: 0, x1: 0, y1: 0, prices: [70, 200], level: 0, paid: 0, payT: 0, menuOnly: true },
+    { id: 'bigtree', name: 'Giant trees', x0: 0, y0: 0, x1: 0, y1: 0, prices: [250], level: 0, paid: 0, payT: 0, menuOnly: true },
   ];
   private workers: Worker[] = [];
   private pile = 0;
@@ -283,7 +290,10 @@ export class Game {
     }
   }
 
+  private saveBlocked = false;
+
   private save() {
+    if (this.saveBlocked) return;
     const upgrades: Record<string, { level: number; paid: number }> = {};
     for (const u of this.upgrades) upgrades[u.id] = { level: u.level, paid: u.paid };
     try {
@@ -305,6 +315,18 @@ export class Game {
     return AXE_SPEED[this.upgrade('axe').level];
   }
 
+  private get price() {
+    return PRICE + 5 * this.upgrade('price').level;
+  }
+
+  private get logsPerTree() {
+    return LOGS_PER_TREE + this.upgrade('bigtree').level;
+  }
+
+  private regrowTime() {
+    return (22 + Math.random() * 8) * [1, 0.6, 0.35][this.upgrade('grow').level];
+  }
+
   private get hasBelt() {
     return this.upgrade('belt').level > 0;
   }
@@ -313,7 +335,7 @@ export class Game {
     const p = this.player;
     for (const u of this.upgrades) {
       const price = u.prices[u.level];
-      if (price === undefined) continue;
+      if (price === undefined || u.menuOnly) continue;
       const inside = p.x > u.x0 && p.x < u.x1 && p.y > u.y0 && p.y < u.y1;
       if (!inside || this.money <= 0) {
         u.payT = -0.25; // short pause before paying starts
@@ -332,25 +354,85 @@ export class Game {
         this.coins.push({ x: from.x, y: from.y, t: 0, dur: 0.35, toWorld: { x: (u.x0 + u.x1) / 2, y: (u.y0 + u.y1) / 2, z: 0 }, onArrive: () => {} });
       }
       if (!paidNow) continue;
-      if (u.paid >= price) {
-        u.paid = 0;
-        u.level++;
-        if (u.id === 'worker') this.hireWorker(u.level - 1);
-        sfx.upgrade();
-        const cx = (u.x0 + u.x1) / 2;
-        const cy = (u.y0 + u.y1) / 2;
-        this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : u.id === 'worker' ? 'Hired!' : `${u.name} ${u.level + 1}!` });
-        for (let i = 0; i < 24; i++) {
-          this.particles.push({
-            x: cx, y: cy, z: 0.2,
-            vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: 3 + Math.random() * 3,
-            life: 1, max: 1, color: ['#ffd23a', '#ffffff', '#ff7a1a', '#3fbf7f'][i % 4], size: 0.07, gravity: 9,
-          });
-        }
-      }
+      if (u.paid >= price) this.completeUpgrade(u);
       this.hooks.onMoney(this.money, false);
       this.save();
     }
+  }
+
+  private completeUpgrade(u: Upgrade) {
+    u.paid = 0;
+    u.level++;
+    if (u.id === 'worker') this.hireWorker(u.level - 1);
+    sfx.upgrade();
+    const cx = u.menuOnly ? this.player.x : (u.x0 + u.x1) / 2;
+    const cy = u.menuOnly ? this.player.y : (u.y0 + u.y1) / 2;
+    this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : u.id === 'worker' ? 'Hired!' : `${u.name} ${u.level + 1}!` });
+    for (let i = 0; i < 24; i++) {
+      this.particles.push({
+        x: cx, y: cy, z: 0.2,
+        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: 3 + Math.random() * 3,
+        life: 1, max: 1, color: ['#ffd23a', '#ffffff', '#ff7a1a', '#3fbf7f'][i % 4], size: 0.07, gravity: 9,
+      });
+    }
+  }
+
+  // --- Public API for the upgrades menu ---------------------------------------
+
+  get eeeddd() {
+    return this.money;
+  }
+
+  upgradeList() {
+    const describe: Record<UpgradeId, (level: number) => string> = {
+      belt: () => 'Drop wood by the north gate and a belt carries it to the counter.',
+      bag: (l) => `Carry ${BASE_CAPACITY + l * BAG_STEP} → ${BASE_CAPACITY + (l + 1) * BAG_STEP} logs.`,
+      axe: () => 'Chop trees faster.',
+      worker: (l) => `A helper who chops trees and brings the wood back. You have ${l} of ${this.upgrade('worker').prices.length}.`,
+      boots: () => 'Walk 15% faster.',
+      price: (l) => `People pay ${PRICE + 5 * l} → ${PRICE + 5 * (l + 1)} eeeddd per log.`,
+      crowd: () => 'Twice as many townspeople come to buy wood.',
+      grow: () => 'Chopped trees grow back faster.',
+      bigtree: () => `Every tree gives ${LOGS_PER_TREE + 1} logs.`,
+    };
+    // New menu-only upgrades first, then the ones that also have pads in camp.
+    const ordered = [...this.upgrades.filter((u) => u.menuOnly), ...this.upgrades.filter((u) => !u.menuOnly)];
+    return ordered.map((u) => {
+      const price = u.prices[u.level];
+      return {
+        id: u.id,
+        name: u.name,
+        level: u.level,
+        maxLevel: u.prices.length,
+        cost: price === undefined ? null : price - u.paid,
+        text: describe[u.id](u.level),
+      };
+    });
+  }
+
+  /** Buy the next level of an upgrade outright. Returns false if it's maxed or too expensive. */
+  buy(id: UpgradeId): boolean {
+    const u = this.upgrade(id);
+    const price = u.prices[u.level];
+    if (price === undefined) return false;
+    const cost = price - u.paid;
+    if (this.money < cost) return false;
+    this.money -= cost;
+    this.completeUpgrade(u);
+    this.hooks.onMoney(this.money, true);
+    this.save();
+    return true;
+  }
+
+  /** Wipe the save. The page reloads afterwards to start fresh. */
+  resetSave() {
+    try {
+      localStorage.removeItem(SAVE_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+    this.money = 0;
+    this.saveBlocked = true;
   }
 
   private updateBelt(dt: number) {
@@ -474,8 +556,9 @@ export class Game {
     let wx = (d.x / ISO_X + d.y / ISO_Y) / 2;
     let wy = (d.y / ISO_Y - d.x / ISO_X) / 2;
     const wl = Math.hypot(wx, wy) || 1;
-    wx = (wx / wl) * mag * SPEED * dt;
-    wy = (wy / wl) * mag * SPEED * dt;
+    const speed = SPEED * (1 + 0.15 * this.upgrade('boots').level);
+    wx = (wx / wl) * mag * speed * dt;
+    wy = (wy / wl) * mag * speed * dt;
     const ox = p.x;
     const oy = p.y;
     p.x += wx;
@@ -622,7 +705,7 @@ export class Game {
 
     // Timber!
     tree.stump = true;
-    tree.regrow = 22 + Math.random() * 8;
+    tree.regrow = this.regrowTime();
     sfx.timber();
     for (let i = 0; i < 14; i++) {
       this.particles.push({
@@ -639,7 +722,7 @@ export class Game {
         gravity: 3,
       });
     }
-    const count = Math.min(LOGS_PER_TREE, room);
+    const count = Math.min(this.logsPerTree, room);
     for (let i = 0; i < count; i++) {
       p.incoming++;
       const from = { x: tree.x, y: tree.y, z: 0.8 + i * 0.3 };
@@ -823,8 +906,8 @@ export class Game {
         if (this.onScreen(t.x, t.y, 0)) sfx.chop();
         if (t.hp > 0) continue;
         t.stump = true;
-        t.regrow = 22 + Math.random() * 8;
-        w.stack = Math.min(WORKER_CAPACITY, w.stack + LOGS_PER_TREE);
+        t.regrow = this.regrowTime();
+        w.stack = Math.min(WORKER_CAPACITY, w.stack + this.logsPerTree);
         w.tree = null;
         if (w.stack >= WORKER_CAPACITY) {
           w.state = 'toDrop';
@@ -888,8 +971,9 @@ export class Game {
   private updateCustomers(dt: number) {
     const waiting = this.customers.filter((c) => !c.leaving);
     this.spawnT -= dt;
-    if (this.spawnT <= 0 && waiting.length < MAX_QUEUE) {
-      this.spawnT = 2.5 + Math.random() * 3;
+    const crowd = this.upgrade('crowd').level;
+    if (this.spawnT <= 0 && waiting.length < MAX_QUEUE + crowd) {
+      this.spawnT = (2.5 + Math.random() * 3) / (1 + crowd);
       const coats = ['#3f8fa6', '#2f7d6d', '#5a6fb8', '#b85a6f', '#8a6bb8', '#d0813a'];
       const skins = ['#f5cfa7', '#e2a77f', '#b57a52', '#8a5636'];
       const coat = coats[Math.floor(Math.random() * coats.length)];
@@ -970,7 +1054,7 @@ export class Game {
   }
 
   private sell(c: Customer) {
-    this.texts.push({ x: c.x, y: c.y, z: 1.9, t: 0, text: `+${PRICE}` });
+    this.texts.push({ x: c.x, y: c.y, z: 1.9, t: 0, text: `+${this.price}` });
     const s = this.project(c.x, c.y, 1.6);
     this.coins.push({
       x: s.x,
@@ -978,7 +1062,7 @@ export class Game {
       t: 0,
       dur: 0.55,
       onArrive: () => {
-        this.money += PRICE;
+        this.money += this.price;
         this.save();
         this.hooks.onMoney(this.money, true);
         sfx.coin();
@@ -1302,7 +1386,7 @@ export class Game {
     this.dropZone(DROP);
 
     this.drawBelt();
-    for (const u of this.upgrades) this.drawPad(u);
+    for (const u of this.upgrades) if (!u.menuOnly) this.drawPad(u);
 
     // Footprints.
     for (const f of this.footprints) {
@@ -1880,7 +1964,7 @@ export class Game {
     // Upgrade pad labels.
     for (const up of this.upgrades) {
       const price = up.prices[up.level];
-      if (price === undefined) continue;
+      if (price === undefined || up.menuOnly) continue;
       const cx = (up.x0 + up.x1) / 2;
       const cy = (up.y0 + up.y1) / 2;
       if (!this.onScreen(cx, cy)) continue;

@@ -11,6 +11,8 @@ A snowy isometric wood-gathering game at [your-doom.trom.dev](https://your-doom.
   - **Sharper axe** (60 / 160 / 380): chop faster.
   - **Hire woodcutter** (80 / 200 / 400): up to 3 helpers who walk out, chop trees and bring the wood to the nearest drop-off (the belt too, once built).
 
+- Tap **Upgrades** (top right) for the full list, including menu-only upgrades: Snow boots (walk faster), Fancy wood (+5 eeeddd per log), Town sign (more customers), Tree fertilizer (faster regrowth) and Giant trees (4 logs per tree). **Start over** at the bottom wipes your save (tap twice to confirm).
+
 Controls: drag anywhere on touch screens, WASD or arrow keys on desktop.
 Progress (eeeddd and upgrades) is saved in the browser's localStorage. No server or database.
 

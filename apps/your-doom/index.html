@@ -21,8 +21,21 @@
     <canvas id="c"></canvas>
     <div id="hud">
       <div id="title">YOUR<span>DOOM</span></div>
-      <div id="money" aria-label="eeeddd">
-        <span class="coin">e</span><span id="moneyNum">0</span><span class="unit">eeeddd</span>
+      <div id="hudRight">
+        <div id="money" aria-label="eeeddd">
+          <span class="coin">e</span><span id="moneyNum">0</span><span class="unit">eeeddd</span>
+        </div>
+        <button id="menuBtn" type="button">⬆ Upgrades</button>
+      </div>
+    </div>
+    <div id="menu" hidden>
+      <div class="sheet" role="dialog" aria-label="Upgrades">
+        <div class="sheetHead">
+          <h2>Upgrades</h2>
+          <button id="menuClose" type="button" aria-label="Close">✕</button>
+        </div>
+        <ul id="upList"></ul>
+        <button id="resetBtn" type="button">Start over</button>
       </div>
     </div>
     <div id="hint">Drag anywhere to walk</div>
