@@ -13,6 +13,8 @@ A snowy isometric wood-gathering game at [your-doom.trom.dev](https://your-doom.
 
 - Tap **Upgrades** (top right) for the full list, including menu-only upgrades: Snow boots (walk faster), Fancy wood (+5 eeeddd per log), Town sign (more customers), Tree fertilizer (faster regrowth) and Giant trees (4 logs per tree). **Start over** at the bottom wipes your save (tap twice to confirm).
 
+When an upgrade is maxed out, a new one takes its place (on its pad and in the menu, marked NEW): Turbo belt, Wood sled, Chainsaw, Woodcutter training, Ice skates, Royal wood, Town market, Magic seeds and Mega trees.
+
 Extra fun:
 - **Goals** at the bottom of the screen pay bonus eeeddd when you finish them.
 - **Golden trees** appear now and then (the arrow points to them) and burst into 100 eeeddd.

@@ -62,6 +62,15 @@ const icons: Record<UpgradeId, string> = {
   crowd: '🪧',
   grow: '🌱',
   bigtree: '🌲',
+  beltspeed: '⚡',
+  sled: '🛷',
+  chainsaw: '🪚',
+  crew: '💪',
+  skates: '⛸️',
+  royal: '👑',
+  market: '🏪',
+  seeds: '🪄',
+  megatree: '🌳',
 };
 
 function renderMenu() {
@@ -74,7 +83,7 @@ function renderMenu() {
     li.innerHTML = `
       <div class="icon">${icons[u.id]}</div>
       <div class="info">
-        <div class="name">${u.name}<span class="lvl">${lvl}</span></div>
+        <div class="name">${u.name}<span class="lvl">${lvl}</span>${u.isNew && !maxed ? '<span class="new">NEW</span>' : ''}</div>
         <div class="desc">${maxed ? 'All done!' : u.text}</div>
       </div>
       <button class="buy" type="button">${maxed ? 'Max' : `${u.cost} eeeddd`}</button>`;

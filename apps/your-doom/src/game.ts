@@ -40,7 +40,10 @@ const BELT_PATH = [
 const BELT_SPEED = 1.9;
 const BELT_W = 0.5;
 
-export type UpgradeId = 'belt' | 'bag' | 'axe' | 'worker' | 'boots' | 'price' | 'crowd' | 'grow' | 'bigtree';
+export type UpgradeId =
+  | 'belt' | 'bag' | 'axe' | 'worker' | 'boots' | 'price' | 'crowd' | 'grow' | 'bigtree'
+  // Second tier: each appears once the upgrade it follows is maxed out.
+  | 'beltspeed' | 'sled' | 'chainsaw' | 'crew' | 'skates' | 'royal' | 'market' | 'seeds' | 'megatree';
 interface Upgrade {
   id: UpgradeId;
   name: string;
@@ -54,6 +57,8 @@ interface Upgrade {
   payT: number;
   /** Menu-only upgrades have no pad in the camp. */
   menuOnly?: boolean;
+  /** Only offered once this other upgrade is maxed out (it takes over its pad). */
+  after?: UpgradeId;
 }
 const BAG_STEP = 5; // extra logs per bag level
 const AXE_SPEED = [0.3, 0.24, 0.19, 0.15]; // seconds per swing
@@ -279,7 +284,7 @@ export class Game {
   private flakes: { x: number; y: number; r: number; v: number; ph: number }[] = [];
 
   private beltItems: { d: number }[] = [];
-  private upgrades: Upgrade[] = [
+  private baseUpgrades: Upgrade[] = [
     { id: 'belt', name: 'Wood belt', ...BELT_DROP, prices: [150], level: 0, paid: 0, payT: 0 },
     { id: 'bag', name: 'Bigger bag', x0: -3.3, y0: -3.6, x1: -1.7, y1: -2.0, prices: [40, 100, 220, 450], level: 0, paid: 0, payT: 0 },
     { id: 'axe', name: 'Sharper axe', x0: -5.5, y0: -3.6, x1: -3.9, y1: -2.0, prices: [60, 160, 380], level: 0, paid: 0, payT: 0 },
@@ -289,6 +294,25 @@ export class Game {
     { id: 'crowd', name: 'Town sign', x0: 0, y0: 0, x1: 0, y1: 0, prices: [90], level: 0, paid: 0, payT: 0, menuOnly: true },
     { id: 'grow', name: 'Tree fertilizer', x0: 0, y0: 0, x1: 0, y1: 0, prices: [70, 200], level: 0, paid: 0, payT: 0, menuOnly: true },
     { id: 'bigtree', name: 'Giant trees', x0: 0, y0: 0, x1: 0, y1: 0, prices: [250], level: 0, paid: 0, payT: 0, menuOnly: true },
+  ];
+  private upgrades: Upgrade[] = [
+    ...this.baseUpgrades,
+    ...(
+      [
+        ['beltspeed', 'Turbo belt', 'belt', [200, 450]],
+        ['sled', 'Wood sled', 'bag', [600, 1200]],
+        ['chainsaw', 'Chainsaw', 'axe', [700, 1500]],
+        ['crew', 'Woodcutter training', 'worker', [250, 600]],
+        ['skates', 'Ice skates', 'boots', [400, 900]],
+        ['royal', 'Royal wood', 'price', [1500, 3000]],
+        ['market', 'Town market', 'crowd', [400]],
+        ['seeds', 'Magic seeds', 'grow', [500]],
+        ['megatree', 'Mega trees', 'bigtree', [800]],
+      ] as [UpgradeId, string, UpgradeId, number[]][]
+    ).map(([id, name, after, prices]) => {
+      const parent = this.baseUpgrades.find((u) => u.id === after)!;
+      return { ...parent, id, name, after, prices, level: 0, paid: 0, payT: 0 };
+    }),
   ];
   private workers: Worker[] = [];
   private stats: Record<Stat, number> = { trees: 0, sold: 0, upgrades: 0, golden: 0, hired: 0, earned: 0, belt: 0, escapes: 0 };
@@ -358,24 +382,51 @@ export class Game {
     return this.upgrades.find((u) => u.id === id)!;
   }
 
+  private lvl(id: UpgradeId) {
+    return this.upgrade(id).level;
+  }
+
+  private maxed(u: Upgrade) {
+    return u.level >= u.prices.length;
+  }
+
+  /** Offered right now: its parent (if any) is maxed and it isn't maxed itself. */
+  private available(u: Upgrade) {
+    return !this.maxed(u) && (!u.after || this.maxed(this.upgrade(u.after)));
+  }
+
   private get capacity() {
-    return BASE_CAPACITY + this.upgrade('bag').level * BAG_STEP;
+    return BASE_CAPACITY + this.lvl('bag') * BAG_STEP + this.lvl('sled') * 10;
   }
 
   private get chopInterval() {
-    return AXE_SPEED[this.upgrade('axe').level];
+    const saw = this.lvl('chainsaw');
+    return saw > 0 ? [0.11, 0.08][saw - 1] : AXE_SPEED[this.lvl('axe')];
   }
 
   private get price() {
-    return PRICE + 5 * this.upgrade('price').level;
+    return PRICE + 5 * this.lvl('price') + 10 * this.lvl('royal');
   }
 
   private get logsPerTree() {
-    return LOGS_PER_TREE + this.upgrade('bigtree').level;
+    return LOGS_PER_TREE + this.lvl('bigtree') + this.lvl('megatree');
+  }
+
+  private get beltSpeed() {
+    return BELT_SPEED * [1, 1.6, 2.2][this.lvl('beltspeed')];
+  }
+
+  private get workerCapacity() {
+    return WORKER_CAPACITY + 3 * this.lvl('crew');
+  }
+
+  private get workerSpeed() {
+    return WORKER_SPEED * (1 + 0.35 * this.lvl('crew'));
   }
 
   private regrowTime() {
-    return (22 + Math.random() * 8) * [1, 0.6, 0.35][this.upgrade('grow').level];
+    const k = this.lvl('seeds') > 0 ? 0.15 : [1, 0.6, 0.35][this.lvl('grow')];
+    return (22 + Math.random() * 8) * k;
   }
 
   private get hasBelt() {
@@ -386,7 +437,7 @@ export class Game {
     const p = this.player;
     for (const u of this.upgrades) {
       const price = u.prices[u.level];
-      if (price === undefined || u.menuOnly) continue;
+      if (price === undefined || u.menuOnly || !this.available(u)) continue;
       const inside = p.x > u.x0 && p.x < u.x1 && p.y > u.y0 && p.y < u.y1;
       if (!inside || this.money <= 0) {
         u.payT = -0.25; // short pause before paying starts
@@ -465,7 +516,9 @@ export class Game {
     sfx.upgrade();
     const cx = u.menuOnly ? this.player.x : (u.x0 + u.x1) / 2;
     const cy = u.menuOnly ? this.player.y : (u.y0 + u.y1) / 2;
-    this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : u.id === 'worker' ? 'Hired!' : `${u.name} ${u.level + 1}!` });
+    this.texts.push({ x: cx, y: cy, z: 1.2, t: 0, text: u.id === 'belt' ? 'Belt built!' : u.id === 'worker' ? 'Hired!' : `${u.name}!` });
+    const next = this.upgrades.find((n) => n.after === u.id);
+    if (next && this.maxed(u)) this.hooks.onToast(`New upgrade: ${next.name}!`);
     for (let i = 0; i < 24; i++) {
       this.particles.push({
         x: cx, y: cy, z: 0.2,
@@ -492,9 +545,24 @@ export class Game {
       crowd: () => 'Twice as many townspeople come to buy wood.',
       grow: () => 'Chopped trees grow back faster.',
       bigtree: () => `Every tree gives ${LOGS_PER_TREE + 1} logs.`,
+      beltspeed: () => 'The belt runs faster.',
+      sled: () => `Carry 10 more logs (now ${this.capacity}).`,
+      chainsaw: () => 'Chop trees super fast.',
+      crew: () => 'Woodcutters walk faster and carry 3 more logs.',
+      skates: () => 'Walk another 15% faster.',
+      royal: () => `People pay ${this.price} → ${this.price + 10} eeeddd per log.`,
+      market: () => 'Even more townspeople come to buy.',
+      seeds: () => 'Trees grow back almost right away.',
+      megatree: () => `Every tree gives ${this.logsPerTree + 1} logs.`,
     };
-    // New menu-only upgrades first, then the ones that also have pads in camp.
-    const ordered = [...this.upgrades.filter((u) => u.menuOnly), ...this.upgrades.filter((u) => !u.menuOnly)];
+    // One row per upgrade slot: a maxed upgrade is replaced by the one that follows it.
+    const shown = this.upgrades.filter((u) => {
+      if (u.after && !this.maxed(this.upgrade(u.after))) return false;
+      const next = this.upgrades.find((n) => n.after === u.id);
+      return !(next && this.maxed(u));
+    });
+    // New and menu-only upgrades first, then the ones that also have pads in camp.
+    const ordered = [...shown.filter((u) => u.menuOnly), ...shown.filter((u) => !u.menuOnly)];
     return ordered.map((u) => {
       const price = u.prices[u.level];
       return {
@@ -503,6 +571,7 @@ export class Game {
         level: u.level,
         maxLevel: u.prices.length,
         cost: price === undefined ? null : price - u.paid,
+        isNew: !!u.after,
         text: describe[u.id](u.level),
       };
     });
@@ -512,7 +581,7 @@ export class Game {
   buy(id: UpgradeId): boolean {
     const u = this.upgrade(id);
     const price = u.prices[u.level];
-    if (price === undefined) return false;
+    if (price === undefined || !this.available(u)) return false;
     const cost = price - u.paid;
     if (this.money < cost) return false;
     this.money -= cost;
@@ -535,7 +604,7 @@ export class Game {
 
   private updateBelt(dt: number) {
     const len = beltLength();
-    for (const it of this.beltItems) it.d += dt * BELT_SPEED;
+    for (const it of this.beltItems) it.d += dt * this.beltSpeed;
     const done = this.beltItems.filter((it) => it.d >= len);
     this.beltItems = this.beltItems.filter((it) => it.d < len);
     for (const _ of done) {
@@ -657,7 +726,7 @@ export class Game {
     let wx = (d.x / ISO_X + d.y / ISO_Y) / 2;
     let wy = (d.y / ISO_Y - d.x / ISO_X) / 2;
     const wl = Math.hypot(wx, wy) || 1;
-    const speed = SPEED * (1 + 0.15 * this.upgrade('boots').level);
+    const speed = SPEED * (1 + 0.15 * this.lvl('boots') + 0.15 * this.lvl('skates'));
     wx = (wx / wl) * mag * speed * dt;
     wy = (wy / wl) * mag * speed * dt;
     const ox = p.x;
@@ -997,7 +1066,7 @@ export class Game {
         const t = w.tree;
         if (!t || t.stump) {
           // Someone else felled it.
-          w.state = w.stack >= WORKER_CAPACITY ? 'toDrop' : 'toTree';
+          w.state = w.stack >= this.workerCapacity ? 'toDrop' : 'toTree';
           w.tree = null;
           w.path = [];
           continue;
@@ -1014,9 +1083,9 @@ export class Game {
         if (t.hp > 0) continue;
         t.stump = true;
         t.regrow = this.regrowTime();
-        w.stack = Math.min(WORKER_CAPACITY, w.stack + this.logsPerTree);
+        w.stack = Math.min(this.workerCapacity, w.stack + this.logsPerTree);
         w.tree = null;
-        if (w.stack >= WORKER_CAPACITY) {
+        if (w.stack >= this.workerCapacity) {
           w.state = 'toDrop';
           w.path = [];
         } else {
@@ -1051,7 +1120,7 @@ export class Game {
 
   /** Move along the waypoint path; true once the last point is reached. */
   private walkPath(w: Worker, dt: number): boolean {
-    let budget = WORKER_SPEED * dt;
+    let budget = this.workerSpeed * dt;
     while (w.path.length && budget > 0) {
       const t = w.path[0];
       const dx = t.x - w.x;
@@ -1078,9 +1147,9 @@ export class Game {
   private updateCustomers(dt: number) {
     const waiting = this.customers.filter((c) => !c.leaving);
     this.spawnT -= dt;
-    const crowd = this.upgrade('crowd').level;
+    const crowd = this.lvl('crowd');
     if (this.spawnT <= 0 && waiting.length < MAX_QUEUE + crowd) {
-      this.spawnT = (2.5 + Math.random() * 3) / (1 + crowd);
+      this.spawnT = (2.5 + Math.random() * 3) / (1 + crowd + this.lvl('market'));
       const coats = ['#3f8fa6', '#2f7d6d', '#5a6fb8', '#b85a6f', '#8a6bb8', '#d0813a'];
       const skins = ['#f5cfa7', '#e2a77f', '#b57a52', '#8a5636'];
       const coat = coats[Math.floor(Math.random() * coats.length)];
@@ -1680,7 +1749,7 @@ export class Game {
     this.dropZone(DROP);
 
     this.drawBelt();
-    for (const u of this.upgrades) if (!u.menuOnly) this.drawPad(u);
+    for (const u of this.upgrades) if (!u.menuOnly && this.available(u)) this.drawPad(u);
 
     // Footprints.
     for (const f of this.footprints) {
@@ -1740,7 +1809,7 @@ export class Game {
     g.strokeStyle = 'rgba(255,255,255,0.22)';
     g.lineWidth = Math.max(1, this.S * 0.05);
     const len = beltLength();
-    const offset = built ? (this.time * BELT_SPEED) % 0.5 : 0;
+    const offset = built ? (this.time * this.beltSpeed) % 0.5 : 0;
     for (let d = offset; d < len; d += 0.5) {
       const p = beltPoint(d);
       const nx = p.axis === 'x' ? 0 : 1;
@@ -1774,7 +1843,8 @@ export class Game {
     const s = this.S;
     g.save();
     g.translate(c.x, c.y);
-    if (u.id === 'axe') {
+    const kind = u.after ?? u.id;
+    if (kind === 'axe') {
       g.rotate(-0.5);
       g.fillStyle = '#7b4a24';
       g.fillRect(-s * 0.04, -s * 0.35, s * 0.08, s * 0.7);
@@ -1786,7 +1856,7 @@ export class Game {
       g.closePath();
       g.fillStyle = '#c7ced8';
       g.fill();
-    } else if (u.id === 'worker') {
+    } else if (kind === 'worker') {
       this.ellipse(0, s * 0.02, s * 0.2, s * 0.2, '#eebd94');
       g.beginPath();
       g.ellipse(0, -s * 0.03, s * 0.21, s * 0.19, 0, Math.PI, 0);
@@ -1795,7 +1865,7 @@ export class Game {
       this.ellipse(0, -s * 0.25, s * 0.07, s * 0.07, '#f4f1ea');
       this.ellipse(-s * 0.07, s * 0.04, s * 0.025, s * 0.035, '#2b2f3a');
       this.ellipse(s * 0.07, s * 0.04, s * 0.025, s * 0.035, '#2b2f3a');
-    } else if (u.id === 'bag') {
+    } else if (kind === 'bag') {
       this.roundRect(-s * 0.26, -s * 0.28, s * 0.52, s * 0.56, s * 0.14, '#8a5a2b');
       this.roundRect(-s * 0.18, -s * 0.05, s * 0.36, s * 0.22, s * 0.06, '#6f4520');
       g.beginPath();
@@ -2298,12 +2368,12 @@ export class Game {
     // Upgrade pad labels.
     for (const up of this.upgrades) {
       const price = up.prices[up.level];
-      if (price === undefined || up.menuOnly) continue;
+      if (price === undefined || up.menuOnly || !this.available(up)) continue;
       const cx = (up.x0 + up.x1) / 2;
       const cy = (up.y0 + up.y1) / 2;
       if (!this.onScreen(cx, cy)) continue;
       const s = this.project(cx, cy, 0.95);
-      const title = up.id === 'belt' || up.id === 'worker' ? up.name : `${up.name} ${up.level + 2}`;
+      const title = up.prices.length > 1 && up.id !== 'worker' ? `${up.name} ${up.level + 1}/${up.prices.length}` : up.name;
       const fs = Math.max(11, u * 0.28);
       g.font = `${fs}px 'Lilita One', system-ui, sans-serif`;
       g.textAlign = 'center';

@@ -425,3 +425,13 @@ body {
 #hint {
   bottom: calc(env(safe-area-inset-bottom) + 92px) !important;
 }
+
+#upList .new {
+  font-size: 11px;
+  background: #3fbf7f;
+  color: #fff;
+  border-radius: 6px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: 2px;
+}
