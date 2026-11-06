@@ -63,7 +63,6 @@ export interface Results {
   won: boolean; reason: string; time: number; friendlies: number;
 }
 export interface Hooks {
-  tip?: (key: string, text: string) => void;
   hud?: () => void;
   waveStart?: (n: number) => void;
   waveClear?: (info: ClearInfo) => void;
@@ -287,7 +286,6 @@ export class Game {
     this.wind = 0; Sound.setWind(0);
     this.palFrom = this.palTo = paletteForWave(1); this.palT = 1;
     this.hooks.waveStart && this.hooks.waveStart(1);
-    this.tip('swipe', 'Swipe left or right to move to another turret.');
   }
   /** Moves to the next standing turret in that direction (-1 left, 1 right). Returns whether it moved. */
   move(dir: number) {
@@ -345,7 +343,6 @@ export class Game {
       dropAt: Math.random() < FRIEND_CARRY ? pick(this.posts) : null, gunCD: rand(2, 6),
     };
     this.planes.push(p);
-    this.tip('friendly', 'Planes marked green are friendly. Shoot down three and the level is lost.');
     return p;
   }
   /** A friendly plane flies straight across and leaves; one carrying a crate lets it go near its turret. */
@@ -360,7 +357,6 @@ export class Game {
       const lz = this.lzFor(t);
       if (!t.ruined && !this.crates.some(c => Math.abs(c.lz - lz) < 100)) {
         this.crates.push({ x: p.x, y: p.y + 6, vx: p.dir * p.speed, vy: (LZ_Y - p.y - 6) / CRATE_FALL, lz, landed: false, t: 0, sway: 0 });
-        this.tip('friendDrop', 'A friendly plane dropped an upgrade. Move to that turret to open it.');
         p.dropAt = null;
       } else p.dropAt = this.posts.find(b => (b.x - t.x) * p.dir > 0) ?? null;
     }
@@ -445,8 +441,6 @@ export class Game {
     const target = paletteForWave(n);
     if (target !== this.palTo) { this.palFrom = this.currentPalId(); this.palTo = target; this.palT = 0; }
     this.hooks.waveStart && this.hooks.waveStart(n);
-    if (n === 4) this.tip('wind', 'Wind now drifts your shells. Watch the windsock.');
-    if (target === 'night' && paletteForWave(n - 1) !== 'night') this.tip('night', 'Night. Your searchlight follows your aim.');
   }
   currentPalId(): PaletteId { return this.palT >= .5 ? this.palTo : this.palFrom; }
   planesLeft() {
@@ -470,11 +464,8 @@ export class Game {
       p.hp = p.max = bossHp(this.wave, this.difficulty);
       p.dropCD = rand(3, 4);
       this.labels.push({ text: 'Boss incoming', x: 0, y: GROUND_Y - 70, t: 0, life: 2.6, color: '#ff8a7a', big: true });
-      this.tip('boss', 'A boss! It takes a lot of hits and fires two missiles at a time.');
     }
     this.planes.push(p);
-    if (type === 'fighter') this.tip('fighter', 'Fighters dive at your base. That is the best moment to shoot them.');
-    if (type === 'heavy') this.tip('heavy', 'Heavy bombers drop big bombs on the middle of your base. Stop them first.');
     return p;
   }
 
@@ -850,7 +841,6 @@ export class Game {
           const targets = base.length && Math.random() < .7 ? base : standing;
           const tb = targets.length ? pick(targets) : this.post();
           p.diveTo = [tb.x - p.dir * 110, GROUND_Y - 95];
-          this.tip('dive', 'A diving fighter is closer and bigger. Shoot it now!');
         }
         return;
       case 'dive': {
@@ -962,8 +952,7 @@ export class Game {
     this.bombs.push({ id: nextId++, kind, x: x0, y: y0, x0, y0, vx0, k, g, wa, t: 0, T, hp: 1, trail: [], trailT: 0, angle: 0 });
     if (kind === 'missile') {
       for (let i = 0; i < 4; i++) this.addPuff(x0 + rand(-2, 2), y0 + rand(-1, 1), 'smokeLight', rand(1.2, 2), 2, .5, rand(-4, 4), rand(-2, 2), 1.4);
-      if (p.type !== 'boss') this.tip('enemyMissile', 'Light planes fire missiles at your base. Shoot them down before they land.');
-    } else this.tip('bomb', 'Heavy bombs hit very hard. Shoot them before they land.');
+    }
   }
   bombX(b: Bomb, t: number) { return b.x0 + b.vx0 * (1 - Math.exp(-b.k * t)) / b.k + .5 * b.wa * t * t; }
   bombLandX(b: Bomb) { return this.bombX(b, b.T); }
@@ -1310,7 +1299,6 @@ export class Game {
     };
     this.planes.push(this.cargo);
     for (const p of this.planes) if (p.type === 'fighter' && p.state === 'fly' && Math.random() < .35) p.chaseCargo = true;
-    this.tip('cargo', "An upgrade is on its way. Don't shoot the cargo plane or its crate.");
     this.hooks.hud && this.hooks.hud();
   }
   /** The crate waiting on the landing zone, if there is one (in war mode, the one beside the turret in use). */
@@ -1348,9 +1336,6 @@ export class Game {
     else if (id === 'shield') { this.shieldT = SHIELD_TIME; Sound.shield(); }
     this.lock = { target: null, t: 0, step: 0, locked: false };
     this.firing = false;
-    if (id === 'missiles') this.tip('missile', 'Hold a plane in your sights to lock on, then tap to fire a missile.');
-    if (id === 'laser') this.tip('laser', 'Hold your finger down to keep the laser on.');
-    if (id === 'lightning') this.tip('lightning', 'Aim near a plane and tap. The bolt jumps to whatever is close by.');
     this.labels.push({ text: UPGRADES[id].name, x: this.gunX, y: GROUND_Y - 70, t: 0, life: 2.4, color: '#bff5cf', big: true });
     if (c) for (let i = 0; i < 6; i++) this.addPuff(c.x + rand(-4, 4), LZ_Y - rand(0, 4), 'dust', rand(1.5, 2.5), 2, .5, rand(-6, 6), -6);
     Sound.pop();
@@ -1392,7 +1377,6 @@ export class Game {
     c.landed = true; c.t = 0; c.x = c.lz; c.y = LZ_Y; c.sway = 0;
     for (let i = 0; i < 5; i++) this.addPuff(c.x + rand(-5, 5), GROUND_Y - 1, 'dust', rand(1.2, 2), 2, .45, rand(-8, 8), -4, 1.6);
     this.labels.push({ text: 'Upgrade ready', x: c.x, y: GROUND_Y - 34, t: 0, life: 2.6, color: '#bff5cf', big: true });
-    if (!this.war || Math.abs(c.lz - this.gunX) < 150) this.tip('crate', 'Tap the crate on the pad to open it.');
     Sound.pop();
     this.vibrate(20);
     this.hooks.hud && this.hooks.hud();
@@ -1459,9 +1443,6 @@ export class Game {
       this.vibrate(80);
       if (b.id === 'turret' && !this.war) { this.gameOver(); return; }
       this.labels.push({ text: `${b.name} destroyed`, x: b.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#ff8a7a' });
-      if (b.id === 'radar') this.tip('radar', 'Radar is down. No bomb shadows or plane arrows.');
-      if (b.id === 'hangar') this.tip('hangar', 'Hangar is down. No more supply drops.');
-      if (b.id === 'search' && !b.outpost) this.tip('search', 'Searchlight is down. At night, look for running lights.');
       if (this.war) {
         // the base is lost once all of its buildings are down; a lost turret sends the player to the nearest one left
         if (this.buildings.every(o => o.outpost || o.id === 'turret' || o.ruined)) { this.gameOver('The base was destroyed.'); return; }
@@ -1575,5 +1556,4 @@ export class Game {
     const now = performance.now();
     if (ms < 20 || now - this.lastVibe > 150) { this.lastVibe = now; try { navigator.vibrate(ms); } catch { } }
   }
-  tip(key: string, text: string) { this.hooks.tip && this.hooks.tip(key, text); }
 }
