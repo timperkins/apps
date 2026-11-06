@@ -306,7 +306,7 @@ export interface Bomber {
 }
 /** The Bomber's numbers: heights are shares of the sky from the ground (0) to SKY_TOP (1). */
 export const BOMBER = {
-  climb: 55, hp: 6, respawn: 5, missileCD: 8, nukeCD: 12, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
+  climb: 55, hp: 6, respawn: 5, missileCD: 8, nukeCD: 22, nukeAlt: 3 / 4, diveCD: 15, diveTime: 6, diveAlt: 7 / 15,
   armTime: 12, grabCD: 10, armRange: Infinity, touch: 24, cargoDps: 10, highDps: 4, lowDps: 8, shield: 10,
 };
 /** The top of the sky the Bomber can fly to, and the lowest it can go. */
