@@ -51,8 +51,12 @@ The **Survival** row on the title screen (below the mode and difficulty rows) op
 
 - You have 1,000,000 health, shown in a bar at the top, and heal 1.2% of that (12,000) every second.
 - A bear's hit takes 8% of your max health (80,000), at most once every 5 seconds per bear. Health lost pops up in red bubbles.
-- The crossbow is always in hand. Space (or **Shoot bear**) fires at the nearest bear within range, and does nothing if none is close; S (or **Shoot**) fires straight ahead with no target. Bolts fly over the walls.
+- The crossbow is always in hand. Space (or **Shoot bear**) fires at the nearest bear within range, and does nothing if none is close; Z (or **Shoot**) fires straight ahead with no target. Bolts fly over the walls.
 - Bears have 10.5 health. Normal ammo reloads in 3 seconds and does 3.5 damage (three hits a bear); Quick reloads in 1.5 s for 2.1 damage, and Heavy in 5 s for 5.25.
+- A bear inside also throws rocks when it isn't close enough to swipe: each rock that hits takes 9% (90,000), one throw every 5 seconds per bear. Rocks fly straight, so they can be dodged.
+- Once you've defeated 4 bears, "Bears in base in 20 seconds" shows for 4 seconds and from then on bears only wait 20 seconds at the gate. A **mine** and a **machine** pop up in the camp at the same time.
+- Press M (or **Mine**) next to the mine and your guy hits it with the crossbow: one stone every 4 seconds until you walk away or press M again. Click or tap the machine (or press M) when you're next to it: it takes all your stone, and each stone is a batch that gives 5 stone ammo after 4 seconds, one batch after another.
+- S (or the ammo button) switches between your loadout ammo and stone ammo. Stone ammo does 1.7x normal damage (5.95), and each shot uses one up; when it runs out you go back to your loadout ammo.
 - Bears come more often as time goes on. The run ends when your health hits zero; the score is the time survived, and the best time is kept.
 
 Numbers are in `SURVIVAL` and `AMMO` at the top of `src/survival.ts`; the screens are wired up in `src/main.ts` under "survival".

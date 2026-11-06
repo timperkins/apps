@@ -10,6 +10,15 @@ export const SURVIVAL = {
   heal: .012,           // the guy heals 1.2% of max health every second
   bearHp: 10.5,
   gateWait: 30,         // seconds a bear waits at the gate before it comes in
+  gateWaitLater: 20,    // ...and after the first 4 bears are defeated
+  rushKills: 4,         // bears to defeat before the gate wait drops and the mine and machine appear
+  bearThrow: .09,       // a bear inside throws a rock that takes 9% of max health
+  throwCooldown: 5,
+  throwSpeed: 170,
+  mineEvery: 4,         // mining gives a stone every 4 seconds
+  batchTime: 4,         // the machine turns each stone into stone ammo in 4 seconds
+  batchAmmo: 5,         // stone ammo per stone
+  stoneDamage: 1.7,     // stone ammo does 1.7x normal ammo damage
   targetRange: 300,     // space bar only fires if a bear is this close (world units)
   boltRange: 420,
   boltSpeed: 520,
@@ -34,11 +43,13 @@ export interface SurvivalResult { time: number; kills: number; shots: number; hi
 const W = 600, H = 920;
 const WALL = { x0: 110, x1: 490, y0: 400, y1: 860, t: 14 };
 const GATE = { x: 300, w: 74 };
-const GUY_R = 13, BEAR_R = 18;
+const GUY_R = 13, BEAR_R = 18, STONE = '#a9a59c';
+const MINE = { x: WALL.x0 + 62, y: WALL.y0 + 95, r: 24 }, MACHINE = { x: WALL.x1 - 62, y: WALL.y0 + 215, r: 26 }, NEAR = 58;
 
 type BearState = 'walk' | 'wait' | 'enter' | 'inside' | 'dead';
-interface Bear { id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; }
-interface Bolt { x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Bear | null; }
+interface Bear { tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; }
+interface Bolt { stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Bear | null; }
+interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info'; }
 
 export interface SurvivalHooks { over(r: SurvivalResult): void; pause(): void; }
@@ -62,6 +73,10 @@ export class Survival {
   private scale = 1; private ox = 0; private oy = 0; private cw = 0;
   private decor: { x: number; y: number; r: number; k: number }[] = [];
   private noTargetT = 0;
+  private rocks: Rock[] = [];
+  private gateWait = SURVIVAL.gateWait;
+  private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
+  private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
 
   constructor(private canvas: HTMLCanvasElement, private pad: HTMLElement, private hooks: SurvivalHooks) {
     this.ctx = canvas.getContext('2d')!;
@@ -85,12 +100,16 @@ export class Survival {
     btn('#svTarget', () => this.shoot(true));
     btn('#svFree', () => this.shoot(false));
     btn('#svPause', () => this.hooks.pause());
+    btn('#svMine', () => this.action());
+    btn('#svAmmoBtn', () => this.switchAmmo());
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) this.shoot(true); return; }
-      if (k === 's') { if (!e.repeat) this.shoot(false); return; }
+      if (k === 'z') { if (!e.repeat) this.shoot(false); return; }
       if (k === 'p' || k === 'Escape') { this.hooks.pause(); return; }
+      if (k === 'm') { if (!e.repeat) this.action(); return; }
+      if (k === 's') { if (!e.repeat) this.switchAmmo(); return; }
       if (k.startsWith('Arrow')) { e.preventDefault(); this.keys.add(k); }
     });
     addEventListener('keyup', e => this.keys.delete(e.key));
@@ -103,6 +122,9 @@ export class Survival {
     this.bears = []; this.bolts = []; this.bubbles = [];
     this.t = 0; this.healT = 0; this.spawnT = 2; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
     this.gateOpen = 0; this.hurtFlash = 0; this.keys.clear(); this.stick = null;
+    this.rocks = []; this.gateWait = SURVIVAL.gateWait;
+    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0;
+    this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say('Bears are coming. Shoot them before they get in!');
@@ -113,6 +135,11 @@ export class Survival {
   private down(e: PointerEvent) {
     e.preventDefault();
     if (!this.running || this.paused) return;
+    // a tap on the machine uses it
+    if (this.mineOn) {
+      const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
+      if (Math.hypot(wx - MACHINE.x, wy - MACHINE.y) < MACHINE.r + 10) { this.useMachine(); return; }
+    }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
   }
@@ -124,7 +151,7 @@ export class Survival {
     if (m > max) { s.ox += s.dx * (1 - max / m); s.oy += s.dy * (1 - max / m); s.dx *= max / m; s.dy *= max / m; }
   }
 
-  /** Space shoots at the nearest bear in range; S shoots straight ahead with no target. */
+  /** Space shoots at the nearest bear in range; Z shoots straight ahead with no target. */
   private shoot(targeted: boolean) {
     if (this.reload > 0) { Sound.click(); return; }
     let target: Bear | null = null;
@@ -143,10 +170,41 @@ export class Survival {
       this.face = Math.atan2(target.y - this.y, target.x - this.x);
     }
     const a = this.face, ammo = AMMO[this.load.ammo];
-    this.bolts.push({ x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg: ammo.damage, target });
+    // stone ammo: 1.7x normal damage, and each shot uses one up
+    const stone = this.useStone && this.stoneAmmo > 0;
+    const dmg = stone ? AMMO.normal.damage * SURVIVAL.stoneDamage : ammo.damage;
+    if (stone) { this.stoneAmmo--; if (!this.stoneAmmo) { this.useStone = false; this.bubble(this.x, this.y - 30, 'Out of stone ammo', 'info'); } }
+    this.mining = false;
+    this.bolts.push({ x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone });
     this.reload = ammo.reload;
     this.shots++;
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
+  }
+
+  /** M: start or stop mining when next to the mine, or use the machine when next to it. */
+  private action() {
+    if (!this.mineOn) return;
+    if (dist(this.x, this.y, MINE.x, MINE.y) < NEAR) {
+      this.mining = !this.mining; this.mineT = 0;
+      if (this.mining) this.face = Math.atan2(MINE.y - this.y, MINE.x - this.x);
+      Sound.ui();
+    } else if (dist(this.x, this.y, MACHINE.x, MACHINE.y) < NEAR) this.useMachine();
+    else this.bubble(this.x, this.y - 30, 'Walk to the mine or the machine', 'info');
+  }
+  /** The machine takes all your stone; each stone is a batch that gives 5 stone ammo after 4 seconds. */
+  private useMachine() {
+    if (dist(this.x, this.y, MACHINE.x, MACHINE.y) > NEAR) { this.bubble(MACHINE.x, MACHINE.y - 36, 'Walk to the machine', 'info'); Sound.denied(); return; }
+    if (!this.stones) { this.bubble(MACHINE.x, MACHINE.y - 36, 'No stone to put in', 'info'); Sound.denied(); return; }
+    this.bubble(MACHINE.x, MACHINE.y - 36, `${this.stones} stone in`, 'info');
+    this.queue += this.stones; this.stones = 0;
+    Sound.thump();
+  }
+  /** S: switch between your loadout ammo and stone ammo. */
+  private switchAmmo() {
+    if (!this.useStone && !this.stoneAmmo) { this.bubble(this.x, this.y - 30, 'No stone ammo yet', 'info'); Sound.denied(); return; }
+    this.useStone = !this.useStone;
+    this.bubble(this.x, this.y - 30, this.useStone ? 'Stone ammo' : `${AMMO[this.load.ammo].name} ammo`, 'info');
+    Sound.click();
   }
 
   /* ---------- rules ---------- */
@@ -179,6 +237,26 @@ export class Survival {
     this.healT += dt;
     while (this.healT >= 1) { this.healT -= 1; this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * SURVIVAL.heal); }
 
+    // mining: a stone every 4 seconds while next to the mine
+    this.swing = Math.max(0, this.swing - dt);
+    if (this.mineOn) this.popT += dt;
+    if (this.mining) {
+      if (m > 0 || dist(this.x, this.y, MINE.x, MINE.y) > NEAR) this.mining = false;
+      else {
+        this.face = Math.atan2(MINE.y - this.y, MINE.x - this.x);
+        if (this.swing <= 0) { this.swing = 1; Sound.click(); }
+        this.mineT += dt;
+        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.stones++; this.bubble(MINE.x, MINE.y - 30, '+1 stone', 'info'); Sound.thump(); }
+      }
+    }
+    if (this.queue > 0) {
+      this.batchT += dt;
+      if (this.batchT >= SURVIVAL.batchTime) {
+        this.batchT -= SURVIVAL.batchTime; this.queue--; this.stoneAmmo += SURVIVAL.batchAmmo;
+        this.bubble(MACHINE.x, MACHINE.y - 36, `+${SURVIVAL.batchAmmo} stone ammo`, 'info'); Sound.pop();
+      }
+    } else this.batchT = 0;
+
     // more bears as time goes on
     this.spawnT -= dt;
     if (this.spawnT <= 0) {
@@ -196,7 +274,7 @@ export class Survival {
       } else if (b.state === 'wait') {
         b.wait += dt;
         b.face = approachAngle(b.face, Math.atan2(WALL.y0 - b.y, GATE.x - b.x), dt * 2);
-        if (b.wait >= SURVIVAL.gateWait) b.state = 'enter';
+        if (b.wait >= this.gateWait) b.state = 'enter';
       } else if (b.state === 'enter') {
         entering = true;
         // line up at the gate, then walk through it
@@ -205,7 +283,7 @@ export class Survival {
           if (Math.abs(b.x - x) > 1) this.stepTo(b, x, b.y + 4, SURVIVAL.bearSpeedInside, dt);
           else this.stepTo(b, GATE.x, WALL.y0 + 50, SURVIVAL.bearSpeedInside, dt);
         } else if (this.stepTo(b, GATE.x, WALL.y0 + WALL.t + BEAR_R + 8, SURVIVAL.bearSpeedInside, dt)) {
-          b.state = 'inside'; b.cd = .8;
+          b.state = 'inside'; b.cd = .8; b.tc = 2;
           this.say('A bear got in!');
           Sound.tone('sawtooth', 160, 90, .5, .12);
         }
@@ -216,6 +294,9 @@ export class Survival {
         if (d > reach - 2) this.stepTo(b, this.x, this.y, SURVIVAL.bearSpeedInside, dt, reach - 2);
         else b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 6);
         if (d <= reach && b.cd <= 0) this.bearHit(b);
+        // from further off it throws a rock, every 5 seconds
+        b.tc = Math.max(0, b.tc - dt);
+        if (d > reach + 20 && b.tc <= 0) this.throwRock(b);
       }
     }
     this.gateOpen = clamp(this.gateOpen + (entering ? dt : -dt) * 1.5, 0, 1);
@@ -236,6 +317,11 @@ export class Survival {
       }
     }
     this.bolts = this.bolts.filter(b => b.left > 0);
+    for (const r of this.rocks) {
+      r.x += r.vx * dt; r.y += r.vy * dt; r.left -= SURVIVAL.throwSpeed * dt; r.spin += dt * 9;
+      if (dist(r.x, r.y, this.x, this.y) < GUY_R + 5) { r.left = 0; this.hurt(SURVIVAL.bearThrow); }
+    }
+    this.rocks = this.rocks.filter(r => r.left > 0);
     this.bears = this.bears.filter(b => b.state !== 'dead' || b.dead < 1.2);
     for (const u of this.bubbles) u.t += dt;
     this.bubbles = this.bubbles.filter(u => u.t < (u.kind === 'loss' ? 1.6 : 1.1));
@@ -243,6 +329,7 @@ export class Survival {
     if (this.hp <= 0) {
       this.hp = 0; this.running = false;
       Sound.boom(false);
+      this.mining = false;
       this.hooks.over({ time: this.t, kills: this.kills, shots: this.shots, hits: this.hits, damage: this.damage });
     }
   }
@@ -258,7 +345,7 @@ export class Survival {
     const ring = 70 + Math.min(4, Math.floor(waiting / 5)) * 42;
     const a = Math.PI + .25 + Math.random() * (Math.PI - .5);
     const tx = clamp(GATE.x + Math.cos(a) * ring * 1.4, 40, W - 40), ty = clamp(WALL.y0 - 10 + Math.sin(a) * ring, 40, WALL.y0 - BEAR_R - 10);
-    this.bears.push({ id: this.nextId++, x, y, hp: SURVIVAL.bearHp, state: 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6 });
+    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp, state: 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6 });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -297,10 +384,22 @@ export class Survival {
     }
   }
 
+  private throwRock(b: Bear) {
+    b.tc = SURVIVAL.throwCooldown; b.swipe = .25;
+    const a = Math.atan2(this.y - b.y, this.x - b.x);
+    b.face = a;
+    this.rocks.push({ x: b.x + Math.cos(a) * 24, y: b.y + Math.sin(a) * 24, vx: Math.cos(a) * SURVIVAL.throwSpeed, vy: Math.sin(a) * SURVIVAL.throwSpeed, left: 520, spin: 0 });
+    Sound.tone('sine', 300, 160, .15, .1);
+  }
+
   private bearHit(b: Bear) {
-    const dmg = SURVIVAL.maxHp * SURVIVAL.bearHit;
-    this.hp -= dmg;
     b.cd = SURVIVAL.bearCooldown; b.swipe = .35;
+    this.hurt(SURVIVAL.bearHit);
+  }
+
+  private hurt(share: number) {
+    const dmg = SURVIVAL.maxHp * share;
+    this.hp -= dmg;
     this.hurtFlash = .4;
     this.bubble(this.x + (Math.random() - .5) * 16, this.y - 24, '-' + fmt(dmg), 'loss');
     Sound.noise(.25, 'lowpass', 700, .8, .4); Sound.tone('sine', 120, 50, .25, .3);
@@ -314,13 +413,20 @@ export class Survival {
     Sound.hitPlane();
     if (b.hp <= 1e-6) {
       b.state = 'dead'; b.dead = 0; this.kills++;
+      if (this.kills === SURVIVAL.rushKills) {
+        // the bears get impatient, and a mine and a machine pop up in the camp
+        this.gateWait = SURVIVAL.gateWaitLater;
+        this.say('Bears in base in 20 seconds', 4);
+        this.mineOn = true;
+        Sound.alarm();
+      }
       Sound.tone('sine', 200, 70, .4, .18);
     }
   }
 
   private bubble(x: number, y: number, text: string, kind: Bubble['kind']) { this.bubbles.push({ x, y, text, t: 0, kind }); }
   private sayT = 0; private sayText = '';
-  private say(text: string) { this.sayText = text; this.sayT = 3; }
+  private say(text: string, secs = 3) { this.sayText = text; this.sayT = secs; }
 
   /* ---------- drawing ---------- */
   draw(dt: number) {
@@ -330,7 +436,7 @@ export class Survival {
     const g = this.ctx;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     // the map sits between the health bar (top) and the buttons (bottom)
-    const top = 64, bottom = 96;
+    const top = this.mineOn ? 82 : 64, bottom = 96;
     this.scale = Math.min(cw / W, (ch - top - bottom) / H);
     this.ox = (cw - W * this.scale) / 2; this.oy = top + (ch - top - bottom - H * this.scale) / 2;
     g.fillStyle = '#2f4426'; g.fillRect(0, 0, cw, ch);
@@ -365,6 +471,7 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
+    if (this.mineOn) this.drawMineAndMachine(g);
     this.drawWalls(g);
     // dead bears fade, then the rest on top
     for (const b of this.bears) if (b.state === 'dead') this.drawBear(g, b);
@@ -374,13 +481,51 @@ export class Survival {
       const a = Math.atan2(bo.vy, bo.vx);
       g.save(); g.translate(bo.x, bo.y); g.rotate(a);
       g.strokeStyle = '#5a3d22'; g.lineWidth = 2.2; g.beginPath(); g.moveTo(-14, 0); g.lineTo(6, 0); g.stroke();
-      g.fillStyle = AMMO[this.load.ammo].color; g.beginPath(); g.moveTo(10, 0); g.lineTo(4, -3.5); g.lineTo(4, 3.5); g.fill();
+      g.fillStyle = bo.stone ? STONE : AMMO[this.load.ammo].color; g.beginPath(); g.moveTo(10, 0); g.lineTo(4, -3.5); g.lineTo(4, 3.5); g.fill();
       g.fillStyle = '#f0e6d0'; g.fillRect(-15, -3, 4, 6);
+      g.restore();
+    }
+    // rocks thrown by bears
+    for (const r of this.rocks) {
+      g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.arc(r.x + 3, r.y + 4, 6, 0, 7); g.fill();
+      g.save(); g.translate(r.x, r.y); g.rotate(r.spin);
+      g.fillStyle = '#8d8a84'; g.beginPath(); g.moveTo(-6, -3); g.lineTo(-1, -7); g.lineTo(6, -4); g.lineTo(7, 3); g.lineTo(1, 7); g.lineTo(-6, 4); g.closePath(); g.fill();
+      g.fillStyle = '#b5b1a8'; g.beginPath(); g.arc(-1, -2, 2.5, 0, 7); g.fill();
       g.restore();
     }
     // targeting range when a bear is close: a faint ring
     g.strokeStyle = 'rgba(255,245,234,.10)'; g.lineWidth = 1.5; g.setLineDash([6, 8]);
     g.beginPath(); g.arc(this.x, this.y, SURVIVAL.targetRange, 0, 7); g.stroke(); g.setLineDash([]);
+  }
+
+  private drawMineAndMachine(g: CanvasRenderingContext2D) {
+    const pop = Math.min(1, this.popT * 2);
+    // the mine: a heap of grey rock
+    g.save(); g.translate(MINE.x, MINE.y); g.scale(pop, pop);
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(4, 6, 28, 20, 0, 0, 7); g.fill();
+    g.fillStyle = '#6f6c66'; g.beginPath(); g.moveTo(-26, 10); g.lineTo(-18, -12); g.lineTo(-4, -22); g.lineTo(14, -16); g.lineTo(26, 2); g.lineTo(18, 16); g.lineTo(-12, 18); g.closePath(); g.fill();
+    g.fillStyle = '#8f8b84'; g.beginPath(); g.moveTo(-14, -8); g.lineTo(-3, -17); g.lineTo(10, -12); g.lineTo(4, 0); g.lineTo(-10, 2); g.closePath(); g.fill();
+    g.fillStyle = '#c7c2b8'; g.beginPath(); g.arc(12, 6, 3, 0, 7); g.arc(-8, 10, 2.5, 0, 7); g.fill();
+    if (this.mining && this.swing > .7) { g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const a = i * 1.6 + this.t * 3; g.beginPath(); g.moveTo(Math.cos(a) * 14, Math.sin(a) * 14); g.lineTo(Math.cos(a) * 22, Math.sin(a) * 22); g.stroke(); } }
+    g.restore();
+    // the machine: a metal box with a hopper, a light while it works and a progress bar
+    g.save(); g.translate(MACHINE.x, MACHINE.y); g.scale(pop, pop);
+    g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-22, -18, 50, 44);
+    g.fillStyle = '#5b6670'; g.fillRect(-26, -22, 52, 44);
+    g.fillStyle = '#7d8a95'; g.fillRect(-20, -16, 24, 18);
+    g.fillStyle = '#3a4249'; g.beginPath(); g.moveTo(8, -18); g.lineTo(22, -18); g.lineTo(18, -6); g.lineTo(12, -6); g.closePath(); g.fill();
+    g.fillStyle = this.queue ? (Math.sin(this.t * 10) > 0 ? '#ffcf4a' : '#a07a20') : '#3c4a3c'; g.beginPath(); g.arc(16, 10, 4, 0, 7); g.fill();
+    if (this.queue) { g.fillStyle = '#222'; g.fillRect(-20, 8, 26, 6); g.fillStyle = '#9fe0b0'; g.fillRect(-20, 8, 26 * this.batchT / SURVIVAL.batchTime, 6); }
+    g.restore();
+    // labels
+    g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
+    g.fillText('Mine', MINE.x, MINE.y + 34);
+    g.fillText(this.queue ? `Machine (${this.queue} left)` : 'Machine', MACHINE.x, MACHINE.y + 38);
+    // mining progress ring
+    if (this.mining) {
+      g.strokeStyle = '#c7c2b8'; g.lineWidth = 3;
+      g.beginPath(); g.arc(MINE.x, MINE.y, MINE.r + 8, -Math.PI / 2, -Math.PI / 2 + this.mineT / SURVIVAL.mineEvery * Math.PI * 2); g.stroke();
+    }
   }
 
   private drawCamp(g: CanvasRenderingContext2D) {
@@ -452,12 +597,12 @@ export class Survival {
     if (b.state === 'dead') return;
     // waiting at the gate: a ring that fills over 30 seconds, and the seconds left
     if (b.state === 'wait') {
-      const k = b.wait / SURVIVAL.gateWait;
+      const k = b.wait / this.gateWait;
       g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 4; g.beginPath(); g.arc(b.x, b.y, BEAR_R + 7, 0, 7); g.stroke();
       g.strokeStyle = k > .8 ? '#ff6a5a' : '#ffcf8c'; g.lineWidth = 3;
       g.beginPath(); g.arc(b.x, b.y, BEAR_R + 7, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); g.stroke();
       g.fillStyle = '#fff5ea'; g.font = '600 13px Jost, sans-serif'; g.textAlign = 'center';
-      g.fillText(String(Math.ceil(SURVIVAL.gateWait - b.wait)), b.x, b.y - BEAR_R - 12);
+      g.fillText(String(Math.ceil(this.gateWait - b.wait)), b.x, b.y - BEAR_R - 12);
     }
     // health bar once hurt
     if (b.hp < SURVIVAL.bearHp) {
@@ -472,7 +617,7 @@ export class Survival {
     g.save(); g.translate(this.x, this.y);
     g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
     if (this.hurtFlash > 0) { g.fillStyle = `rgba(255,60,50,${this.hurtFlash})`; g.beginPath(); g.arc(0, 0, GUY_R + 10, 0, 7); g.fill(); }
-    paintGuy(g, L, a, bob, this.reload > 0 ? 0 : 1);
+    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 ? 0 : 1, this.useStone ? STONE : undefined);
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
@@ -503,6 +648,12 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     g.fillText(inside ? `${inside} inside · ${waiting} outside` : `${waiting} outside`, cw - 14, y + h + 20);
+    if (this.mineOn) {
+      g.textAlign = 'left'; g.fillStyle = '#d9d4ca';
+      g.fillText(`Stone ${this.stones}   Stone ammo ${this.stoneAmmo}`, x, y + h + 38);
+      g.textAlign = 'right'; g.fillStyle = this.useStone ? '#fff' : '#fff5ea';
+      g.fillText(`Ammo: ${this.useStone ? 'Stone' : AMMO[this.load.ammo].name}`, cw - 14, y + h + 38);
+    }
 
     // bubbles: red for health lost, small white numbers on bears
     for (const u of this.bubbles) {
@@ -546,11 +697,19 @@ export class Survival {
     const r = this.reload / AMMO[this.load.ammo].reload;
     this.pad.style.setProperty('--reload', String(r));
     this.pad.classList.toggle('loading', this.reload > 0);
+    const nearMine = this.mineOn && dist(this.x, this.y, MINE.x, MINE.y) < NEAR, nearMachine = this.mineOn && dist(this.x, this.y, MACHINE.x, MACHINE.y) < NEAR;
+    const mb = this.pad.querySelector<HTMLElement>('#svMine')!, ab = this.pad.querySelector<HTMLElement>('#svAmmoBtn')!;
+    mb.hidden = !nearMine && !nearMachine;
+    const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
+    if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
+    ab.hidden = !this.stoneAmmo && !this.useStone;
+    const al = this.useStone ? 'Stone' : AMMO[this.load.ammo].name;
+    if (ab.firstElementChild!.textContent !== al) ab.firstElementChild!.textContent = al;
   }
 }
 
 /** The little guy, centred on the origin, facing angle a. */
-function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number) {
+function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number, boltColor = AMMO[L.ammo].color) {
   g.rotate(a);
   // feet
   g.fillStyle = '#3a2c20'; g.beginPath(); g.arc(3 + bob, -6, 3.5, 0, 7); g.arc(3 - bob, 6, 3.5, 0, 7); g.fill();
@@ -562,7 +721,7 @@ function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: numbe
   g.strokeStyle = '#5a3d22'; g.lineWidth = 3.5; g.beginPath(); g.moveTo(4, 0); g.lineTo(26, 0); g.stroke();
   g.strokeStyle = '#3a2a1a'; g.lineWidth = 3; g.beginPath(); g.moveTo(22, -12); g.quadraticCurveTo(28, 0, 22, 12); g.stroke();
   g.strokeStyle = '#e8e0d0'; g.lineWidth = 1; g.beginPath(); g.moveTo(22, -12); g.lineTo(22 - 8 * pull, 0); g.lineTo(22, 12); g.stroke();
-  if (pull) { g.strokeStyle = AMMO[L.ammo].color; g.lineWidth = 2; g.beginPath(); g.moveTo(14, 0); g.lineTo(30, 0); g.stroke(); }
+  if (pull) { g.strokeStyle = boltColor; g.lineWidth = 2; g.beginPath(); g.moveTo(14, 0); g.lineTo(30, 0); g.stroke(); }
   // head and hat
   g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(0, 0, 7.5, 0, 7); g.fill();
   if (L.hat === 'cap') { g.fillStyle = shade(L.color, -.25); g.beginPath(); g.arc(0, 0, 7.8, 0, 7); g.fill(); g.beginPath(); g.ellipse(7, 0, 5, 6, 0, -Math.PI / 2, Math.PI / 2); g.fill(); }
@@ -585,6 +744,7 @@ export function drawPreview(c: HTMLCanvasElement, L: Loadout) {
   paintGuy(g, L, -.5, 0, 1);
 }
 
+const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(bx - ax, by - ay);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const trim = (n: number) => String(Math.round(n * 100) / 100);

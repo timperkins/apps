@@ -262,8 +262,8 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #svFree { right: 104px; }
 /* reloading: the buttons drain from the top while the crossbow loads */
 .svbtn::before { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, .55); transform-origin: bottom; transform: scaleY(0); z-index: -1; }
-#svPad.loading .svbtn::before { transform: scaleY(var(--reload, 0)); }
-#svPad.loading .svbtn { color: var(--muted); }
+#svPad.loading .svbtn:not(.small)::before { transform: scaleY(var(--reload, 0)); }
+#svPad.loading .svbtn:not(.small) { color: var(--muted); }
 #survSetup { gap: 10px; overflow-y: auto; justify-content: safe center; }
 .svform { display: flex; flex-direction: column; gap: 10px; width: min(340px, 100%); }
 .svfield { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; font-size: 13px; color: var(--muted); }
@@ -277,3 +277,6 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svammo button small { color: var(--muted); font-size: 11px; line-height: 1.25; }
 .svammo button[aria-checked="true"] { border-color: var(--accent); background: rgba(255, 207, 140, .16); }
 #svPreview { width: 96px; height: 96px; }
+.svbtn.small { width: 62px; height: 62px; bottom: 104px; font-size: 12.5px; }
+#svMine { right: 22px; }
+#svAmmoBtn { right: 96px; }
