@@ -8,11 +8,12 @@ import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
 import { CoopHost, LOCAL, MAX_PLAYERS, type Player } from './coop/host';
 import { BomberPad } from './coop/pad';
-import { randomName } from './coop/names';
+import { randomName, cleanName } from './coop/names';
 import type { ClientMsg, Role } from './coop/protocol';
 import { takeSnap } from './coop/mirror';
+import { Survival, AMMO, HATS, COLORS, drawPreview, type Loadout, type AmmoId, type HatId, type SurvivalResult } from './survival';
 
-type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'shop' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
+type Mode = 'loading' | 'survival' | 'survPause' | 'start' | 'play' | 'paused' | 'cards' | 'shop' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; reduceMotion: boolean; }
 /** `wave` is the wave reached; war mode keeps the level instead, and `time` is the seconds survived. */
 interface ScoreEntry { score: number; wave: number; date: number; time?: number; won?: boolean; }
@@ -191,6 +192,7 @@ function renderScores() {
 }
 function best() { return scores.length ? scores[0].score : 0; }
 function startScreen() {
+  survival.stop();
   mode = 'start';
   game.reset();
   game.phase = 'idle';
@@ -728,6 +730,81 @@ function hintProgress(kind: 'fire' | 'tilt') {
 }
 function endHint() { hintState = null; $('hint').hidden = true; store.set('hinted', true); }
 
+/* ---------- survival ---------- */
+// A separate top-down game: the title screen's Survival row opens the loadout screen first.
+const isAmmo = (a: unknown): a is AmmoId => typeof a === 'string' && a in AMMO;
+const isHat = (h: unknown): h is HatId => typeof h === 'string' && h in HATS;
+const savedLoad = store.get<Partial<Loadout>>('survival.loadout', {});
+const loadout: Loadout = {
+  name: typeof savedLoad.name === 'string' && savedLoad.name.trim() ? cleanName(savedLoad.name) : randomName(),
+  color: typeof savedLoad.color === 'string' && COLORS.includes(savedLoad.color) ? savedLoad.color : COLORS[0],
+  hat: isHat(savedLoad.hat) ? savedLoad.hat : 'none',
+  ammo: isAmmo(savedLoad.ammo) ? savedLoad.ammo : 'normal',
+};
+const survival = new Survival($<HTMLCanvasElement>('sv'), $('svPad'), { over: survivalOver, pause: survivalPause });
+if (isComputer()) $('svHelp').textContent = 'Arrow keys to walk';
+if (Tilt.debug) (window as unknown as { __surv: unknown }).__surv = survival;
+function renderLoadout() {
+  const name = $<HTMLInputElement>('svName');
+  if (document.activeElement !== name) name.value = loadout.name;
+  $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
+  $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
+  $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
+  const b = store.get<number>('survival.best', 0);
+  $('svBest').textContent = b ? `Best ${clock(b)} survived` : '';
+  drawPreview($<HTMLCanvasElement>('svPreview'), loadout);
+  store.set('survival.loadout', loadout);
+}
+function openLoadout() {
+  Sound.init();
+  survival.stop();
+  renderLoadout();
+  show('survSetup'); mode = 'menu'; returnTo = 'start';
+}
+$('survivalBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openLoadout(); });
+$('svName').addEventListener('input', () => { loadout.name = cleanName($<HTMLInputElement>('svName').value); renderLoadout(); });
+$('svName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); });
+$('svDice').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); Sound.ui(); loadout.name = randomName(loadout.name); $<HTMLInputElement>('svName').value = loadout.name; renderLoadout(); });
+$('survSetup').addEventListener('click', e => {
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a]');
+  if (!t) return;
+  Sound.ui();
+  if (t.dataset.c) loadout.color = t.dataset.c;
+  if (isHat(t.dataset.h)) loadout.hat = t.dataset.h;
+  if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
+  renderLoadout();
+});
+function startSurvival() {
+  Sound.ui();
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  show(null); setHud(false);
+  survival.start({ ...loadout });
+  mode = 'survival'; last = performance.now();
+}
+$('svGo').addEventListener('click', e => { e.stopPropagation(); startSurvival(); });
+$('svBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); startScreen(); });
+function survivalPause() {
+  if (mode !== 'survival') return;
+  survival.paused = true; mode = 'survPause'; show('survPause');
+}
+$('svResume').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.paused = false; show(null); mode = 'survival'; last = performance.now(); });
+$('svQuit').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.stop(); startScreen(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) survivalPause(); });
+function survivalOver(r: SurvivalResult) {
+  const best = store.get<number>('survival.best', 0);
+  const isBest = r.time > best;
+  if (isBest) store.set('survival.best', r.time);
+  $('svNewBest').hidden = !isBest || best === 0;
+  $('svTime').textContent = clock(r.time);
+  const stats: [string, string][] = [['Survived', clock(r.time)], ['Bears defeated', String(r.kills)], ['Shots', String(r.shots)], ['Hits', String(r.hits)], ['Best', clock(Math.max(best, r.time))]];
+  $('svStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  // give the last hit a moment on screen before the results
+  setTimeout(() => { if (mode === 'survival') { mode = 'menu'; returnTo = 'start'; $('svPad').hidden = true; show('survOver'); } }, 900);
+}
+$('svAgain').addEventListener('click', e => { e.stopPropagation(); startSurvival(); });
+$('svChange').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openLoadout(); });
+$('svTitle').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.stop(); startScreen(); });
+
 /* ---------- loop ---------- */
 let last = performance.now();
 function frame(now: number) {
@@ -735,6 +812,9 @@ function frame(now: number) {
   const dt = Math.max(0, Math.min(.05, (now - last) / 1000));
   last = now;
   if (mode === 'loading') return;
+  // survival draws on its own canvas over the stage; the results screen keeps the last frame
+  if (mode === 'survival' || mode === 'survPause') { survival.update(dt); survival.draw(dt); return; }
+  if (mode === 'menu' && !$<HTMLCanvasElement>('sv').hidden) return;
   const tiltRoll = Tilt.update(now / 1000, dt);
   // co-op: the Base aims from its phone unless it plays on this screen
   const localAim = !game.coop || localRole === 'base';

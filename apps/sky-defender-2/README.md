@@ -45,6 +45,18 @@ Both are picked on the title screen and remembered, and every mode and difficult
 - **Adventure**: the original endless waves, but only the turret is built, and it starts at only 20% of a normal turret's health. Its health label shows that share, so it reads 20% until Max health is upgraded. Every enemy plane shot down earns **1 iron**, shown with a Shop button in the top right corner. Tap it (the game pauses) to spend iron in the **iron shop**: Max health (+10% of a normal turret per level, up to 10 levels), Damage (+25% shell damage, 8 levels), Fire rate (+15%, 6 levels), Extra turret (80 iron, then 150; up to two more turrets, east and west of the base, that aim and fire with yours and can fall without ending the game) and, during a game, Repair turrets (3 iron). Iron and levels are saved on the device and carry over between games, so each run starts a little stronger; the shop is also on the title screen and the results screen, with **Start adventure over** to reset. The other buildings are expensive **base parts** in the shop: Searchlight (40 iron), Radar (50, bomb shadows and plane arrows), Repair yard (60, the turret slowly repairs itself), Weapons depot (75, 50% more special weapon ammo) and Resupply hangar (100, supply crates). Until a part is bought, its job doesn't happen. Bought parts go up at once and are built at the start of every later game. Prices are `SHOP` and `PARTS` in `src/game.ts`.
 - **Hard** (was Expert) has about twice the planes per wave, mixes in fighters and heavy bombers from the start, sends them in bigger groups with shorter gaps, and they drop, fire and dive more often. Everything that hits the base does 1.6x the damage. Points are worth 1.5x. In War it means bigger, more frequent enemy groups. The numbers are in `DIFFICULTY` in `src/game.ts`.
 
+## Survival
+
+The **Survival** row on the title screen (below the mode and difficulty rows) opens a separate top-down game. First you get your little guy ready: a name (or the dice for a random one), a shirt colour, a hat (none, cap, helmet or crown) and an ammo type, all remembered on the device. Then he walks around a walled camp (arrow keys on a computer, drag anywhere on a phone) while slow bears come out of the woods and wait outside the gate. A ring and a countdown over each waiting bear show its 30 seconds; when they run out the gate swings open and that bear comes in after you.
+
+- You have 1,000,000 health, shown in a bar at the top, and heal 1.2% of that (12,000) every second.
+- A bear's hit takes 8% of your max health (80,000), at most once every 5 seconds per bear. Health lost pops up in red bubbles.
+- The crossbow is always in hand. Space (or **Shoot bear**) fires at the nearest bear within range, and does nothing if none is close; S (or **Shoot**) fires straight ahead with no target. Bolts fly over the walls.
+- Bears have 10.5 health. Normal ammo reloads in 3 seconds and does 3.5 damage (three hits a bear); Quick reloads in 1.5 s for 2.1 damage, and Heavy in 5 s for 5.25.
+- Bears come more often as time goes on. The run ends when your health hits zero; the score is the time survived, and the best time is kept.
+
+Numbers are in `SURVIVAL` and `AMMO` at the top of `src/survival.ts`; the screens are wired up in `src/main.ts` under "survival".
+
 ## Co-op
 
 Turn on **Co-op** (the switch beside Normal and Hard on the title screen) and tap to open the lobby. Co-op works with Original and with Adventure (the same weak turret, iron and shop, saved on the host screen, with the Bomber and Sniper attacking it); War has no co-op, so picking one turns the other off. It shows a QR code (and a 4-letter room code); a phone that scans it joins the game, and **Join** lets the host device play too. Every player gets a random call sign, and **New name** (the dice) picks another. The host picks each player's role: **Base** (the normal game: tilt to aim, tap or the phone's FIRE button to shoot, open crates), **Bomber** or **Sniper**. Two players can both be the **Base**: the second one gets an extra turret just east of the base, with its own aim and the plain gun (crates still open from the main turret), so two Bases and nobody else is a game too. Up to three players can join; Start needs a Base and at least one of Bomber or Sniper, so Base and Sniper alone is a two-player game too (with no Bomber plane, just the usual waves).
@@ -81,6 +93,7 @@ Every fourth wave (4, 8, 12, ...) has a boss: a much bigger dark bomber with red
 - `src/game.ts` rules and entity types: waves, planes, bombs, fighter dives, shells, missiles, upgrades, scoring
 - `src/render.ts` canvas renderer (world rotates around the turret; barrel and HUD stay in screen space)
 - `src/audio.ts` synthesised sound and music (no audio files)
+- `src/survival.ts` Survival mode: the base, bears, crossbow and its own canvas
 - `src/main.ts` screens, settings, high scores, portrait handling, game loop, and the co-op lobby on the host screen
 - `src/coop/` co-op: rooms and players, the phone controller, the Bomber's buttons
 - `public/` service worker, web manifest and icons, copied into the build as-is
