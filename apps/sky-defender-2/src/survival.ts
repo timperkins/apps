@@ -15,7 +15,9 @@ export const SURVIVAL = {
   bearThrow: .09,       // a bear inside throws a rock that takes 9% of max health
   throwCooldown: 5,
   throwSpeed: 170,
-  mineEvery: 4,         // mining gives a stone every 4 seconds
+  mineEvery: 2,         // mining gives a stone every 2 seconds
+  minerCost: 30,        // stone to hire a miner
+  minerEvery: 5,        // the miner digs a stone every 5 seconds
   batchTime: 4,         // the machine turns each stone into stone ammo in 4 seconds
   batchAmmo: 5,         // stone ammo per stone
   stoneDamage: 1.7,     // stone ammo does 1.7x normal ammo damage
@@ -76,7 +78,7 @@ export class Survival {
   private rocks: Rock[] = [];
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
-  private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
+  private miner = false; private minerT = 0; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
 
   constructor(private canvas: HTMLCanvasElement, private pad: HTMLElement, private hooks: SurvivalHooks) {
     this.ctx = canvas.getContext('2d')!;
@@ -102,6 +104,7 @@ export class Survival {
     btn('#svPause', () => this.hooks.pause());
     btn('#svMine', () => this.action());
     btn('#svAmmoBtn', () => this.switchAmmo());
+    btn('#svHire', () => this.hire());
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -110,6 +113,7 @@ export class Survival {
       if (k === 'p' || k === 'Escape') { this.hooks.pause(); return; }
       if (k === 'm') { if (!e.repeat) this.action(); return; }
       if (k === 's') { if (!e.repeat) this.switchAmmo(); return; }
+      if (k === 'h') { if (!e.repeat) this.hire(); return; }
       if (k.startsWith('Arrow')) { e.preventDefault(); this.keys.add(k); }
     });
     addEventListener('keyup', e => this.keys.delete(e.key));
@@ -123,7 +127,7 @@ export class Survival {
     this.t = 0; this.healT = 0; this.spawnT = 2; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
     this.gateOpen = 0; this.hurtFlash = 0; this.keys.clear(); this.stick = null;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
-    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0;
+    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miner = false; this.minerT = 0;
     this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
@@ -199,6 +203,14 @@ export class Survival {
     this.queue += this.stones; this.stones = 0;
     Sound.thump();
   }
+  /** H next to the mine: hire a miner for 30 stone, who digs a stone every 5 seconds for you. */
+  private hire() {
+    if (!this.mineOn || this.miner) return;
+    if (dist(this.x, this.y, MINE.x, MINE.y) > NEAR) { this.bubble(this.x, this.y - 30, 'Walk to the mine to hire a miner', 'info'); Sound.denied(); return; }
+    if (this.stones < SURVIVAL.minerCost) { this.bubble(this.x, this.y - 30, `A miner costs ${SURVIVAL.minerCost} stone`, 'info'); Sound.denied(); return; }
+    this.stones -= SURVIVAL.minerCost; this.miner = true; this.minerT = 0;
+    this.say('You hired a miner!'); Sound.pop();
+  }
   /** S: switch between your loadout ammo and stone ammo. */
   private switchAmmo() {
     if (!this.useStone && !this.stoneAmmo) { this.bubble(this.x, this.y - 30, 'No stone ammo yet', 'info'); Sound.denied(); return; }
@@ -248,6 +260,10 @@ export class Survival {
         this.mineT += dt;
         if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.stones++; this.bubble(MINE.x, MINE.y - 30, '+1 stone', 'info'); Sound.thump(); }
       }
+    }
+    if (this.miner) {
+      this.minerT += dt;
+      if (this.minerT >= SURVIVAL.minerEvery) { this.minerT -= SURVIVAL.minerEvery; this.stones++; this.bubble(MINE.x - 4, MINE.y + 10, '+1 stone', 'info'); }
     }
     if (this.queue > 0) {
       this.batchT += dt;
@@ -517,9 +533,24 @@ export class Survival {
     g.fillStyle = this.queue ? (Math.sin(this.t * 10) > 0 ? '#ffcf4a' : '#a07a20') : '#3c4a3c'; g.beginPath(); g.arc(16, 10, 4, 0, 7); g.fill();
     if (this.queue) { g.fillStyle = '#222'; g.fillRect(-20, 8, 26, 6); g.fillStyle = '#9fe0b0'; g.fillRect(-20, 8, 26 * this.batchT / SURVIVAL.batchTime, 6); }
     g.restore();
+    // the hired miner, below the mine, swinging a pick at it
+    if (this.miner) {
+      const mx = MINE.x - 4, my = MINE.y + 30, sw = Math.sin(this.minerT / SURVIVAL.minerEvery * Math.PI * 10) * .6;
+      g.save(); g.translate(mx, my);
+      g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(2, 3, 11, 9, 0, 0, 7); g.fill();
+      g.rotate(-Math.PI / 2);
+      g.fillStyle = '#7a5a3a'; g.beginPath(); g.ellipse(0, 0, 8, 10, 0, 0, 7); g.fill();
+      g.save(); g.rotate(sw);
+      g.strokeStyle = '#5a3d22'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(4, 2); g.lineTo(18, 2); g.stroke();
+      g.strokeStyle = '#9aa0a6'; g.lineWidth = 3; g.beginPath(); g.moveTo(18, -6); g.quadraticCurveTo(22, 2, 18, 10); g.stroke();
+      g.restore();
+      g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(0, 0, 5.5, 0, 7); g.fill();
+      g.fillStyle = '#e0b43a'; g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill(); g.fillStyle = '#fff6b0'; g.beginPath(); g.arc(4, 0, 1.8, 0, 7); g.fill();
+      g.restore();
+    }
     // labels
     g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
-    g.fillText('Mine', MINE.x, MINE.y + 34);
+    g.fillText('Mine', MINE.x + (this.miner ? 34 : 0), MINE.y + 34);
     g.fillText(this.queue ? `Machine (${this.queue} left)` : 'Machine', MACHINE.x, MACHINE.y + 38);
     // mining progress ring
     if (this.mining) {
@@ -703,6 +734,7 @@ export class Survival {
     const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
     ab.hidden = !this.stoneAmmo && !this.useStone;
+    this.pad.querySelector<HTMLElement>('#svHire')!.hidden = !nearMine || this.miner;
     const al = this.useStone ? 'Stone' : AMMO[this.load.ammo].name;
     if (ab.firstElementChild!.textContent !== al) ab.firstElementChild!.textContent = al;
   }

@@ -280,3 +280,5 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svbtn.small { width: 62px; height: 62px; bottom: 104px; font-size: 12.5px; }
 #svMine { right: 22px; }
 #svAmmoBtn { right: 96px; }
+#svHire { right: 22px; bottom: 174px; font-size: 12px; }
+#svHire small { font-size: 9.5px; }
