@@ -2,7 +2,7 @@
 import './style.css';
 import { loadArt } from './art';
 import { Renderer } from './render';
-import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT, SNIPER_PERKS, SHOP, newAdventure, type ShopId, type Adventure } from './game';
+import { Game, UPGRADES, WAR_STRIKES, WAR_TIME, type Difficulty, type GameMode, type Results, type UpgradeId, type Crate, type PackKind, type BomberAct, PROTECT, SNIPER_PERKS, SHOP, PARTS, newAdventure, type ShopId, type Adventure } from './game';
 import { Tilt, isComputer } from './input';
 import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
@@ -58,6 +58,7 @@ const game = new Game({
 });
 // adventure: iron and shop levels are kept on this device between games
 game.adv = Object.assign(newAdventure(), store.get<Partial<Adventure>>('adventure', {}));
+if (!Array.isArray(game.adv.parts)) game.adv.parts = [];
 function saveAdventure() { store.set('adventure', game.adv); }
 applySettings();
 game.difficulty = difficulty;
@@ -332,6 +333,7 @@ $('ironBtn').addEventListener('click', e => { e.stopPropagation(); if (mode === 
 /* ---------- adventure: iron and the iron shop ---------- */
 let ironAtStart = 0;
 let shopFrom: 'play' | 'start' | 'results' = 'start';
+const BUILDING_NAMES: Record<string, string> = { search: 'Searchlight', radar: 'Radar', repair: 'Repair yard', depot: 'Weapons depot', hangar: 'Resupply hangar' };
 function ironHud() { $('ironCount').textContent = String(game.adv.iron); }
 function openShop(from: typeof shopFrom) {
   shopFrom = from;
@@ -355,6 +357,18 @@ function renderShop() {
     b.disabled = !!block;
     b.innerHTML = `${lv}<b>${it.name}</b><span class="desc">${it.desc}</span><span class="price">${block === 'Maxed' || block === 'Full health' || block === 'During a game' ? block : `${game.shopCost(id)} iron`}</span>`;
     b.addEventListener('click', e => { e.stopPropagation(); if (game.buy(id)) { Sound.pop(); saveAdventure(); ironHud(); renderShop(); } });
+    list.appendChild(b);
+  }
+  const head = document.createElement('h3');
+  head.className = 'shophead'; head.textContent = 'Base parts';
+  list.appendChild(head);
+  for (const p of PARTS) {
+    const block = game.partBlock(p.id);
+    const b = document.createElement('button');
+    b.className = 'card shopitem';
+    b.disabled = !!block;
+    b.innerHTML = `<span class="kind">Base part</span><b>${BUILDING_NAMES[p.id]}</b><span class="desc">${p.desc}</span><span class="price">${block === 'Built' ? 'Built' : `${p.cost} iron`}</span>`;
+    b.addEventListener('click', e => { e.stopPropagation(); if (game.buyPart(p.id)) { Sound.pop(); saveAdventure(); ironHud(); renderShop(); } });
     list.appendChild(b);
   }
   $('shopNote').textContent = shopFrom === 'play'

@@ -118,8 +118,17 @@ export const SHOP: Record<ShopId, ShopItem> = {
   rate: { name: 'Fire rate', desc: 'The gun fires 15% faster.', max: 6, cost: lv => 4 + lv * 3 },
   repair: { name: 'Repair turret', desc: 'Patch the turret back to full health now.', max: Infinity, cost: () => 3 },
 };
-export interface Adventure { iron: number; health: number; damage: number; rate: number; }
-export const newAdventure = (): Adventure => ({ iron: 0, health: 0, damage: 0, rate: 0 });
+/** Base parts: buildings bought with iron. Each stays built for every later adventure game and does its usual job
+ *  (the depot and repair yard do extra adventure jobs). A part destroyed in a game is back for the next one. */
+export const PARTS: { id: BuildingId; cost: number; desc: string }[] = [
+  { id: 'search', cost: 40, desc: 'Lights up the sky at night.' },
+  { id: 'radar', cost: 50, desc: 'Shows where bombs will land and arrows to planes off screen.' },
+  { id: 'repair', cost: 60, desc: 'The turret slowly repairs itself while the yard stands.' },
+  { id: 'depot', cost: 75, desc: 'Special weapons from crates get 50% more ammo.' },
+  { id: 'hangar', cost: 100, desc: 'Supply planes drop upgrade crates every wave.' },
+];
+export interface Adventure { iron: number; health: number; damage: number; rate: number; parts: BuildingId[]; }
+export const newAdventure = (): Adventure => ({ iron: 0, health: 0, damage: 0, rate: 0, parts: [] });
 /** Where the crate can land on the pad: the gap left of the depot or right of the hangar, picked at random each drop. */
 const LZ_SPOTS = [-77, 86];
 export const LZ_Y = GROUND_Y - 3.4;
@@ -341,6 +350,8 @@ export interface BomberView {
   protect: number; protectT: number;
 }
 
+const makeBuilding = (d: BuildingDef, x: number, name = d.name): Building => ({ def: d, id: d.id, name, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 });
+
 export class Game {
   settings = { reduceMotion: false, vibration: true };
   /** set before start() (and before reset(), for the title screen's backdrop); they hold for the whole game */
@@ -409,7 +420,7 @@ export class Game {
     this.planes = []; this.bombs = []; this.shells = []; this.missiles = []; this.pulses = []; this.particles = [];
     this.tracers = []; this.bolts = []; this.crates = []; this.labels = []; this.trails = [];
     this.cargo = null; this.cargoAt = null; this.lzX = LZ_SPOTS[1];
-    const make = (d: BuildingDef, x: number, name = d.name): Building => ({ def: d, id: d.id, name, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 });
+    const make = makeBuilding;
     this.buildings = BUILDINGS.map(d => make(d, mockToWorld(d.mx, 800)[0]));
     if (this.mode === 'war') {
       // a turret out on its own either side of the base
@@ -418,7 +429,7 @@ export class Game {
       this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
     }
     // adventure: the turret stands on its own, weak to start
-    if (this.adventure) { this.buildings = this.buildings.filter(b => b.id === 'turret'); const t = this.b('turret'); t.max = t.hp = t.def.hp * this.advHpShare; }
+    if (this.adventure) { this.buildings = this.buildings.filter(b => b.id === 'turret' || this.adv.parts.includes(b.id)); const t = this.b('turret'); t.max = t.hp = t.def.hp * this.advHpShare; }
     this.gun2 = null;
     if (!this.coop) this.localGun = 1;
     if (this.coop && this.secondBaseName !== null) {
@@ -461,7 +472,7 @@ export class Game {
   b(id: BuildingId): Building { return this.buildings.find(b => b.id === id && !b.outpost)!; }
   has(id: BuildingId) { return this.buildings.some(b => b.id === id && !b.outpost); }
   /** Whether a building is standing. In adventure only the turret is built: radar warnings and supply drops still work, but there is no searchlight. */
-  alive(id: BuildingId) { return this.has(id) ? !this.b(id).ruined : this.adventure && id !== 'search'; }
+  alive(id: BuildingId) { return this.has(id) && !this.b(id).ruined; }
   /** The turret's health as a share of a normal turret's (in adventure it starts at 20%). */
   turretPct() { const t = this.b('turret'); return t.ruined ? 0 : Math.max(1, Math.round(t.hp / t.def.hp * 100)); }
   /** The turret the player is using. */
@@ -493,6 +504,24 @@ export class Game {
       this.adv[id]++;
       // more max health also adds that much health to a standing turret
       if (id === 'health' && this.adventure && !t.ruined) { const m = t.def.hp * this.advHpShare; t.hp += m - t.max; t.max = m; }
+    }
+    return true;
+  }
+  partBlock(id: BuildingId): string | null {
+    const p = PARTS.find(p => p.id === id)!;
+    if (this.adv.parts.includes(id)) return 'Built';
+    return this.adv.iron < p.cost ? 'Not enough iron' : null;
+  }
+  /** Buys a base part; during an adventure game it goes up at once, at full health. */
+  buyPart(id: BuildingId) {
+    if (this.partBlock(id)) return false;
+    this.adv.iron -= PARTS.find(p => p.id === id)!.cost;
+    this.adv.parts.push(id);
+    if (this.adventure && !this.has(id)) {
+      const d = BUILDINGS.find(d => d.id === id)!;
+      this.buildings.push(makeBuilding(d, mockToWorld(d.mx, 800)[0]));
+      this.buildings.sort((a, b) => a.x - b.x);
+      this.labels.push({ text: `${d.name} built`, x: this.buildings.find(b => b.id === id)!.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#c9d3dc' });
     }
     return true;
   }
@@ -2157,7 +2186,7 @@ export class Game {
     const c = crate && !crate.dead ? crate : this.readyCrate();
     if (c) c.dead = true;
     this.crates = this.crates.filter(cr => !cr.dead);
-    if (isWeapon(id)) { this.weapon = id; this.ammo = AMMO[id] * (this.perks.has('overcharge') ? 2 : 1); this.fireCD = 0; }
+    if (isWeapon(id)) { this.weapon = id; this.ammo = Math.round(AMMO[id] * (this.perks.has('overcharge') ? 2 : 1) * (this.adventure && this.alive('depot') ? 1.5 : 1)); this.fireCD = 0; }
     else if (SET_PERKS.includes(id as PerkId)) this.perks.add(id as PerkId);
     else if (id === 'dual' || id === 'triple') this.guns = id === 'dual' ? 2 : 3;
     else if (id === 'reload') this.fastLoad = true;
@@ -2414,6 +2443,8 @@ export class Game {
     for (const b of this.buildings) {
       b.hit = Math.max(0, b.hit - dt * 3);
       // Mending: standing buildings slowly repair themselves during play
+      // adventure: a standing repair yard slowly repairs the turret
+      if (this.adventure && b.id === 'turret' && this.alive('repair') && !b.ruined && b.hp < b.max && !this.ended && this.phase !== 'idle') b.hp = Math.min(b.max, b.hp + b.max * MEND_RATE * dt);
       if (this.perks.has('mend') && !b.ruined && b.hp < b.max && !this.ended && this.phase !== 'idle') b.hp = Math.min(b.max, b.hp + b.max * MEND_RATE * dt);
       if (b.ruined) b.ruinT += dt;
       const frac = b.hp / b.max;

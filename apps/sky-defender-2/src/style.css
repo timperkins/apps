@@ -240,3 +240,5 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #shop { background: rgba(12, 10, 24, .86); }
 #shop .card { background: rgba(38, 34, 56, .92); }
 #shop .card:disabled { opacity: .62; }
+#shop .shophead { grid-column: 1 / -1; margin: 8px 0 0; font: 600 13px/1 var(--font-b); letter-spacing: .08em; text-transform: uppercase; color: #c9d3dc; text-align: left; }
+#shop { justify-content: flex-start; overflow-y: auto; }
