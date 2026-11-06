@@ -29,6 +29,19 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
     </button>
     <p id="svHelp">Drag anywhere to walk</p>
+    <button id="svInv" class="svinv" hidden><span>Belt ×0</span><small>E: place</small></button>
+    <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
+    <button id="svShopBtn" class="svbtn small" hidden><span>Shop</span><small>B</small></button>
+    <div id="svShop" class="svshop" hidden>
+      <h3>Shop</h3>
+      <p class="fine"><b id="svShopStone">0</b> stone</p>
+      <div class="svitem">
+        <div><b>Belt</b><small>Goes in your inventory. Place it anywhere in the camp; it carries stone (and you). R turns it.</small></div>
+        <button id="svBuyBelt" class="primary">5 stone</button>
+      </div>
+      <p class="fine" id="svShopInv"></p>
+      <button class="ghost small" id="svShopClose">Close (B)</button>
+    </div>
     <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>
     <button id="svMine" class="svbtn small" hidden><span>Mine</span><small>M</small></button>
     <button id="svHire" class="svbtn small hire" hidden><span>Miner</span><small>H: 30 stone</small></button>
@@ -160,7 +173,16 @@
     <canvas id="svPreview" width="120" height="120" aria-hidden="true"></canvas>
     <button class="primary" id="svGo">Start</button>
     <p class="fine" id="svBest"></p>
-    <button class="ghost small" id="svBack">Back</button>
+    <div class="row"><button class="ghost small" id="svHow">How to play</button><button class="ghost small" id="svBack">Back</button></div>
+  </section>
+
+  <section id="survIntro" class="screen">
+    <p class="fine" id="svIntroStep"></p>
+    <div class="svintro-icon" id="svIntroIcon" aria-hidden="true"></div>
+    <h2 id="svIntroTitle"></h2>
+    <ul class="svintro" id="svIntroText"></ul>
+    <div class="row"><button class="ghost" id="svIntroBack">Back</button><button class="primary" id="svIntroNext">Next</button></div>
+    <button class="ghost small" id="svIntroSkip">Skip</button>
   </section>
 
   <section id="survPause" class="screen">

@@ -18,6 +18,8 @@ export const SURVIVAL = {
   mineEvery: 2,         // mining gives a stone every 2 seconds
   minerCost: 30,        // stone to hire a miner
   minerEvery: 5,        // the miner digs a stone every 5 seconds
+  beltCost: 5,          // stone for a belt in the shop
+  beltSpeed: 45,        // how fast a belt carries stone (and you)
   batchTime: 4,         // the machine turns each stone into stone ammo in 4 seconds
   batchAmmo: 5,         // stone ammo per stone
   stoneDamage: 1.7,     // stone ammo does 1.7x normal ammo damage
@@ -46,6 +48,12 @@ const W = 600, H = 920;
 const WALL = { x0: 110, x1: 490, y0: 400, y1: 860, t: 14 };
 const GATE = { x: 300, w: 74 };
 const GUY_R = 13, BEAR_R = 18, STONE = '#a9a59c';
+// belts sit on a grid inside the walls
+const TILE = 24, GX0 = WALL.x0 + WALL.t, GY0 = WALL.y0 + WALL.t;
+const COLS = Math.floor((WALL.x1 - WALL.t - GX0) / TILE), ROWS = Math.floor((WALL.y1 - WALL.t - GY0) / TILE);
+const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const; // right, down, left, up
+const SHOP = { x: WALL.x1 - 62, y: WALL.y1 - 62, r: 26 };
+interface Item { x: number; y: number; gone?: boolean; }
 const MINE = { x: WALL.x0 + 62, y: WALL.y0 + 95, r: 24 }, MACHINE = { x: WALL.x1 - 62, y: WALL.y0 + 215, r: 26 }, NEAR = 58;
 
 type BearState = 'walk' | 'wait' | 'enter' | 'inside' | 'dead';
@@ -78,6 +86,8 @@ export class Survival {
   private rocks: Rock[] = [];
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
+  private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
+  private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miner = false; private minerT = 0; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
 
   constructor(private canvas: HTMLCanvasElement, private pad: HTMLElement, private hooks: SurvivalHooks) {
@@ -105,9 +115,20 @@ export class Survival {
     btn('#svMine', () => this.action());
     btn('#svAmmoBtn', () => this.switchAmmo());
     btn('#svHire', () => this.hire());
+    btn('#svShopBtn', () => this.openShop());
+    btn('#svInv', () => this.togglePlacing());
+    btn('#svRotate', () => this.rotate());
+    pad.querySelector('#svBuyBelt')!.addEventListener('click', e => { e.stopPropagation(); this.buyBelt(); });
+    pad.querySelector('#svShopClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeShop(); });
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (this.shopOpen) { if (k === 'b' || k === 'Escape') this.closeShop(); else if (k === 'Enter' && !e.repeat) this.buyBelt(); return; }
+      if (k === 'b') { if (!e.repeat) this.openShop(); return; }
+      if (k === 'e') { if (!e.repeat) this.togglePlacing(); return; }
+      if (k === 'r') { if (!e.repeat) this.rotate(); return; }
+      if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
+      if (this.placing && k === 'Escape') { this.placing = false; return; }
       if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) this.shoot(true); return; }
       if (k === 'z') { if (!e.repeat) this.shoot(false); return; }
       if (k === 'p' || k === 'Escape') { this.hooks.pause(); return; }
@@ -128,6 +149,7 @@ export class Survival {
     this.gateOpen = 0; this.hurtFlash = 0; this.keys.clear(); this.stick = null;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
     this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miner = false; this.minerT = 0;
+    this.belts.clear(); this.items = []; this.inv = 0; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop();
     this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
@@ -138,16 +160,24 @@ export class Survival {
   /* ---------- input ---------- */
   private down(e: PointerEvent) {
     e.preventDefault();
-    if (!this.running || this.paused) return;
-    // a tap on the machine uses it
+    if (!this.running || this.paused || this.shopOpen) return;
+    const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
+    // placing a belt: tap the spot
+    if (this.placing) { const t = tileAt(wx, wy); if (t) { this.placeAt(t.c, t.r); return; } }
+    // a tap on the machine uses it, a tap on the shop opens it
     if (this.mineOn) {
-      const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
       if (Math.hypot(wx - MACHINE.x, wy - MACHINE.y) < MACHINE.r + 10) { this.useMachine(); return; }
+      if (Math.hypot(wx - SHOP.x, wy - SHOP.y) < SHOP.r + 10) { this.openShop(); return; }
     }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
   }
   private move(e: PointerEvent) {
+    // with a mouse, the belt being placed follows the pointer
+    if (this.placing && e.pointerType === 'mouse') {
+      const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
+      this.hover = t ? { ...t, t: performance.now() } : null;
+    }
     const s = this.stick;
     if (!s || s.id !== e.pointerId) return;
     s.dx = e.offsetX - s.ox; s.dy = e.offsetY - s.oy;
@@ -203,6 +233,96 @@ export class Survival {
     this.queue += this.stones; this.stones = 0;
     Sound.thump();
   }
+  /* ---------- shop, inventory and belts ---------- */
+  private openShop() {
+    if (!this.mineOn) return;
+    if (dist(this.x, this.y, SHOP.x, SHOP.y) > NEAR + 6) { this.bubble(SHOP.x, SHOP.y - 36, 'Walk to the shop', 'info'); Sound.denied(); return; }
+    this.shopOpen = true; this.stick = null; this.keys.clear(); this.mining = false;
+    this.renderShop();
+    this.pad.querySelector<HTMLElement>('#svShop')!.hidden = false;
+    Sound.ui();
+  }
+  private closeShop() { this.shopOpen = false; this.pad.querySelector<HTMLElement>('#svShop')!.hidden = true; }
+  private renderShop() {
+    this.pad.querySelector('#svShopStone')!.textContent = String(this.stones);
+    this.pad.querySelector('#svShopInv')!.textContent = this.inv ? `In your inventory: ${this.inv} belt${this.inv > 1 ? 's' : ''}` : '';
+    (this.pad.querySelector('#svBuyBelt') as HTMLButtonElement).disabled = this.stones < SURVIVAL.beltCost;
+  }
+  private buyBelt() {
+    if (this.stones < SURVIVAL.beltCost) { Sound.denied(); return; }
+    this.stones -= SURVIVAL.beltCost; this.inv++;
+    Sound.pop(); this.renderShop();
+  }
+  private togglePlacing() {
+    if (!this.placing && !this.inv) { this.bubble(this.x, this.y - 30, 'No belts. Buy them at the shop', 'info'); Sound.denied(); return; }
+    this.placing = !this.placing; this.hover = null;
+    Sound.click();
+  }
+  /** Where the belt would go: under the mouse, or the tile in front of the guy. */
+  private ghost() {
+    if (this.hover && performance.now() - this.hover.t < 4000) return this.hover;
+    const d = DIRS[Math.round(((this.face % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 2)) % 4];
+    return tileAt(this.x + d[0] * TILE, this.y + d[1] * TILE);
+  }
+  private placeAt(c: number, r: number) {
+    const key = c + ',' + r;
+    if (this.belts.has(key)) { this.belts.set(key, (this.belts.get(key)! + 1) % 4); Sound.click(); return; }
+    if (!this.inv) { this.placing = false; return; }
+    if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put a belt there", 'info'); Sound.denied(); return; }
+    this.belts.set(key, this.placeDir); this.inv--;
+    Sound.thump();
+    if (!this.inv) this.placing = false;
+  }
+  /** R: turn the belt being placed, or the belt under (or in front of) the guy. */
+  private rotate() {
+    if (this.placing) { this.placeDir = (this.placeDir + 1) % 4; Sound.click(); return; }
+    for (const t of [tileAt(this.x, this.y), this.ghost()]) {
+      if (!t) continue;
+      const key = t.c + ',' + t.r;
+      if (this.belts.has(key)) { this.belts.set(key, (this.belts.get(key)! + 1) % 4); Sound.click(); return; }
+    }
+    this.bubble(this.x, this.y - 30, 'Stand on a belt to turn it', 'info');
+  }
+  /** New stone goes onto a belt that touches the mine, or into your pocket. */
+  private giveStone(x: number, y: number) {
+    let best: { c: number; r: number } | null = null, bd = MINE.r + 34;
+    for (const key of this.belts.keys()) {
+      const [c, r] = key.split(',').map(Number), d = dist(tileX(c), tileY(r), MINE.x, MINE.y);
+      if (d < bd) { bd = d; best = { c, r }; }
+    }
+    if (best && this.items.length < 80) { this.items.push({ x: tileX(best.c), y: tileY(best.r) }); this.bubble(x, y, '+1 stone on the belt', 'info'); }
+    else { this.stones++; this.bubble(x, y, '+1 stone', 'info'); }
+  }
+  /** Belts move stone along; stone that runs into the machine goes in as a batch. */
+  private moveItems(dt: number) {
+    const step = SURVIVAL.beltSpeed * dt;
+    for (const it of this.items) {
+      const t = tileAt(it.x, it.y);
+      const d = t ? this.belts.get(t.c + ',' + t.r) : undefined;
+      if (!t || d === undefined) continue;
+      const [dx, dy] = DIRS[d];
+      // anything just ahead on the belt holds it up
+      if (this.items.some(o => { const a = (o.x - it.x) * dx + (o.y - it.y) * dy; return o !== it && !o.gone && a > 0 && a < 11 && Math.abs((o.x - it.x) * dy - (o.y - it.y) * dx) < 6; })) continue;
+      // keep to the middle of the belt
+      if (dx) it.y += clamp(tileY(t.r) - it.y, -step, step); else it.x += clamp(tileX(t.c) - it.x, -step, step);
+      const nx = it.x + dx * step, ny = it.y + dy * step, nt = tileAt(nx + dx * 6, ny + dy * 6);
+      const onward = nt && (nt.c !== t.c || nt.r !== t.r) ? this.belts.has(nt.c + ',' + nt.r) : !!nt;
+      if (onward) { it.x = nx; it.y = ny; continue; }
+      if (dist(tileX(t.c) + dx * TILE, tileY(t.r) + dy * TILE, MACHINE.x, MACHINE.y) < MACHINE.r + 24) {
+        it.gone = true; this.queue++;
+        this.bubble(MACHINE.x, MACHINE.y - 36, 'Stone in', 'info');
+      } else {
+        // end of the line: it waits at the edge
+        it.x = clamp(nx, tileX(t.c) - 9, tileX(t.c) + 9); it.y = clamp(ny, tileY(t.r) - 9, tileY(t.r) + 9);
+      }
+    }
+    this.items = this.items.filter(it => !it.gone);
+    // walk over stone to pick it up
+    const before = this.items.length;
+    this.items = this.items.filter(it => dist(it.x, it.y, this.x, this.y) > GUY_R + 4);
+    if (this.items.length < before) { this.stones += before - this.items.length; Sound.click(); }
+  }
+
   /** H next to the mine: hire a miner for 30 stone, who digs a stone every 5 seconds for you. */
   private hire() {
     if (!this.mineOn || this.miner) return;
@@ -221,7 +341,7 @@ export class Survival {
 
   /* ---------- rules ---------- */
   update(dt: number) {
-    if (!this.running || this.paused) return;
+    if (!this.running || this.paused || this.shopOpen) return;
     this.t += dt;
     this.reload = Math.max(0, this.reload - dt);
     this.noTargetT -= dt;
@@ -241,6 +361,9 @@ export class Survival {
       this.face = Math.atan2(my, mx);
       this.walk += dt * 10 * Math.min(1, m);
     }
+    // a belt under the guy carries him along
+    const under = tileAt(this.x, this.y), ud = under ? this.belts.get(under.c + ',' + under.r) : undefined;
+    if (ud !== undefined) { this.x += DIRS[ud][0] * SURVIVAL.beltSpeed * dt; this.y += DIRS[ud][1] * SURVIVAL.beltSpeed * dt; }
     // the guy stays inside the walls
     this.x = clamp(this.x, WALL.x0 + WALL.t + GUY_R, WALL.x1 - WALL.t - GUY_R);
     this.y = clamp(this.y, WALL.y0 + WALL.t + GUY_R, WALL.y1 - WALL.t - GUY_R);
@@ -258,13 +381,14 @@ export class Survival {
         this.face = Math.atan2(MINE.y - this.y, MINE.x - this.x);
         if (this.swing <= 0) { this.swing = 1; Sound.click(); }
         this.mineT += dt;
-        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.stones++; this.bubble(MINE.x, MINE.y - 30, '+1 stone', 'info'); Sound.thump(); }
+        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.giveStone(MINE.x, MINE.y - 30); Sound.thump(); }
       }
     }
     if (this.miner) {
       this.minerT += dt;
-      if (this.minerT >= SURVIVAL.minerEvery) { this.minerT -= SURVIVAL.minerEvery; this.stones++; this.bubble(MINE.x - 4, MINE.y + 10, '+1 stone', 'info'); }
+      if (this.minerT >= SURVIVAL.minerEvery) { this.minerT -= SURVIVAL.minerEvery; this.giveStone(MINE.x - 4, MINE.y + 10); }
     }
+    this.moveItems(dt);
     if (this.queue > 0) {
       this.batchT += dt;
       if (this.batchT >= SURVIVAL.batchTime) {
@@ -487,7 +611,21 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
-    if (this.mineOn) this.drawMineAndMachine(g);
+    this.drawBelts(g);
+    if (this.mineOn) { this.drawMineAndMachine(g); this.drawShop(g); }
+    for (const it of this.items) {
+      g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(it.x + 1.5, it.y + 2, 5.5, 0, 7); g.fill();
+      g.fillStyle = STONE; g.beginPath(); g.arc(it.x, it.y, 5.5, 0, 7); g.fill();
+      g.fillStyle = '#d0ccc2'; g.beginPath(); g.arc(it.x - 1.5, it.y - 1.5, 2, 0, 7); g.fill();
+    }
+    if (this.placing) {
+      const t = this.ghost();
+      if (t) {
+        const bad = this.belts.has(t.c + ',' + t.r) ? false : blockedTile(t.c, t.r);
+        g.globalAlpha = .6; paintBelt(g, tileX(t.c), tileY(t.r), this.belts.get(t.c + ',' + t.r) ?? this.placeDir, this.t); g.globalAlpha = 1;
+        g.strokeStyle = bad ? '#ff6a5a' : '#fff5ea'; g.lineWidth = 2; g.strokeRect(GX0 + t.c * TILE + 1, GY0 + t.r * TILE + 1, TILE - 2, TILE - 2);
+      }
+    }
     this.drawWalls(g);
     // dead bears fade, then the rest on top
     for (const b of this.bears) if (b.state === 'dead') this.drawBear(g, b);
@@ -512,6 +650,31 @@ export class Survival {
     // targeting range when a bear is close: a faint ring
     g.strokeStyle = 'rgba(255,245,234,.10)'; g.lineWidth = 1.5; g.setLineDash([6, 8]);
     g.beginPath(); g.arc(this.x, this.y, SURVIVAL.targetRange, 0, 7); g.stroke(); g.setLineDash([]);
+  }
+
+  private drawBelts(g: CanvasRenderingContext2D) {
+    if (this.placing) {
+      // a faint grid while placing
+      g.strokeStyle = 'rgba(255,245,234,.12)'; g.lineWidth = 1;
+      for (let c = 0; c <= COLS; c++) { g.beginPath(); g.moveTo(GX0 + c * TILE, GY0); g.lineTo(GX0 + c * TILE, GY0 + ROWS * TILE); g.stroke(); }
+      for (let r = 0; r <= ROWS; r++) { g.beginPath(); g.moveTo(GX0, GY0 + r * TILE); g.lineTo(GX0 + COLS * TILE, GY0 + r * TILE); g.stroke(); }
+    }
+    for (const [key, d] of this.belts) { const [c, r] = key.split(',').map(Number); paintBelt(g, tileX(c), tileY(r), d, this.t); }
+  }
+
+  private drawShop(g: CanvasRenderingContext2D) {
+    const pop = Math.min(1, this.popT * 2);
+    g.save(); g.translate(SHOP.x, SHOP.y); g.scale(pop, pop);
+    g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-22, -14, 50, 38);
+    g.fillStyle = '#8a5a32'; g.fillRect(-26, -10, 52, 32);
+    g.fillStyle = '#6a4224'; g.fillRect(-26, 8, 52, 4);
+    // striped awning
+    for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#f2efe6' : '#d64545'; g.fillRect(-28 + i * 56 / 6, -22, 56 / 6 + .5, 14); }
+    g.fillStyle = STONE; g.beginPath(); g.arc(-10, 0, 4, 0, 7); g.arc(0, 2, 4, 0, 7); g.fill();
+    paintBelt(g, 14, 0, 0, this.t, .5);
+    g.restore();
+    g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
+    g.fillText('Shop', SHOP.x, SHOP.y + 36);
   }
 
   private drawMineAndMachine(g: CanvasRenderingContext2D) {
@@ -735,6 +898,19 @@ export class Survival {
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
     ab.hidden = !this.stoneAmmo && !this.useStone;
     this.pad.querySelector<HTMLElement>('#svHire')!.hidden = !nearMine || this.miner;
+    const nearShop = this.mineOn && dist(this.x, this.y, SHOP.x, SHOP.y) < NEAR + 6;
+    this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = !nearShop || this.shopOpen;
+    const inv = this.pad.querySelector<HTMLElement>('#svInv')!;
+    inv.hidden = !this.inv && !this.placing;
+    inv.classList.toggle('on', this.placing);
+    const il = `Belt ×${this.inv}`;
+    if (inv.firstElementChild!.textContent !== il) inv.firstElementChild!.textContent = il;
+    const standing = tileAt(this.x, this.y);
+    this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
+    const help = this.placing ? 'Tap a spot to place the belt. R turns it.' : this.helpText;
+    const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
+    if (hp.textContent !== help) hp.textContent = help;
+    if (this.shopOpen) this.renderShop();
     const al = this.useStone ? 'Stone' : AMMO[this.load.ammo].name;
     if (ab.firstElementChild!.textContent !== al) ab.firstElementChild!.textContent = al;
   }
@@ -776,6 +952,28 @@ export function drawPreview(c: HTMLCanvasElement, L: Loadout) {
   paintGuy(g, L, -.5, 0, 1);
 }
 
+const tileX = (c: number) => GX0 + c * TILE + TILE / 2, tileY = (r: number) => GY0 + r * TILE + TILE / 2;
+function tileAt(x: number, y: number) {
+  const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE);
+  return c >= 0 && r >= 0 && c < COLS && r < ROWS ? { c, r } : null;
+}
+/** Belts can't go on the mine, the machine or the shop. */
+function blockedTile(c: number, r: number) {
+  const x = tileX(c), y = tileY(r);
+  return [MINE, MACHINE, SHOP].some(o => dist(x, y, o.x, o.y) < o.r + 10);
+}
+/** A conveyor tile with moving chevrons pointing along direction d. */
+function paintBelt(g: CanvasRenderingContext2D, x: number, y: number, d: number, t: number, k = 1) {
+  const s = TILE * k;
+  g.save(); g.translate(x, y); g.rotate(d * Math.PI / 2);
+  g.fillStyle = '#3b3f45'; g.fillRect(-s / 2, -s / 2, s, s);
+  g.fillStyle = '#2a2d31'; g.fillRect(-s / 2, -s / 2, s, s * .14); g.fillRect(-s / 2, s / 2 - s * .14, s, s * .14);
+  g.beginPath(); g.rect(-s / 2, -s / 2, s, s); g.clip();
+  g.strokeStyle = '#e0b43a'; g.lineWidth = 2 * k;
+  const off = (t * SURVIVAL.beltSpeed * k) % (s / 2);
+  for (let i = -1; i < 2; i++) { const cx = -s / 2 + i * s / 2 + off; g.beginPath(); g.moveTo(cx - s * .12, -s * .2); g.lineTo(cx + s * .08, 0); g.lineTo(cx - s * .12, s * .2); g.stroke(); }
+  g.restore();
+}
 const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(bx - ax, by - ay);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');

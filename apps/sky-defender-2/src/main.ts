@@ -742,7 +742,7 @@ const loadout: Loadout = {
   ammo: isAmmo(savedLoad.ammo) ? savedLoad.ammo : 'normal',
 };
 const survival = new Survival($<HTMLCanvasElement>('sv'), $('svPad'), { over: survivalOver, pause: survivalPause });
-if (isComputer()) $('svHelp').textContent = 'Arrow keys to walk';
+if (isComputer()) survival.helpText = 'Arrow keys to walk';
 if (Tilt.debug) (window as unknown as { __surv: unknown }).__surv = survival;
 function renderLoadout() {
   const name = $<HTMLInputElement>('svName');
@@ -774,6 +774,51 @@ $('survSetup').addEventListener('click', e => {
   if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
   renderLoadout();
 });
+// the intro before the first run (and from "How to play" on the loadout screen)
+const INTRO: { icon: string; title: string; lines: string[] }[] = [
+  { icon: '🏹', title: 'Walk and shoot', lines: [
+    'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone.',
+    '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
+    'Your crossbow reloads after every shot. Normal ammo: 3 seconds, 3.5 damage. Bears have 10.5 health.'] },
+  { icon: '🐻', title: 'The bears', lines: [
+    'Bears wait outside the gate. The ring over each one counts down 30 seconds, then it comes in.',
+    'Inside, a bear swipes for 8% of your health every 5 seconds, and throws rocks for 9% from further away. Dodge the rocks!',
+    'You have 1,000,000 health and heal 1.2% every second. Red bubbles show what you lose.'] },
+  { icon: '⛏️', title: 'The mine', lines: [
+    'After 4 bears, bears only wait 20 seconds, and a mine, a machine and a shop pop up in your camp.',
+    'Stand next to the mine and press <kbd>M</kbd> to mine: 1 stone every 2 seconds.',
+    'With 30 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you.'] },
+  { icon: '⚙️', title: 'The machine', lines: [
+    'Walk to the machine and click it (or press <kbd>M</kbd>). It takes all your stone.',
+    'Each stone becomes 5 stone ammo after 4 seconds. Stone ammo does 1.7x damage.',
+    'Press <kbd>S</kbd> to switch between your ammo and stone ammo. Each stone shot uses one up.'] },
+  { icon: '🛒', title: 'Shop and belts', lines: [
+    'Walk to the shop and press <kbd>B</kbd> (or click it). A belt costs 5 stone and goes in your inventory.',
+    'Press <kbd>E</kbd> (or tap the belt in the corner), then click a spot to place it. <kbd>R</kbd> turns it.',
+    'Belts carry stone, and you! Put one next to the mine and lead the line into the machine to make stone ammo by itself.'] },
+];
+let introPage = 0, introThen: (() => void) | null = null;
+function showIntro(then: (() => void) | null) {
+  introPage = 0; introThen = then;
+  renderIntro(); show('survIntro'); mode = 'menu'; returnTo = 'start';
+}
+function renderIntro() {
+  const p = INTRO[introPage];
+  $('svIntroStep').textContent = `How to play · ${introPage + 1} of ${INTRO.length}`;
+  $('svIntroIcon').textContent = p.icon;
+  $('svIntroTitle').textContent = p.title;
+  $('svIntroText').innerHTML = p.lines.map(l => `<li>${l}</li>`).join('');
+  $('svIntroBack').style.visibility = introPage ? 'visible' : 'hidden';
+  $('svIntroNext').textContent = introPage < INTRO.length - 1 ? 'Next' : introThen ? 'Start' : 'Done';
+}
+function endIntro() {
+  store.set('survival.intro', true);
+  if (introThen) introThen(); else { renderLoadout(); show('survSetup'); }
+}
+$('svIntroNext').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (introPage < INTRO.length - 1) { introPage++; renderIntro(); } else endIntro(); });
+$('svIntroBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (introPage) { introPage--; renderIntro(); } });
+$('svIntroSkip').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); endIntro(); });
+$('svHow').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); showIntro(null); });
 function startSurvival() {
   Sound.ui();
   (document.activeElement as HTMLElement | null)?.blur?.();
@@ -781,7 +826,7 @@ function startSurvival() {
   survival.start({ ...loadout });
   mode = 'survival'; last = performance.now();
 }
-$('svGo').addEventListener('click', e => { e.stopPropagation(); startSurvival(); });
+$('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('survival.intro', false)) startSurvival(); else showIntro(startSurvival); });
 $('svBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); startScreen(); });
 function survivalPause() {
   if (mode !== 'survival') return;

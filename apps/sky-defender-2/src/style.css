@@ -282,3 +282,22 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #svAmmoBtn { right: 96px; }
 #svHire { right: 22px; bottom: 174px; font-size: 12px; }
 #svHire small { font-size: 9.5px; }
+#svShopBtn { right: 22px; bottom: 174px; }
+#svRotate { right: 170px; }
+.svinv { position: absolute; left: 14px; bottom: 84px; border-radius: 12px; border: 2px solid rgba(255, 245, 234, .5); background: rgba(20, 16, 34, .65); color: var(--ink); font: 500 14px/1.1 var(--font-b); padding: 7px 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; cursor: pointer; touch-action: none; }
+.svinv small { font-size: 10.5px; color: var(--muted); }
+.svinv.on { border-color: var(--accent); background: rgba(255, 207, 140, .25); }
+.svshop { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100% - 32px)); background: rgba(24, 20, 40, .95); border: 1px solid var(--line); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.svshop h3 { font: 700 22px var(--font-d); margin: 0; }
+.svitem { display: flex; gap: 10px; align-items: center; text-align: left; background: rgba(255, 245, 234, .07); border: 1px solid var(--line); border-radius: 14px; padding: 10px; width: 100%; }
+.svitem > div { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.svitem small { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.svitem button.primary { min-width: 0; padding: 10px 14px; font-size: 14px; flex: none; }
+.svitem button.primary:disabled { opacity: .45; }
+#survIntro { gap: 12px; }
+.svintro-icon { font-size: 54px; line-height: 1; }
+.svintro { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; width: min(330px, 100%); text-align: left; font-size: 15px; line-height: 1.35; }
+.svintro li { padding-left: 18px; position: relative; }
+.svintro li::before { content: ''; position: absolute; left: 3px; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.svintro kbd { font: 600 12px var(--font-b); background: rgba(255, 245, 234, .14); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+#survIntro .row button.primary { min-width: 130px; }
