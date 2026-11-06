@@ -7,6 +7,20 @@ const hint = document.querySelector<HTMLDivElement>('#hint')!;
 const moneyEl = document.querySelector<HTMLDivElement>('#money')!;
 const moneyNum = document.querySelector<HTMLSpanElement>('#moneyNum')!;
 
+const goalLabel = document.querySelector<HTMLSpanElement>('#goalLabel')!;
+const goalReward = document.querySelector<HTMLSpanElement>('#goalReward')!;
+const goalBar = document.querySelector<HTMLElement>('#goalBar')!;
+const toast = document.querySelector<HTMLDivElement>('#toast')!;
+let toastTimer = 0;
+function showToast(text: string) {
+  toast.textContent = text;
+  toast.classList.remove('show');
+  void toast.offsetWidth;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
 const touchFirst = matchMedia('(pointer: coarse)').matches;
 hint.textContent = touchFirst ? 'Drag anywhere to walk' : 'WASD or arrow keys to walk';
 
@@ -26,6 +40,12 @@ const game = new Game(canvas, input, {
     }
   },
   onFirstMove: () => hint.classList.add('hide'),
+  onGoal: (text, cur, target, reward) => {
+    goalLabel.textContent = target > 1 ? `${text}  ${cur.toLocaleString()}/${target.toLocaleString()}` : text;
+    goalReward.textContent = `+${reward}`;
+    goalBar.style.width = `${(cur / target) * 100}%`;
+  },
+  onToast: (text) => showToast(text),
 });
 
 // Upgrades menu.
@@ -90,6 +110,18 @@ resetBtn.addEventListener('click', () => {
     resetBtn.textContent = 'Tap again to lose everything';
     return;
   }
+  game.resetSave();
+  location.reload();
+});
+
+// Restart button with a confirm dialog.
+const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
+document.querySelector('#restartBtn')!.addEventListener('click', () => (confirmEl.hidden = false));
+document.querySelector('#confirmNo')!.addEventListener('click', () => (confirmEl.hidden = true));
+confirmEl.addEventListener('click', (e) => {
+  if (e.target === confirmEl) confirmEl.hidden = true;
+});
+document.querySelector('#confirmYes')!.addEventListener('click', () => {
   game.resetSave();
   location.reload();
 });

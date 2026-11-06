@@ -74,3 +74,37 @@ export function upgrade() {
   blip(659, 0.09, 0.12, 0.15, 'triangle');
   blip(784, 0.18, 0.25, 0.18, 'triangle');
 }
+
+export function growl() {
+  if (!ctx) return;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sawtooth';
+  o.frequency.setValueAtTime(110, now());
+  o.frequency.linearRampToValueAtTime(70, now() + 0.4);
+  g.gain.setValueAtTime(0.0001, now());
+  g.gain.exponentialRampToValueAtTime(0.12, now() + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, now() + 0.45);
+  const f = ctx.createBiquadFilter();
+  f.type = 'lowpass';
+  f.frequency.value = 500;
+  o.connect(f).connect(g).connect(ctx.destination);
+  o.start();
+  o.stop(now() + 0.5);
+}
+
+export function howl() {
+  if (!ctx) return;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(380, now());
+  o.frequency.linearRampToValueAtTime(620, now() + 0.5);
+  o.frequency.linearRampToValueAtTime(420, now() + 1.3);
+  g.gain.setValueAtTime(0.0001, now());
+  g.gain.exponentialRampToValueAtTime(0.1, now() + 0.2);
+  g.gain.exponentialRampToValueAtTime(0.0001, now() + 1.4);
+  o.connect(g).connect(ctx.destination);
+  o.start();
+  o.stop(now() + 1.5);
+}

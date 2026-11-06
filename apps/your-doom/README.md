@@ -13,6 +13,13 @@ A snowy isometric wood-gathering game at [your-doom.trom.dev](https://your-doom.
 
 - Tap **Upgrades** (top right) for the full list, including menu-only upgrades: Snow boots (walk faster), Fancy wood (+5 eeeddd per log), Town sign (more customers), Tree fertilizer (faster regrowth) and Giant trees (4 logs per tree). **Start over** at the bottom wipes your save (tap twice to confirm).
 
+Extra fun:
+- **Goals** at the bottom of the screen pay bonus eeeddd when you finish them.
+- **Golden trees** appear now and then (the arrow points to them) and burst into 100 eeeddd.
+- **Rich customers** wear a crown and pay double.
+- A **wolf** roams the woods. If it catches you, you drop half your logs; run back into camp to escape.
+- **Restart** (top right) starts a new game after a confirm.
+
 Controls: drag anywhere on touch screens, WASD or arrow keys on desktop.
 Progress (eeeddd and upgrades) is saved in the browser's localStorage. No server or database.
 

@@ -26,6 +26,7 @@
           <span class="coin">e</span><span id="moneyNum">0</span><span class="unit">eeeddd</span>
         </div>
         <button id="menuBtn" type="button">⬆ Upgrades</button>
+        <button id="restartBtn" type="button">↺ Restart</button>
       </div>
     </div>
     <div id="menu" hidden>
@@ -38,6 +39,18 @@
         <button id="resetBtn" type="button">Start over</button>
       </div>
     </div>
+    <div id="confirm" hidden>
+      <div class="dialog" role="alertdialog" aria-label="Restart">
+        <h2>Start over?</h2>
+        <p>You'll lose all your eeeddd, upgrades and woodcutters.</p>
+        <div class="row">
+          <button id="confirmNo" type="button">Keep playing</button>
+          <button id="confirmYes" type="button">Restart</button>
+        </div>
+      </div>
+    </div>
+    <div id="toast"></div>
+    <div id="goal"><div class="goalText"><span id="goalLabel"></span><span id="goalReward"></span></div><div class="bar"><i id="goalBar"></i></div></div>
     <div id="hint">Drag anywhere to walk</div>
     <script type="module" src="/src/main.ts"></script>
   </body>

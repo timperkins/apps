@@ -106,6 +106,45 @@ interface Tree {
   regrow: number;
   grow: number;
   shake: number;
+  golden?: boolean;
+}
+
+type Stat = 'trees' | 'sold' | 'upgrades' | 'golden' | 'hired' | 'earned' | 'belt' | 'escapes';
+interface Goal {
+  text: string;
+  stat: Stat;
+  target: number;
+  reward: number;
+}
+const GOALS: Goal[] = [
+  { text: 'Chop 3 trees', stat: 'trees', target: 3, reward: 20 },
+  { text: 'Sell 10 logs', stat: 'sold', target: 10, reward: 30 },
+  { text: 'Buy an upgrade', stat: 'upgrades', target: 1, reward: 30 },
+  { text: 'Chop a golden tree', stat: 'golden', target: 1, reward: 50 },
+  { text: 'Hire a woodcutter', stat: 'hired', target: 1, reward: 60 },
+  { text: 'Sell 50 logs', stat: 'sold', target: 50, reward: 100 },
+  { text: 'Get away from the wolf', stat: 'escapes', target: 1, reward: 80 },
+  { text: 'Build the wood belt', stat: 'belt', target: 1, reward: 100 },
+  { text: 'Earn 1,000 eeeddd', stat: 'earned', target: 1000, reward: 200 },
+  { text: 'Chop 3 golden trees', stat: 'golden', target: 3, reward: 200 },
+  { text: 'Sell 200 logs', stat: 'sold', target: 200, reward: 400 },
+];
+/** After the list runs out, keep going with ever bigger selling goals. */
+function goalAt(i: number): Goal {
+  if (i < GOALS.length) return GOALS[i];
+  const n = i - GOALS.length + 1;
+  return { text: `Sell ${200 + n * 150} logs`, stat: 'sold', target: 200 + n * 150, reward: 400 + n * 100 };
+}
+
+interface Wolf {
+  x: number;
+  y: number;
+  state: 'roam' | 'chase' | 'flee';
+  t: number;
+  tx: number;
+  ty: number;
+  face: number;
+  walk: number;
 }
 
 interface Post {
@@ -130,6 +169,7 @@ interface Customer {
   coat: string;
   skin: string;
   happy: number;
+  rich: boolean;
 }
 
 interface Flyer {
@@ -177,6 +217,8 @@ interface FloatText {
 
 export interface GameHooks {
   moneyTarget: () => { x: number; y: number };
+  onGoal: (text: string, cur: number, target: number, reward: number) => void;
+  onToast: (text: string) => void;
   onMoney: (value: number, bump: boolean) => void;
   onFirstMove: () => void;
 }
@@ -249,6 +291,12 @@ export class Game {
     { id: 'bigtree', name: 'Giant trees', x0: 0, y0: 0, x1: 0, y1: 0, prices: [250], level: 0, paid: 0, payT: 0, menuOnly: true },
   ];
   private workers: Worker[] = [];
+  private stats: Record<Stat, number> = { trees: 0, sold: 0, upgrades: 0, golden: 0, hired: 0, earned: 0, belt: 0, escapes: 0 };
+  private goal = 0;
+  private goldenT = 12;
+  private wolf: Wolf | null = null;
+  private wolfT = 25;
+  private shakeAmt = 0;
   private pile = 0;
   private pileIncoming = 0;
   private spawnT = 0.6;
@@ -267,6 +315,7 @@ export class Game {
     for (let i = 0; i < this.upgrade('worker').level; i++) this.hireWorker(i);
     hooks.onMoney(this.money, false);
     this.buildWorld();
+    this.checkGoal();
     this.resize();
     addEventListener('resize', () => this.resize());
   }
@@ -279,6 +328,8 @@ export class Game {
     try {
       const data = JSON.parse(localStorage.getItem(SAVE_KEY) ?? '{}');
       this.money = Math.max(0, Number(data.money) || 0);
+      this.goal = Math.max(0, Number(data.goal) || 0);
+      for (const k of Object.keys(this.stats) as Stat[]) this.stats[k] = Math.max(0, Number(data.stats?.[k]) || 0);
       for (const u of this.upgrades) {
         const s = data.upgrades?.[u.id];
         if (!s) continue;
@@ -297,7 +348,7 @@ export class Game {
     const upgrades: Record<string, { level: number; paid: number }> = {};
     for (const u of this.upgrades) upgrades[u.id] = { level: u.level, paid: u.paid };
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ money: this.money, upgrades }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ money: this.money, upgrades, goal: this.goal, stats: this.stats }));
     } catch {
       /* storage unavailable */
     }
@@ -360,9 +411,56 @@ export class Game {
     }
   }
 
+  private bump(stat: Stat, n = 1) {
+    this.stats[stat] += n;
+    this.checkGoal();
+  }
+
+  private checkGoal() {
+    const g = goalAt(this.goal);
+    const cur = Math.min(g.target, this.stats[g.stat]);
+    if (cur >= g.target) {
+      this.goal++;
+      this.hooks.onToast(`Goal done! +${g.reward} eeeddd`);
+      sfx.upgrade();
+      // Shower of coins from the player.
+      const s = this.project(this.player.x, this.player.y, 1.4);
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const amount = Math.floor(g.reward / n) + (i === 0 ? g.reward % n : 0);
+        this.coins.push({
+          x: s.x + (Math.random() - 0.5) * 60,
+          y: s.y + (Math.random() - 0.5) * 30,
+          t: -i * 0.06,
+          dur: 0.7,
+          onArrive: () => this.earn(amount, false),
+        });
+      }
+      this.save();
+      this.checkGoal();
+      return;
+    }
+    this.hooks.onGoal(g.text, cur, g.target, g.reward);
+  }
+
+  /** Add eeeddd (counts toward the "earn" goals). */
+  private earn(n: number, countSale: boolean) {
+    this.money += n;
+    this.stats.earned += n;
+    if (countSale) this.stats.sold++;
+    this.save();
+    this.hooks.onMoney(this.money, true);
+    sfx.coin();
+    this.checkGoal();
+  }
+
   private completeUpgrade(u: Upgrade) {
     u.paid = 0;
     u.level++;
+    this.stats.upgrades++;
+    if (u.id === 'worker') this.stats.hired++;
+    if (u.id === 'belt') this.stats.belt = 1;
+    this.checkGoal();
     if (u.id === 'worker') this.hireWorker(u.level - 1);
     sfx.upgrade();
     const cx = u.menuOnly ? this.player.x : (u.x0 + u.x1) / 2;
@@ -538,6 +636,9 @@ export class Game {
     this.updateCustomers(dt);
     this.updateTrees(dt);
     this.updateEffects(dt);
+    this.updateGolden(dt);
+    this.updateWolf(dt);
+    this.shakeAmt = Math.max(0, this.shakeAmt - dt);
     this.camX += (this.player.x - this.camX) * Math.min(1, dt * 6);
     this.camY += (this.player.y - this.camY) * Math.min(1, dt * 6);
   }
@@ -707,6 +808,12 @@ export class Game {
     tree.stump = true;
     tree.regrow = this.regrowTime();
     sfx.timber();
+    this.shakeAmt = Math.max(this.shakeAmt, 0.25);
+    this.bump('trees');
+    if (tree.golden) {
+      tree.golden = false;
+      this.goldTreeReward(tree);
+    }
     for (let i = 0; i < 14; i++) {
       this.particles.push({
         x: tree.x + (Math.random() - 0.5) * 0.8,
@@ -844,7 +951,7 @@ export class Game {
     let best: Tree | null = null;
     let bd = Infinity;
     for (const t of this.trees) {
-      if (t.stump || t.grow < 1 || claimed.has(t) || Math.max(Math.abs(t.x), Math.abs(t.y)) > WORLD - 1) continue;
+      if (t.stump || t.golden || t.grow < 1 || claimed.has(t) || Math.max(Math.abs(t.x), Math.abs(t.y)) > WORLD - 1) continue;
       // Distance from the nearest gate, so workers stay close to camp.
       let d = Infinity;
       for (const g of GATES) d = Math.min(d, Math.hypot(t.x - g.outer.x, t.y - g.outer.y));
@@ -993,6 +1100,7 @@ export class Game {
         coat,
         skin: skins[Math.floor(Math.random() * skins.length)],
         happy: 0,
+        rich: Math.random() < 0.15,
       });
     }
 
@@ -1054,20 +1162,200 @@ export class Game {
   }
 
   private sell(c: Customer) {
-    this.texts.push({ x: c.x, y: c.y, z: 1.9, t: 0, text: `+${this.price}` });
+    const amount = this.price * (c.rich ? 2 : 1);
+    this.texts.push({ x: c.x, y: c.y, z: 1.9, t: 0, text: `+${amount}` });
     const s = this.project(c.x, c.y, 1.6);
-    this.coins.push({
-      x: s.x,
-      y: s.y,
-      t: 0,
-      dur: 0.55,
-      onArrive: () => {
-        this.money += this.price;
-        this.save();
-        this.hooks.onMoney(this.money, true);
-        sfx.coin();
-      },
-    });
+    this.coins.push({ x: s.x, y: s.y, t: 0, dur: 0.55, onArrive: () => this.earn(amount, true) });
+  }
+
+  // -------------------------------------------------------------------------
+  // Golden trees and the wolf
+  // -------------------------------------------------------------------------
+
+  private updateGolden(dt: number) {
+    if (this.trees.some((t) => t.golden)) return;
+    this.goldenT -= dt;
+    if (this.goldenT > 0) return;
+    this.goldenT = 35 + Math.random() * 25;
+    const options = this.trees.filter((t) => !t.stump && t.grow >= 1 && Math.max(Math.abs(t.x), Math.abs(t.y)) < 16);
+    if (!options.length) return;
+    const t = options[Math.floor(Math.random() * options.length)];
+    t.golden = true;
+    this.hooks.onToast('A golden tree appeared! ✨');
+  }
+
+  private goldTreeReward(t: Tree) {
+    this.bump('golden');
+    this.texts.push({ x: t.x, y: t.y, z: 2.6, t: 0, text: 'GOLD! +100' });
+    this.shakeAmt = 0.45;
+    for (let i = 0; i < 30; i++) {
+      this.particles.push({
+        x: t.x, y: t.y, z: 1 + Math.random(),
+        vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5, vz: 2 + Math.random() * 4,
+        life: 1.2, max: 1.2, color: i % 2 ? '#ffd23a' : '#fff3b0', size: 0.08, gravity: 8,
+      });
+    }
+    const s = this.project(t.x, t.y, 1.5);
+    for (let i = 0; i < 10; i++) {
+      this.coins.push({
+        x: s.x + (Math.random() - 0.5) * 70,
+        y: s.y + (Math.random() - 0.5) * 40,
+        t: -i * 0.05,
+        dur: 0.7,
+        onArrive: () => this.earn(10, false),
+      });
+    }
+  }
+
+  private updateWolf(dt: number) {
+    const p = this.player;
+    const outside = !inCamp(p.x, p.y);
+    if (!this.wolf) {
+      if (!outside) return;
+      this.wolfT -= dt;
+      if (this.wolfT > 0) return;
+      // Appear somewhere in the woods, off to the side of the player.
+      const a = Math.random() * Math.PI * 2;
+      const x = Math.max(-WORLD, Math.min(WORLD, p.x + Math.cos(a) * 9));
+      const y = Math.max(-WORLD, Math.min(WORLD, p.y + Math.sin(a) * 9));
+      if (inCamp(x, y) || Math.max(Math.abs(x), Math.abs(y)) < CAMP + 1.5) return;
+      this.wolf = { x, y, state: 'roam', t: 0, tx: x, ty: y, face: 1, walk: 0 };
+      this.hooks.onToast('A wolf is in the woods! 🐺');
+      sfx.howl();
+      return;
+    }
+    const w = this.wolf;
+    w.t += dt;
+    const dx = p.x - w.x;
+    const dy = p.y - w.y;
+    const d = Math.hypot(dx, dy);
+    let tx = w.tx;
+    let ty = w.ty;
+    let speed = 1.6;
+    if (w.state === 'roam') {
+      if (Math.hypot(w.tx - w.x, w.ty - w.y) < 0.3) {
+        w.tx = w.x + (Math.random() - 0.5) * 6;
+        w.ty = w.y + (Math.random() - 0.5) * 6;
+      }
+      if (outside && d < 7) {
+        w.state = 'chase';
+        w.t = 0;
+        sfx.growl();
+      }
+      if (w.t > 40) {
+        // Wander off for a while.
+        this.wolf = null;
+        this.wolfT = 30 + Math.random() * 30;
+        return;
+      }
+    } else if (w.state === 'chase') {
+      tx = p.x;
+      ty = p.y;
+      speed = 3.7;
+      if (!outside || w.t > 7 || d > 12) {
+        if (p.stack > 0 || !outside) this.bump('escapes');
+        w.state = 'flee';
+        w.t = 0;
+      } else if (d < 0.55) {
+        // Caught! Lose half the stack.
+        const lost = Math.ceil(p.stack / 2);
+        p.stack -= lost;
+        for (let i = 0; i < lost; i++) {
+          this.particles.push({
+            x: p.x, y: p.y, z: 1 + i * 0.1,
+            vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, vz: 3 + Math.random() * 2,
+            life: 0.8, max: 0.8, color: BARK, size: 0.12, gravity: 10,
+          });
+        }
+        this.texts.push({ x: p.x, y: p.y, z: 2.2, t: 0, text: lost ? `-${lost} logs!` : 'Chomp!' });
+        this.shakeAmt = 0.5;
+        sfx.growl();
+        // Knock the player back.
+        p.x += (dx / (d || 1)) * 1.2;
+        p.y += (dy / (d || 1)) * 1.2;
+        this.collide(p);
+        w.state = 'flee';
+        w.t = 0;
+      }
+    } else {
+      tx = w.x - dx;
+      ty = w.y - dy;
+      speed = 3;
+      if (w.t > 3) {
+        if (d > 10 || w.t > 6) {
+          this.wolf = null;
+          this.wolfT = 35 + Math.random() * 35;
+          return;
+        }
+      }
+    }
+    const mx = tx - w.x;
+    const my = ty - w.y;
+    const md = Math.hypot(mx, my);
+    if (md > 0.01) {
+      const k = Math.min(md, speed * dt) / md;
+      w.x += mx * k;
+      w.y += my * k;
+      // The wolf never enters the camp.
+      if (inCamp(w.x, w.y)) {
+        const ox = Math.abs(w.x) > Math.abs(w.y);
+        if (ox) w.x = Math.sign(w.x || 1) * CAMP;
+        else w.y = Math.sign(w.y || 1) * CAMP;
+      }
+      w.x = Math.max(-WORLD, Math.min(WORLD, w.x));
+      w.y = Math.max(-WORLD, Math.min(WORLD, w.y));
+      const sx = mx - my;
+      if (Math.abs(sx) > 0.02) w.face = sx > 0 ? 1 : -1;
+      w.walk += dt * speed * 4;
+    }
+  }
+
+  private drawWolf(w: Wolf) {
+    const g = this.g;
+    const u = this.S;
+    const b = this.project(w.x, w.y, 0);
+    this.ellipse(b.x, b.y, u * 0.45, u * 0.2, 'rgba(40,60,90,0.22)');
+    const bob = Math.abs(Math.sin(w.walk)) * u * 0.04;
+    g.save();
+    g.translate(b.x, b.y - bob);
+    g.scale(w.face * 1.4, 1.4);
+    // Legs.
+    const sw = Math.sin(w.walk) * u * 0.07;
+    for (const [lx, o] of [[-0.25, sw], [-0.12, -sw], [0.15, -sw], [0.28, sw]] as const) {
+      this.roundRect(lx * u + o - u * 0.04, -u * 0.28, u * 0.08, u * 0.28, u * 0.03, '#5e6676');
+    }
+    // Tail.
+    g.beginPath();
+    g.moveTo(-u * 0.32, -u * 0.42);
+    g.quadraticCurveTo(-u * 0.6, -u * 0.5 + Math.sin(w.walk) * u * 0.05, -u * 0.62, -u * 0.25);
+    g.lineWidth = u * 0.1;
+    g.lineCap = 'round';
+    g.strokeStyle = '#7d8696';
+    g.stroke();
+    // Body.
+    this.ellipse(0, -u * 0.4, u * 0.42, u * 0.2, '#8a93a3');
+    this.ellipse(u * 0.05, -u * 0.34, u * 0.3, u * 0.1, '#c3c9d3');
+    // Head.
+    this.ellipse(u * 0.38, -u * 0.55, u * 0.17, u * 0.15, '#8a93a3');
+    this.ellipse(u * 0.53, -u * 0.5, u * 0.1, u * 0.07, '#9aa2b0');
+    this.ellipse(u * 0.62, -u * 0.52, u * 0.03, u * 0.03, '#2b2f3a');
+    // Ears.
+    for (const ex of [0.3, 0.42]) {
+      g.beginPath();
+      g.moveTo(ex * u - u * 0.05, -u * 0.64);
+      g.lineTo(ex * u, -u * 0.8);
+      g.lineTo(ex * u + u * 0.05, -u * 0.64);
+      g.closePath();
+      g.fillStyle = '#6f7787';
+      g.fill();
+    }
+    // Eye.
+    this.ellipse(u * 0.44, -u * 0.58, u * 0.03, u * 0.03, w.state === 'chase' ? '#ff3b2f' : '#fff6c8');
+    g.restore();
+    if (w.state === 'chase') {
+      const s = this.project(w.x, w.y, 1.6);
+      this.label(s.x, s.y, '!', '#e0452f');
+    }
   }
 
   private updateTrees(dt: number) {
@@ -1304,6 +1592,10 @@ export class Game {
     g.fillStyle = '#e6eef6';
     g.fillRect(0, 0, this.w, this.h);
 
+    if (this.shakeAmt > 0) {
+      const m = this.shakeAmt * 14;
+      g.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+    }
     this.drawGround();
 
     const items: { key: number; draw: () => void }[] = [];
@@ -1334,6 +1626,8 @@ export class Game {
     if (hire.prices[hire.level] !== undefined) {
       items.push({ key: HIRE_SPOT.x + HIRE_SPOT.y, draw: () => this.drawCandidate() });
     }
+    const wolf = this.wolf;
+    if (wolf && this.onScreen(wolf.x, wolf.y)) items.push({ key: wolf.x + wolf.y, draw: () => this.drawWolf(wolf) });
     for (const w of this.workers) {
       if (this.onScreen(w.x, w.y)) items.push({ key: w.x + w.y + 0.015, draw: () => this.drawWorker(w) });
     }
@@ -1548,7 +1842,7 @@ export class Game {
       g.lineTo(base.x + rx, base.y);
       g.ellipse(base.x, base.y, rx, ry, 0, 0, Math.PI, false);
       g.closePath();
-      g.fillStyle = '#1f7a4c';
+      g.fillStyle = t.golden ? '#d79b12' : '#1f7a4c';
       g.fill();
       // Lit left half.
       g.beginPath();
@@ -1556,7 +1850,7 @@ export class Game {
       g.lineTo(base.x - rx, base.y);
       g.ellipse(base.x, base.y, rx, ry, 0, Math.PI, Math.PI * 0.55, true);
       g.closePath();
-      g.fillStyle = '#2f9a5f';
+      g.fillStyle = t.golden ? '#f6c63b' : '#2f9a5f';
       g.fill();
       // Snow cap.
       const f = 0.42;
@@ -1579,6 +1873,25 @@ export class Game {
       g.fill();
     }
     g.restore();
+    if (t.golden) {
+      for (let k2 = 0; k2 < 4; k2++) {
+        const ph = this.time * 2 + k2 * 1.7;
+        const sp = this.project(t.x + Math.cos(ph) * 0.6, t.y + Math.sin(ph) * 0.6, 0.8 + ((ph * 0.4) % 1.6));
+        const r = this.S * 0.07 * (0.6 + 0.4 * Math.sin(ph * 3));
+        g.fillStyle = '#fff6c8';
+        g.beginPath();
+        g.moveTo(sp.x, sp.y - r * 2);
+        g.lineTo(sp.x + r * 0.5, sp.y - r * 0.5);
+        g.lineTo(sp.x + r * 2, sp.y);
+        g.lineTo(sp.x + r * 0.5, sp.y + r * 0.5);
+        g.lineTo(sp.x, sp.y + r * 2);
+        g.lineTo(sp.x - r * 0.5, sp.y + r * 0.5);
+        g.lineTo(sp.x - r * 2, sp.y);
+        g.lineTo(sp.x - r * 0.5, sp.y - r * 0.5);
+        g.closePath();
+        g.fill();
+      }
+    }
   }
 
   private drawPost(p: Post) {
@@ -1873,6 +2186,27 @@ export class Game {
       alpha: 1 - c.fade,
       happy: c.happy > 0,
     }, undefined, (bx, by) => {
+      if (c.rich) {
+        // Gold crown: this one pays double.
+        const u = this.S;
+        const hx = bx + c.face * u * 0.02;
+        const hy = by - u * 1.22;
+        const g = this.g;
+        g.beginPath();
+        g.moveTo(hx - u * 0.16, hy + u * 0.06);
+        g.lineTo(hx - u * 0.16, hy - u * 0.08);
+        g.lineTo(hx - u * 0.08, hy);
+        g.lineTo(hx, hy - u * 0.12);
+        g.lineTo(hx + u * 0.08, hy);
+        g.lineTo(hx + u * 0.16, hy - u * 0.08);
+        g.lineTo(hx + u * 0.16, hy + u * 0.06);
+        g.closePath();
+        g.fillStyle = '#ffd23a';
+        g.fill();
+        g.strokeStyle = '#a86f00';
+        g.lineWidth = u * 0.025;
+        g.stroke();
+      }
       // Logs they've bought, held in front.
       for (let i = 0; i < c.got; i++) {
         this.logScreen(bx + c.face * this.S * 0.12, by - this.S * 0.42 - i * this.S * 0.12, this.S * 0.55, this.S * 0.16, 0);
@@ -1995,7 +2329,8 @@ export class Game {
         if (Math.hypot(b.x - p.x, b.y - p.y) < Math.hypot(target.x - p.x, target.y - p.y)) target = b;
       }
     } else if (carrying === 0 || !inCamp(p.x, p.y)) {
-      target = inCamp(p.x, p.y) ? this.nearestTreeByRoute(p) : this.nearestTree(p.x, p.y, 60);
+      const gold = this.trees.find((t) => t.golden && !t.stump);
+      target = gold ?? (inCamp(p.x, p.y) ? this.nearestTreeByRoute(p) : this.nearestTree(p.x, p.y, 60));
     }
     if (!target) return;
     const dx = target.x - p.x;
@@ -2078,6 +2413,7 @@ export class Game {
     const g = this.g;
     const hud = this.hooks.moneyTarget();
     for (const c of this.coins) {
+      if (c.t < 0) continue;
       const t = easeInOut(c.t);
       const target = c.toWorld ? this.project(c.toWorld.x, c.toWorld.y, c.toWorld.z) : hud;
       const x = lerp(c.x, target.x, t);
