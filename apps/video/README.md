@@ -1,13 +1,13 @@
 # Video Deluxe Maker
 
-Turns iPhone footage of home projects into narrated YouTube videos. This is phase 1, the upload app: sign in, make a project and upload clips from the phone straight to Cloud Storage. The full plan, with later phases (processing, Gemini indexing, rough cut, Remotion render), is in the Video Deluxe Maker plan doc.
+Turns iPhone footage of home projects into narrated YouTube videos. So far: sign in, make a project, upload clips from the phone straight to Cloud Storage, and process each clip in the cloud. The full plan, with later phases (processing, Gemini indexing, rough cut, Remotion render), is in the Video Deluxe Maker plan doc.
 
 - **Sign-in:** Google, through Firebase Auth. Every API route checks the ID token and the `ALLOWED_EMAILS` list (only `tjp503@gmail.com` for now).
 - **Uploads:** the browser asks the server for a resumable upload session, then sends the file to Cloud Storage in 16 MB chunks. If the phone sleeps or loses signal, the upload retries and continues from what Cloud Storage already has. If the page is closed, picking the same file again (same name and size) continues the same upload.
 - **Screen:** the page keeps the screen awake with the Wake Lock API while uploads run.
 - **Data:** Firestore database `video`, with `projects/{id}` and `projects/{id}/clips/{clipId}`. All reads and writes go through the API, and `firestore.rules` denies direct client access.
-- **Processing:** when an upload completes, the server starts an execution of the `video-process` Cloud Run job (`jobs/process`, deployed by CI) for that clip. Phase 2's job is a hello-world that checks FFmpeg, Firestore and Cloud Storage access and marks the clip processed. A clip whose job couldn't start shows a Process button.
-- **Storage:** originals go to `gs://apps-97595-video/video/projects/{projectId}/originals/{clipId}.{ext}`, a bucket just for this app.
+- **Processing:** when an upload completes, the server starts an execution of the `video-process` Cloud Run job (`jobs/process`, deployed by CI) for that clip. The job downloads the original and, in one FFmpeg pass, writes a 720p proxy and a 1080p mezzanine (H.264, SDR Rec.709, constant 30 fps, a keyframe every second). HDR clips are tone-mapped with zscale and Hable. It then finds scene changes on the proxy, saves a poster frame, uploads everything next to the original and writes `media` (source details, outputs, scene times, drift) on the clip. Each clip shows its progress, a summary, a Watch proxy player and a Process again link. The job has 8 vCPU, 32 GiB and 3 hours; `/tmp` is in memory, so the original and outputs must fit in 32 GiB.
+- **Storage:** originals go to `gs://apps-97595-video/video/projects/{projectId}/originals/{clipId}.{ext}`, a bucket just for this app. The job writes `proxies/{clipId}.mp4`, `mezzanines/{clipId}.mp4` and `posters/{clipId}.jpg` beside `originals/`. The app plays them through two-hour signed links.
 
 ## Setup
 
@@ -27,6 +27,9 @@ Runs on Firebase App Hosting in project `apps-97595`, from the `apps` repo:
   ```
 
 - Cloud Run jobs need a one-time setup: `scripts/setup-jobs.sh video <deploy service account> apps-97595-video` from the repo root.
+- Signed links need the App Hosting service account to sign as itself:
+  `gcloud iam service-accounts add-iam-policy-binding firebase-app-hosting-compute@apps-97595.iam.gserviceaccount.com --member=serviceAccount:firebase-app-hosting-compute@apps-97595.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator`
+- Job helpers have their own tests: `cd jobs/process && npm test`.
 
 ## Local development
 

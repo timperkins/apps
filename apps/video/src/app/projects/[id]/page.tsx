@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SignInGate, useAuth } from "@/components/AuthProvider";
-import type { Clip, Project } from "@/lib/types";
+import type { Clip, ClipMediaUrls, Project } from "@/lib/types";
 import { keepScreenOn, uploadFile, type Progress } from "@/lib/uploader";
 
 export default function ProjectPage() {
@@ -34,11 +34,42 @@ function clipState(c: Clip): string {
       return "Processed";
     case "queued":
       return "Processing…";
+    case "running": {
+      const { step, percent } = c.processing;
+      return `Processing: ${step ?? "starting"}${percent != null ? ` ${percent}%` : ""}`;
+    }
     case "failed":
       return "Processing failed";
     default:
       return "Uploaded";
   }
+}
+
+function formatDuration(seconds: number): string {
+  const s = Math.round(seconds);
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function resolution(width: number | null, height: number | null): string {
+  const short = Math.min(width ?? 0, height ?? 0);
+  if (short >= 2160) return "4K";
+  if (short >= 1080) return "1080p";
+  if (short >= 720) return "720p";
+  return short ? `${short}p` : "";
+}
+
+/** One line about a processed clip: "4K HDR 30 fps · 1:23 · 4 scene changes". */
+function mediaSummary(c: Clip): string {
+  const m = c.media;
+  if (!m) return "";
+  const parts = [
+    [resolution(m.width, m.height), m.hdr ? "HDR" : "SDR", m.fps ? `${Math.round(m.fps)} fps` : ""].filter(Boolean).join(" "),
+    m.durationSec != null ? formatDuration(m.durationSec) : "",
+    `${m.scenes.length} scene ${m.scenes.length === 1 ? "change" : "changes"}`,
+  ];
+  if (m.driftSec != null && Math.abs(m.driftSec) > 0.1) parts.push(`proxy off by ${m.driftSec.toFixed(2)} s`);
+  return parts.filter(Boolean).join(" · ");
 }
 
 function ProjectView() {
@@ -50,6 +81,7 @@ function ProjectView() {
   const [savedNotes, setSavedNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [watching, setWatching] = useState<{ clipId: string; urls: ClipMediaUrls } | null>(null);
   const running = useRef(false);
   const queueRef = useRef<QueueItem[]>([]);
 
@@ -79,6 +111,14 @@ function ProjectView() {
   useEffect(() => {
     fetchProject().then(apply);
   }, [fetchProject, apply]);
+
+  // While a clip is processing, check on it every 10 seconds.
+  const processing = clips.some((c) => c.processing?.status === "queued" || c.processing?.status === "running");
+  useEffect(() => {
+    if (!processing) return;
+    const timer = setInterval(load, 10_000);
+    return () => clearInterval(timer);
+  }, [processing, load]);
 
   const update = (index: number, patch: Partial<QueueItem>) => {
     queueRef.current = queueRef.current.map((item, i) => (i === index ? { ...item, ...patch } : item));
@@ -130,6 +170,17 @@ function ProjectView() {
     const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/process`, { method: "POST" });
     if (!res.ok) setError(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Couldn't start processing.");
     load();
+  }
+
+  async function watch(clipId: string) {
+    if (watching?.clipId === clipId) {
+      setWatching(null);
+      return;
+    }
+    const res = await authedFetch(`/api/projects/${id}/clips/${clipId}/media`);
+    const body = (await res.json().catch(() => ({}))) as ClipMediaUrls & { error?: string };
+    if (!res.ok) setError(body.error ?? "Couldn't load the clip.");
+    else setWatching({ clipId, urls: body });
   }
 
   async function saveNotes() {
@@ -238,11 +289,40 @@ function ProjectView() {
                     {formatBytes(c.size)} · {clipState(c)}
                   </span>
                 </div>
-                {c.status === "uploaded" && c.processing?.status !== "done" && c.processing?.status !== "queued" && (
+                {c.processing?.status === "done" && c.media && (
+                  <p className="small">
+                    <span className="muted">{mediaSummary(c)} </span>
+                    <button className="link" onClick={() => watch(c.id)}>
+                      {watching?.clipId === c.id ? "Hide" : "Watch proxy"}
+                    </button>
+                  </p>
+                )}
+                {watching?.clipId === c.id && (
+                  <div className="player">
+                    {watching.urls.proxy ? (
+                      <video
+                        src={watching.urls.proxy}
+                        poster={watching.urls.poster ?? undefined}
+                        controls
+                        playsInline
+                        preload="metadata"
+                      />
+                    ) : (
+                      <p className="muted small">No proxy yet. Process the clip again.</p>
+                    )}
+                    <p className="small">
+                      <a href={watching.urls.original} target="_blank" rel="noreferrer">
+                        Open the original
+                      </a>{" "}
+                      to compare.
+                    </p>
+                  </div>
+                )}
+                {c.status === "uploaded" && c.processing?.status !== "queued" && c.processing?.status !== "running" && (
                   <p className="small">
                     {c.processing?.error && <span className="error">{c.processing.error} </span>}
                     <button className="link" onClick={() => startProcessing(c.id)}>
-                      Process
+                      {c.processing?.status === "done" ? "Process again" : "Process"}
                     </button>
                   </p>
                 )}

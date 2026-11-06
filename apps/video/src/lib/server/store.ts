@@ -3,7 +3,7 @@ import { FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb, footageBucket, storagePrefix } from "../firebase/admin";
 import { startProcessJob } from "./jobs";
 import { clipKey, offsetFromRange, originalPath } from "../resumable";
-import type { Clip, ClipProcessing, Project, UploadTicket } from "../types";
+import type { Clip, ClipMedia, ClipMediaUrls, ClipProcessing, Project, UploadTicket } from "../types";
 
 const projects = () => adminDb().collection("projects");
 const clips = (projectId: string) => projects().doc(projectId).collection("clips");
@@ -38,8 +38,37 @@ function toClip(snap: DocumentSnapshot): Clip {
     createdAt: millis(d.createdAt),
     uploadedAt: d.uploadedAt ? millis(d.uploadedAt) : null,
     processing: d.processing
-      ? { status: d.processing.status ?? "queued", error: d.processing.error ?? null }
+      ? {
+          status: d.processing.status ?? "queued",
+          error: d.processing.error ?? null,
+          step: d.processing.step ?? null,
+          percent: d.processing.percent ?? null,
+        }
       : null,
+    media: toMedia(d.media),
+  };
+}
+
+/** The `media` field the processing job writes (see jobs/process/index.mjs). */
+interface StoredMedia {
+  source?: Partial<Omit<ClipMedia, "scenes" | "driftSec">>;
+  scenes?: number[];
+  driftSec?: number | null;
+}
+
+function toMedia(m: StoredMedia | undefined): ClipMedia | null {
+  if (!m?.source) return null;
+  return {
+    durationSec: m.source.durationSec ?? null,
+    width: m.source.width ?? null,
+    height: m.source.height ?? null,
+    fps: m.source.fps ?? null,
+    codec: m.source.codec ?? null,
+    hdr: Boolean(m.source.hdr),
+    recordedAt: m.source.recordedAt ?? null,
+    device: m.source.device ?? null,
+    scenes: Array.isArray(m.scenes) ? m.scenes : [],
+    driftSec: m.driftSec ?? null,
   };
 }
 
@@ -181,16 +210,44 @@ export async function processClip(projectId: string, clipId: string): Promise<Cl
   const ref = clips(projectId).doc(clipId);
   const snap = await ref.get();
   if (!snap.exists || snap.data()!.status !== "uploaded") return null;
-  let processing: { status: ClipProcessing["status"]; error: string | null; execution: string | null };
+  // Queued is written before the job starts, so it can't overwrite what a fast job reports.
+  await ref.update({
+    processing: { status: "queued", error: null, step: null, percent: null, execution: null, startedAt: FieldValue.serverTimestamp() },
+  });
+  let processing: ClipProcessing = { status: "queued", error: null, step: null, percent: null };
   try {
     const execution = await startProcessJob(projectId, clipId);
-    processing = execution
-      ? { status: "queued", error: null, execution }
-      : { status: "failed", error: "No processing job is configured (PROCESS_JOB).", execution: null };
+    if (execution) {
+      await ref.update({ "processing.execution": execution });
+    } else {
+      processing = { ...processing, status: "failed", error: "No processing job is configured (PROCESS_JOB)." };
+    }
   } catch (error) {
     console.error("Couldn't start the processing job", error);
-    processing = { status: "failed", error: `Couldn't start processing: ${(error as Error).message}`, execution: null };
+    processing = { ...processing, status: "failed", error: `Couldn't start processing: ${(error as Error).message}` };
   }
-  await ref.update({ processing: { ...processing, startedAt: FieldValue.serverTimestamp() } });
-  return { status: processing.status, error: processing.error };
+  if (processing.status === "failed") {
+    await ref.update({ "processing.status": "failed", "processing.error": processing.error });
+  }
+  return processing;
+}
+
+/** Signed links, valid for two hours, to the proxy, poster and original of a clip. */
+export async function clipMediaUrls(projectId: string, clipId: string): Promise<ClipMediaUrls | null> {
+  const snap = await clips(projectId).doc(clipId).get();
+  if (!snap.exists) return null;
+  const d = snap.data()!;
+  const sign = async (path: string | undefined) => {
+    if (!path) return null;
+    const [url] = await footageBucket()
+      .file(path)
+      .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 2 * 60 * 60 * 1000 });
+    return url;
+  };
+  const [proxy, poster, original] = await Promise.all([
+    sign(d.media?.proxy?.path),
+    sign(d.media?.posterPath),
+    sign(d.path),
+  ]);
+  return { proxy, poster, original: original! };
 }
