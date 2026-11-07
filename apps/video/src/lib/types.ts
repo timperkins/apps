@@ -46,6 +46,30 @@ export interface Clip {
   uploadedAt: number | null;
   processing: ClipProcessing | null;
   media: ClipMedia | null;
+  index: ClipIndex | null;
+}
+
+export type SegmentKind = "action" | "idle" | "repetitive" | "highlight";
+
+/** One labeled stretch of a clip, from Gemini. Times are seconds in the clip. */
+export interface Segment {
+  start: number;
+  end: number;
+  kind: SegmentKind;
+  description: string;
+  phase: string | null;
+  tools: string[];
+  camera: "steady" | "handheld" | "moving" | null;
+  issues: string[];
+}
+
+export interface ClipIndex {
+  status: "running" | "done" | "failed" | "skipped";
+  error: string | null;
+  summary: string;
+  segments: Segment[];
+  model: string | null;
+  modelVersion: string | null;
 }
 
 /** Short-lived signed links for watching a processed clip. */

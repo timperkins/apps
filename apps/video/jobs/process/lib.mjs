@@ -134,3 +134,97 @@ export function progressSeconds(text) {
   const matches = [...text.matchAll(/out_time_us=(\d+)/g)];
   return matches.length ? Number(matches.at(-1)[1]) / 1e6 : null;
 }
+
+// ---- Gemini indexing ----
+
+/** Bumped whenever the prompt or schema changes, and saved with each index. */
+export const INDEX_PROMPT_VERSION = 1;
+
+export const SEGMENT_KINDS = ["action", "idle", "repetitive", "highlight"];
+
+/** JSON schema Gemini must answer with. */
+export const indexSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string", description: "One or two sentences on what happens in the whole clip." },
+    segments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          start: { type: "number", description: "Seconds from the start of the video." },
+          end: { type: "number", description: "Seconds from the start of the video." },
+          kind: { type: "string", enum: SEGMENT_KINDS },
+          description: { type: "string", description: "What happens, in a short plain sentence." },
+          phase: { type: "string", description: "Project phase, e.g. demolition, framing, sanding, finishing, cleanup." },
+          tools: { type: "array", items: { type: "string" }, description: "Tools or materials in use." },
+          camera: { type: "string", enum: ["steady", "handheld", "moving"] },
+          issues: {
+            type: "array",
+            items: { type: "string", enum: ["blurry", "dark", "obstructed", "shaky", "out of frame"] },
+          },
+        },
+        required: ["start", "end", "kind", "description", "camera"],
+      },
+    },
+  },
+  required: ["summary", "segments"],
+};
+
+/** The indexing prompt for one clip. */
+export function indexPrompt({ durationSec, projectName, projectNotes, fileName }) {
+  return [
+    "You are logging raw footage for the editor of a home-project YouTube video.",
+    "The footage is filmed on an iPhone, often on a tripod, while the maker works.",
+    `Project: ${projectName || "untitled"}.`,
+    projectNotes ? `The maker's notes on the project: ${projectNotes}` : null,
+    `This clip is ${fileName}, ${durationSec.toFixed(1)} seconds long.`,
+    "",
+    "Split the whole clip into consecutive segments with no gaps, from 0 to the end. Label each one:",
+    "- highlight: a satisfying or important moment worth showing at normal speed, such as a reveal, a first cut, a fit, or a before/after.",
+    "- action: someone is working and it's worth showing, but it isn't special.",
+    "- repetitive: long, steady, repeated work (sanding, drilling many holes, painting, sweeping) that suits a timelapse or jump cuts.",
+    "- idle: nobody is doing anything useful: walking away, looking at the phone, an empty frame, setting up the camera.",
+    "Careful, slow work such as measuring or marking is action, not idle.",
+    "Make segments at least 2 seconds long, except for short highlights. Give start and end in seconds from the start of the video.",
+    "Describe what happens plainly, and note camera motion and any quality problems.",
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+}
+
+/**
+ * Tidies Gemini's segments: clamps to the clip, sorts, moves each boundary to a scene change
+ * within a second (Gemini samples one frame a second), removes overlaps and drops slivers.
+ */
+export function cleanSegments(raw, durationSec, scenes = [], snapWithin = 1) {
+  const snap = (t) => {
+    let best = t;
+    let distance = snapWithin;
+    for (const s of scenes) {
+      if (Math.abs(s - t) <= distance) {
+        best = s;
+        distance = Math.abs(s - t);
+      }
+    }
+    return best;
+  };
+  const clamp = (t) => Math.min(Math.max(Number(t) || 0, 0), durationSec);
+  const segments = (raw ?? [])
+    .filter((s) => SEGMENT_KINDS.includes(s?.kind))
+    .map((s) => ({
+      start: round(snap(clamp(s.start)), 2),
+      end: round(snap(clamp(s.end)), 2),
+      kind: s.kind,
+      description: String(s.description ?? "").trim(),
+      phase: s.phase ? String(s.phase).trim() : null,
+      tools: Array.isArray(s.tools) ? s.tools.map(String) : [],
+      camera: s.camera ?? null,
+      issues: Array.isArray(s.issues) ? s.issues.map(String) : [],
+    }))
+    .sort((a, b) => a.start - b.start);
+  for (let i = 0; i < segments.length - 1; i++) {
+    if (segments[i].end > segments[i + 1].start) segments[i].end = segments[i + 1].start;
+  }
+  return segments.filter((s) => s.end - s.start >= 0.3);
+}

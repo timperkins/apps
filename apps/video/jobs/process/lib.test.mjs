@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeSource, outputPaths, parseScenes, progressSeconds, transcodeArgs } from "./lib.mjs";
+import { cleanSegments, describeSource, indexPrompt, outputPaths, parseScenes, progressSeconds, transcodeArgs } from "./lib.mjs";
 
 const iphoneProbe = {
   format: {
@@ -70,4 +70,31 @@ test("parses scene changes and progress", () => {
   assert.deepEqual(scenes, [4, 10.033]);
   assert.equal(progressSeconds("out_time_us=1500000\nprogress=continue\nout_time_us=2500000\n"), 2.5);
   assert.equal(progressSeconds("progress=continue"), null);
+});
+
+test("tidies Gemini segments", () => {
+  const raw = [
+    { start: 9.6, end: 30, kind: "repetitive", description: " sanding ", camera: "steady" },
+    { start: -1, end: 10.2, kind: "action", description: "measuring", camera: "handheld", tools: ["tape"] },
+    { start: 30, end: 30.1, kind: "highlight", description: "sliver", camera: "steady" },
+    { start: 31, end: 99, kind: "boring", description: "bad kind", camera: "steady" },
+  ];
+  const segments = cleanSegments(raw, 40, [10]);
+  assert.equal(segments.length, 2);
+  assert.deepEqual(
+    segments.map((s) => [s.start, s.end, s.kind]),
+    [
+      [0, 10, "action"],
+      [10, 30, "repetitive"],
+    ],
+  );
+  assert.equal(segments[1].description, "sanding");
+  assert.deepEqual(segments[0].tools, ["tape"]);
+});
+
+test("prompt carries the project notes", () => {
+  const prompt = indexPrompt({ durationSec: 12, projectName: "Deck", projectNotes: "Rebuilding the deck", fileName: "IMG_1.MOV" });
+  assert.match(prompt, /Rebuilding the deck/);
+  assert.match(prompt, /12\.0 seconds/);
+  assert.doesNotMatch(indexPrompt({ durationSec: 1, projectName: "", projectNotes: "", fileName: "a" }), /notes on the project/);
 });

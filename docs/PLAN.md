@@ -86,7 +86,9 @@ Apps can also list Cloud Run jobs, for work too long for a request (video proces
 repository and deploys it as `<app>-<name>` (prod) or `<app>-<name>-preview` (previews), before the app
 rolls out. The app starts executions through the Cloud Run Admin API. Run `scripts/setup-jobs.sh <app>
 <deploy service account> [bucket]` once per app first; it creates the job service account and the
-permissions the deploy account, the jobs and App Hosting need.
+permissions the deploy account, the jobs and App Hosting need. A job's `"secrets": { "ENV_NAME":
+"<secret id>" }` are mounted from Secret Manager (latest version); grant the job service account
+`roles/secretmanager.secretAccessor` on each.
 
 ## Deploy flow
 

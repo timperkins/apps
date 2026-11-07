@@ -17,7 +17,11 @@
       "maxRetries": 1,
       "env": {
         "FIRESTORE_DATABASE_ID": "video",
-        "STORAGE_BUCKET": "apps-97595-video"
+        "STORAGE_BUCKET": "apps-97595-video",
+        "INDEX_MODEL": "gemini-flash-latest"
+      },
+      "secrets": {
+        "GEMINI_API_KEY": "video-gemini-api-key"
       }
     }
   ]
