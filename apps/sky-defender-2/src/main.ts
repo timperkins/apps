@@ -787,15 +787,16 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '⛏️', title: 'The mine', lines: [
     'After 4 bears, bears only wait 20 seconds, but 40% fewer come. A mine, a machine and a shop pop up in your camp.',
     'Stand next to the mine and press <kbd>M</kbd> to mine: 1 stone every 2 seconds.',
-    'With 30 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you. Extra miners cost 20 stone each.'] },
+    'With 10 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you. Extra miners cost 20 stone each.'] },
   { icon: '⚙️', title: 'The machine', lines: [
     'Walk to the machine and click it (or press <kbd>M</kbd>). It takes all your stone.',
     'Each stone becomes 5 stone ammo after 4 seconds. Stone ammo does 1.7x damage.',
     'Press <kbd>S</kbd> to switch between your ammo and stone ammo. Each stone shot uses one up.'] },
   { icon: '🛒', title: 'Shop and belts', lines: [
-    'Walk to the shop and press <kbd>B</kbd> (or click it). A belt costs 5 stone and goes in your inventory.',
+    'Walk to the shop and press <kbd>B</kbd> (or click it). A belt costs 5 stone, is 3 tiles long and goes in your inventory.',
     'Press <kbd>E</kbd> (or tap the belt in the corner), then click a spot to place it. <kbd>R</kbd> turns it.',
     'Belts carry stone, and you! Put one next to the mine and lead the line into the machine to make stone ammo by itself.',
+    'A turret (15 stone, <kbd>U</kbd> to place) shoots bears for 5.25 damage. Load it with stone ammo with <kbd>T</kbd>, or feed it stone with a belt.',
     'A grabber (3 stone, <kbd>G</kbd> to place) picks stone up from behind it and puts it down in front: on a belt, or into the machine.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
