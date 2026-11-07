@@ -13,7 +13,17 @@ A snowy isometric wood-gathering game at [your-doom.trom.dev](https://your-doom.
 
 - Tap **Upgrades** (top right) for the full list, including menu-only upgrades: Snow boots (walk faster), Fancy wood (+5 eeeddd per log), Town sign (more customers), Tree fertilizer (faster regrowth) and Giant trees (4 logs per tree). **Start over** at the bottom wipes your save (tap twice to confirm).
 
-When an upgrade is maxed out, a new one takes its place (on its pad and in the menu, marked NEW): Turbo belt, Wood sled, Chainsaw, Woodcutter training, Ice skates, Royal wood, Town market, Magic seeds and Mega trees.
+Before the game starts you pick one of 8 ways to play (Restart brings the picker back):
+1. **Night & blizzards**: day/night cycle; feed the campfire logs or customers leave. Lantern and Firewood box upgrades.
+2. **Frozen lake**: buy Ice fishing, fish at the holes on the lake, sell fish at the crate in camp.
+3. **Boss wolf**: a giant wolf raids the counter now and then; fight it, buy Spiked gates and guards.
+4. **Build the town**: bring logs to three house plots; each house brings more (and richer) customers.
+5. **Pets**: a dog that chases wolves off and a reindeer that carries 10 more logs.
+6. **Outfits**: buy and wear hats and coats in the Shop.
+7. **Daily chest**: a free chest every hour you come back (eeeddd, a free upgrade, golden trees or a jackpot).
+8. **Rebirth**: start over on purpose for stars (+25% eeeddd each, and a bit faster).
+
+When an upgrade is maxed out, a new one takes its place (on its pad and in the menu, marked NEW): Turbo belt, Wood sled, Chainsaw, Woodcutter training, Ice skates, Royal wood, Town market, Magic seeds and Mega trees. When those max out they turn into endless Golden upgrades (+5% eeeddd per sale per level).
 
 Extra fun:
 - **Goals** at the bottom of the screen pay bonus eeeddd when you finish them.

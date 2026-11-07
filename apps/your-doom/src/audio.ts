@@ -108,3 +108,8 @@ export function howl() {
   o.start();
   o.stop(now() + 1.5);
 }
+
+export function bark() {
+  blip(620, 0, 0.07, 0.16, 'square');
+  blip(560, 0.14, 0.07, 0.16, 'square');
+}

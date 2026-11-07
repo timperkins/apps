@@ -1,5 +1,6 @@
 import * as sfx from './audio';
 import type { Input } from './input';
+import { OUTFITS, type Mode, type OutfitId } from './modes';
 
 // ---------------------------------------------------------------------------
 // World layout (world units; x runs down-right on screen, y down-left, z up)
@@ -40,10 +41,14 @@ const BELT_PATH = [
 const BELT_SPEED = 1.9;
 const BELT_W = 0.5;
 
-export type UpgradeId =
+type BaseId =
   | 'belt' | 'bag' | 'axe' | 'worker' | 'boots' | 'price' | 'crowd' | 'grow' | 'bigtree'
   // Second tier: each appears once the upgrade it follows is maxed out.
-  | 'beltspeed' | 'sled' | 'chainsaw' | 'crew' | 'skates' | 'royal' | 'market' | 'seeds' | 'megatree';
+  | 'beltspeed' | 'sled' | 'chainsaw' | 'crew' | 'skates' | 'royal' | 'market' | 'seeds' | 'megatree'
+  // Only offered in one play mode.
+  | 'lantern' | 'firebox' | 'lake' | 'rod' | 'wall' | 'guard' | 'dog' | 'reindeer';
+// Endless last tier: every upgrade with nothing after it turns into a golden version.
+export type UpgradeId = BaseId | `gold-${BaseId}`;
 interface Upgrade {
   id: UpgradeId;
   name: string;
@@ -59,6 +64,74 @@ interface Upgrade {
   menuOnly?: boolean;
   /** Only offered once this other upgrade is maxed out (it takes over its pad). */
   after?: UpgradeId;
+  /** Only offered in this play mode. */
+  mode?: Mode;
+}
+
+// --- Mode constants -----------------------------------------------------------
+const DAY_LEN = 100; // seconds per day/night cycle (night mode)
+const FIRE_DROP = { x0: -1.1, y0: 0.3, x1: 0.3, y1: 1.7 };
+const LAKE = { x: -13.5, y: 8.5, r: 3.6 };
+const HOLES = [
+  { x: -14.6, y: 7.8 },
+  { x: -12.4, y: 8.8 },
+  { x: -13.7, y: 9.9 },
+];
+const FISH_DROP = { x0: -5.6, y0: 1.6, x1: -4.0, y1: 3.2 };
+const FISH_PRICE = 25;
+const FISH_CAP = 6;
+const BOSS_TARGET = { x: 2.4, y: 1.0 };
+const HOUSE_PLOTS = [
+  { x0: -3.1, y0: 4.55, x1: -1.3, y1: 6.35, need: 15 },
+  { x0: -0.7, y0: 4.55, x1: 1.1, y1: 6.35, need: 30 },
+  { x0: 1.7, y0: 4.55, x1: 3.5, y1: 6.35, need: 50 },
+];
+const CHEST_SPOT = { x: 1.7, y: -4.1 };
+const CHEST_EVERY = 60 * 60 * 1000;
+const REBIRTH_STEP = 500; // eeeddd earned per star
+
+interface Boss {
+  x: number;
+  y: number;
+  face: number;
+  walk: number;
+  hp: number;
+  max: number;
+  path: { x: number; y: number }[];
+  eatT: number;
+  hitCD: number;
+  flash: number;
+}
+
+interface Guard {
+  x: number;
+  y: number;
+  post: { x: number; y: number };
+  face: number;
+  walk: number;
+  moving: boolean;
+  t: number;
+  swing: number;
+}
+
+interface House {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  need: number;
+  have: number;
+  pending: number;
+}
+
+interface Pet {
+  kind: 'dog' | 'reindeer';
+  x: number;
+  y: number;
+  face: number;
+  walk: number;
+  moving: boolean;
+  barkT: number;
 }
 const BAG_STEP = 5; // extra logs per bag level
 const AXE_SPEED = [0.3, 0.24, 0.19, 0.15]; // seconds per swing
@@ -101,6 +174,7 @@ const WOOD = '#f2c98b';
 const RING = '#c9934f';
 
 type V3 = { x: number; y: number; z: number };
+type HatStyle = 'beanie' | 'tophat' | 'viking' | 'crown';
 
 interface Tree {
   x: number;
@@ -268,6 +342,7 @@ export class Game {
     swing: 0,
     chopping: null as Tree | null,
     dropT: 0,
+    fighting: false,
     stepDist: 0,
     stepSide: 1,
   };
@@ -313,10 +388,62 @@ export class Game {
       const parent = this.baseUpgrades.find((u) => u.id === after)!;
       return { ...parent, id, name, after, prices, level: 0, paid: 0, payT: 0 };
     }),
+    ...(
+      [
+        ['lantern', 'Lantern', 'night', [120, 300]],
+        ['firebox', 'Firewood box', 'night', [200]],
+        ['lake', 'Ice fishing', 'lake', [150]],
+        ['rod', 'Better fishing rod', 'lake', [200, 500]],
+        ['wall', 'Spiked gates', 'boss', [150, 400]],
+        ['guard', 'Hire guard', 'boss', [200, 450]],
+        ['dog', 'Dog', 'pets', [250]],
+        ['reindeer', 'Reindeer', 'pets', [500]],
+      ] as [UpgradeId, string, Mode, number[]][]
+    ).map(([id, name, mode, prices]): Upgrade => ({ id, name, mode, prices, x0: 0, y0: 0, x1: 0, y1: 0, level: 0, paid: 0, payT: 0, menuOnly: true })),
   ];
+  // Golden upgrades never run out: each level costs more and adds 5% to every sale.
+  private goldens: Upgrade[] = this.upgrades
+    .filter((u) => !this.upgrades.some((n) => n.after === u.id))
+    .map((u) => {
+      const first = Math.round((u.prices[u.prices.length - 1] * 1.5) / 10) * 10;
+      const prices = Array.from({ length: 60 }, (_, i) => Math.round((first * 1.6 ** i) / 10) * 10);
+      return { ...u, id: `gold-${u.id}` as UpgradeId, name: `Golden ${u.name.toLowerCase()}`, after: u.id, prices, level: 0, paid: 0, payT: 0 };
+    });
   private workers: Worker[] = [];
   private stats: Record<Stat, number> = { trees: 0, sold: 0, upgrades: 0, golden: 0, hired: 0, earned: 0, belt: 0, escapes: 0 };
   private goal = 0;
+  mode: Mode | null = null;
+  paused = false;
+  // Night
+  private clock = 0;
+  private fuel = 100;
+  private fuelIncoming = 0;
+  private darkCanvas: HTMLCanvasElement | null = null;
+  // Lake
+  private fish = 0;
+  private fishT = 0;
+  private fishSellT = 0;
+  // Boss
+  private boss: Boss | null = null;
+  private bossT = 45;
+  private bossWarned = false;
+  private bossHitT = 0;
+  private guards: Guard[] = [];
+  // Town
+  private houses: House[] = [];
+  private houseSave: number[] = [];
+  // Pets
+  private pets: Pet[] = [];
+  // Outfits
+  private owned = new Set<OutfitId>(['hat-blue', 'coat-red']);
+  private hat: OutfitId = 'hat-blue';
+  private coat: OutfitId = 'coat-red';
+  // Daily chest
+  private lastChest = 0;
+  private streak = 0;
+  private chest: { x: number; y: number; open: number; done: boolean; fade: number } | null = null;
+  // Rebirth
+  stars = 0;
   private goldenT = 12;
   private wolf: Wolf | null = null;
   private wolfT = 25;
@@ -334,11 +461,13 @@ export class Game {
     private hooks: GameHooks,
   ) {
     this.g = canvas.getContext('2d')!;
+    this.upgrades.push(...this.goldens);
     input.onGesture(() => sfx.unlockAudio());
     this.load();
     for (let i = 0; i < this.upgrade('worker').level; i++) this.hireWorker(i);
     hooks.onMoney(this.money, false);
     this.buildWorld();
+    this.applyMode();
     this.checkGoal();
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -354,6 +483,14 @@ export class Game {
       this.money = Math.max(0, Number(data.money) || 0);
       this.goal = Math.max(0, Number(data.goal) || 0);
       for (const k of Object.keys(this.stats) as Stat[]) this.stats[k] = Math.max(0, Number(data.stats?.[k]) || 0);
+      this.stars = Math.max(0, Number(data.stars) || 0);
+      if (typeof data.mode === 'string') this.mode = data.mode as Mode;
+      if (Array.isArray(data.houses)) this.houseSave = data.houses.map((n: unknown) => Math.max(0, Number(n) || 0));
+      if (Array.isArray(data.owned)) for (const id of data.owned) if (OUTFITS.some((o) => o.id === id)) this.owned.add(id);
+      if (this.owned.has(data.hat)) this.hat = data.hat;
+      if (this.owned.has(data.coat)) this.coat = data.coat;
+      this.lastChest = Number(data.lastChest) || 0;
+      this.streak = Number(data.streak) || 0;
       for (const u of this.upgrades) {
         const s = data.upgrades?.[u.id];
         if (!s) continue;
@@ -372,7 +509,20 @@ export class Game {
     const upgrades: Record<string, { level: number; paid: number }> = {};
     for (const u of this.upgrades) upgrades[u.id] = { level: u.level, paid: u.paid };
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ money: this.money, upgrades, goal: this.goal, stats: this.stats }));
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+          money: this.money,
+          upgrades,
+          goal: this.goal,
+          stats: this.stats,
+          mode: this.mode,
+          stars: this.stars,
+          houses: this.houses.map((h) => h.have),
+          owned: [...this.owned],
+          hat: this.hat,
+          coat: this.coat,
+          lastChest: this.lastChest,
+          streak: this.streak,
+        }));
     } catch {
       /* storage unavailable */
     }
@@ -392,16 +542,28 @@ export class Game {
 
   /** Offered right now: its parent (if any) is maxed and it isn't maxed itself. */
   private available(u: Upgrade) {
+    if (u.mode && u.mode !== this.mode) return false;
     return !this.maxed(u) && (!u.after || this.maxed(this.upgrade(u.after)));
   }
 
+  /** Stars from rebirths: more eeeddd per sale. */
+  private get starBoost() {
+    const gold = this.goldens.reduce((n, u) => n + u.level, 0);
+    return (1 + 0.25 * this.stars) * (1 + 0.05 * gold);
+  }
+
+  /** Stars also make you a bit quicker (capped). */
+  private get starSpeed() {
+    return Math.min(1.5, 1 + 0.05 * this.stars);
+  }
+
   private get capacity() {
-    return BASE_CAPACITY + this.lvl('bag') * BAG_STEP + this.lvl('sled') * 10;
+    return BASE_CAPACITY + this.lvl('bag') * BAG_STEP + this.lvl('sled') * 10 + this.lvl('reindeer') * 10;
   }
 
   private get chopInterval() {
     const saw = this.lvl('chainsaw');
-    return saw > 0 ? [0.11, 0.08][saw - 1] : AXE_SPEED[this.lvl('axe')];
+    return (saw > 0 ? [0.11, 0.08][saw - 1] : AXE_SPEED[this.lvl('axe')]) / this.starSpeed;
   }
 
   private get price() {
@@ -513,6 +675,8 @@ export class Game {
     if (u.id === 'belt') this.stats.belt = 1;
     this.checkGoal();
     if (u.id === 'worker') this.hireWorker(u.level - 1);
+    if (u.id === 'dog' || u.id === 'reindeer') this.spawnPet(u.id);
+    if (u.id === 'guard') this.addGuard(u.level - 1);
     sfx.upgrade();
     const cx = u.menuOnly ? this.player.x : (u.x0 + u.x1) / 2;
     const cy = u.menuOnly ? this.player.y : (u.y0 + u.y1) / 2;
@@ -535,7 +699,7 @@ export class Game {
   }
 
   upgradeList() {
-    const describe: Record<UpgradeId, (level: number) => string> = {
+    const describe: Partial<Record<UpgradeId, (level: number) => string>> = {
       belt: () => 'Drop wood by the north gate and a belt carries it to the counter.',
       bag: (l) => `Carry ${BASE_CAPACITY + l * BAG_STEP} → ${BASE_CAPACITY + (l + 1) * BAG_STEP} logs.`,
       axe: () => 'Chop trees faster.',
@@ -554,25 +718,34 @@ export class Game {
       market: () => 'Even more townspeople come to buy.',
       seeds: () => 'Trees grow back almost right away.',
       megatree: () => `Every tree gives ${this.logsPerTree + 1} logs.`,
+      lantern: () => 'See farther at night.',
+      firebox: () => 'The campfire burns half as fast.',
+      lake: () => 'Open three fishing holes on the frozen lake.',
+      rod: () => 'Catch fish faster.',
+      wall: () => 'The boss wolf is slower and weaker.',
+      guard: (l) => `A guard who fights the boss wolf. You have ${l} of 2.`,
+      dog: () => 'Follows you and scares wolves away.',
+      reindeer: () => 'Follows you and carries 10 extra logs.',
     };
     // One row per upgrade slot: a maxed upgrade is replaced by the one that follows it.
     const shown = this.upgrades.filter((u) => {
+      if (u.mode && u.mode !== this.mode) return false;
       if (u.after && !this.maxed(this.upgrade(u.after))) return false;
       const next = this.upgrades.find((n) => n.after === u.id);
       return !(next && this.maxed(u));
     });
     // New and menu-only upgrades first, then the ones that also have pads in camp.
-    const ordered = [...shown.filter((u) => u.menuOnly), ...shown.filter((u) => !u.menuOnly)];
+    const ordered = [...shown.filter((u) => u.mode), ...shown.filter((u) => u.menuOnly && !u.mode), ...shown.filter((u) => !u.menuOnly)];
     return ordered.map((u) => {
       const price = u.prices[u.level];
       return {
         id: u.id,
         name: u.name,
         level: u.level,
-        maxLevel: u.prices.length,
+        maxLevel: u.id.startsWith('gold-') ? 0 : u.prices.length,
         cost: price === undefined ? null : price - u.paid,
-        isNew: !!u.after,
-        text: describe[u.id](u.level),
+        isNew: !!u.after || !!u.mode,
+        text: describe[u.id]?.(u.level) ?? `Golden upgrade! +5% eeeddd from every sale (level ${u.level + 1}).`,
       };
     });
   }
@@ -706,7 +879,12 @@ export class Game {
     this.updateTrees(dt);
     this.updateEffects(dt);
     this.updateGolden(dt);
-    this.updateWolf(dt);
+    if (this.mode !== 'boss') this.updateWolf(dt);
+    this.updateNight(dt);
+    this.updateLake(dt);
+    this.updateBoss(dt);
+    this.updatePets(dt);
+    this.updateChest(dt);
     this.shakeAmt = Math.max(0, this.shakeAmt - dt);
     this.camX += (this.player.x - this.camX) * Math.min(1, dt * 6);
     this.camY += (this.player.y - this.camY) * Math.min(1, dt * 6);
@@ -726,7 +904,7 @@ export class Game {
     let wx = (d.x / ISO_X + d.y / ISO_Y) / 2;
     let wy = (d.y / ISO_Y - d.x / ISO_X) / 2;
     const wl = Math.hypot(wx, wy) || 1;
-    const speed = SPEED * (1 + 0.15 * this.lvl('boots') + 0.15 * this.lvl('skates'));
+    const speed = SPEED * (1 + 0.15 * this.lvl('boots') + 0.15 * this.lvl('skates')) * this.starSpeed;
     wx = (wx / wl) * mag * speed * dt;
     wy = (wy / wl) * mag * speed * dt;
     const ox = p.x;
@@ -800,6 +978,7 @@ export class Game {
     circle(CAMPFIRE.x, CAMPFIRE.y, 0.7);
     box(COUNTER.x0, COUNTER.y0, COUNTER.x1, COUNTER.y1);
     for (const t of TENTS) box(t.x0, t.y0, t.x1, t.y1);
+    for (const h of this.houses) if (h.have >= h.need) box(h.x0 + 0.2, h.y0 + 0.2, h.x1 - 0.2, h.y1 - 0.2);
   }
 
   private nearestTree(x: number, y: number, maxD: number): Tree | null {
@@ -924,6 +1103,49 @@ export class Game {
     const within = (r: { x0: number; y0: number; x1: number; y1: number }) => p.x > r.x0 && p.x < r.x1 && p.y > r.y0 && p.y < r.y1;
     const atCounter = within(DROP);
     const atBelt = this.hasBelt && within(BELT_DROP);
+    if (p.stack > 0 && this.mode === 'night' && within(FIRE_DROP) && this.fuel + this.fuelIncoming < 100) {
+      p.dropT += dt;
+      while (p.dropT >= 0.12 && p.stack > 0 && this.fuel + this.fuelIncoming < 100) {
+        p.dropT -= 0.12;
+        const from = { x: p.x, y: p.y, z: 1.0 + p.stack * 0.17 };
+        p.stack--;
+        this.fuelIncoming += 10;
+        this.flyers.push({
+          from,
+          to: () => ({ x: CAMPFIRE.x, y: CAMPFIRE.y, z: 0.4 }),
+          t: 0, dur: 0.3, delay: 0, arc: 0.8, spin: 1,
+          onArrive: () => {
+            this.fuelIncoming -= 10;
+            this.fuel = Math.min(100, this.fuel + 10);
+            sfx.pop();
+          },
+        });
+      }
+      return;
+    }
+    const plot = this.houses.find((h) => h.have + h.pending < h.need && within(h));
+    if (p.stack > 0 && plot) {
+      p.dropT += dt;
+      while (p.dropT >= 0.09 && p.stack > 0 && plot.have + plot.pending < plot.need) {
+        p.dropT -= 0.09;
+        const from = { x: p.x, y: p.y, z: 1.0 + p.stack * 0.17 };
+        p.stack--;
+        plot.pending++;
+        this.flyers.push({
+          from,
+          to: () => ({ x: (plot.x0 + plot.x1) / 2, y: (plot.y0 + plot.y1) / 2, z: 0.3 }),
+          t: 0, dur: 0.3, delay: 0, arc: 0.9, spin: 1,
+          onArrive: () => {
+            plot.pending--;
+            plot.have++;
+            sfx.pop();
+            if (plot.have === plot.need) this.houseBuilt(plot);
+            this.save();
+          },
+        });
+      }
+      return;
+    }
     if ((!atCounter && !atBelt) || p.stack <= 0) {
       p.dropT = 0.1;
       return;
@@ -1148,8 +1370,10 @@ export class Game {
     const waiting = this.customers.filter((c) => !c.leaving);
     this.spawnT -= dt;
     const crowd = this.lvl('crowd');
-    if (this.spawnT <= 0 && waiting.length < MAX_QUEUE + crowd) {
-      this.spawnT = (2.5 + Math.random() * 3) / (1 + crowd + this.lvl('market'));
+    const homes = this.houses.filter((h) => h.have >= h.need).length;
+    const fireOut = this.mode === 'night' && this.fuel <= 0;
+    if (this.spawnT <= 0 && !fireOut && waiting.length < MAX_QUEUE + crowd + Math.min(2, homes)) {
+      this.spawnT = (2.5 + Math.random() * 3) / (1 + crowd + this.lvl('market') + 0.7 * homes);
       const coats = ['#3f8fa6', '#2f7d6d', '#5a6fb8', '#b85a6f', '#8a6bb8', '#d0813a'];
       const skins = ['#f5cfa7', '#e2a77f', '#b57a52', '#8a5636'];
       const coat = coats[Math.floor(Math.random() * coats.length)];
@@ -1169,7 +1393,7 @@ export class Game {
         coat,
         skin: skins[Math.floor(Math.random() * skins.length)],
         happy: 0,
-        rich: Math.random() < 0.15,
+        rich: Math.random() < 0.15 + 0.1 * homes,
       });
     }
 
@@ -1231,7 +1455,7 @@ export class Game {
   }
 
   private sell(c: Customer) {
-    const amount = this.price * (c.rich ? 2 : 1);
+    const amount = Math.round(this.price * (c.rich ? 2 : 1) * this.starBoost);
     this.texts.push({ x: c.x, y: c.y, z: 1.9, t: 0, text: `+${amount}` });
     const s = this.project(c.x, c.y, 1.6);
     this.coins.push({ x: s.x, y: s.y, t: 0, dur: 0.55, onArrive: () => this.earn(amount, true) });
@@ -1379,15 +1603,15 @@ export class Game {
     }
   }
 
-  private drawWolf(w: Wolf) {
+  private drawWolf(w: { x: number; y: number; face: number; walk: number; state?: string }, scale = 1.4, fur = '#8a93a3') {
     const g = this.g;
     const u = this.S;
     const b = this.project(w.x, w.y, 0);
-    this.ellipse(b.x, b.y, u * 0.45, u * 0.2, 'rgba(40,60,90,0.22)');
+    this.ellipse(b.x, b.y, u * 0.32 * scale, u * 0.14 * scale, 'rgba(40,60,90,0.22)');
     const bob = Math.abs(Math.sin(w.walk)) * u * 0.04;
     g.save();
     g.translate(b.x, b.y - bob);
-    g.scale(w.face * 1.4, 1.4);
+    g.scale(w.face * scale, scale);
     // Legs.
     const sw = Math.sin(w.walk) * u * 0.07;
     for (const [lx, o] of [[-0.25, sw], [-0.12, -sw], [0.15, -sw], [0.28, sw]] as const) {
@@ -1402,10 +1626,10 @@ export class Game {
     g.strokeStyle = '#7d8696';
     g.stroke();
     // Body.
-    this.ellipse(0, -u * 0.4, u * 0.42, u * 0.2, '#8a93a3');
+    this.ellipse(0, -u * 0.4, u * 0.42, u * 0.2, fur);
     this.ellipse(u * 0.05, -u * 0.34, u * 0.3, u * 0.1, '#c3c9d3');
     // Head.
-    this.ellipse(u * 0.38, -u * 0.55, u * 0.17, u * 0.15, '#8a93a3');
+    this.ellipse(u * 0.38, -u * 0.55, u * 0.17, u * 0.15, fur);
     this.ellipse(u * 0.53, -u * 0.5, u * 0.1, u * 0.07, '#9aa2b0');
     this.ellipse(u * 0.62, -u * 0.52, u * 0.03, u * 0.03, '#2b2f3a');
     // Ears.
@@ -1419,11 +1643,814 @@ export class Game {
       g.fill();
     }
     // Eye.
-    this.ellipse(u * 0.44, -u * 0.58, u * 0.03, u * 0.03, w.state === 'chase' ? '#ff3b2f' : '#fff6c8');
+    this.ellipse(u * 0.44, -u * 0.58, u * 0.03, u * 0.03, w.state === 'chase' || w.state === 'boss' ? '#ff3b2f' : '#fff6c8');
     g.restore();
     if (w.state === 'chase') {
       const s = this.project(w.x, w.y, 1.6);
       this.label(s.x, s.y, '!', '#e0452f');
+    }
+  }
+
+  // =========================================================================
+  // Play modes (picked on the start screen)
+  // =========================================================================
+
+  setMode(m: Mode) {
+    this.mode = m;
+    this.applyMode();
+    this.save();
+    const tips: Record<Mode, string> = {
+      night: 'Bring logs to the campfire before night! 🔥',
+      lake: 'Buy Ice fishing in Upgrades, then fish at the lake 🎣',
+      boss: 'A boss wolf will raid the camp. Get ready! 🐺',
+      town: 'Bring logs to the house plots to build houses 🏠',
+      pets: 'Buy a dog or a reindeer in Upgrades 🐶',
+      outfits: 'Buy hats and coats in the Shop 🎩',
+      chest: 'Open the chest in camp! 🎁',
+      rebirth: `Earn ${REBIRTH_STEP} eeeddd, then Rebirth for stars 🌟`,
+    };
+    this.hooks.onToast(tips[m]);
+    this.checkGoal();
+  }
+
+  private applyMode() {
+    const m = this.mode;
+    if (m === 'lake') this.trees = this.trees.filter((t) => Math.hypot(t.x - LAKE.x, t.y - LAKE.y) > LAKE.r + 1.3);
+    if (m === 'town' && !this.houses.length) {
+      this.houses = HOUSE_PLOTS.map((h, i) => ({ ...h, have: Math.min(h.need, this.houseSave[i] ?? 0), pending: 0 }));
+    }
+    if (m === 'pets') {
+      if (this.lvl('dog')) this.spawnPet('dog');
+      if (this.lvl('reindeer')) this.spawnPet('reindeer');
+    }
+    if (m === 'boss') for (let i = 0; i < this.lvl('guard'); i++) this.addGuard(i);
+    if (m === 'chest' && Date.now() - this.lastChest >= CHEST_EVERY) {
+      this.chest = { x: CHEST_SPOT.x, y: CHEST_SPOT.y, open: 0, done: false, fade: 0 };
+    }
+  }
+
+  // --- Night and blizzards ------------------------------------------------------
+
+  private nightDark() {
+    if (this.mode !== 'night') return 0;
+    const ph = this.clock % DAY_LEN;
+    if (ph < 55) return 0;
+    if (ph < 62) return ((ph - 55) / 7) * 0.8;
+    if (ph < 93) return 0.8;
+    return (1 - (ph - 93) / 7) * 0.8;
+  }
+
+  private get fireScale() {
+    if (this.mode !== 'night') return 1;
+    return this.fuel > 0 ? 0.35 + (0.65 * this.fuel) / 100 : 0;
+  }
+
+  private updateNight(dt: number) {
+    if (this.mode !== 'night') return;
+    const before = this.nightDark();
+    this.clock += dt;
+    const dark = this.nightDark();
+    if (before === 0 && dark > 0) this.hooks.onToast('Night is coming! Keep the fire burning 🔥');
+    if (before > 0 && dark === 0) this.hooks.onToast('Good morning! ☀️');
+    const drain = (dark > 0.3 ? 1.5 : 0.45) * (this.lvl('firebox') ? 0.5 : 1);
+    const was = this.fuel;
+    this.fuel = Math.max(0, this.fuel - drain * dt);
+    if (was > 0 && this.fuel === 0) {
+      this.hooks.onToast('The fire went out! People are leaving 🥶');
+      for (const c of this.customers) c.leaving = true;
+    }
+    if (was > 25 && this.fuel <= 25) this.hooks.onToast('The fire is getting low! Bring logs 🪵');
+    // Smoke from a dead fire.
+    if (this.fuel <= 0 && Math.random() < dt * 4) {
+      this.particles.push({
+        x: CAMPFIRE.x, y: CAMPFIRE.y, z: 0.3, vx: 0.1, vy: -0.1, vz: 0.8,
+        life: 1.6, max: 1.6, color: '#9aa3b2', size: 0.09, gravity: -0.2,
+      });
+    }
+  }
+
+  private drawDarkness() {
+    const dark = this.nightDark();
+    if (dark <= 0) return;
+    if (!this.darkCanvas) this.darkCanvas = document.createElement('canvas');
+    const c = this.darkCanvas;
+    if (c.width !== this.canvas.width || c.height !== this.canvas.height) {
+      c.width = this.canvas.width;
+      c.height = this.canvas.height;
+    }
+    const d = c.getContext('2d')!;
+    d.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    d.globalCompositeOperation = 'source-over';
+    d.clearRect(0, 0, this.w, this.h);
+    d.fillStyle = `rgba(8,14,42,${dark})`;
+    d.fillRect(0, 0, this.w, this.h);
+    d.globalCompositeOperation = 'destination-out';
+    const hole = (x: number, y: number, r: number) => {
+      const gr = d.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'rgba(0,0,0,1)');
+      gr.addColorStop(0.55, 'rgba(0,0,0,0.75)');
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      d.fillStyle = gr;
+      d.beginPath();
+      d.arc(x, y, r, 0, Math.PI * 2);
+      d.fill();
+    };
+    const p = this.player;
+    const ps = this.project(p.x, p.y, 0.6);
+    hole(ps.x, ps.y, this.S * (2.4 + 1.6 * this.lvl('lantern')));
+    if (this.fuel > 0) {
+      const cf = this.project(CAMPFIRE.x, CAMPFIRE.y, 0.4);
+      hole(cf.x, cf.y, this.S * (1.5 + (4.5 * this.fuel) / 100) * (1 + Math.sin(this.time * 9) * 0.03));
+    }
+    for (const w of this.workers) {
+      const s = this.project(w.x, w.y, 0.6);
+      hole(s.x, s.y, this.S * 1.3);
+    }
+    d.globalCompositeOperation = 'source-over';
+    const g = this.g;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.drawImage(c, 0, 0);
+    g.restore();
+  }
+
+  // --- Frozen lake -------------------------------------------------------------
+
+  private updateLake(dt: number) {
+    if (this.mode !== 'lake') return;
+    const p = this.player;
+    if (this.lvl('lake')) {
+      const hole = HOLES.find((h) => Math.hypot(h.x - p.x, h.y - p.y) < 0.65);
+      if (hole && this.fish < FISH_CAP) {
+        this.fishT += dt * (1 + 0.6 * this.lvl('rod'));
+        if (this.fishT >= 1.6) {
+          this.fishT = 0;
+          this.fish++;
+          this.texts.push({ x: hole.x, y: hole.y, z: 1.4, t: 0, text: '+1 🐟' });
+          sfx.pop();
+          for (let i = 0; i < 10; i++) {
+            this.particles.push({
+              x: hole.x, y: hole.y, z: 0.1,
+              vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, vz: 2 + Math.random() * 2,
+              life: 0.6, max: 0.6, color: i % 2 ? '#7cc7f0' : '#ffffff', size: 0.06, gravity: 9,
+            });
+          }
+        }
+      } else {
+        this.fishT = 0;
+      }
+    }
+    const inside = p.x > FISH_DROP.x0 && p.x < FISH_DROP.x1 && p.y > FISH_DROP.y0 && p.y < FISH_DROP.y1;
+    if (!inside || this.fish <= 0) {
+      this.fishSellT = 0;
+      return;
+    }
+    this.fishSellT += dt;
+    while (this.fishSellT >= 0.15 && this.fish > 0) {
+      this.fishSellT -= 0.15;
+      this.fish--;
+      const amount = Math.round(FISH_PRICE * this.starBoost);
+      this.texts.push({ x: p.x, y: p.y, z: 1.9, t: 0, text: `+${amount}` });
+      const s = this.project(p.x, p.y, 1.4);
+      this.coins.push({ x: s.x, y: s.y, t: 0, dur: 0.55, onArrive: () => this.earn(amount, false) });
+    }
+  }
+
+  // --- Boss wolf ---------------------------------------------------------------
+
+  private addGuard(i: number) {
+    const post = i === 0 ? { x: 0, y: -5.6 } : { x: -5.6, y: 0 };
+    this.guards.push({ x: post.x, y: post.y, post, face: 1, walk: 0, moving: false, t: 0, swing: 0 });
+  }
+
+  private updateBoss(dt: number) {
+    const p = this.player;
+    p.fighting = false;
+    if (this.mode !== 'boss') return;
+    const wall = this.lvl('wall');
+    if (!this.boss) {
+      this.bossT -= dt;
+      if (this.bossT < 8 && !this.bossWarned) {
+        this.bossWarned = true;
+        this.hooks.onToast('Something BIG is coming… 🐺');
+        sfx.howl();
+      }
+      if (this.bossT <= 0) {
+        const gate = GATES[Math.floor(Math.random() * GATES.length)];
+        const max = Math.max(4, 12 - 3 * wall);
+        this.boss = {
+          x: gate.outer.x * 1.9,
+          y: gate.outer.y * 1.9,
+          face: 1,
+          walk: 0,
+          hp: max,
+          max,
+          path: [gate.outer, gate.inner, BOSS_TARGET],
+          eatT: 0,
+          hitCD: 0,
+          flash: 0,
+        };
+        this.hooks.onToast('The BOSS WOLF is attacking! Fight it! 🐺');
+        sfx.howl();
+        this.shakeAmt = 0.4;
+      }
+      for (const gd of this.guards) this.moveGuard(gd, gd.post, dt);
+      return;
+    }
+    const b = this.boss;
+    b.flash = Math.max(0, b.flash - dt);
+    b.hitCD -= dt;
+    // Walk the path into camp.
+    if (b.path.length) {
+      const t = b.path[0];
+      const dx = t.x - b.x;
+      const dy = t.y - b.y;
+      const d = Math.hypot(dx, dy);
+      const step = 1.7 * (1 - 0.2 * wall) * dt;
+      if (d <= step) {
+        b.x = t.x;
+        b.y = t.y;
+        b.path.shift();
+      } else {
+        b.x += (dx / d) * step;
+        b.y += (dy / d) * step;
+        const sx = dx - dy;
+        if (Math.abs(sx) > 0.02) b.face = sx > 0 ? 1 : -1;
+        b.walk += dt * 6;
+      }
+    } else {
+      // At the counter: eat the wood!
+      b.face = 1;
+      b.eatT += dt;
+      if (b.eatT >= 0.8) {
+        b.eatT = 0;
+        if (this.pile > 0) {
+          this.pile--;
+          this.texts.push({ x: COUNTER.x0, y: 0, z: 1.6, t: 0, text: '-1 🪵' });
+          if (Math.random() < 0.3) sfx.growl();
+        }
+      }
+    }
+    const d = Math.hypot(p.x - b.x, p.y - b.y);
+    if (d < 1.6) {
+      p.fighting = true;
+      const sx = b.x - b.y - (p.x - p.y);
+      if (!p.moving && Math.abs(sx) > 0.05) p.face = sx > 0 ? 1 : -1;
+      this.bossHitT += dt;
+      if (this.bossHitT >= 0.35 / this.starSpeed) {
+        this.bossHitT = 0;
+        p.swing = 1;
+        this.hitBoss(1 + Math.floor(this.lvl('axe') / 2) + this.lvl('chainsaw'));
+        if (!this.boss) return;
+      }
+    } else {
+      this.bossHitT = 0;
+    }
+    // Bumping into it while it walks knocks logs off.
+    if (b.path.length && d < 0.9 && b.hitCD <= 0 && p.stack > 0) {
+      b.hitCD = 3;
+      const lost = Math.ceil(p.stack / 2);
+      p.stack -= lost;
+      this.texts.push({ x: p.x, y: p.y, z: 2.2, t: 0, text: `-${lost} logs!` });
+      this.shakeAmt = 0.4;
+      sfx.growl();
+    }
+    for (const gd of this.guards) {
+      const near = Math.hypot(gd.post.x - b.x, gd.post.y - b.y) < 6 || inCamp(b.x, b.y);
+      this.moveGuard(gd, near ? { x: b.x - 0.9, y: b.y + 0.3 } : gd.post, dt);
+      gd.swing = Math.max(0, gd.swing - dt * 4);
+      if (Math.hypot(gd.x - b.x, gd.y - b.y) < 1.4) {
+        gd.t += dt;
+        if (gd.t >= 0.7) {
+          gd.t = 0;
+          gd.swing = 1;
+          this.hitBoss(1);
+          if (!this.boss) return;
+        }
+      }
+    }
+  }
+
+  private moveGuard(gd: Guard, target: { x: number; y: number }, dt: number) {
+    const dx = target.x - gd.x;
+    const dy = target.y - gd.y;
+    const d = Math.hypot(dx, dy);
+    gd.moving = d > 0.1;
+    if (!gd.moving) return;
+    const step = Math.min(d, 3.2 * dt);
+    gd.x += (dx / d) * step;
+    gd.y += (dy / d) * step;
+    const sx = dx - dy;
+    if (Math.abs(sx) > 0.02) gd.face = sx > 0 ? 1 : -1;
+    gd.walk += dt * 12;
+  }
+
+  private hitBoss(n: number) {
+    const b = this.boss;
+    if (!b) return;
+    b.hp -= n;
+    b.flash = 0.12;
+    this.shakeAmt = Math.max(this.shakeAmt, 0.12);
+    sfx.chop();
+    for (let i = 0; i < 5; i++) {
+      this.particles.push({
+        x: b.x, y: b.y, z: 1,
+        vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: 2 + Math.random() * 2,
+        life: 0.5, max: 0.5, color: '#6f7787', size: 0.07, gravity: 8,
+      });
+    }
+    if (b.hp > 0) return;
+    // Beaten!
+    this.boss = null;
+    this.bossT = 70 + Math.random() * 25;
+    this.bossWarned = false;
+    this.shakeAmt = 0.5;
+    this.hooks.onToast('You beat the Boss Wolf! +150 eeeddd 🏆');
+    sfx.upgrade();
+    this.bump('escapes');
+    const s = this.project(b.x, b.y, 1.5);
+    for (let i = 0; i < 10; i++) {
+      this.coins.push({ x: s.x + (Math.random() - 0.5) * 80, y: s.y + (Math.random() - 0.5) * 40, t: -i * 0.05, dur: 0.7, onArrive: () => this.earn(15, false) });
+    }
+  }
+
+  // --- Build the town ----------------------------------------------------------
+
+  private houseBuilt(h: House) {
+    const cx = (h.x0 + h.x1) / 2;
+    const cy = (h.y0 + h.y1) / 2;
+    this.hooks.onToast('House built! More townspeople will come 🏠');
+    sfx.upgrade();
+    this.shakeAmt = 0.3;
+    this.texts.push({ x: cx, y: cy, z: 2.4, t: 0, text: 'New house!' });
+    for (let i = 0; i < 24; i++) {
+      this.particles.push({
+        x: cx, y: cy, z: 1,
+        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: 3 + Math.random() * 3,
+        life: 1, max: 1, color: ['#ffd23a', '#ffffff', '#ff7a1a', '#3fbf7f'][i % 4], size: 0.07, gravity: 9,
+      });
+    }
+    // Keep the player out of the new walls.
+    this.collide(this.player);
+  }
+
+  private drawHouse(h: House) {
+    const P = (x: number, y: number, z: number) => this.project(x, y, z);
+    const x0 = h.x0 + 0.2;
+    const y0 = h.y0 + 0.2;
+    const x1 = h.x1 - 0.2;
+    const y1 = h.y1 - 0.2;
+    const wall = 1.05;
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    this.shadow(cx + 0.3, cy + 0.3, 1.3, 0.14);
+    this.box(x0, y0, 0, x1, y1, wall, '#f1dcb5', '#e6cc9c', '#cdb084');
+    // Door and window.
+    this.poly([P(cx - 0.22, y1, 0), P(cx + 0.22, y1, 0), P(cx + 0.22, y1, 0.65), P(cx - 0.22, y1, 0.65)], '#7a4a24');
+    this.poly([P(x1, cy - 0.25, 0.4), P(x1, cy + 0.25, 0.4), P(x1, cy + 0.25, 0.8), P(x1, cy - 0.25, 0.8)], '#bfe4f7');
+    // Roof.
+    const apex = P(cx, cy, wall + 1.0);
+    const r = 0.12;
+    this.poly([P(x0 - r, y0 - r, wall), P(x1 + r, y0 - r, wall), apex], '#e05a48');
+    this.poly([P(x0 - r, y1 + r, wall), P(x0 - r, y0 - r, wall), apex], '#e05a48');
+    this.poly([P(x1 + r, y0 - r, wall), P(x1 + r, y1 + r, wall), apex], '#a83a2e');
+    this.poly([P(x0 - r, y1 + r, wall), P(x1 + r, y1 + r, wall), apex], '#c8493a');
+    this.ellipse(apex.x, apex.y + this.S * 0.1, this.S * 0.25, this.S * 0.12, '#ffffff');
+    // Chimney smoke.
+    if (Math.random() < 0.05) {
+      this.particles.push({
+        x: x1 - 0.3, y: y0 + 0.3, z: wall + 0.9, vx: 0.15, vy: -0.1, vz: 0.6,
+        life: 2, max: 2, color: '#d7dde6', size: 0.08, gravity: -0.1,
+      });
+    }
+  }
+
+  // --- Pets ---------------------------------------------------------------------
+
+  private spawnPet(kind: 'dog' | 'reindeer') {
+    if (this.pets.some((p) => p.kind === kind)) return;
+    this.pets.push({ kind, x: this.player.x - 0.8, y: this.player.y + 0.6, face: 1, walk: 0, moving: false, barkT: 0 });
+  }
+
+  private updatePets(dt: number) {
+    const p = this.player;
+    this.pets.forEach((pet, i) => {
+      const keep = pet.kind === 'dog' ? 0.9 : 1.5 + i * 0.2;
+      const dx = p.x - pet.x;
+      const dy = p.y - pet.y;
+      const d = Math.hypot(dx, dy);
+      pet.moving = d > keep;
+      if (pet.moving) {
+        const step = Math.min(d - keep, Math.max(2.5, (d - keep) * 4) * dt);
+        pet.x += (dx / d) * step;
+        pet.y += (dy / d) * step;
+        const sx = dx - dy;
+        if (Math.abs(sx) > 0.02) pet.face = sx > 0 ? 1 : -1;
+        pet.walk += dt * 14;
+      }
+      pet.barkT = Math.max(0, pet.barkT - dt);
+      // The dog chases wolves off.
+      const w = this.wolf;
+      if (pet.kind === 'dog' && w && w.state !== 'flee' && Math.hypot(w.x - pet.x, w.y - pet.y) < 6) {
+        w.state = 'flee';
+        w.t = 0;
+        if (pet.barkT <= 0) {
+          pet.barkT = 2;
+          this.texts.push({ x: pet.x, y: pet.y, z: 1.2, t: 0, text: 'Woof! Woof!' });
+          sfx.bark();
+        }
+      }
+    });
+  }
+
+  private drawPet(pet: Pet) {
+    const g = this.g;
+    const u = this.S;
+    const big = pet.kind === 'reindeer';
+    const sc = big ? 1.5 : 0.9;
+    const fur = big ? '#9a6a3f' : '#c48a4f';
+    const dark = big ? '#6f4a2a' : '#8f5f30';
+    const b = this.project(pet.x, pet.y, 0);
+    this.ellipse(b.x, b.y, u * 0.3 * sc, u * 0.13 * sc, 'rgba(40,60,90,0.22)');
+    const bob = pet.moving ? Math.abs(Math.sin(pet.walk)) * u * 0.04 : 0;
+    g.save();
+    g.translate(b.x, b.y - bob);
+    g.scale(pet.face * sc, sc);
+    const sw = pet.moving ? Math.sin(pet.walk) * u * 0.07 : 0;
+    for (const [lx, o] of [[-0.22, sw], [-0.1, -sw], [0.14, -sw], [0.26, sw]] as const) {
+      this.roundRect(lx * u + o - u * 0.04, -u * 0.28, u * 0.08, u * 0.28, u * 0.03, dark);
+    }
+    // Tail.
+    if (!big) {
+      g.beginPath();
+      g.moveTo(-u * 0.3, -u * 0.42);
+      g.quadraticCurveTo(-u * 0.45, -u * 0.6, -u * 0.38 + Math.sin(this.time * 14) * u * 0.06, -u * 0.72);
+      g.lineWidth = u * 0.07;
+      g.lineCap = 'round';
+      g.strokeStyle = fur;
+      g.stroke();
+    }
+    this.ellipse(0, -u * 0.4, u * 0.36, u * 0.18, fur);
+    this.ellipse(u * 0.04, -u * 0.33, u * 0.24, u * 0.08, big ? '#e8d6bd' : '#f1dcbc');
+    // Head.
+    this.ellipse(u * 0.34, -u * 0.58, u * 0.15, u * 0.14, fur);
+    this.ellipse(u * 0.47, -u * 0.53, u * 0.08, u * 0.06, big ? '#c9a27a' : '#e2b98a');
+    this.ellipse(u * 0.54, -u * 0.55, u * 0.035, u * 0.035, big ? '#e0302a' : '#2b2f3a');
+    this.ellipse(u * 0.38, -u * 0.62, u * 0.025, u * 0.025, '#2b2f3a');
+    if (big) {
+      // Antlers.
+      g.strokeStyle = '#d9c39a';
+      g.lineWidth = u * 0.04;
+      g.lineCap = 'round';
+      for (const ox of [0.26, 0.36]) {
+        g.beginPath();
+        g.moveTo(ox * u, -u * 0.7);
+        g.lineTo(ox * u - u * 0.06, -u * 0.95);
+        g.moveTo(ox * u - u * 0.03, -u * 0.82);
+        g.lineTo(ox * u + u * 0.06, -u * 0.9);
+        g.stroke();
+      }
+      // Saddle bags of logs when you are carrying a lot.
+      if (this.player.stack > this.capacity - 10) {
+        this.logScreen(-u * 0.02, -u * 0.6, u * 0.45, u * 0.13, 0);
+        this.logScreen(-u * 0.02, -u * 0.72, u * 0.45, u * 0.13, 0);
+      }
+    } else {
+      // Floppy ear.
+      this.ellipse(u * 0.28, -u * 0.6, u * 0.05, u * 0.1, dark);
+      // Red collar.
+      this.roundRect(u * 0.2, -u * 0.5, u * 0.08, u * 0.1, u * 0.02, '#d23f3f');
+    }
+    g.restore();
+  }
+
+  // --- Outfits ------------------------------------------------------------------
+
+  outfitList() {
+    return OUTFITS.map((o) => ({
+      id: o.id,
+      kind: o.kind,
+      name: o.name,
+      price: o.price,
+      icon: o.icon,
+      color: o.color,
+      owned: this.owned.has(o.id),
+      worn: this.hat === o.id || this.coat === o.id,
+    }));
+  }
+
+  /** Wear an outfit, buying it first if needed. Returns false if you can't afford it. */
+  useOutfit(id: OutfitId): boolean {
+    const o = OUTFITS.find((x) => x.id === id);
+    if (!o) return false;
+    if (!this.owned.has(id)) {
+      if (this.money < o.price) return false;
+      this.money -= o.price;
+      this.owned.add(id);
+      this.hooks.onMoney(this.money, true);
+      sfx.upgrade();
+      this.stats.upgrades++;
+      this.checkGoal();
+    }
+    if (o.kind === 'hat') this.hat = id;
+    else this.coat = id;
+    this.save();
+    return true;
+  }
+
+  // --- Daily chest --------------------------------------------------------------
+
+  private updateChest(dt: number) {
+    if (this.mode !== 'chest') return;
+    if (!this.chest) {
+      if (Date.now() - this.lastChest >= CHEST_EVERY) {
+        this.chest = { x: CHEST_SPOT.x, y: CHEST_SPOT.y, open: 0, done: false, fade: 0 };
+        this.hooks.onToast('A new chest is waiting in camp! 🎁');
+      }
+      return;
+    }
+    const c = this.chest;
+    const p = this.player;
+    if (!c.done && c.open === 0 && Math.hypot(p.x - c.x, p.y - c.y) < 1.0) c.open = 0.001;
+    if (c.open > 0 && !c.done) {
+      c.open = Math.min(1, c.open + dt * 1.6);
+      if (c.open >= 1) {
+        c.done = true;
+        this.chestReward();
+      }
+    }
+    if (c.done) {
+      c.fade += dt;
+      if (c.fade > 3) this.chest = null;
+    }
+  }
+
+  private chestReward() {
+    const c = this.chest!;
+    const now = Date.now();
+    this.streak = now - this.lastChest < 48 * 60 * 60 * 1000 ? this.streak + 1 : 1;
+    this.lastChest = now;
+    this.shakeAmt = 0.35;
+    sfx.upgrade();
+    for (let i = 0; i < 30; i++) {
+      this.particles.push({
+        x: c.x, y: c.y, z: 0.6,
+        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: 3 + Math.random() * 3,
+        life: 1.2, max: 1.2, color: ['#ffd23a', '#ffffff', '#ff7a1a', '#7cc7f0'][i % 4], size: 0.07, gravity: 8,
+      });
+    }
+    const coins = (total: number) => {
+      const s = this.project(c.x, c.y, 0.8);
+      const n = 10;
+      for (let i = 0; i < n; i++) {
+        const amount = Math.floor(total / n) + (i === 0 ? total % n : 0);
+        this.coins.push({ x: s.x + (Math.random() - 0.5) * 70, y: s.y + (Math.random() - 0.5) * 40, t: -i * 0.05, dur: 0.7, onArrive: () => this.earn(amount, false) });
+      }
+    };
+    const roll = Math.random();
+    const streakText = this.streak > 1 ? ` (${this.streak} in a row!)` : '';
+    if (roll < 0.45) {
+      const amount = 100 + Math.floor(Math.random() * 3) * 100 + (this.streak - 1) * 50;
+      coins(amount);
+      this.hooks.onToast(`🎁 Chest: +${amount} eeeddd${streakText}`);
+    } else if (roll < 0.65) {
+      const options = this.upgrades.filter((u) => this.available(u));
+      const u = options[Math.floor(Math.random() * options.length)];
+      if (u) {
+        this.completeUpgrade(u);
+        this.hooks.onToast(`🎁 Chest: free ${u.name}!${streakText}`);
+      } else {
+        coins(300);
+        this.hooks.onToast(`🎁 Chest: +300 eeeddd${streakText}`);
+      }
+    } else if (roll < 0.85) {
+      const trees = this.trees.filter((t) => !t.stump && t.grow >= 1 && Math.max(Math.abs(t.x), Math.abs(t.y)) < 15);
+      for (let i = 0; i < 3 && trees.length; i++) trees.splice(Math.floor(Math.random() * trees.length), 1)[0].golden = true;
+      this.hooks.onToast(`🎁 Chest: 3 golden trees! ✨${streakText}`);
+    } else {
+      coins(500);
+      this.hooks.onToast(`🎁 JACKPOT! +500 eeeddd${streakText}`);
+    }
+    this.save();
+  }
+
+  private drawChest() {
+    const c = this.chest;
+    if (!c) return;
+    const g = this.g;
+    const a = c.done ? Math.max(0, 1 - Math.max(0, c.fade - 2)) : 1;
+    g.save();
+    g.globalAlpha = a;
+    const x0 = c.x - 0.45;
+    const x1 = c.x + 0.45;
+    const y0 = c.y - 0.32;
+    const y1 = c.y + 0.32;
+    this.shadow(c.x + 0.1, c.y + 0.1, 0.6, 0.18);
+    this.box(x0, y0, 0, x1, y1, 0.45, '#b9773d', '#9a5f2c', '#7f4a1f');
+    this.box(x0, y1 - 0.02, 0.18, x1, y1, 0.27, '#ffd23a', '#e0b12a', '#c99a1a');
+    if (c.open > 0) {
+      // Lid swung up at the back, with light pouring out.
+      const s = this.project(c.x, c.y, 0.5);
+      const gr = g.createRadialGradient(s.x, s.y, 0, s.x, s.y, this.S * 1.2 * c.open);
+      gr.addColorStop(0, 'rgba(255,230,120,0.9)');
+      gr.addColorStop(1, 'rgba(255,230,120,0)');
+      g.fillStyle = gr;
+      g.beginPath();
+      g.arc(s.x, s.y, this.S * 1.2 * c.open, 0, Math.PI * 2);
+      g.fill();
+      this.box(x0, y0 - 0.1, 0.45, x1, y0, 0.45 + 0.55 * c.open, '#c98a4f', '#a46a35', '#8a5428');
+    } else {
+      this.box(x0, y0, 0.45, x1, y1, 0.62, '#c98a4f', '#a46a35', '#8a5428');
+      const s = this.project(c.x, c.y + 0.32, 0.45);
+      this.ellipse(s.x, s.y, this.S * 0.07, this.S * 0.07, '#ffd23a');
+    }
+    g.restore();
+  }
+
+  // --- Rebirth ------------------------------------------------------------------
+
+  rebirthInfo() {
+    return { stars: this.stars, gain: Math.floor(this.stats.earned / REBIRTH_STEP), earned: this.stats.earned, step: REBIRTH_STEP };
+  }
+
+  /** Start over but keep (and add) stars. The page reloads afterwards. */
+  rebirth(): boolean {
+    const gain = Math.floor(this.stats.earned / REBIRTH_STEP);
+    if (gain < 1) return false;
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({ mode: 'rebirth', stars: this.stars + gain }));
+    } catch {
+      return false;
+    }
+    this.saveBlocked = true;
+    return true;
+  }
+
+  // --- Mode drawing hooks -------------------------------------------------------
+
+  private modeGround() {
+    const g = this.g;
+    if (this.mode === 'night') {
+      this.zoneOutline(FIRE_DROP, 'rgba(255,140,40,0.15)', '#ff9a3c');
+    }
+    if (this.mode === 'lake') {
+      if (this.onScreen(LAKE.x, LAKE.y, 6)) {
+        const c = this.project(LAKE.x, LAKE.y, 0);
+        this.ellipse(c.x, c.y, LAKE.r * 1.22 * this.S, LAKE.r * 0.71 * this.S, '#a9d6ee');
+        this.ellipse(c.x - this.S * 0.3, c.y - this.S * 0.15, LAKE.r * 0.95 * this.S, LAKE.r * 0.55 * this.S, '#c6e6f6');
+        g.strokeStyle = 'rgba(255,255,255,0.7)';
+        g.lineWidth = Math.max(1, this.S * 0.04);
+        g.beginPath();
+        g.moveTo(c.x - this.S * 1.6, c.y - this.S * 0.3);
+        g.lineTo(c.x - this.S * 0.4, c.y - this.S * 0.8);
+        g.moveTo(c.x + this.S * 0.4, c.y + this.S * 0.6);
+        g.lineTo(c.x + this.S * 1.5, c.y + this.S * 0.1);
+        g.stroke();
+        if (this.lvl('lake')) {
+          for (const h of HOLES) {
+            const s = this.project(h.x, h.y, 0);
+            this.ellipse(s.x, s.y, this.S * 0.42, this.S * 0.25, '#ffffff');
+            this.ellipse(s.x, s.y, this.S * 0.34, this.S * 0.19, '#2e6f9e');
+            const bob = Math.sin(this.time * 3 + h.x) * this.S * 0.03;
+            this.ellipse(s.x + this.S * 0.08, s.y + bob, this.S * 0.05, this.S * 0.05, '#e0452f');
+          }
+        }
+      }
+      this.zoneOutline(FISH_DROP, 'rgba(80,170,230,0.15)', '#7cc7f0');
+      const fc = this.project((FISH_DROP.x0 + FISH_DROP.x1) / 2, (FISH_DROP.y0 + FISH_DROP.y1) / 2, 0);
+      this.drawFish(fc.x, fc.y, this.S * 0.6);
+    }
+    for (const h of this.houses) {
+      if (h.have >= h.need) continue;
+      this.zoneOutline(h, 'rgba(160,96,47,0.12)', '#e2a86c');
+    }
+    if (this.mode === 'chest' && !this.chest) {
+      this.zoneOutline({ x0: CHEST_SPOT.x - 0.6, y0: CHEST_SPOT.y - 0.5, x1: CHEST_SPOT.x + 0.6, y1: CHEST_SPOT.y + 0.5 }, 'rgba(255,210,58,0.08)', 'rgba(255,210,58,0.6)');
+    }
+  }
+
+  private modeDrawables(items: { key: number; draw: () => void }[]) {
+    for (const h of this.houses) {
+      const key = (h.x0 + h.x1 + h.y0 + h.y1) / 2;
+      if (h.have >= h.need) items.push({ key, draw: () => this.drawHouse(h) });
+      else if (h.have > 0) {
+        items.push({
+          key,
+          draw: () => {
+            const n = Math.min(12, Math.ceil((h.have / h.need) * 12));
+            const cx = (h.x0 + h.x1) / 2;
+            const cy = (h.y0 + h.y1) / 2;
+            for (let i = 0; i < n; i++) this.logWorld(cx - 0.3 + (i % 3) * 0.3, cy, 0.11 + Math.floor(i / 3) * 0.19, 'y', 0.7);
+          },
+        });
+      }
+    }
+    const b = this.boss;
+    if (b && this.onScreen(b.x, b.y)) {
+      items.push({ key: b.x + b.y, draw: () => this.drawWolf({ ...b, state: 'boss' }, 3.2, b.flash > 0 ? '#ffffff' : '#5d6575') });
+    }
+    for (const gd of this.guards) {
+      if (!this.onScreen(gd.x, gd.y)) continue;
+      items.push({
+        key: gd.x + gd.y + 0.01,
+        draw: () =>
+          this.drawPerson(
+            gd.x,
+            gd.y,
+            { face: gd.face, walk: gd.walk, moving: gd.moving, coat: '#56607a', coatDark: '#414a60', skin: '#eebd94', hat: 'beanie', hatColor: '#9aa3b2', hatStyle: 'viking' },
+            undefined,
+            (bx, by) => {
+              // Spear.
+              const g = this.g;
+              const u = this.S;
+              g.save();
+              g.translate(bx + gd.face * u * 0.25, by - u * 0.5);
+              g.rotate(gd.face * (0.2 + gd.swing * 0.8));
+              g.fillStyle = '#7b4a24';
+              g.fillRect(-u * 0.025, -u * 0.8, u * 0.05, u * 1.0);
+              g.beginPath();
+              g.moveTo(0, -u * 1.0);
+              g.lineTo(u * 0.07, -u * 0.8);
+              g.lineTo(-u * 0.07, -u * 0.8);
+              g.closePath();
+              g.fillStyle = '#c7ced8';
+              g.fill();
+              g.restore();
+            },
+          ),
+      });
+    }
+    for (const pet of this.pets) {
+      if (this.onScreen(pet.x, pet.y)) items.push({ key: pet.x + pet.y + 0.01, draw: () => this.drawPet(pet) });
+    }
+    const c = this.chest;
+    if (c) items.push({ key: c.x + c.y, draw: () => this.drawChest() });
+  }
+
+  private modeOverlays() {
+    const g = this.g;
+    const u = this.S;
+    const small = (x: number, y: number, text: string) => {
+      const fs = Math.max(11, u * 0.28);
+      g.font = `${fs}px 'Lilita One', system-ui, sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineWidth = fs * 0.25;
+      g.strokeStyle = 'rgba(43,47,58,0.85)';
+      g.strokeText(text, x, y);
+      g.fillStyle = '#ffffff';
+      g.fillText(text, x, y);
+    };
+    if (this.mode === 'night') {
+      // Fire meter over the campfire.
+      const s = this.project(CAMPFIRE.x, CAMPFIRE.y, 1.6);
+      const w = u * 1.4;
+      const h = u * 0.18;
+      this.roundRect(s.x - w / 2 - 2, s.y - h / 2 - 2, w + 4, h + 4, h, 'rgba(43,47,58,0.8)');
+      const f = this.fuel / 100;
+      if (f > 0) this.roundRect(s.x - w / 2, s.y - h / 2, w * f, h, h / 2, f < 0.25 ? '#e0452f' : '#ff9a3c');
+      small(s.x, s.y - u * 0.35, this.fuel <= 0 ? 'Fire out! Bring logs' : '🔥 Campfire');
+      const fd = this.project((FIRE_DROP.x0 + FIRE_DROP.x1) / 2, (FIRE_DROP.y0 + FIRE_DROP.y1) / 2, 0.2);
+      small(fd.x, fd.y, 'Feed the fire');
+    }
+    if (this.mode === 'lake') {
+      const s = this.project(LAKE.x, LAKE.y, 0.6);
+      if (this.onScreen(LAKE.x, LAKE.y, 6)) small(s.x, s.y - u * 0.8, this.lvl('lake') ? '🎣 Stand on a hole to fish' : '🔒 Ice fishing: buy it in Upgrades');
+      const fc = this.project((FISH_DROP.x0 + FISH_DROP.x1) / 2, (FISH_DROP.y0 + FISH_DROP.y1) / 2, 0.9);
+      small(fc.x, fc.y, `Sell fish: ${Math.round(FISH_PRICE * this.starBoost)} each`);
+      if (this.fishT > 0) {
+        const p = this.project(this.player.x, this.player.y, 2.2);
+        g.beginPath();
+        g.arc(p.x, p.y, u * 0.25, -Math.PI / 2, -Math.PI / 2 + (this.fishT / 1.6) * Math.PI * 2);
+        g.strokeStyle = '#7cc7f0';
+        g.lineWidth = u * 0.08;
+        g.stroke();
+      }
+      if (this.fish >= FISH_CAP) {
+        const p = this.project(this.player.x, this.player.y, 2.4);
+        this.label(p.x + u * 0.4, p.y, 'Fish full!', '#2e6f9e');
+      }
+    }
+    for (const h of this.houses) {
+      if (h.have >= h.need) continue;
+      const s = this.project((h.x0 + h.x1) / 2, (h.y0 + h.y1) / 2, 1.1);
+      small(s.x, s.y, `🏠 House ${h.have}/${h.need} logs`);
+    }
+    const b = this.boss;
+    if (b) {
+      const s = this.project(b.x, b.y, 2.9);
+      const w = u * 1.8;
+      const h = u * 0.2;
+      this.roundRect(s.x - w / 2 - 2, s.y - h / 2 - 2, w + 4, h + 4, h, 'rgba(43,47,58,0.85)');
+      this.roundRect(s.x - w / 2, s.y - h / 2, (w * Math.max(0, b.hp)) / b.max, h, h / 2, '#e0452f');
+      small(s.x, s.y - u * 0.35, 'BOSS WOLF');
+    }
+    if (this.mode === 'chest' && !this.chest) {
+      const left = Math.max(0, CHEST_EVERY - (Date.now() - this.lastChest));
+      const m = Math.floor(left / 60000);
+      const sec = Math.floor((left % 60000) / 1000);
+      const s = this.project(CHEST_SPOT.x, CHEST_SPOT.y, 0.4);
+      small(s.x, s.y, `🎁 Next chest in ${m}:${String(sec).padStart(2, '0')}`);
     }
   }
 
@@ -1697,6 +2724,7 @@ export class Game {
     }
     const wolf = this.wolf;
     if (wolf && this.onScreen(wolf.x, wolf.y)) items.push({ key: wolf.x + wolf.y, draw: () => this.drawWolf(wolf) });
+    this.modeDrawables(items);
     for (const w of this.workers) {
       if (this.onScreen(w.x, w.y)) items.push({ key: w.x + w.y + 0.015, draw: () => this.drawWorker(w) });
     }
@@ -1705,6 +2733,8 @@ export class Game {
     for (const it of items) it.draw();
 
     this.drawFlyers();
+    this.drawDarkness();
+    this.modeOverlays();
     this.drawOverlays();
     this.drawSnowfall();
     this.drawStick();
@@ -1731,7 +2761,7 @@ export class Game {
 
     // Campfire glow.
     const cf = P(CAMPFIRE.x, CAMPFIRE.y);
-    const flick = 1 + Math.sin(this.time * 9) * 0.04 + Math.sin(this.time * 23) * 0.03;
+    const flick = (1 + Math.sin(this.time * 9) * 0.04 + Math.sin(this.time * 23) * 0.03) * Math.max(0.01, this.fireScale);
     const gr = g.createRadialGradient(cf.x, cf.y, 0, cf.x, cf.y, this.S * 2.6 * flick);
     gr.addColorStop(0, 'rgba(255,170,70,0.45)');
     gr.addColorStop(1, 'rgba(255,170,70,0)');
@@ -1748,6 +2778,7 @@ export class Game {
     // Drop zone: dashed square with a log icon.
     this.dropZone(DROP);
 
+    this.modeGround();
     this.drawBelt();
     for (const u of this.upgrades) if (!u.menuOnly && this.available(u)) this.drawPad(u);
 
@@ -1843,7 +2874,9 @@ export class Game {
     const s = this.S;
     g.save();
     g.translate(c.x, c.y);
-    const kind = u.after ?? u.id;
+    let root = u;
+    while (root.after) root = this.upgrade(root.after);
+    const kind = root.id;
     if (kind === 'axe') {
       g.rotate(-0.5);
       g.fillStyle = '#7b4a24';
@@ -2049,7 +3082,8 @@ export class Game {
       { dx: 0, s: 0.5, c: '#fff1a0', ph: 4.2 },
     ];
     for (const f of flames) {
-      const hgt = this.S * 0.8 * f.s * (1 + Math.sin(this.time * 12 + f.ph) * 0.12);
+      const hgt = this.S * 0.8 * f.s * (1 + Math.sin(this.time * 12 + f.ph) * 0.12) * this.fireScale;
+      if (hgt <= 0) continue;
       const wid = this.S * 0.28 * f.s;
       const fx = base.x + f.dx * this.S;
       g.beginPath();
@@ -2074,7 +3108,7 @@ export class Game {
   private drawPerson(
     x: number,
     y: number,
-    o: { face: number; walk: number; moving: boolean; coat: string; coatDark: string; skin: string; hat: 'beanie' | 'hood'; hatColor: string; alpha?: number; happy?: boolean },
+    o: { face: number; walk: number; moving: boolean; coat: string; coatDark: string; skin: string; hat: 'beanie' | 'hood'; hatColor: string; hatStyle?: HatStyle; alpha?: number; happy?: boolean },
     behind?: (bx: number, by: number) => void,
     front?: (bx: number, by: number) => void,
   ) {
@@ -2123,13 +3157,7 @@ export class Game {
       g.ellipse(hx + o.face * u * 0.06, hy + u * 0.09, u * 0.15, u * 0.12, 0, 0, Math.PI);
       g.fillStyle = '#7a3e1d';
       g.fill();
-      // Beanie with pompom.
-      g.beginPath();
-      g.ellipse(hx, hy - u * 0.05, u * 0.23, u * 0.2, 0, Math.PI, 0);
-      g.fillStyle = o.hatColor;
-      g.fill();
-      this.roundRect(hx - u * 0.24, hy - u * 0.08, u * 0.48, u * 0.08, u * 0.04, '#f4f1ea');
-      this.ellipse(hx, hy - u * 0.27, u * 0.08, u * 0.08, '#f4f1ea');
+      this.drawHat(hx, hy, o.hatStyle ?? 'beanie', o.hatColor);
     }
     // Eyes.
     const ex = hx + o.face * u * 0.09;
@@ -2149,26 +3177,94 @@ export class Game {
     g.restore();
   }
 
+  private drawHat(hx: number, hy: number, style: HatStyle, color: string) {
+    const g = this.g;
+    const u = this.S;
+    if (style === 'tophat') {
+      this.roundRect(hx - u * 0.27, hy - u * 0.14, u * 0.54, u * 0.08, u * 0.03, color);
+      this.roundRect(hx - u * 0.17, hy - u * 0.52, u * 0.34, u * 0.4, u * 0.04, color);
+      this.roundRect(hx - u * 0.17, hy - u * 0.22, u * 0.34, u * 0.07, 0, '#c8352b');
+    } else if (style === 'viking') {
+      g.beginPath();
+      g.ellipse(hx, hy - u * 0.04, u * 0.24, u * 0.22, 0, Math.PI, 0);
+      g.fillStyle = color;
+      g.fill();
+      this.roundRect(hx - u * 0.25, hy - u * 0.08, u * 0.5, u * 0.07, u * 0.03, '#7b838f');
+      for (const side of [-1, 1]) {
+        g.beginPath();
+        g.moveTo(hx + side * u * 0.2, hy - u * 0.12);
+        g.quadraticCurveTo(hx + side * u * 0.42, hy - u * 0.2, hx + side * u * 0.36, hy - u * 0.46);
+        g.quadraticCurveTo(hx + side * u * 0.3, hy - u * 0.24, hx + side * u * 0.12, hy - u * 0.2);
+        g.closePath();
+        g.fillStyle = '#f4ecd8';
+        g.fill();
+      }
+    } else if (style === 'crown') {
+      g.beginPath();
+      g.moveTo(hx - u * 0.2, hy - u * 0.08);
+      g.lineTo(hx - u * 0.22, hy - u * 0.34);
+      g.lineTo(hx - u * 0.1, hy - u * 0.2);
+      g.lineTo(hx, hy - u * 0.38);
+      g.lineTo(hx + u * 0.1, hy - u * 0.2);
+      g.lineTo(hx + u * 0.22, hy - u * 0.34);
+      g.lineTo(hx + u * 0.2, hy - u * 0.08);
+      g.closePath();
+      g.fillStyle = color;
+      g.fill();
+      g.strokeStyle = '#a86f00';
+      g.lineWidth = u * 0.025;
+      g.stroke();
+      this.ellipse(hx, hy - u * 0.16, u * 0.035, u * 0.035, '#d23f5c');
+    } else {
+      // Beanie with pompom.
+      g.beginPath();
+      g.ellipse(hx, hy - u * 0.05, u * 0.23, u * 0.2, 0, Math.PI, 0);
+      g.fillStyle = color;
+      g.fill();
+      this.roundRect(hx - u * 0.24, hy - u * 0.08, u * 0.48, u * 0.08, u * 0.04, '#f4f1ea');
+      this.ellipse(hx, hy - u * 0.27, u * 0.08, u * 0.08, '#f4f1ea');
+    }
+  }
+
+  private drawFish(x: number, y: number, size: number) {
+    const g = this.g;
+    this.ellipse(x, y, size * 0.5, size * 0.28, '#f08a3c');
+    g.beginPath();
+    g.moveTo(x - size * 0.4, y);
+    g.lineTo(x - size * 0.75, y - size * 0.25);
+    g.lineTo(x - size * 0.75, y + size * 0.25);
+    g.closePath();
+    g.fillStyle = '#d96d22';
+    g.fill();
+    this.ellipse(x + size * 0.25, y - size * 0.05, size * 0.05, size * 0.05, '#2b2f3a');
+  }
+
   private drawPlayer() {
     const p = this.player;
     const u = this.S;
     this.drawPerson(
       p.x,
       p.y,
-      { face: p.face, walk: p.walk, moving: p.moving, coat: '#d8452f', coatDark: '#a92f1f', skin: '#f5cfa7', hat: 'beanie', hatColor: '#2f6db5' },
+      (() => {
+        const hat = OUTFITS.find((o) => o.id === this.hat)!;
+        const coat = OUTFITS.find((o) => o.id === this.coat)!;
+        return { face: p.face, walk: p.walk, moving: p.moving, coat: coat.color, coatDark: shade(coat.color, -0.22), skin: '#f5cfa7', hat: 'beanie' as const, hatColor: hat.color, hatStyle: hat.style as HatStyle };
+      })(),
       (bx, by) => {
         // Wood stack on the back.
         const sx = bx - p.face * u * 0.22;
         for (let i = 0; i < p.stack; i++) {
           this.logScreen(sx, by - u * 0.55 - i * u * 0.17, u * 0.72, u * 0.21, 0);
         }
+        for (let i = 0; i < this.fish; i++) this.drawFish(bx + p.face * u * 0.42, by - u * 0.35 - i * u * 0.14, u * 0.22);
       },
       (bx, by) => {
         // Axe.
         const g = this.g;
-        const swing = p.chopping ? Math.sin((1 - p.swing) * Math.PI) : 0;
-        const ang = p.chopping ? -1.2 + (1 - p.swing) * 2.0 : 0.5;
-        if (!p.chopping && p.moving) return;
+        const acting = !!p.chopping || p.fighting;
+        const swing = acting ? Math.sin((1 - p.swing) * Math.PI) : 0;
+        const ang = acting ? -1.2 + (1 - p.swing) * 2.0 : 0.5;
+        if (!acting && p.moving) return;
         g.save();
         g.translate(bx + p.face * u * 0.25, by - u * 0.5);
         g.scale(p.face, 1);
@@ -2373,7 +3469,7 @@ export class Game {
       const cy = (up.y0 + up.y1) / 2;
       if (!this.onScreen(cx, cy)) continue;
       const s = this.project(cx, cy, 0.95);
-      const title = up.prices.length > 1 && up.id !== 'worker' ? `${up.name} ${up.level + 1}/${up.prices.length}` : up.name;
+      const title = up.id.startsWith('gold-') ? `${up.name} ${up.level + 1}` : up.prices.length > 1 && up.id !== 'worker' ? `${up.name} ${up.level + 1}/${up.prices.length}` : up.name;
       const fs = Math.max(11, u * 0.28);
       g.font = `${fs}px 'Lilita One', system-ui, sans-serif`;
       g.textAlign = 'center';
@@ -2391,7 +3487,19 @@ export class Game {
     let target: { x: number; y: number } | null = null;
     const carrying = p.stack + p.incoming;
     let isDrop = false;
-    if (carrying >= this.capacity || (p.stack > 0 && inCamp(p.x, p.y))) {
+    const center = (r: { x0: number; y0: number; x1: number; y1: number }) => ({ x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 });
+    if (this.mode === 'night' && p.stack > 0 && this.fuel < 40) {
+      isDrop = true;
+      target = center(FIRE_DROP);
+    } else if (this.fish > 0) {
+      isDrop = true;
+      target = center(FISH_DROP);
+    } else if (this.boss) {
+      target = this.boss;
+    } else if (this.chest && !this.chest.done) {
+      isDrop = true;
+      target = this.chest;
+    } else if (carrying >= this.capacity || (p.stack > 0 && inCamp(p.x, p.y))) {
       isDrop = true;
       target = { x: (DROP.x0 + DROP.x1) / 2, y: (DROP.y0 + DROP.y1) / 2 };
       if (this.hasBelt) {
@@ -2453,12 +3561,17 @@ export class Game {
   private drawSnowfall() {
     const g = this.g;
     g.fillStyle = 'rgba(255,255,255,0.85)';
-    for (const f of this.flakes) {
-      const y = (f.y + this.time * f.v) % 1;
-      const x = (f.x + Math.sin(this.time * 0.8 + f.ph) * 0.01 - (this.camX - this.camY) * 0.004 + 10) % 1;
-      g.beginPath();
-      g.arc(x * this.w, y * this.h, f.r, 0, Math.PI * 2);
-      g.fill();
+    const storm = this.nightDark() > 0.3;
+    for (const pass of storm ? [0, 0.37, 0.71] : [0]) {
+      for (const f of this.flakes) {
+        const v = storm ? f.v * 4 : f.v;
+        const y = (f.y + pass + this.time * v) % 1;
+        const wind = storm ? this.time * 0.35 + y * 0.3 : 0;
+        const x = (f.x + pass + wind + Math.sin(this.time * 0.8 + f.ph) * 0.01 - (this.camX - this.camY) * 0.004 + 10) % 1;
+        g.beginPath();
+        g.arc(x * this.w, y * this.h, f.r, 0, Math.PI * 2);
+        g.fill();
+      }
     }
   }
 
