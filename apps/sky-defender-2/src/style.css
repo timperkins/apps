@@ -307,3 +307,14 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 #svLoad { right: 96px; bottom: 174px; }
 .svinv.short { left: 112px; bottom: 136px; }
 .svshop { z-index: 5; gap: 6px; padding: 12px 14px; }
+.svinv.split { left: 14px; bottom: 188px; }
+.svinv.chest { left: 112px; bottom: 188px; }
+.svitem small { font-size: 11.5px; }
+.svitem { padding: 8px 10px; }
+/* shop: two columns of item cards */
+.svshop { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: min(360px, calc(100% - 20px)); }
+.svshop > :not(.svitem) { grid-column: 1 / -1; justify-self: center; margin: 0; }
+.svshop .svitem { flex-direction: column; align-items: stretch; gap: 6px; padding: 8px; }
+.svshop .svitem b { font-size: 14px; }
+.svshop .svitem small { font-size: 11px; }
+.svshop .svitem button.primary { padding: 7px 8px; font-size: 13px; width: 100%; }

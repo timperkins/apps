@@ -30,6 +30,8 @@
     </button>
     <p id="svHelp">Drag anywhere to walk</p>
     <button id="svInv" class="svinv" hidden><span>Belt 3 ×0</span><small>E: place</small></button>
+    <button id="svInvSplit" class="svinv split" hidden><span>Splitter ×0</span><small>X: place</small></button>
+    <button id="svInvChest" class="svinv chest" hidden><span>Chest ×0</span><small>C: place</small></button>
     <button id="svInvShort" class="svinv short" hidden><span>Belt 1 ×0</span><small>Q: place</small></button>
     <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
     <button id="svInvTurret" class="svinv turret" hidden><span>Turret ×0</span><small>U: place</small></button>
@@ -40,23 +42,31 @@
       <h3>Shop</h3>
       <p class="fine"><b id="svShopStone">0</b> stone</p>
       <div class="svitem">
-        <div><b>Long belt</b><small>Goes in your inventory. Each belt is 3 tiles long. Place it anywhere in the camp; it carries stone (and you). R turns it.</small></div>
+        <div><b>Long belt</b><small>3 tiles long. Carries stone (and you). E to place, R turns it.</small></div>
         <button id="svBuyBelt" class="primary">5 stone</button>
       </div>
       <div class="svitem">
-        <div><b>Short belts ×3</b><small>Three 1-tile belts, for corners and short gaps. Q to place.</small></div>
+        <div><b>Short belts ×3</b><small>Three 1-tile belts for corners and gaps. Q to place.</small></div>
         <button id="svBuyShort" class="primary">5 stone</button>
       </div>
       <div class="svitem">
-        <div><b>Grabber</b><small>Place it between two spots: it picks stone up from behind it and puts it down in front, on a belt, the ground or into the machine. R turns it.</small></div>
+        <div><b>Grabber</b><small>Moves stone from behind it to in front of it. G to place.</small></div>
         <button id="svBuyGrab" class="primary">3 stone</button>
       </div>
       <div class="svitem">
-        <div><b>Turret</b><small>Place it, then load it with stone ammo (T next to it), or feed it stone with a belt or grabber (1 shot each). It shoots the nearest bear for 5.25 damage.</small></div>
+        <div><b>Turret</b><small>Shoots bears for 5.25. Load stone ammo with T, or feed it stone. U to place.</small></div>
         <button id="svBuyTurret" class="primary">15 stone</button>
       </div>
+      <div class="svitem">
+        <div><b>Splitter</b><small>Sends stone left and right in turn, half each way. X to place.</small></div>
+        <button id="svBuySplit" class="primary">4 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Chest</b><small>Holds 200 stone. T takes it out, or a grabber. C to place.</small></div>
+        <button id="svBuyChest" class="primary">10 stone</button>
+      </div>
       <p class="fine" id="svShopInv"></p>
-      <p class="fine">Tap a placed belt, grabber or turret to pick it back up.</p>
+      <p class="fine">Tap anything you placed to pick it back up.</p>
       <button class="ghost small" id="svShopClose">Close (B)</button>
     </div>
     <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>
