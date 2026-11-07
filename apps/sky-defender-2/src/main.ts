@@ -787,7 +787,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '⛏️', title: 'The mine', lines: [
     'After 4 bears, bears only wait 20 seconds, and a mine, a machine and a shop pop up in your camp.',
     'Stand next to the mine and press <kbd>M</kbd> to mine: 1 stone every 2 seconds.',
-    'With 30 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you.'] },
+    'With 30 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you. Extra miners cost 20 stone each.'] },
   { icon: '⚙️', title: 'The machine', lines: [
     'Walk to the machine and click it (or press <kbd>M</kbd>). It takes all your stone.',
     'Each stone becomes 5 stone ammo after 4 seconds. Stone ammo does 1.7x damage.',

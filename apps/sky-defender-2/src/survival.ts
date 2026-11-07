@@ -16,7 +16,9 @@ export const SURVIVAL = {
   throwCooldown: 5,
   throwSpeed: 170,
   mineEvery: 2,         // mining gives a stone every 2 seconds
-  minerCost: 30,        // stone to hire a miner
+  minerCost: 30,        // stone to hire the first miner
+  extraMinerCost: 20,   // stone for each extra miner
+  maxMiners: 6,
   minerEvery: 5,        // the miner digs a stone every 5 seconds
   beltCost: 5,          // stone for a belt in the shop
   beltSpeed: 45,        // how fast a belt carries stone (and you)
@@ -54,6 +56,8 @@ const COLS = Math.floor((WALL.x1 - WALL.t - GX0) / TILE), ROWS = Math.floor((WAL
 const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const; // right, down, left, up
 const SHOP = { x: WALL.x1 - 62, y: WALL.y1 - 62, r: 26 };
 interface Item { x: number; y: number; gone?: boolean; }
+// where hired miners stand, relative to the mine
+const MINER_SPOTS = [[-4, 30], [32, 22], [-30, 26], [36, -8], [8, -32], [-32, -14]] as const;
 const MINE = { x: WALL.x0 + 62, y: WALL.y0 + 95, r: 24 }, MACHINE = { x: WALL.x1 - 62, y: WALL.y0 + 215, r: 26 }, NEAR = 58;
 
 type BearState = 'walk' | 'wait' | 'enter' | 'inside' | 'dead';
@@ -88,7 +92,7 @@ export class Survival {
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
   private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
-  private miner = false; private minerT = 0; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
+  private miners: number[] = []; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
 
   constructor(private canvas: HTMLCanvasElement, private pad: HTMLElement, private hooks: SurvivalHooks) {
     this.ctx = canvas.getContext('2d')!;
@@ -148,7 +152,7 @@ export class Survival {
     this.t = 0; this.healT = 0; this.spawnT = 2; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
     this.gateOpen = 0; this.hurtFlash = 0; this.keys.clear(); this.stick = null;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
-    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miner = false; this.minerT = 0;
+    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = [];
     this.belts.clear(); this.items = []; this.inv = 0; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop();
     this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
@@ -323,13 +327,16 @@ export class Survival {
     if (this.items.length < before) { this.stones += before - this.items.length; Sound.click(); }
   }
 
-  /** H next to the mine: hire a miner for 30 stone, who digs a stone every 5 seconds for you. */
+  private minerCost() { return this.miners.length ? SURVIVAL.extraMinerCost : SURVIVAL.minerCost; }
+  /** H next to the mine: hire a miner (30 stone, then 20 for each extra one), who digs a stone every 5 seconds for you. */
   private hire() {
-    if (!this.mineOn || this.miner) return;
+    if (!this.mineOn) return;
+    if (this.miners.length >= SURVIVAL.maxMiners) { this.bubble(this.x, this.y - 30, 'No room for more miners', 'info'); Sound.denied(); return; }
     if (dist(this.x, this.y, MINE.x, MINE.y) > NEAR) { this.bubble(this.x, this.y - 30, 'Walk to the mine to hire a miner', 'info'); Sound.denied(); return; }
-    if (this.stones < SURVIVAL.minerCost) { this.bubble(this.x, this.y - 30, `A miner costs ${SURVIVAL.minerCost} stone`, 'info'); Sound.denied(); return; }
-    this.stones -= SURVIVAL.minerCost; this.miner = true; this.minerT = 0;
-    this.say('You hired a miner!'); Sound.pop();
+    const cost = this.minerCost();
+    if (this.stones < cost) { this.bubble(this.x, this.y - 30, `${this.miners.length ? 'An extra' : 'A'} miner costs ${cost} stone`, 'info'); Sound.denied(); return; }
+    this.stones -= cost; this.miners.push(Math.random() * SURVIVAL.minerEvery * .5);
+    this.say(this.miners.length > 1 ? `You hired miner ${this.miners.length}!` : 'You hired a miner!'); Sound.pop();
   }
   /** S: switch between your loadout ammo and stone ammo. */
   private switchAmmo() {
@@ -384,9 +391,9 @@ export class Survival {
         if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.giveStone(MINE.x, MINE.y - 30); Sound.thump(); }
       }
     }
-    if (this.miner) {
-      this.minerT += dt;
-      if (this.minerT >= SURVIVAL.minerEvery) { this.minerT -= SURVIVAL.minerEvery; this.giveStone(MINE.x - 4, MINE.y + 10); }
+    for (let i = 0; i < this.miners.length; i++) {
+      this.miners[i] += dt;
+      if (this.miners[i] >= SURVIVAL.minerEvery) { this.miners[i] -= SURVIVAL.minerEvery; const [ox, oy] = MINER_SPOTS[i]; this.giveStone(MINE.x + ox, MINE.y + oy - 18); }
     }
     this.moveItems(dt);
     if (this.queue > 0) {
@@ -696,12 +703,12 @@ export class Survival {
     g.fillStyle = this.queue ? (Math.sin(this.t * 10) > 0 ? '#ffcf4a' : '#a07a20') : '#3c4a3c'; g.beginPath(); g.arc(16, 10, 4, 0, 7); g.fill();
     if (this.queue) { g.fillStyle = '#222'; g.fillRect(-20, 8, 26, 6); g.fillStyle = '#9fe0b0'; g.fillRect(-20, 8, 26 * this.batchT / SURVIVAL.batchTime, 6); }
     g.restore();
-    // the hired miner, below the mine, swinging a pick at it
-    if (this.miner) {
-      const mx = MINE.x - 4, my = MINE.y + 30, sw = Math.sin(this.minerT / SURVIVAL.minerEvery * Math.PI * 10) * .6;
+    // hired miners stand round the mine, swinging picks at it
+    this.miners.forEach((mt, i) => {
+      const [ox, oy] = MINER_SPOTS[i], mx = MINE.x + ox, my = MINE.y + oy, sw = Math.sin(mt / SURVIVAL.minerEvery * Math.PI * 10) * .6;
       g.save(); g.translate(mx, my);
       g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(2, 3, 11, 9, 0, 0, 7); g.fill();
-      g.rotate(-Math.PI / 2);
+      g.rotate(Math.atan2(-oy, -ox));
       g.fillStyle = '#7a5a3a'; g.beginPath(); g.ellipse(0, 0, 8, 10, 0, 0, 7); g.fill();
       g.save(); g.rotate(sw);
       g.strokeStyle = '#5a3d22'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(4, 2); g.lineTo(18, 2); g.stroke();
@@ -710,10 +717,10 @@ export class Survival {
       g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(0, 0, 5.5, 0, 7); g.fill();
       g.fillStyle = '#e0b43a'; g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill(); g.fillStyle = '#fff6b0'; g.beginPath(); g.arc(4, 0, 1.8, 0, 7); g.fill();
       g.restore();
-    }
+    });
     // labels
     g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
-    g.fillText('Mine', MINE.x + (this.miner ? 34 : 0), MINE.y + 34);
+    g.fillText(this.miners.length ? `Mine (${this.miners.length} miner${this.miners.length > 1 ? 's' : ''})` : 'Mine', MINE.x + (this.miners.length ? 40 : 0), MINE.y + (this.miners.length ? 52 : 34));
     g.fillText(this.queue ? `Machine (${this.queue} left)` : 'Machine', MACHINE.x, MACHINE.y + 38);
     // mining progress ring
     if (this.mining) {
@@ -897,7 +904,12 @@ export class Survival {
     const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
     ab.hidden = !this.stoneAmmo && !this.useStone;
-    this.pad.querySelector<HTMLElement>('#svHire')!.hidden = !nearMine || this.miner;
+    const hb = this.pad.querySelector<HTMLElement>('#svHire')!;
+    hb.hidden = !nearMine || this.miners.length >= SURVIVAL.maxMiners;
+    const hl = `H: ${this.minerCost()} stone`;
+    if (hb.lastElementChild!.textContent !== hl) hb.lastElementChild!.textContent = hl;
+    const hn = this.miners.length ? 'Extra miner' : 'Miner';
+    if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     const nearShop = this.mineOn && dist(this.x, this.y, SHOP.x, SHOP.y) < NEAR + 6;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = !nearShop || this.shopOpen;
     const inv = this.pad.querySelector<HTMLElement>('#svInv')!;
