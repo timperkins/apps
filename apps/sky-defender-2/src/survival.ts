@@ -22,6 +22,8 @@ export const SURVIVAL = {
   minerEvery: 5,        // the miner digs a stone every 5 seconds
   beltCost: 5,          // stone for a belt in the shop
   beltLength: 3,        // one belt from the shop lays 3 tiles
+  shortBeltCost: 5,     // 3 one-tile belts for 5 stone
+  shortBeltPack: 3,
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
@@ -69,7 +71,7 @@ interface Item { x: number; y: number; gone?: boolean; }
 interface Grabber { d: number; t: number; carry: boolean; }
 /** A turret shoots the nearest bear in range, one ammo a shot. */
 interface Turret { ammo: number; cd: number; face: number; }
-type Placeable = 'belt' | 'grab' | 'turret';
+type Placeable = 'belt' | 'short' | 'grab' | 'turret';
 // where hired miners stand, relative to the mine
 const MINER_SPOTS = [[-4, 30], [32, 22], [-30, 26], [36, -8], [8, -32], [-32, -14]] as const;
 const MINE = { x: WALL.x0 + 62, y: WALL.y0 + 95, r: 24 }, MACHINE = { x: WALL.x1 - 62, y: WALL.y0 + 215, r: 26 }, NEAR = 58;
@@ -105,7 +107,7 @@ export class Survival {
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
   private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
-  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
+  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miners: number[] = []; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
 
@@ -124,7 +126,15 @@ export class Survival {
     }
     canvas.addEventListener('pointerdown', e => this.down(e));
     canvas.addEventListener('pointermove', e => this.move(e));
-    const up = (e: PointerEvent) => { if (this.stick && this.stick.id === e.pointerId) this.stick = null; };
+    const up = (e: PointerEvent) => {
+      if (this.stick && this.stick.id === e.pointerId) this.stick = null;
+      // a quick tap (not a drag) on a belt, grabber or turret picks it up
+      const tp = this.tap; this.tap = null;
+      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen) {
+        const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
+        if (t) this.pickUp(t.c, t.r);
+      }
+    };
     canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
     canvas.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     const btn = (id: string, f: () => void) => pad.querySelector<HTMLElement>(id)!.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (this.running && !this.paused) f(); });
@@ -138,10 +148,12 @@ export class Survival {
     btn('#svInv', () => this.togglePlacing('belt'));
     btn('#svInvGrab', () => this.togglePlacing('grab'));
     btn('#svInvTurret', () => this.togglePlacing('turret'));
+    btn('#svInvShort', () => this.togglePlacing('short'));
     btn('#svLoad', () => this.loadTurret());
     btn('#svRotate', () => this.rotate());
     pad.querySelector('#svBuyBelt')!.addEventListener('click', e => { e.stopPropagation(); this.buyBelt(); });
     pad.querySelector('#svBuyGrab')!.addEventListener('click', e => { e.stopPropagation(); this.buyGrabber(); });
+    pad.querySelector('#svBuyShort')!.addEventListener('click', e => { e.stopPropagation(); this.buyShort(); });
     pad.querySelector('#svBuyTurret')!.addEventListener('click', e => { e.stopPropagation(); this.buyTurret(); });
     pad.querySelector('#svShopClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeShop(); });
     addEventListener('keydown', e => {
@@ -152,6 +164,7 @@ export class Survival {
       if (k === 'e') { if (!e.repeat) this.togglePlacing('belt'); return; }
       if (k === 'g') { if (!e.repeat) this.togglePlacing('grab'); return; }
       if (k === 'u') { if (!e.repeat) this.togglePlacing('turret'); return; }
+      if (k === 'q') { if (!e.repeat) this.togglePlacing('short'); return; }
       if (k === 't') { if (!e.repeat) this.loadTurret(); return; }
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
       if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
@@ -177,7 +190,7 @@ export class Survival {
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
     this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = [];
     this.belts.clear(); this.items = []; this.inv = 0; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop();
-    this.invGrab = 0; this.placeType = 'belt'; this.grabbers.clear(); this.invTurret = 0; this.turrets.clear();
+    this.invGrab = 0; this.placeType = 'belt'; this.grabbers.clear(); this.invTurret = 0; this.turrets.clear(); this.invShort = 0; this.tap = null;
     this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
@@ -199,6 +212,7 @@ export class Survival {
     }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
+    this.tap = { id: e.pointerId, x: e.offsetX, y: e.offsetY, t: e.timeStamp };
   }
   private move(e: PointerEvent) {
     // with a mouse, the belt being placed follows the pointer
@@ -273,7 +287,8 @@ export class Survival {
   private closeShop() { this.shopOpen = false; this.pad.querySelector<HTMLElement>('#svShop')!.hidden = true; }
   private renderShop() {
     this.pad.querySelector('#svShopStone')!.textContent = String(this.stones);
-    const have = [this.inv ? `${this.inv} belt${this.inv > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
+    (this.pad.querySelector('#svBuyShort') as HTMLButtonElement).disabled = this.stones < SURVIVAL.shortBeltCost;
+    const have = [this.inv ? `${this.inv} long belt${this.inv > 1 ? 's' : ''}` : '', this.invShort ? `${this.invShort} short belt${this.invShort > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
     (this.pad.querySelector('#svBuyTurret') as HTMLButtonElement).disabled = this.stones < SURVIVAL.turretCost;
     this.pad.querySelector('#svShopInv')!.textContent = have ? `In your inventory: ${have}` : '';
     (this.pad.querySelector('#svBuyBelt') as HTMLButtonElement).disabled = this.stones < SURVIVAL.beltCost;
@@ -304,11 +319,27 @@ export class Survival {
     best.ammo += this.stoneAmmo; this.stoneAmmo = 0; this.useStone = false;
     Sound.thump();
   }
-  private count(type: Placeable) { return type === 'belt' ? this.inv : type === 'grab' ? this.invGrab : this.invTurret; }
+  private count(type: Placeable) { return type === 'belt' ? this.inv : type === 'short' ? this.invShort : type === 'grab' ? this.invGrab : this.invTurret; }
+  private buyShort() {
+    if (this.stones < SURVIVAL.shortBeltCost) { Sound.denied(); return; }
+    this.stones -= SURVIVAL.shortBeltCost; this.invShort += SURVIVAL.shortBeltPack;
+    Sound.pop(); this.renderShop();
+  }
+  /** Tap a placed piece to put it back in your inventory. A belt tile comes back as a 1-tile belt. */
+  private pickUp(c: number, r: number) {
+    const key = c + ',' + r, x = tileX(c), y = tileY(r);
+    // stone on that spot goes in your pocket
+    const dropStone = () => { const before = this.items.length; this.items = this.items.filter(it => { const t = tileAt(it.x, it.y); return !t || t.c !== c || t.r !== r; }); this.stones += before - this.items.length; };
+    if (this.belts.has(key)) { this.belts.delete(key); this.invShort++; dropStone(); this.bubble(x, y - 14, '+1 short belt', 'info'); }
+    else if (this.grabbers.has(key)) { if (this.grabbers.get(key)!.carry) this.stones++; this.grabbers.delete(key); this.invGrab++; this.bubble(x, y - 14, '+1 grabber', 'info'); }
+    else if (this.turrets.has(key)) { const tu = this.turrets.get(key)!; this.stoneAmmo += tu.ammo; this.turrets.delete(key); this.invTurret++; this.bubble(x, y - 14, tu.ammo ? `+1 turret, ${tu.ammo} ammo back` : '+1 turret', 'info'); }
+    else return;
+    Sound.click();
+  }
   private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
-    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${type === 'belt' ? 'belts' : type === 'grab' ? 'grabbers' : 'turrets'}. Buy them at the shop`, 'info'); Sound.denied(); return; }
+    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${type === 'belt' ? 'long belts' : type === 'short' ? 'short belts' : type === 'grab' ? 'grabbers' : 'turrets'}. Buy them at the shop`, 'info'); Sound.denied(); return; }
     this.placing = true; this.placeType = type; this.hover = null;
     Sound.click();
   }
@@ -340,6 +371,8 @@ export class Survival {
         this.belts.set(cc + ',' + rr, this.placeDir);
       }
       this.inv--;
+    } else if (this.placeType === 'short') {
+      this.belts.set(key, this.placeDir); this.invShort--;
     } else {
       if (this.placeType === 'grab') { this.grabbers.set(key, { d: this.placeDir, t: 0, carry: false }); this.invGrab--; }
       else { this.turrets.set(key, { ammo: 0, cd: 0, face: -Math.PI / 2 }); this.invTurret--; }
@@ -738,7 +771,7 @@ export class Survival {
         const bad = taken ? false : blockedTile(t.c, t.r);
         g.globalAlpha = .6;
         if (!taken) {
-          if (this.placeType === 'belt') { const [dx, dy] = DIRS[this.placeDir]; for (let i = 0; i < SURVIVAL.beltLength; i++) { const cc = t.c + dx * i, rr = t.r + dy * i; if (cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS || (i && (blockedTile(cc, rr) || this.taken(cc, rr)))) break; paintBelt(g, tileX(cc), tileY(rr), this.placeDir, this.t); } }
+          if (this.placeType === 'belt' || this.placeType === 'short') { const [dx, dy] = DIRS[this.placeDir]; for (let i = 0; i < (this.placeType === 'belt' ? SURVIVAL.beltLength : 1); i++) { const cc = t.c + dx * i, rr = t.r + dy * i; if (cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS || (i && (blockedTile(cc, rr) || this.taken(cc, rr)))) break; paintBelt(g, tileX(cc), tileY(rr), this.placeDir, this.t); } }
           else if (this.placeType === 'grab') paintGrabber(g, tileX(t.c), tileY(t.r), { d: this.placeDir, t: 0, carry: false });
           else paintTurret(g, tileX(t.c), tileY(t.r), { ammo: 0, cd: 0, face: -Math.PI / 2 });
         }
@@ -1034,13 +1067,18 @@ export class Survival {
     const inv = this.pad.querySelector<HTMLElement>('#svInv')!;
     inv.hidden = !this.inv && !(this.placing && this.placeType === 'belt');
     inv.classList.toggle('on', this.placing && this.placeType === 'belt');
-    const il = `Belt ×${this.inv}`;
+    const il = `Belt 3 ×${this.inv}`;
     if (inv.firstElementChild!.textContent !== il) inv.firstElementChild!.textContent = il;
     const ig = this.pad.querySelector<HTMLElement>('#svInvGrab')!;
     ig.hidden = !this.invGrab && !(this.placing && this.placeType === 'grab');
     ig.classList.toggle('on', this.placing && this.placeType === 'grab');
     const gl = `Grabber ×${this.invGrab}`;
     if (ig.firstElementChild!.textContent !== gl) ig.firstElementChild!.textContent = gl;
+    const is = this.pad.querySelector<HTMLElement>('#svInvShort')!;
+    is.hidden = !this.invShort && !(this.placing && this.placeType === 'short');
+    is.classList.toggle('on', this.placing && this.placeType === 'short');
+    const sl = `Belt 1 ×${this.invShort}`;
+    if (is.firstElementChild!.textContent !== sl) is.firstElementChild!.textContent = sl;
     const it = this.pad.querySelector<HTMLElement>('#svInvTurret')!;
     it.hidden = !this.invTurret && !(this.placing && this.placeType === 'turret');
     it.classList.toggle('on', this.placing && this.placeType === 'turret');
@@ -1051,7 +1089,7 @@ export class Survival {
     this.pad.querySelector<HTMLElement>('#svLoad')!.hidden = !nearTurret || !this.stoneAmmo;
     const standing = tileAt(this.x, this.y);
     this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const help = this.placing ? (this.placeType === 'turret' ? 'Tap a spot to place the turret.' : `Tap a spot to place the ${this.placeType === 'belt' ? 'belt' : 'grabber'}. R turns it.`) : this.helpText;
+    const help = this.placing ? (this.placeType === 'turret' ? 'Tap a spot to place the turret.' : `Tap a spot to place the ${this.placeType === 'grab' ? 'grabber' : 'belt'}. R turns it.`) : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
     if (hp.textContent !== help) hp.textContent = help;
     if (this.shopOpen) this.renderShop();

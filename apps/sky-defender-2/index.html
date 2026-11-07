@@ -29,7 +29,8 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
     </button>
     <p id="svHelp">Drag anywhere to walk</p>
-    <button id="svInv" class="svinv" hidden><span>Belt ×0</span><small>E: place</small></button>
+    <button id="svInv" class="svinv" hidden><span>Belt 3 ×0</span><small>E: place</small></button>
+    <button id="svInvShort" class="svinv short" hidden><span>Belt 1 ×0</span><small>Q: place</small></button>
     <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
     <button id="svInvTurret" class="svinv turret" hidden><span>Turret ×0</span><small>U: place</small></button>
     <button id="svLoad" class="svbtn small" hidden><span>Load</span><small>T</small></button>
@@ -39,8 +40,12 @@
       <h3>Shop</h3>
       <p class="fine"><b id="svShopStone">0</b> stone</p>
       <div class="svitem">
-        <div><b>Belt</b><small>Goes in your inventory. Each belt is 3 tiles long. Place it anywhere in the camp; it carries stone (and you). R turns it.</small></div>
+        <div><b>Long belt</b><small>Goes in your inventory. Each belt is 3 tiles long. Place it anywhere in the camp; it carries stone (and you). R turns it.</small></div>
         <button id="svBuyBelt" class="primary">5 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Short belts ×3</b><small>Three 1-tile belts, for corners and short gaps. Q to place.</small></div>
+        <button id="svBuyShort" class="primary">5 stone</button>
       </div>
       <div class="svitem">
         <div><b>Grabber</b><small>Place it between two spots: it picks stone up from behind it and puts it down in front, on a belt, the ground or into the machine. R turns it.</small></div>
@@ -51,6 +56,7 @@
         <button id="svBuyTurret" class="primary">15 stone</button>
       </div>
       <p class="fine" id="svShopInv"></p>
+      <p class="fine">Tap a placed belt, grabber or turret to pick it back up.</p>
       <button class="ghost small" id="svShopClose">Close (B)</button>
     </div>
     <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>

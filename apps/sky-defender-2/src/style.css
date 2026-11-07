@@ -305,3 +305,5 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svshop { max-height: calc(100% - 24px); overflow-y: auto; }
 .svinv.turret { left: 14px; bottom: 136px; }
 #svLoad { right: 96px; bottom: 174px; }
+.svinv.short { left: 112px; bottom: 136px; }
+.svshop { z-index: 5; gap: 6px; padding: 12px 14px; }
