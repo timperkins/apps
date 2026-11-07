@@ -30,6 +30,7 @@
     </button>
     <p id="svHelp">Drag anywhere to walk</p>
     <button id="svInv" class="svinv" hidden><span>Belt ×0</span><small>E: place</small></button>
+    <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
     <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
     <button id="svShopBtn" class="svbtn small" hidden><span>Shop</span><small>B</small></button>
     <div id="svShop" class="svshop" hidden>
@@ -38,6 +39,10 @@
       <div class="svitem">
         <div><b>Belt</b><small>Goes in your inventory. Place it anywhere in the camp; it carries stone (and you). R turns it.</small></div>
         <button id="svBuyBelt" class="primary">5 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Grabber</b><small>Place it between two spots: it picks stone up from behind it and puts it down in front, on a belt, the ground or into the machine. R turns it.</small></div>
+        <button id="svBuyGrab" class="primary">3 stone</button>
       </div>
       <p class="fine" id="svShopInv"></p>
       <button class="ghost small" id="svShopClose">Close (B)</button>

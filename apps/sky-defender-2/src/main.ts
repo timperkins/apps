@@ -785,7 +785,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Inside, a bear swipes for 8% of your health every 5 seconds, and throws rocks for 9% from further away. Dodge the rocks!',
     'You have 1,000,000 health and heal 1.2% every second. Red bubbles show what you lose.'] },
   { icon: '⛏️', title: 'The mine', lines: [
-    'After 4 bears, bears only wait 20 seconds, and a mine, a machine and a shop pop up in your camp.',
+    'After 4 bears, bears only wait 20 seconds, but 40% fewer come. A mine, a machine and a shop pop up in your camp.',
     'Stand next to the mine and press <kbd>M</kbd> to mine: 1 stone every 2 seconds.',
     'With 30 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you. Extra miners cost 20 stone each.'] },
   { icon: '⚙️', title: 'The machine', lines: [
@@ -795,7 +795,8 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🛒', title: 'Shop and belts', lines: [
     'Walk to the shop and press <kbd>B</kbd> (or click it). A belt costs 5 stone and goes in your inventory.',
     'Press <kbd>E</kbd> (or tap the belt in the corner), then click a spot to place it. <kbd>R</kbd> turns it.',
-    'Belts carry stone, and you! Put one next to the mine and lead the line into the machine to make stone ammo by itself.'] },
+    'Belts carry stone, and you! Put one next to the mine and lead the line into the machine to make stone ammo by itself.',
+    'A grabber (3 stone, <kbd>G</kbd> to place) picks stone up from behind it and puts it down in front: on a belt, or into the machine.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
 function showIntro(then: (() => void) | null) {

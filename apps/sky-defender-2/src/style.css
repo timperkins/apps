@@ -301,3 +301,5 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svintro li::before { content: ''; position: absolute; left: 3px; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .svintro kbd { font: 600 12px var(--font-b); background: rgba(255, 245, 234, .14); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
 #survIntro .row button.primary { min-width: 130px; }
+.svinv.grab { left: 112px; }
+.svshop { max-height: calc(100% - 24px); overflow-y: auto; }
