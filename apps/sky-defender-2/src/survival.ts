@@ -47,6 +47,10 @@ export const SURVIVAL = {
   boltSpeed: 520,
   guySpeed: 120,
   bearEvery: 10,        // seconds between bears
+  waveStart: 480,       // huge waves start after 8 minutes
+  waveEvery: 60,        // then one every minute
+  waveSize: 12,         // bears in the first huge wave
+  waveGrow: 2,          // each wave after that has 2 more
   bearSpeed: 20,        // slow
   bearSpeedInside: 26,
 };
@@ -118,7 +122,7 @@ export class Survival {
   private bears: Bear[] = [];
   private bolts: Bolt[] = [];
   private bubbles: Bubble[] = [];
-  private t = 0; private healT = 0; private spawnT = 0; private nextId = 1; private kills = 0;
+  private t = 0; private healT = 0; private spawnT = 0; private waveT = 0; private waveN = 0; private waveLeft = 0; private waveGap = 0; private waveWarned = false; private nextId = 1; private kills = 0;
   private shots = 0; private hits = 0; private damage = 0;
   private gateOpen = 0; private hurtFlash = 0; private walk = 0;
   private keys = new Set<string>();
@@ -221,7 +225,7 @@ export class Survival {
     this.load = load;
     this.hp = SURVIVAL.maxHp; this.x = 300; this.y = 660; this.face = -Math.PI / 2; this.reload = 0;
     this.bears = []; this.bolts = []; this.bubbles = [];
-    this.t = 0; this.healT = 0; this.spawnT = 2; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
+    this.t = 0; this.healT = 0; this.spawnT = 2; this.waveT = SURVIVAL.waveStart; this.waveN = 0; this.waveLeft = 0; this.waveGap = 0; this.waveWarned = false; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
     this.gateOpen = 0; this.hurtFlash = 0; this.keys.clear(); this.stick = null;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
     this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = [];
@@ -690,6 +694,18 @@ export class Survival {
       // bears come at a steady pace (no growing over time); after the mine checkpoint, 40% fewer
       const fewer = this.mineOn ? SURVIVAL.mineBears : 1;
       this.spawnT = SURVIVAL.bearEvery / fewer;
+    }
+    // huge waves from 8 minutes on, on top of the steady bears
+    this.waveT -= dt;
+    if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say('A huge wave of bears is coming!', 4); Sound.boom(false); }
+    if (this.waveT <= 0) {
+      this.waveLeft += SURVIVAL.waveSize + this.waveN * SURVIVAL.waveGrow; this.waveN++;
+      this.waveT = SURVIVAL.waveEvery; this.waveWarned = false;
+      this.say(`Huge wave ${this.waveN}!`, 3);
+    }
+    if (this.waveLeft > 0) {
+      this.waveGap -= dt;
+      if (this.waveGap <= 0) { this.spawnBear(); this.waveLeft--; this.waveGap = .25; }
     }
 
     let entering = false;
