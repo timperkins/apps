@@ -1,0 +1,28 @@
+{
+  "name": "video",
+  "type": "apphosting",
+  "domain": "video.trom.dev",
+  "backend": "video",
+  "previewBackend": "video-preview",
+  "firestore": {
+    "prod": "video"
+  },
+  "jobServiceAccount": "video-jobs@apps-97595.iam.gserviceaccount.com",
+  "jobs": [
+    {
+      "name": "process",
+      "cpu": "8",
+      "memory": "32Gi",
+      "timeout": "10800s",
+      "maxRetries": 1,
+      "env": {
+        "FIRESTORE_DATABASE_ID": "video",
+        "STORAGE_BUCKET": "apps-97595-video",
+        "INDEX_MODEL": "gemini-flash-latest"
+      },
+      "secrets": {
+        "GEMINI_API_KEY": "video-gemini-api-key"
+      }
+    }
+  ]
+}

@@ -89,8 +89,8 @@ async function requiredRecords() {
   }
   report(created.ok ? `Created custom domain ${domain}` : `Custom domain ${domain} already exists`);
 
-  // A domain that already existed may be fully set up, in which case Firebase lists no records
-  // to add. Give it a short grace period, then treat that as nothing to do.
+  // A domain set up by an earlier run (every push re-runs create-app until the app merges) can
+  // report no DNS records once they are in place. Give it a short wait, then keep what's there.
   const attempts = created.ok ? 30 : 3;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const res = await api('GET', `${base}/${domain}`);
@@ -99,12 +99,12 @@ async function requiredRecords() {
         .flatMap((u) => u?.desired ?? [])
         .flatMap((set) => set.records ?? []);
       if (records.length) return records;
+      if (!created.ok && attempt === attempts - 1) {
+        report(`No DNS changes reported for existing domain ${domain}; keeping current records`);
+        return [];
+      }
     }
     await sleep(10_000);
-  }
-  if (!created.ok) {
-    report(`Firebase lists no DNS changes for ${domain}; leaving DNS as it is`);
-    return [];
   }
   throw new Error(`Firebase did not report DNS records for ${domain} within 5 minutes`);
 }

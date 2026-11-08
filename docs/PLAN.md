@@ -20,7 +20,7 @@ Update it as phases land.
 | `trom.dev` itself | A small static homepage app that links to every app | Replaces Sky Defender at the apex |
 | DNS | Move from Namecheap to Google Cloud DNS (nameserver change at Namecheap, once) | Subdomains can then be created by script with the same Google credentials as deploys |
 | Firebase project | Keep the existing `apps-97595` for everything | All apps already live here |
-| Data | One named Firestore database per app, plus a `<name>-preview` database for previews | Previews never touch prod data; one shared Auth user pool |
+| Data | One named Firestore database per app, plus an optional `<name>-preview` database for previews (on by default; `--no-preview-db` skips it for single-user tools, whose previews then use prod) | Previews of shared apps never touch prod data; one shared Auth user pool |
 | Static apps | Firebase Hosting, one Hosting site per app | Per-branch preview channels, about one minute to a link, CDN, no cold starts |
 | Apps with server code | Firebase App Hosting, two backends per app: prod (follows `main`) and preview (CI picks the branch) | Needs a real server; one preview slot per app is an acceptable trade |
 | Prod trigger | Merge to `main` | Standard for a solo repo. Release tags can be added later if batching is wanted |
@@ -79,6 +79,17 @@ CLAUDE.md
 
 For App Hosting apps: `"type": "apphosting"`, `"backend": "news"`, `"previewBackend": "news-preview"`.
 
+Apps can also list Cloud Run jobs, for work too long for a request (video processing, renders):
+`"jobServiceAccount": "<app>-jobs@apps-97595.iam.gserviceaccount.com"` and
+`"jobs": [{ "name": "process", "cpu": "4", "memory": "16Gi", "timeout": "3600s", "maxRetries": 1, "env": { ... } }]`.
+`deploy-app.yml` builds each from `jobs/<name>/Dockerfile`, pushes it to the `apps` Artifact Registry
+repository and deploys it as `<app>-<name>` (prod) or `<app>-<name>-preview` (previews), before the app
+rolls out. The app starts executions through the Cloud Run Admin API. Run `scripts/setup-jobs.sh <app>
+<deploy service account> [bucket]` once per app first; it creates the job service account and the
+permissions the deploy account, the jobs and App Hosting need. A job's `"secrets": { "ENV_NAME":
+"<secret id>" }` are mounted from Secret Manager (latest version); grant the job service account
+`roles/secretmanager.secretAccessor` on each.
+
 ## Deploy flow
 
 **Preview: on push to any branch other than `main`**
@@ -97,7 +108,7 @@ For App Hosting apps: `"type": "apphosting"`, `"backend": "news"`, `"previewBack
 
 **New app:** `create-app.yml` (workflow_dispatch: name, type; also called by `preview.yml` for each app whose `app.json` is new on the branch, with inputs from that `app.json`) runs with the deploy service account, so no Claude session needs Google credentials. It:
 - creates the Hosting site (or both App Hosting backends with root directory `apps/<name>`),
-- creates the `<name>` and `<name>-preview` Firestore databases if requested,
+- creates the Firestore databases listed in `app.json` (`<name>`, plus `<name>-preview` unless the app has none) if requested,
 - creates the Cloud DNS records and attaches `<name>.trom.dev` to the site or backend,
 - adds the domain to Auth's authorized domains.
 Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch like any other change.

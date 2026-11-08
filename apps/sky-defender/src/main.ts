@@ -23,7 +23,6 @@ const store = {
 };
 
 const settings: Settings = Object.assign({ sound: true, music: true, vibration: true, reduceMotion: matchMedia('(prefers-reduced-motion: reduce)').matches }, store.get('settings', {}));
-const seenTips = new Set<string>(store.get<string[]>('tips', []));
 // every mode and difficulty keeps its own high scores; hard was once called expert, and its scores keep that key
 const scoreKey = (m: GameMode, d: Difficulty) => (m === 'war' ? 'scores.war' : 'scores') + (d === 'hard' ? (m === 'war' ? '.hard' : '.expert') : '');
 const savedDiff = store.get<string>('difficulty', 'normal');
@@ -32,14 +31,11 @@ let gameMode: GameMode = store.get<string>('mode', 'original') === 'war' ? 'war'
 let scores = store.get<ScoreEntry[]>(scoreKey(gameMode, difficulty), []);
 
 let mode: Mode = 'loading';   // loading | start | play | paused | cards | countdown | results | recal | nosensor
-let toastTimer = 0;
-const toastQueue: string[] = [];
 let flatT = 0;
 let hintState: { fire: number; tilt: number } | null = null;
 
 const renderer = new Renderer(canvas);
 const game = new Game({
-  tip: showTip,
   hud: () => { },
   waveStart: n => { if (n === 1 && !store.get('hinted', false)) startHint(); },
   waveClear: () => { if (hintState) endHint(); },
@@ -250,7 +246,7 @@ fz.addEventListener('pointerup', up); fz.addEventListener('pointercancel', up); 
 // user-select: none. Swallowing the touch itself stops that; pointer events still fire.
 const noTouchDefault = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); };
 fz.addEventListener('touchstart', noTouchDefault, { passive: false });
-// Elsewhere (screens, toasts), drop the second tap of a quick pair unless it lands on a control.
+// Elsewhere (screens), drop the second tap of a quick pair unless it lands on a control.
 let lastTouchEnd = 0;
 document.addEventListener('touchend', e => {
   const now = e.timeStamp;
@@ -370,20 +366,7 @@ function showResults(r: Results) {
 $('againBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); Tilt.calibrate(); game.start(); show(null); setHud(true); mode = 'play'; });
 $('titleBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); startScreen(); });
 
-/* ---------- tips and first-run hint ---------- */
-function showTip(key: string, text: string) {
-  if (seenTips.has(key)) return;
-  seenTips.add(key); store.set('tips', [...seenTips]);
-  toastQueue.push(text);
-  if (!toastTimer) nextToast();
-}
-function nextToast() {
-  const t = $('toast');
-  const text = toastQueue.shift();
-  if (!text) { t.classList.remove('show'); toastTimer = 0; return; }
-  t.textContent = text; t.classList.add('show');
-  toastTimer = setTimeout(() => { t.classList.remove('show'); toastTimer = setTimeout(nextToast, 400); }, 3200);
-}
+/* ---------- first-run hint ---------- */
 function startHint() { hintState = { fire: 0, tilt: 0 }; $('hint').hidden = false; }
 function hintProgress(kind: 'fire' | 'tilt') {
   if (!hintState) return;

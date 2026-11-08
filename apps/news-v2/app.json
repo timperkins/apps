@@ -1,0 +1,7 @@
+{
+  "name": "news-v2",
+  "type": "apphosting",
+  "domain": "news-v2.trom.dev",
+  "backend": "news-v2",
+  "previewBackend": "news-v2-preview"
+}

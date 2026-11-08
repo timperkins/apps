@@ -1,0 +1,7 @@
+# Overrides for the preview backend (environment name: preview).
+# This app has no preview database: previews use the same `video` database and storage prefix,
+# since Tim is the only user. Previews start the preview build of the processing job.
+env:
+  - variable: PROCESS_JOB
+    value: video-process-preview
+    availability: [RUNTIME]
