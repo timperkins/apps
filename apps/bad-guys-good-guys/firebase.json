@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "trom-bad-guys-good-guys",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
