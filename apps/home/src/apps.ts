@@ -41,4 +41,9 @@ export const APPS: AppLink[] = [
     url: 'https://news.trom.dev',
     blurb: "Today's news, written up from real reporting, with local stories and topics you care about.",
   },
+  {
+    name: 'Your doom',
+    url: 'https://your-doom.trom.dev',
+    blurb: 'Chop wood in the snowy woods, sell it to the camp for eeeddd, and pick from 8 ways to play.',
+  },
 ];
