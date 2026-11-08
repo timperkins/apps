@@ -33,12 +33,14 @@
     <button id="svInvSplit" class="svinv split" hidden><span>Splitter ×0</span><small>X: place</small></button>
     <button id="svInvChest" class="svinv chest" hidden><span>Chest ×0</span><small>C: place</small></button>
     <button id="svInvMine" class="svinv mine" hidden><span>Mine ×0</span><small>N: place</small></button>
+    <button id="svInvLab" class="svinv lab" hidden><span>Lab ×0</span><small>L: place</small></button>
     <button id="svInvMachine" class="svinv machine" hidden><span>Machine ×0</span><small>K: place</small></button>
     <button id="svInvShort" class="svinv short" hidden><span>Belt 1 ×0</span><small>Q: place</small></button>
     <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
     <button id="svInvTurret" class="svinv turret" hidden><span>Turret ×0</span><small>U: place</small></button>
     <button id="svLoad" class="svbtn small" hidden><span>Load</span><small>T</small></button>
     <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
+    <button id="svLabBtn" class="svbtn small" hidden><span>Research</span><small>Y</small></button>
     <button id="svShopBtn" class="svbtn small" hidden><span>Shop</span><small>B</small></button>
     <div id="svShop" class="svshop" hidden>
       <h3>Shop</h3>
@@ -75,6 +77,15 @@
         <div><b>Machine</b><small>Another machine for making stone ammo. K to place.</small></div>
         <button id="svBuyMachine" class="primary">45 stone</button>
       </div>
+      <div class="svitem">
+        <div><b>Science pack</b><small>Put packs in a lab with T to research upgrades.</small></div>
+        <button id="svBuyPack" class="primary">5 stone</button>
+        <button id="svBuyPack5" class="primary">5 for 25</button>
+      </div>
+      <div class="svitem">
+        <div><b>Lab</b><small>Uses science packs to research. Y picks what. L to place.</small></div>
+        <button id="svBuyLab" class="primary">20 stone</button>
+      </div>
       <div class="svitem wide">
         <div><b>Bigger base</b><small>Moves your walls out for more room. Two steps.</small></div>
         <button id="svBuyExpand" class="primary">40 stone</button>
@@ -82,6 +93,13 @@
       <p class="fine" id="svShopInv"></p>
       <p class="fine">Tap anything you placed to pick it back up.</p>
       <button class="ghost small" id="svShopClose">Close (B)</button>
+    </div>
+    <div id="svLab" class="svshop svlab" hidden>
+      <h3>Research</h3>
+      <p class="fine" id="svLabInfo"></p>
+      <div id="svResList" class="svreslist"></div>
+      <p class="fine">Each lab with packs in it uses one every 2 seconds. Put packs in with T.</p>
+      <button class="ghost small" id="svLabClose">Close (Y)</button>
     </div>
     <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>
     <button id="svMine" class="svbtn small" hidden><span>Mine</span><small>M</small></button>

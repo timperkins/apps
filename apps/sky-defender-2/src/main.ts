@@ -800,6 +800,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'A splitter (4 stone, <kbd>X</kbd>) splits stone left and right. A chest (10 stone, <kbd>C</kbd>) holds 200; <kbd>T</kbd> takes it out. Tap anything you placed to pick it up.',
     'A grabber (3 stone, <kbd>G</kbd> to place) picks stone up from behind it and puts it down in front: on a belt, or into the machine.',
     'After 8 minutes huge waves of bears come every minute, a little bigger each time. Build turrets before then!',
+    'Science packs (5 stone) go into a lab (20 stone, <kbd>L</kbd>) with <kbd>T</kbd>. Press <kbd>Y</kbd> to pick an upgrade to research.',
     'Need more room? Buy a bigger base (40, then 60 stone). More mines cost 30 stone (<kbd>N</kbd>) and more machines 45 (<kbd>K</kbd>).'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;

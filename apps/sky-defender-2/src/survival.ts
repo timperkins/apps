@@ -28,6 +28,10 @@ export const SURVIVAL = {
   splitTime: .3,        // seconds between stones out of a splitter
   chestCost: 10,        // stone for a chest
   chestSize: 200,       // a chest holds 200 stone
+  packCost: 5,          // stone for a science pack
+  labCost: 20,          // stone for a lab
+  labSize: 40,          // packs a lab holds
+  labEvery: 2,          // a working lab uses one pack every 2 seconds
   mineCost: 30,         // stone for an extra mine
   machineCost: 45,      // stone for an extra machine
   expandCosts: [40, 60], // stone to make the base bigger, step by step
@@ -54,6 +58,39 @@ export const SURVIVAL = {
   bearSpeed: 20,        // slow
   bearSpeedInside: 26,
 };
+
+/** Things the labs can research, cheapest first. */
+export const RESEARCH = [
+  { id: 'sharp', name: 'Sharper bolts', desc: 'Your crossbow does 25% more damage', cost: 20 },
+  { id: 'string', name: 'Tighter string', desc: 'Your crossbow reloads 20% faster', cost: 25 },
+  { id: 'belts', name: 'Quick belts', desc: 'Belts move 50% faster', cost: 30 },
+  { id: 'grab', name: 'Nimble grabbers', desc: 'Grabbers move stone twice as fast', cost: 35 },
+  { id: 'picks', name: 'Strong picks', desc: 'You and your miners dig 30% faster', cost: 40 },
+  { id: 'packed', name: 'Packed ammo', desc: 'Machines make 7 stone ammo per stone instead of 5', cost: 50 },
+  { id: 'range', name: 'Long-range turrets', desc: 'Turrets reach 30% farther', cost: 60 },
+  { id: 'heavy', name: 'Heavy turret bolts', desc: 'Turrets do 40% more damage', cost: 70 },
+  { id: 'armor', name: 'Leather armor', desc: 'Bears hurt you 25% less', cost: 85 },
+  { id: 'heal', name: 'Fast healing', desc: 'Heal 2% a second instead of 1.2%', cost: 100 },
+] as const;
+type ResId = typeof RESEARCH[number]['id'];
+/** Numbers that research can change; reset at the start of each run. */
+const ST = { beltSpeed: 0, grabTime: 0, mineEvery: 0, minerEvery: 0, batchAmmo: 0, turretRange: 0, turretDamage: 0, heal: 0, boltMul: 1, reloadMul: 1, armor: 1 };
+function resetStats() {
+  Object.assign(ST, { beltSpeed: SURVIVAL.beltSpeed, grabTime: SURVIVAL.grabTime, mineEvery: SURVIVAL.mineEvery, minerEvery: SURVIVAL.minerEvery, batchAmmo: SURVIVAL.batchAmmo, turretRange: SURVIVAL.turretRange, turretDamage: SURVIVAL.turretDamage, heal: SURVIVAL.heal, boltMul: 1, reloadMul: 1, armor: 1 });
+}
+function applyResearch(id: ResId) {
+  if (id === 'sharp') ST.boltMul = 1.25;
+  else if (id === 'string') ST.reloadMul = .8;
+  else if (id === 'belts') ST.beltSpeed = SURVIVAL.beltSpeed * 1.5;
+  else if (id === 'grab') ST.grabTime = SURVIVAL.grabTime / 2;
+  else if (id === 'picks') { ST.mineEvery = SURVIVAL.mineEvery * .7; ST.minerEvery = SURVIVAL.minerEvery * .7; }
+  else if (id === 'packed') ST.batchAmmo = 7;
+  else if (id === 'range') ST.turretRange = SURVIVAL.turretRange * 1.3;
+  else if (id === 'heavy') ST.turretDamage = SURVIVAL.turretDamage * 1.4;
+  else if (id === 'armor') ST.armor = .75;
+  else if (id === 'heal') ST.heal = .02;
+}
+resetStats();
 
 export type AmmoId = 'normal' | 'quick' | 'heavy';
 export const AMMO: Record<AmmoId, { name: string; reload: number; damage: number; color: string; desc: string }> = {
@@ -90,7 +127,9 @@ interface Chest { stone: number; ammo: number; }
 interface Grabber { d: number; t: number; carry: boolean; ammo?: boolean; }
 /** A turret shoots the nearest bear in range, one ammo a shot. */
 interface Turret { ammo: number; cd: number; face: number; }
-type Placeable = 'belt' | 'short' | 'grab' | 'turret' | 'split' | 'chest' | 'mine' | 'machine';
+type Placeable = 'belt' | 'short' | 'grab' | 'turret' | 'split' | 'chest' | 'mine' | 'machine' | 'lab';
+/** A lab and the science packs in it. */
+interface Lab { packs: number; t: number; }
 /** A splitter takes stone in and sends it out to its left and right in turn. */
 interface Splitter { d: number; buf: boolean[]; side: number; t: number; }
 // where hired miners stand, relative to the mine
@@ -134,7 +173,7 @@ export class Survival {
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
   private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
-  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private invSplit = 0; private invChest = 0; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Spot[] = []; private machines: Machine[] = []; private mineAt: Spot | null = null; private expansion = 0; private invMine = 0; private invMachine = 0; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
+  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private invSplit = 0; private invChest = 0; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Spot[] = []; private machines: Machine[] = []; private mineAt: Spot | null = null; private expansion = 0; private invMine = 0; private invMachine = 0; private invLab = 0; private labs = new Map<string, Lab>(); private packs = 0; private researching: ResId | null = null; private progress: Record<string, number> = {}; private done = new Set<ResId>(); labOpen = false; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miners: number[] = []; private popT = 0; private stones = 0; private stoneAmmo = 0; private useStone = false;
 
@@ -157,7 +196,7 @@ export class Survival {
       if (this.stick && this.stick.id === e.pointerId) this.stick = null;
       // a quick tap (not a drag) on a belt, grabber or turret picks it up
       const tp = this.tap; this.tap = null;
-      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen) {
+      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen) {
         const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
         if (t) this.pickUp(t.c, t.r);
       }
@@ -181,6 +220,8 @@ export class Survival {
     btn('#svInvMine', () => this.togglePlacing('mine'));
     btn('#svInvMachine', () => this.togglePlacing('machine'));
     btn('#svLoad', () => this.useNear());
+    btn('#svInvLab', () => this.togglePlacing('lab'));
+    btn('#svLabBtn', () => this.openLab());
     btn('#svRotate', () => this.rotate());
     pad.querySelector('#svBuyBelt')!.addEventListener('click', e => { e.stopPropagation(); this.buyBelt(); });
     pad.querySelector('#svBuyGrab')!.addEventListener('click', e => { e.stopPropagation(); this.buyGrabber(); });
@@ -191,10 +232,16 @@ export class Survival {
     pad.querySelector('#svBuyChest')!.addEventListener('click', e => { e.stopPropagation(); this.buy('chest'); });
     pad.querySelector('#svBuyShort')!.addEventListener('click', e => { e.stopPropagation(); this.buyShort(); });
     pad.querySelector('#svBuyTurret')!.addEventListener('click', e => { e.stopPropagation(); this.buyTurret(); });
+    pad.querySelector('#svBuyPack')!.addEventListener('click', e => { e.stopPropagation(); this.buyPacks(1); });
+    pad.querySelector('#svBuyPack5')!.addEventListener('click', e => { e.stopPropagation(); this.buyPacks(5); });
+    pad.querySelector('#svBuyLab')!.addEventListener('click', e => { e.stopPropagation(); this.buy('lab'); });
+    pad.querySelector('#svLabClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeLab(); });
+    pad.querySelector('#svResList')!.addEventListener('click', e => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-res]'); if (b) { e.stopPropagation(); this.pickResearch(b.dataset.res as ResId); } });
     pad.querySelector('#svShopClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeShop(); });
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (this.labOpen) { if (k === 'y' || k === 'Escape') this.closeLab(); return; }
       if (this.shopOpen) { if (k === 'b' || k === 'Escape') this.closeShop(); else if (k === 'Enter' && !e.repeat) this.buyBelt(); return; }
       if (k === 'b') { if (!e.repeat) this.openShop(); return; }
       if (k === 'e') { if (!e.repeat) this.togglePlacing('belt'); return; }
@@ -205,6 +252,8 @@ export class Survival {
       if (k === 'c') { if (!e.repeat) this.togglePlacing('chest'); return; }
       if (k === 'n') { if (!e.repeat) this.togglePlacing('mine'); return; }
       if (k === 'k') { if (!e.repeat) this.togglePlacing('machine'); return; }
+      if (k === 'l') { if (!e.repeat) this.togglePlacing('lab'); return; }
+      if (k === 'y') { if (!e.repeat) this.openLab(); return; }
       if (k === 't') { if (!e.repeat) this.useNear(); return; }
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
       if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
@@ -234,6 +283,7 @@ export class Survival {
     this.mines = [{ ...FIRST_MINE, r: MINE_R }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: 0, batchT: 0, ammo: 0 }]; this.mineAt = null;
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.invMine = 0; this.invMachine = 0; this.updateStructs();
     this.stones = 0; this.stoneAmmo = 0; this.useStone = false;
+    this.invLab = 0; this.labs.clear(); this.packs = 0; this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say('Bears are coming. Shoot them before they get in!');
@@ -243,7 +293,7 @@ export class Survival {
   /* ---------- input ---------- */
   private down(e: PointerEvent) {
     e.preventDefault();
-    if (!this.running || this.paused || this.shopOpen) return;
+    if (!this.running || this.paused || this.shopOpen || this.labOpen) return;
     const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
     // placing a belt: tap the spot
     if (this.placing) { const t = tileAt(wx, wy); if (t) { this.placeAt(t.c, t.r); return; } }
@@ -291,11 +341,11 @@ export class Survival {
     const a = this.face, ammo = AMMO[this.load.ammo];
     // stone ammo: 1.7x normal damage, and each shot uses one up
     const stone = this.useStone && this.stoneAmmo > 0;
-    const dmg = stone ? AMMO.normal.damage * SURVIVAL.stoneDamage : ammo.damage;
+    const dmg = (stone ? AMMO.normal.damage * SURVIVAL.stoneDamage : ammo.damage) * ST.boltMul;
     if (stone) { this.stoneAmmo--; if (!this.stoneAmmo) { this.useStone = false; this.bubble(this.x, this.y - 30, 'Out of stone ammo', 'info'); } }
     this.mining = false;
     this.bolts.push({ x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone });
-    this.reload = ammo.reload;
+    this.reload = ammo.reload * ST.reloadMul;
     this.shots++;
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
   }
@@ -349,8 +399,11 @@ export class Survival {
     ex.textContent = maxed ? 'Biggest' : `${SURVIVAL.expandCosts[this.expansion]} stone`;
     ex.disabled = maxed || this.stones < SURVIVAL.expandCosts[this.expansion];
     (this.pad.querySelector('#svBuyChest') as HTMLButtonElement).disabled = this.stones < SURVIVAL.chestCost;
+    (this.pad.querySelector('#svBuyPack') as HTMLButtonElement).disabled = this.stones < SURVIVAL.packCost;
+    (this.pad.querySelector('#svBuyPack5') as HTMLButtonElement).disabled = this.stones < SURVIVAL.packCost * 5;
+    (this.pad.querySelector('#svBuyLab') as HTMLButtonElement).disabled = this.stones < SURVIVAL.labCost;
     (this.pad.querySelector('#svBuyShort') as HTMLButtonElement).disabled = this.stones < SURVIVAL.shortBeltCost;
-    const have = [this.inv ? `${this.inv} long belt${this.inv > 1 ? 's' : ''}` : '', this.invShort ? `${this.invShort} short belt${this.invShort > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : '', this.invSplit ? `${this.invSplit} splitter${this.invSplit > 1 ? 's' : ''}` : '', this.invChest ? `${this.invChest} chest${this.invChest > 1 ? 's' : ''}` : '', this.invMine ? `${this.invMine} mine${this.invMine > 1 ? 's' : ''}` : '', this.invMachine ? `${this.invMachine} machine${this.invMachine > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
+    const have = [this.inv ? `${this.inv} long belt${this.inv > 1 ? 's' : ''}` : '', this.invShort ? `${this.invShort} short belt${this.invShort > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : '', this.invSplit ? `${this.invSplit} splitter${this.invSplit > 1 ? 's' : ''}` : '', this.invChest ? `${this.invChest} chest${this.invChest > 1 ? 's' : ''}` : '', this.invMine ? `${this.invMine} mine${this.invMine > 1 ? 's' : ''}` : '', this.invMachine ? `${this.invMachine} machine${this.invMachine > 1 ? 's' : ''}` : '', this.invLab ? `${this.invLab} lab${this.invLab > 1 ? 's' : ''}` : '', this.packs ? `${this.packs} science pack${this.packs > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
     (this.pad.querySelector('#svBuyTurret') as HTMLButtonElement).disabled = this.stones < SURVIVAL.turretCost;
     this.pad.querySelector('#svShopInv')!.textContent = have ? `In your inventory: ${have}` : '';
     (this.pad.querySelector('#svBuyBelt') as HTMLButtonElement).disabled = this.stones < SURVIVAL.beltCost;
@@ -371,12 +424,69 @@ export class Survival {
     this.stones -= SURVIVAL.turretCost; this.invTurret++;
     Sound.pop(); this.renderShop();
   }
-  private buy(type: 'split' | 'chest' | 'mine' | 'machine') {
-    const cost = { split: SURVIVAL.splitterCost, chest: SURVIVAL.chestCost, mine: SURVIVAL.mineCost, machine: SURVIVAL.machineCost }[type];
+  private buy(type: 'split' | 'chest' | 'mine' | 'machine' | 'lab') {
+    const cost = { split: SURVIVAL.splitterCost, chest: SURVIVAL.chestCost, mine: SURVIVAL.mineCost, machine: SURVIVAL.machineCost, lab: SURVIVAL.labCost }[type];
     if (this.stones < cost) { Sound.denied(); return; }
     this.stones -= cost;
-    if (type === 'split') this.invSplit++; else if (type === 'chest') this.invChest++; else if (type === 'mine') this.invMine++; else this.invMachine++;
+    if (type === 'split') this.invSplit++; else if (type === 'chest') this.invChest++; else if (type === 'mine') this.invMine++; else if (type === 'lab') this.invLab++; else this.invMachine++;
     Sound.pop(); this.renderShop();
+  }
+  private buyPacks(n: number) {
+    if (this.stones < SURVIVAL.packCost * n) { Sound.denied(); return; }
+    this.stones -= SURVIVAL.packCost * n; this.packs += n;
+    Sound.pop(); this.renderShop();
+  }
+  /* ---------- labs and research ---------- */
+  private nearLab() {
+    for (const [key, lab] of this.labs) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) return lab; }
+    return null;
+  }
+  /** T next to a lab: put your science packs in it. */
+  private loadLab(lab: Lab) {
+    const n = Math.min(this.packs, SURVIVAL.labSize - lab.packs);
+    if (!n) { this.bubble(this.x, this.y - 30, this.packs ? 'The lab is full' : 'No science packs. Buy them at the shop', 'info'); Sound.denied(); return; }
+    lab.packs += n; this.packs -= n;
+    this.bubble(this.x, this.y - 30, `${n} pack${n > 1 ? 's' : ''} in`, 'info'); Sound.thump();
+    if (!this.researching) this.bubble(this.x, this.y - 46, 'Pick something to research (Y)', 'info');
+  }
+  private openLab() {
+    if (!this.labs.size && !this.invLab) { this.bubble(this.x, this.y - 30, 'Buy a lab at the shop first', 'info'); Sound.denied(); return; }
+    this.labOpen = true; this.stick = null; this.keys.clear();
+    this.renderLab();
+    this.pad.querySelector<HTMLElement>('#svLab')!.hidden = false;
+    Sound.ui();
+  }
+  private closeLab() { this.labOpen = false; this.pad.querySelector<HTMLElement>('#svLab')!.hidden = true; }
+  private pickResearch(id: ResId) {
+    if (this.done.has(id)) return;
+    this.researching = id; Sound.click(); this.renderLab();
+  }
+  private renderLab() {
+    const inLabs = [...this.labs.values()].reduce((a, l) => a + l.packs, 0);
+    this.pad.querySelector('#svLabInfo')!.textContent = `${this.labs.size} lab${this.labs.size === 1 ? '' : 's'} · ${inLabs} packs in labs · ${this.packs} in your pocket`;
+    const list = this.pad.querySelector<HTMLElement>('#svResList')!;
+    const html = RESEARCH.map(r => {
+      const done = this.done.has(r.id), on = this.researching === r.id, p = Math.floor(this.progress[r.id] ?? 0);
+      return `<button class="svres${done ? ' done' : ''}${on ? ' on' : ''}" data-res="${r.id}"${done ? ' disabled' : ''}><b>${r.name}</b><small>${r.desc}</small><i>${done ? 'Done' : `${p}/${r.cost} packs`}</i><span style="width:${Math.min(100, p / r.cost * 100)}%"></span></button>`;
+    }).join('');
+    if (list.dataset.html !== html) { list.innerHTML = html; list.dataset.html = html; }
+  }
+  /** Labs with packs in them work on the chosen research, one pack every 2 seconds each. */
+  private runLabs(dt: number) {
+    const id = this.researching;
+    for (const lab of this.labs.values()) {
+      if (!id || !lab.packs) { lab.t = 0; continue; }
+      lab.t += dt;
+      if (lab.t < SURVIVAL.labEvery) continue;
+      lab.t -= SURVIVAL.labEvery; lab.packs--;
+      const r = RESEARCH.find(x => x.id === id)!;
+      this.progress[id] = (this.progress[id] ?? 0) + 1;
+      if (this.progress[id] >= r.cost && this.researching === id) {
+        this.done.add(id); applyResearch(id); this.researching = null;
+        this.say(`Research done: ${r.name}!`, 4); Sound.pop();
+        return;
+      }
+    }
   }
   /** The chest next to the guy, if any. */
   private nearChest() {
@@ -385,6 +495,8 @@ export class Survival {
   }
   /** T: take the stone out of a chest next to you, or load a turret next to you. */
   private useNear() {
+    const lab = this.nearLab();
+    if (lab && this.packs) { this.loadLab(lab); return; }
     const ck = this.nearChest();
     const ch = ck ? this.chests.get(ck)! : null;
     if (ch && (ch.stone + ch.ammo > 0 || !this.stoneAmmo)) {
@@ -406,7 +518,7 @@ export class Survival {
     best.ammo += this.stoneAmmo; this.stoneAmmo = 0; this.useStone = false;
     Sound.thump();
   }
-  private count(type: Placeable) { return { belt: this.inv, short: this.invShort, grab: this.invGrab, turret: this.invTurret, split: this.invSplit, chest: this.invChest, mine: this.invMine, machine: this.invMachine }[type]; }
+  private count(type: Placeable) { return { belt: this.inv, short: this.invShort, grab: this.invGrab, turret: this.invTurret, split: this.invSplit, chest: this.invChest, mine: this.invMine, machine: this.invMachine, lab: this.invLab }[type]; }
   /** Puts one stone into whatever is at (c, r): the machine, a turret, a chest, a splitter or a free belt. False if it can't take it. */
   private deliver(c: number, r: number, ammo = false) {
     const x = tileX(c), y = tileY(r), key = c + ',' + r;
@@ -443,14 +555,15 @@ export class Survival {
     else if (this.grabbers.has(key)) { const gk = this.grabbers.get(key)!; if (gk.carry) { if (gk.ammo) this.stoneAmmo++; else this.stones++; } this.grabbers.delete(key); this.invGrab++; this.bubble(x, y - 14, '+1 grabber', 'info'); }
     else if (this.splitters.has(key)) { for (const a of this.splitters.get(key)!.buf) { if (a) this.stoneAmmo++; else this.stones++; } this.splitters.delete(key); this.invSplit++; this.bubble(x, y - 14, '+1 splitter', 'info'); }
     else if (this.chests.has(key)) { const ch = this.chests.get(key)!, n = ch.stone + ch.ammo; this.stones += ch.stone; this.stoneAmmo += ch.ammo; this.chests.delete(key); this.invChest++; this.bubble(x, y - 14, n ? `+1 chest, ${n} things back` : '+1 chest', 'info'); }
+    else if (this.labs.has(key)) { const lb = this.labs.get(key)!; this.packs += lb.packs; this.labs.delete(key); this.invLab++; this.bubble(x, y - 14, lb.packs ? `+1 lab, ${lb.packs} packs back` : '+1 lab', 'info'); }
     else if (this.turrets.has(key)) { const tu = this.turrets.get(key)!; this.stoneAmmo += tu.ammo; this.turrets.delete(key); this.invTurret++; this.bubble(x, y - 14, tu.ammo ? `+1 turret, ${tu.ammo} ammo back` : '+1 turret', 'info'); }
     else return;
     Sound.click();
   }
-  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k); }
+  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
-    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${({ belt: 'long belts', short: 'short belts', grab: 'grabbers', turret: 'turrets', split: 'splitters', chest: 'chests', mine: 'mines', machine: 'machines' })[type]}. Buy them at the shop`, 'info'); Sound.denied(); return; }
+    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${({ belt: 'long belts', short: 'short belts', grab: 'grabbers', turret: 'turrets', split: 'splitters', chest: 'chests', mine: 'mines', machine: 'machines', lab: 'labs' })[type]}. Buy them at the shop`, 'info'); Sound.denied(); return; }
     this.placing = true; this.placeType = type; this.hover = null;
     Sound.click();
   }
@@ -474,7 +587,7 @@ export class Survival {
     const x = tileX(c), y = tileY(r);
     if (x - rr < WALL.x0 + WALL.t + 4 || x + rr > WALL.x1 - WALL.t - 4 || y - rr < WALL.y0 + WALL.t + 4 || y + rr > WALL.y1 - WALL.t - 4) return false;
     if (structs.some(o => dist(x, y, o.x, o.y) < rr + o.r + 16)) return false;
-    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
+    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
     return true;
   }
   private placeAt(c: number, r: number) {
@@ -491,7 +604,7 @@ export class Survival {
     }
     if (this.turnTile(key)) return;
     if (!this.count(this.placeType)) { this.placing = false; return; }
-    if (this.turrets.has(key) || this.chests.has(key)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
+    if (this.turrets.has(key) || this.chests.has(key) || this.labs.has(key)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
     if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put that there", 'info'); Sound.denied(); return; }
     if (this.placeType === 'belt') {
       // one belt is 3 tiles long, laid from the spot in the direction it faces
@@ -508,6 +621,7 @@ export class Survival {
       if (this.placeType === 'grab') { this.grabbers.set(key, { d: this.placeDir, t: 0, carry: false }); this.invGrab--; }
       else if (this.placeType === 'split') { this.splitters.set(key, { d: this.placeDir, buf: [], side: 0, t: 0 }); this.invSplit--; }
       else if (this.placeType === 'chest') { this.chests.set(key, { stone: 0, ammo: 0 }); this.invChest--; }
+      else if (this.placeType === 'lab') { this.labs.set(key, { packs: 0, t: 0 }); this.invLab--; }
       else { this.turrets.set(key, { ammo: 0, cd: 0, face: -Math.PI / 2 }); this.invTurret--; }
       // stone lying on the spot goes back in your pocket
       for (const it of this.items) { const t = tileAt(it.x, it.y); if (t && t.c === c && t.r === r) { it.gone = true; if (it.ammo) this.stoneAmmo++; else this.stones++; } } this.items = this.items.filter(it => !it.gone);
@@ -536,7 +650,7 @@ export class Survival {
   }
   /** Belts move stone along; stone that runs into the machine goes in as a batch. */
   private moveItems(dt: number) {
-    const step = SURVIVAL.beltSpeed * dt;
+    const step = ST.beltSpeed * dt;
     for (const it of this.items) {
       const t = tileAt(it.x, it.y);
       const d = t ? this.belts.get(t.c + ',' + t.r) : undefined;
@@ -572,7 +686,7 @@ export class Survival {
         continue;
       }
       gr.t += dt;
-      if (gr.t < SURVIVAL.grabTime) continue;
+      if (gr.t < ST.grabTime) continue;
       const fx = tileX(c + dx), fy = tileY(r + dy);
       if (this.deliver(c + dx, r + dy, gr.ammo)) { gr.carry = false; continue; }
       const ft = tileAt(fx, fy);
@@ -612,7 +726,7 @@ export class Survival {
     if (!near(this.mines, this.x, this.y)) { this.bubble(this.x, this.y - 30, 'Walk to the mine to hire a miner', 'info'); Sound.denied(); return; }
     const cost = this.minerCost();
     if (this.stones < cost) { this.bubble(this.x, this.y - 30, `${this.miners.length ? 'An extra' : 'A'} miner costs ${cost} stone`, 'info'); Sound.denied(); return; }
-    this.stones -= cost; this.miners.push(Math.random() * SURVIVAL.minerEvery * .5);
+    this.stones -= cost; this.miners.push(Math.random() * ST.minerEvery * .5);
     this.say(this.miners.length > 1 ? `You hired miner ${this.miners.length}!` : 'You hired a miner!'); Sound.pop();
   }
   /** S: switch between your loadout ammo and stone ammo. */
@@ -625,7 +739,7 @@ export class Survival {
 
   /* ---------- rules ---------- */
   update(dt: number) {
-    if (!this.running || this.paused || this.shopOpen) return;
+    if (!this.running || this.paused || this.shopOpen || this.labOpen) return;
     this.t += dt;
     this.reload = Math.max(0, this.reload - dt);
     this.noTargetT -= dt;
@@ -647,14 +761,14 @@ export class Survival {
     }
     // a belt under the guy carries him along
     const under = tileAt(this.x, this.y), ud = under ? this.belts.get(under.c + ',' + under.r) : undefined;
-    if (ud !== undefined) { this.x += DIRS[ud][0] * SURVIVAL.beltSpeed * dt; this.y += DIRS[ud][1] * SURVIVAL.beltSpeed * dt; }
+    if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
     // the guy stays inside the walls
     this.x = clamp(this.x, WALL.x0 + WALL.t + GUY_R, WALL.x1 - WALL.t - GUY_R);
     this.y = clamp(this.y, WALL.y0 + WALL.t + GUY_R, WALL.y1 - WALL.t - GUY_R);
 
     // healing: 1.2% of max health every second
     this.healT += dt;
-    while (this.healT >= 1) { this.healT -= 1; this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * SURVIVAL.heal); }
+    while (this.healT >= 1) { this.healT -= 1; this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * ST.heal); }
 
     // mining: a stone every 4 seconds while next to the mine
     this.swing = Math.max(0, this.swing - dt);
@@ -666,22 +780,23 @@ export class Survival {
         this.face = Math.atan2(mineAt.y - this.y, mineAt.x - this.x);
         if (this.swing <= 0) { this.swing = 1; Sound.click(); }
         this.mineT += dt;
-        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.giveStone(mineAt.x, mineAt.y - 30, mineAt); Sound.thump(); }
+        if (this.mineT >= ST.mineEvery) { this.mineT -= ST.mineEvery; this.giveStone(mineAt.x, mineAt.y - 30, mineAt); Sound.thump(); }
       }
     }
     for (let i = 0; i < this.miners.length; i++) {
       this.miners[i] += dt;
-      if (this.miners[i] >= SURVIVAL.minerEvery) { this.miners[i] -= SURVIVAL.minerEvery; const [mine, ox, oy] = this.minerSpot(i); this.giveStone(mine.x + ox, mine.y + oy - 18, mine); }
+      if (this.miners[i] >= ST.minerEvery) { this.miners[i] -= ST.minerEvery; const [mine, ox, oy] = this.minerSpot(i); this.giveStone(mine.x + ox, mine.y + oy - 18, mine); }
     }
     this.moveItems(dt);
+    this.runLabs(dt);
     for (const mc of this.machines) {
       if (mc.queue > 0) {
         mc.batchT += dt;
         if (mc.batchT >= SURVIVAL.batchTime) {
           mc.batchT -= SURVIVAL.batchTime; mc.queue--;
           // with a grabber pulling from the machine, the ammo waits in the machine for it; otherwise it's yours
-          if (this.machineGrabbed(mc)) mc.ammo += SURVIVAL.batchAmmo; else this.stoneAmmo += SURVIVAL.batchAmmo;
-          this.bubble(mc.x, mc.y - 36, `+${SURVIVAL.batchAmmo} stone ammo`, 'info'); Sound.pop();
+          if (this.machineGrabbed(mc)) mc.ammo += ST.batchAmmo; else this.stoneAmmo += ST.batchAmmo;
+          this.bubble(mc.x, mc.y - 36, `+${ST.batchAmmo} stone ammo`, 'info'); Sound.pop();
         }
       } else mc.batchT = 0;
       if (mc.ammo && !this.machineGrabbed(mc)) { this.stoneAmmo += mc.ammo; mc.ammo = 0; }
@@ -748,12 +863,12 @@ export class Survival {
       tu.cd = Math.max(0, tu.cd - dt);
       if (!tu.ammo || tu.cd > 0) continue;
       const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
-      let target: Bear | null = null, bd = SURVIVAL.turretRange;
+      let target: Bear | null = null, bd = ST.turretRange;
       for (const b of this.bears) { if (b.state === 'dead') continue; const d = dist(x, y, b.x, b.y); if (d < bd) { bd = d; target = b; } }
       if (!target) continue;
       const a = Math.atan2(target.y - y, target.x - x);
       tu.face = a; tu.ammo--; tu.cd = SURVIVAL.turretReload;
-      this.bolts.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg: SURVIVAL.turretDamage, target, stone: true });
+      this.bolts.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg: ST.turretDamage, target, stone: true });
       Sound.tone('square', 500, 200, .08, .06);
     }
     this.separate(dt);
@@ -854,7 +969,7 @@ export class Survival {
   }
 
   private hurt(share: number) {
-    const dmg = SURVIVAL.maxHp * share;
+    const dmg = SURVIVAL.maxHp * share * ST.armor;
     this.hp -= dmg;
     this.hurtFlash = .4;
     this.bubble(this.x + (Math.random() - .5) * 16, this.y - 24, '-' + fmt(dmg), 'loss');
@@ -958,6 +1073,7 @@ export class Survival {
           else if (this.placeType === 'grab') paintGrabber(g, tileX(t.c), tileY(t.r), { d: this.placeDir, t: 0, carry: false });
           else if (this.placeType === 'split') paintSplitter(g, tileX(t.c), tileY(t.r), this.placeDir);
           else if (this.placeType === 'chest') paintChest(g, tileX(t.c), tileY(t.r));
+          else if (this.placeType === 'lab') paintLab(g, tileX(t.c), tileY(t.r), 0);
           else paintTurret(g, tileX(t.c), tileY(t.r), { ammo: 0, cd: 0, face: -Math.PI / 2 });
         }
         g.globalAlpha = 1;
@@ -1005,6 +1121,11 @@ export class Survival {
       g.fillStyle = n >= SURVIVAL.chestSize ? '#ff8a7a' : '#fff5ea'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
       g.fillText(`${n}/${SURVIVAL.chestSize}`, tileX(c), tileY(r) + 21);
     }
+    for (const [key, lb] of this.labs) {
+      const [c, r] = key.split(',').map(Number), busy = !!this.researching && lb.packs > 0; paintLab(g, tileX(c), tileY(r), busy ? this.t : 0);
+      g.fillStyle = lb.packs ? '#fff5ea' : '#ff8a7a'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
+      g.fillText(lb.packs ? `${lb.packs} packs` : 'empty', tileX(c), tileY(r) + 21);
+    }
     for (const [key, tu] of this.turrets) {
       const [c, r] = key.split(',').map(Number); paintTurret(g, tileX(c), tileY(r), tu);
       g.fillStyle = tu.ammo ? '#fff5ea' : '#ff8a7a'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
@@ -1040,7 +1161,7 @@ export class Survival {
     // mining progress ring
     if (this.mining && this.mineAt) {
       g.strokeStyle = '#c7c2b8'; g.lineWidth = 3;
-      g.beginPath(); g.arc(this.mineAt.x, this.mineAt.y, this.mineAt.r + 8, -Math.PI / 2, -Math.PI / 2 + this.mineT / SURVIVAL.mineEvery * Math.PI * 2); g.stroke();
+      g.beginPath(); g.arc(this.mineAt.x, this.mineAt.y, this.mineAt.r + 8, -Math.PI / 2, -Math.PI / 2 + this.mineT / ST.mineEvery * Math.PI * 2); g.stroke();
     }
   }
 
@@ -1166,7 +1287,7 @@ export class Survival {
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
-      const k = 1 - this.reload / AMMO[L.ammo].reload;
+      const k = 1 - this.reload / (AMMO[L.ammo].reload * ST.reloadMul);
       g.strokeStyle = 'rgba(255,245,234,.75)'; g.lineWidth = 2.5;
       g.beginPath(); g.arc(this.x, this.y, GUY_R + 6, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); g.stroke();
     }
@@ -1239,7 +1360,7 @@ export class Survival {
     }
 
     // reload shown on the buttons
-    const r = this.reload / AMMO[this.load.ammo].reload;
+    const r = this.reload / (AMMO[this.load.ammo].reload * ST.reloadMul);
     this.pad.style.setProperty('--reload', String(r));
     this.pad.classList.toggle('loading', this.reload > 0);
     const nearMine = this.mineOn && !!near(this.mines, this.x, this.y), nearMachine = this.mineOn && !!near(this.machines, this.x, this.y);
@@ -1276,7 +1397,7 @@ export class Survival {
     it.classList.toggle('on', this.placing && this.placeType === 'turret');
     const tl = `Turret ×${this.invTurret}`;
     if (it.firstElementChild!.textContent !== tl) it.firstElementChild!.textContent = tl;
-    for (const [id, type, label] of [['#svInvSplit', 'split', 'Splitter'], ['#svInvChest', 'chest', 'Chest'], ['#svInvMine', 'mine', 'Mine'], ['#svInvMachine', 'machine', 'Machine']] as const) {
+    for (const [id, type, label] of [['#svInvSplit', 'split', 'Splitter'], ['#svInvChest', 'chest', 'Chest'], ['#svInvMine', 'mine', 'Mine'], ['#svInvMachine', 'machine', 'Machine'], ['#svInvLab', 'lab', 'Lab']] as const) {
       const el = this.pad.querySelector<HTMLElement>(id)!, n = this.count(type), on = this.placing && this.placeType === type;
       el.hidden = !n && !on; el.classList.toggle('on', on);
       const tx = `${label} ×${n}`;
@@ -1286,12 +1407,15 @@ export class Survival {
     for (const key of this.turrets.keys()) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) nearTurret = true; }
     const ck = this.nearChest(), cch = ck ? this.chests.get(ck)! : null, chestFull = !!cch && cch.stone + cch.ammo > 0;
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!;
-    lb.hidden = !(chestFull || (nearTurret && this.stoneAmmo));
-    const ll = chestFull && !(nearTurret && this.stoneAmmo) ? 'Take' : 'Load';
+    const labLoad = !!this.nearLab() && this.packs > 0;
+    lb.hidden = !(labLoad || chestFull || (nearTurret && this.stoneAmmo));
+    const ll = !labLoad && chestFull && !(nearTurret && this.stoneAmmo) ? 'Take' : 'Load';
+    this.pad.querySelector<HTMLElement>('#svLabBtn')!.hidden = !this.labs.size || this.labOpen || this.shopOpen;
+    if (this.labOpen) this.renderLab();
     if (lb.firstElementChild!.textContent !== ll) lb.firstElementChild!.textContent = ll;
     const standing = tileAt(this.x, this.y);
     this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const help = this.placing ? (['turret', 'chest', 'mine', 'machine'].includes(this.placeType) ? `Tap a spot to place the ${this.placeType}.` : `Tap a spot to place the ${({ grab: 'grabber', split: 'splitter' } as Record<string, string>)[this.placeType] ?? 'belt'}. R turns it.`) : this.helpText;
+    const help = this.placing ? (['turret', 'chest', 'mine', 'machine', 'lab'].includes(this.placeType) ? `Tap a spot to place the ${this.placeType}.` : `Tap a spot to place the ${({ grab: 'grabber', split: 'splitter' } as Record<string, string>)[this.placeType] ?? 'belt'}. R turns it.`) : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
     if (hp.textContent !== help) hp.textContent = help;
     if (this.shopOpen) this.renderShop();
@@ -1351,7 +1475,7 @@ function blockedTile(c: number, r: number) {
 }
 /** A hired miner at its spot by a mine, swinging a pick at it. */
 function paintMiner(g: CanvasRenderingContext2D, [mine, ox, oy]: [Spot, number, number], mt: number) {
-  const sw = Math.sin(mt / SURVIVAL.minerEvery * Math.PI * 10) * .6;
+  const sw = Math.sin(mt / ST.minerEvery * Math.PI * 10) * .6;
   g.save(); g.translate(mine.x + ox, mine.y + oy);
   g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(2, 3, 11, 9, 0, 0, 7); g.fill();
   g.rotate(Math.atan2(-oy, -ox));
@@ -1378,6 +1502,17 @@ function paintSplitter(g: CanvasRenderingContext2D, x: number, y: number, d: num
   g.fillStyle = '#e0b43a';
   g.beginPath(); g.moveTo(0, -11); g.lineTo(-3.5, -6); g.lineTo(3.5, -6); g.fill();
   g.beginPath(); g.moveTo(0, 11); g.lineTo(-3.5, 6); g.lineTo(3.5, 6); g.fill();
+  g.restore();
+}
+/** A lab: a bench with a bubbling flask. t > 0 makes it bubble. */
+function paintLab(g: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  g.save(); g.translate(x, y);
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -7, 22, 20);
+  g.fillStyle = '#e8e2d6'; g.fillRect(-11, -10, 22, 20);
+  g.strokeStyle = '#7d8a95'; g.lineWidth = 1.5; g.strokeRect(-11, -10, 22, 20);
+  g.fillStyle = '#7fd6c2'; g.beginPath(); g.moveTo(-2.5, -7); g.lineTo(2.5, -7); g.lineTo(2.5, -2); g.lineTo(7, 6); g.lineTo(-7, 6); g.lineTo(-2.5, -2); g.closePath(); g.fill();
+  g.strokeStyle = '#3a4a52'; g.lineWidth = 1.2; g.stroke();
+  if (t > 0) { g.fillStyle = '#fff5ea'; for (let i = 0; i < 3; i++) { const k = (t * .8 + i / 3) % 1; g.globalAlpha = 1 - k; g.beginPath(); g.arc(Math.sin(i * 2 + t * 3) * 2, 2 - k * 14, 1.6, 0, 7); g.fill(); } g.globalAlpha = 1; }
   g.restore();
 }
 /** A chest: a wooden box with a metal band. */
@@ -1408,7 +1543,7 @@ function paintGrabber(g: CanvasRenderingContext2D, x: number, y: number, gr: Gra
   g.fillStyle = '#4a5560'; g.fillRect(-s / 2 + 2, -s / 2 + 2, s - 4, s - 4);
   g.strokeStyle = '#e0b43a'; g.lineWidth = 1.5; g.strokeRect(-s / 2 + 2, -s / 2 + 2, s - 4, s - 4);
   // arm: points back while it waits, swings forward with a stone
-  const k = gr.carry ? Math.min(1, gr.t / SURVIVAL.grabTime) : 0, a = Math.PI * (1 - k);
+  const k = gr.carry ? Math.min(1, gr.t / ST.grabTime) : 0, a = Math.PI * (1 - k);
   g.fillStyle = '#2a3036'; g.beginPath(); g.arc(0, 0, 5, 0, 7); g.fill();
   g.strokeStyle = '#c9d3dc'; g.lineWidth = 3.5; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(a) * 15, Math.sin(a) * 15); g.stroke();
   g.strokeStyle = '#e0b43a'; g.lineWidth = 2;
@@ -1427,7 +1562,7 @@ function paintBelt(g: CanvasRenderingContext2D, x: number, y: number, d: number,
   g.fillStyle = '#2a2d31'; g.fillRect(-s / 2, -s / 2, s, s * .14); g.fillRect(-s / 2, s / 2 - s * .14, s, s * .14);
   g.beginPath(); g.rect(-s / 2, -s / 2, s, s); g.clip();
   g.strokeStyle = '#e0b43a'; g.lineWidth = 2 * k;
-  const off = (t * SURVIVAL.beltSpeed * k) % (s / 2);
+  const off = (t * ST.beltSpeed * k) % (s / 2);
   for (let i = -1; i < 2; i++) { const cx = -s / 2 + i * s / 2 + off; g.beginPath(); g.moveTo(cx - s * .12, -s * .2); g.lineTo(cx + s * .08, 0); g.lineTo(cx - s * .12, s * .2); g.stroke(); }
   g.restore();
 }
