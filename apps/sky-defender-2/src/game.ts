@@ -8,8 +8,9 @@ export type PlaneState = 'fly' | 'turn' | 'warn' | 'dive' | 'strafe' | 'climb' |
 /** 'won' is only reached in war mode, when the level's clock runs out with the base still standing. */
 export type Phase = 'idle' | 'intro' | 'combat' | 'clear' | 'over' | 'won';
 /** Original: endless waves defending one turret. War: hold out for a fixed time from several turrets, among friendly planes.
- *  Co-op: the original waves for two players, one on the base and one flying the enemy planes as the Bomber. */
-export type GameMode = 'original' | 'war' | 'coop';
+ *  Co-op: the original waves for two players, one on the base and one flying the enemy planes as the Bomber.
+ *  Adventure: the original waves with a weak turret; every enemy plane shot down earns 1 iron, spent in the iron shop. */
+export type GameMode = 'original' | 'war' | 'coop' | 'adventure';
 /** Special weapons replace the gun until their ammo or time runs out. */
 export type WeaponId = 'missiles' | 'laser' | 'rockets' | 'fireballs' | 'sonic' | 'nuke' | 'rapid' | 'lightning' | 'cluster';
 /** Perks: permanent gun improvements (dual, triple, reload, flak), leeching and the upgrade shifter (only from a gold pack), and one-off help for the base (repair, rebuild, shield). */
@@ -74,7 +75,7 @@ export interface Crate { x: number; y: number; vx: number; vy: number; lz: numbe
   held?: boolean; }
 export interface Label { text: string; x: number; y: number; t: number; life: number; color: string; big?: boolean; }
 /** `outpost` marks a war mode turret standing on its own away from the base. */
-export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; }
+export interface Building { def: BuildingDef; id: BuildingId; name: string; x: number; half: number; hp: number; max: number; ruined: boolean; hit: number; smokeT: number; ruinT: number; outpost?: boolean; /** an extra adventure turret, which fires with the main gun */ extra?: boolean; }
 export interface WaveSpec { count: number; list: PlaneType[]; boss: boolean; }
 export interface ClearInfo { bonus: number; health: number; perfect: number; }
 export interface Results {
@@ -91,6 +92,8 @@ export interface Hooks {
   waveClear?: (info: ClearInfo) => void;
   gameOver?: (r: Results) => void;
   label?: (text: string) => void;
+  /** adventure: the iron count changed */
+  iron?: () => void;
 }
 interface Lock { target: Plane | null; t: number; step: number; locked: boolean; }
 
@@ -102,6 +105,37 @@ const SHELL_V0 = 480, SHELL_K = .583, SHELL_G = 22, SHELL_LIFE = 3.3;
 const MISSILE_DRAG = .06, BOMB_DRAG = 1.1;
 const BARREL = 48;
 const FIRE_INTERVAL = 1 / 3;
+
+/* ---------- adventure mode ---------- */
+/** Iron shop items. Levels are kept between games; repair is a one-off during a game. */
+export type ShopId = 'health' | 'damage' | 'rate' | 'turret' | 'repair';
+export interface ShopItem { name: string; desc: string; max: number; cost: (lv: number) => number; }
+/** The adventure turret starts at this share of the normal turret's health; each Max health level adds ADV_HP_STEP more. */
+export const ADV_HP_START = .2, ADV_HP_STEP = .1;
+export const SHOP: Record<ShopId, ShopItem> = {
+  health: { name: 'Max health', desc: `+${ADV_HP_STEP * 100}% turret health (of a normal turret).`, max: 10, cost: lv => 3 + lv * 2 },
+  damage: { name: 'Damage', desc: 'Shells hit 25% harder. Helps against bosses and nukes.', max: 8, cost: lv => 5 + lv * 3 },
+  rate: { name: 'Fire rate', desc: 'The gun fires 15% faster.', max: 6, cost: lv => 4 + lv * 3 },
+  turret: { name: 'Extra turret', desc: 'Another turret beside the base. It aims and fires with yours.', max: 2, cost: lv => 80 + lv * 70 },
+  repair: { name: 'Repair turrets', desc: 'Patch every turret back to full health now.', max: Infinity, cost: () => 3 },
+};
+/** Base parts: buildings bought with iron. Each stays built for every later adventure game and does its usual job
+ *  (the depot and repair yard do extra adventure jobs). A part destroyed in a game is back for the next one. */
+export const PARTS: { id: BuildingId; cost: number; desc: string }[] = [
+  { id: 'search', cost: 40, desc: 'Lights up the sky at night.' },
+  { id: 'radar', cost: 50, desc: 'Shows where bombs will land and arrows to planes off screen.' },
+  { id: 'repair', cost: 60, desc: 'The turret slowly repairs itself while the yard stands.' },
+  { id: 'depot', cost: 75, desc: 'Special weapons from crates get 50% more ammo.' },
+  { id: 'hangar', cost: 100, desc: 'Supply planes drop upgrade crates every wave.' },
+];
+export interface Adventure { iron: number; health: number; damage: number; rate: number; turret: number; parts: BuildingId[]; }
+export const newAdventure = (): Adventure => ({ iron: 0, health: 0, damage: 0, rate: 0, turret: 0, parts: [] });
+/** Where the extra adventure turrets stand: the first east of the base, the second west. */
+export const ADV_TURRET_X = [168, -196];
+/** ...and where they stand when a second Base player's turret already has the east spot. */
+const ADV_TURRET_X2 = [-196, 232];
+/** A diamond pack can't be shot down for this many seconds after it drops. */
+export const DIAMOND_SAFE = 5;
 /** Where the crate can land on the pad: the gap left of the depot or right of the hangar, picked at random each drop. */
 const LZ_SPOTS = [-77, 86];
 export const LZ_Y = GROUND_Y - 3.4;
@@ -323,6 +357,8 @@ export interface BomberView {
   protect: number; protectT: number;
 }
 
+const makeBuilding = (d: BuildingDef, x: number, name = d.name): Building => ({ def: d, id: d.id, name, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 });
+
 export class Game {
   settings = { reduceMotion: false, vibration: true };
   /** set before start() (and before reset(), for the title screen's backdrop); they hold for the whole game */
@@ -373,6 +409,8 @@ export class Game {
   snipes: Snipe[] = []; sniperDamage = 0; protectT = 0; protectCD = 0;
   /** set while the Bomber's own attacks hurt the base, so the damage is credited to the Bomber */
   blame = false; blameSniper = false;
+  /** adventure: iron and shop levels (main.ts loads and saves them) */
+  adv: Adventure = newAdventure();
   /** co-op: flak bursts and explosions since the last snapshot, so the phones can draw them too ([0 flak | 1 air | 2 ground, x, y, size]) */
   fxLog: [number, number, number, number][] | null = null;
 
@@ -389,7 +427,7 @@ export class Game {
     this.planes = []; this.bombs = []; this.shells = []; this.missiles = []; this.pulses = []; this.particles = [];
     this.tracers = []; this.bolts = []; this.crates = []; this.labels = []; this.trails = [];
     this.cargo = null; this.cargoAt = null; this.lzX = LZ_SPOTS[1];
-    const make = (d: BuildingDef, x: number, name = d.name): Building => ({ def: d, id: d.id, name, x, half: d.half, hp: d.hp, max: d.hp, ruined: false, hit: 0, smokeT: 0, ruinT: 0 });
+    const make = makeBuilding;
     this.buildings = BUILDINGS.map(d => make(d, mockToWorld(d.mx, 800)[0]));
     if (this.mode === 'war') {
       // a turret out on its own either side of the base
@@ -397,13 +435,22 @@ export class Game {
       const out = WAR_POSTS.filter(x => x !== 0).map(x => ({ ...make(def, x, x < 0 ? 'West turret' : 'East turret'), outpost: true }));
       this.buildings = [...out.filter(b => b.x < 0), ...this.buildings, ...out.filter(b => b.x > 0)];
     }
+    // adventure: the turret stands on its own, weak to start
+    if (this.adventure) {
+      this.buildings = this.buildings.filter(b => b.id === 'turret' || this.adv.parts.includes(b.id));
+      for (let i = 0; i < this.adv.turret; i++) this.addAdvTurret(i);
+      for (const t of this.advTurrets()) t.max = t.hp = t.def.hp * this.advHpShare;
+    }
     this.gun2 = null;
     if (!this.coop) this.localGun = 1;
     if (this.coop && this.secondBaseName !== null) {
       const def = BUILDINGS.find(d => d.id === 'turret')!;
       this.buildings.push({ ...make(def, GUN2_X, 'Second turret'), outpost: true });
       this.gun2 = { name: this.secondBaseName, x: GUN2_X, roll: 0, aim: 0, firing: false, oneShot: false, fireCD: 0, recoil: 0, flash: 0 };
+      if (this.adventure) { const t = this.buildings[this.buildings.length - 1]; t.max = t.hp = t.def.hp * this.advHpShare; }
     }
+    // left to right, so a phone's copy (and a building bought mid-game) lines up with the host's list
+    this.buildings.sort((a, b) => a.x - b.x);
     this.posts = this.buildings.filter(b => b.id === 'turret' && (this.war || !b.outpost));
     this.postI = this.posts.findIndex(b => !b.outpost);
     this.gunX = this.viewX = this.post().x;
@@ -437,11 +484,78 @@ export class Game {
   get D() { return DIFFICULTY[this.difficulty]; }
   /** The base's own building of this kind (in war mode the outposts are turrets too, but never this one). */
   b(id: BuildingId): Building { return this.buildings.find(b => b.id === id && !b.outpost)!; }
-  alive(id: BuildingId) { return !this.b(id).ruined; }
+  has(id: BuildingId) { return this.buildings.some(b => b.id === id && !b.outpost); }
+  /** Whether a building is standing. In adventure only the turret is built: radar warnings and supply drops still work, but there is no searchlight. */
+  alive(id: BuildingId) { return this.has(id) && !this.b(id).ruined; }
+  /** The turret's health as a share of a normal turret's (in adventure it starts at 20%). */
+  turretPct(t = this.b('turret')) { return t.ruined ? 0 : Math.max(1, Math.round(t.hp / t.def.hp * 100)); }
   /** The turret the player is using. */
   post(): Building { return this.posts[this.postI]; }
   get war() { return this.mode === 'war'; }
-  get coop() { return this.mode === 'coop'; }
+  /** co-op in adventure mode: mode stays 'adventure' and this is set (mode 'coop' is co-op with the original waves) */
+  coopAdv = false;
+  get coop() { return this.mode === 'coop' || this.adventure && this.coopAdv; }
+  get adventure() { return this.mode === 'adventure'; }
+  get advHpShare() { return ADV_HP_START + ADV_HP_STEP * this.adv.health; }
+  /** adventure: shell damage and the gun's reload with the shop's levels (1 elsewhere) */
+  get shellDmg() { return this.adventure ? 1 + .25 * this.adv.damage : 1; }
+  get rateMul() { return this.adventure ? 1 / (1 + .15 * this.adv.rate) : 1; }
+  /** Whether a shop item can be bought now, and why not. */
+  shopBlock(id: ShopId): string | null {
+    const it = SHOP[id];
+    if (id === 'repair') {
+      if (this.phase === 'idle' || this.ended) return 'During a game';
+      if (this.advTurrets().every(t => t.ruined || t.hp >= t.max)) return 'Full health';
+    } else if (this.adv[id] >= it.max) return 'Maxed';
+    return this.adv.iron < this.shopCost(id) ? 'Not enough iron' : null;
+  }
+  shopCost(id: ShopId) { return SHOP[id].cost(id === 'repair' ? 0 : this.adv[id]); }
+  buy(id: ShopId) {
+    if (this.shopBlock(id)) return false;
+    this.adv.iron -= this.shopCost(id);
+    if (id === 'repair') { for (const t of this.advTurrets()) if (!t.ruined) t.hp = t.max; }
+    else {
+      this.adv[id]++;
+      // more max health also adds that much health to every standing turret
+      if (id === 'health' && this.adventure) for (const t of this.advTurrets()) { const m = t.def.hp * this.advHpShare; if (!t.ruined) t.hp += m - t.max; t.max = m; }
+      // a new turret goes up at once during a game
+      if (id === 'turret' && this.adventure && this.phase !== 'idle' && !this.ended) {
+        const t = this.addAdvTurret(this.adv.turret - 1);
+        this.labels.push({ text: `${t.name} built`, x: t.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#c9d3dc' });
+      }
+    }
+    return true;
+  }
+  /** Adventure: every turret (the main one and any extra ones), and the extra ones still standing. */
+  advTurrets() { return this.buildings.filter(b => b.id === 'turret'); }
+  advGuns() { return this.adventure ? this.buildings.filter(b => b.extra && !b.ruined) : []; }
+  addAdvTurret(i: number) {
+    const d = BUILDINGS.find(d => d.id === 'turret')!;
+    const x = (this.secondBaseName !== null && this.coop ? ADV_TURRET_X2 : ADV_TURRET_X)[i];
+    const t: Building = { ...makeBuilding(d, x, x < 0 ? 'West turret' : 'East turret'), outpost: true, extra: true };
+    t.max = t.hp = d.hp * this.advHpShare;
+    this.buildings.push(t);
+    this.buildings.sort((a, b) => a.x - b.x);
+    return t;
+  }
+  partBlock(id: BuildingId): string | null {
+    const p = PARTS.find(p => p.id === id)!;
+    if (this.adv.parts.includes(id)) return 'Built';
+    return this.adv.iron < p.cost ? 'Not enough iron' : null;
+  }
+  /** Buys a base part; during an adventure game it goes up at once, at full health. */
+  buyPart(id: BuildingId) {
+    if (this.partBlock(id)) return false;
+    this.adv.iron -= PARTS.find(p => p.id === id)!.cost;
+    this.adv.parts.push(id);
+    if (this.adventure && !this.has(id)) {
+      const d = BUILDINGS.find(d => d.id === id)!;
+      this.buildings.push(makeBuilding(d, mockToWorld(d.mx, 800)[0]));
+      this.buildings.sort((a, b) => a.x - b.x);
+      this.labels.push({ text: `${d.name} built`, x: this.buildings.find(b => b.id === id)!.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#c9d3dc' });
+    }
+    return true;
+  }
   get ended() { return this.phase === 'over' || this.phase === 'won'; }
   /** Planes U-turn (or, if friendly, leave) past this x. */
   get xe() { return this.war ? WAR_XE : XE; }
@@ -1232,7 +1346,7 @@ export class Game {
       case 'nuke': this.fireNuke(); this.fireCD = 1; break;
       case 'lightning': this.fireLightning(); this.fireCD = .4; break;
       case 'cluster': this.fireCluster(); this.fireCD = .5; break;
-      default: this.fireShell(); this.fireCD = (w === 'rapid' ? FIRE_INTERVAL / 3 : FIRE_INTERVAL) * (this.fastLoad ? 2 / 3 : 1);
+      default: this.fireShell(); this.fireCD = (w === 'rapid' ? FIRE_INTERVAL / 3 : FIRE_INTERVAL) * (this.fastLoad ? 2 / 3 : 1) * this.rateMul;
     }
   }
   /** Spend ammo (or seconds) of the special weapon; the plain gun comes back when it runs out. */
@@ -1251,14 +1365,16 @@ export class Game {
     const n = this.guns, v0 = SHELL_V0 * (this.perks.has('swift') ? 1.33 : 1);
     // Mirror gun: the same volley again, aimed the other way across the middle (none when aiming straight up)
     const aims = this.perks.has('mirror') && Math.abs(this.aim) > .04 ? [this.aim, -this.aim] : [this.aim];
-    for (const aim of aims) for (let k = 0; k < n; k++) {
+    // adventure: every extra turret fires the same volley at the same moment
+    const xs = [this.gunX, ...this.advGuns().map(b => b.x)];
+    for (const gx of xs) for (const aim of aims) for (let k = 0; k < n; k++) {
       // a pair splits 1.6 degrees each side; a fan of three goes 2.4 degrees out from the middle
       const c = k - (n - 1) / 2;
       const off = c * (n === 3 ? 2.4 : 3.2) * Math.PI / 180;
       const a = aim + off;
       const [dx, dy] = this.aimDir(a);
       const side = c * (n === 3 ? 3.4 : 4.4);
-      this.shells.push({ x: this.gunX + dx * BARREL + Math.cos(aim) * side, y: dy * BARREL + Math.sin(aim) * side, vx: dx * v0, vy: dy * v0, t: 0, px: 0, py: 0, ghost: this.ghost || undefined });
+      this.shells.push({ x: gx + dx * BARREL + Math.cos(aim) * side, y: dy * BARREL + Math.sin(aim) * side, vx: dx * v0, vy: dy * v0, t: 0, px: 0, py: 0, ghost: this.ghost || undefined });
     }
     this.stats.shots++;
     this.recoil = 1; this.flash = 1;
@@ -1706,6 +1822,7 @@ export class Game {
       if (!p.hits.length) p.hits.push({ u: 0, v: 0 });
       this.addScore(TYPES[p.type].points * (this.perks.has('bounty') ? 2 : 1), p.x, p.y);
       this.stats.kills++;
+      if (this.adventure) { this.adv.iron++; this.labels.push({ text: '+1 iron', x: p.x, y: p.y + 4, t: 0, life: 1.3, color: '#c9d3dc' }); this.hooks.iron?.(); }
       const boss = p.type === 'boss';
       this.explosion(p.x, p.y, boss ? 2 : .8, false);
       Sound.boom(boss, this.panOf(p.x, p.y));
@@ -1800,7 +1917,7 @@ export class Game {
         if (s.ghost) this.ghostSweep(s, pad);
         else {
           const hit = this.sweepContact(s.px, s.py, s.x, s.y, pad, !!s.fall);
-          if (hit) { this.burst(s, hit, 1, R, false, !!s.fall); break; }
+          if (hit) { this.burst(s, hit, this.shellDmg, R, false, !!s.fall); break; }
         }
         // drop shot: where the shell would have burst at the top of its flight, it turns over and falls
         if (this.dropShot && !s.fall && s.t >= SHELL_LIFE && s.y < DROP_FLOOR) {
@@ -1812,7 +1929,7 @@ export class Game {
         if (!end) continue;
         // a falling drop shot or a ghost shell fades out without a burst, so it can't touch the base or a friendly plane
         if (s.ghost || s.fall) { this.fizzle(s); break; }
-        this.burst(s, null, 1, R);
+        this.burst(s, null, this.shellDmg, R);
         break;
       }
     }
@@ -2102,7 +2219,7 @@ export class Game {
     const c = crate && !crate.dead ? crate : this.readyCrate();
     if (c) c.dead = true;
     this.crates = this.crates.filter(cr => !cr.dead);
-    if (isWeapon(id)) { this.weapon = id; this.ammo = AMMO[id] * (this.perks.has('overcharge') ? 2 : 1); this.fireCD = 0; }
+    if (isWeapon(id)) { this.weapon = id; this.ammo = Math.round(AMMO[id] * (this.perks.has('overcharge') ? 2 : 1) * (this.adventure && this.alive('depot') ? 1.5 : 1)); this.fireCD = 0; }
     else if (SET_PERKS.includes(id as PerkId)) this.perks.add(id as PerkId);
     else if (id === 'dual' || id === 'triple') this.guns = id === 'dual' ? 2 : 3;
     else if (id === 'reload') this.fastLoad = true;
@@ -2265,7 +2382,10 @@ export class Game {
       Sound.denied();
     } else this.labels.push({ text: 'Cargo plane shot down', x: c.x, y: c.y - 20, t: 0, life: 2.2, color: '#ff8a7a' });
   }
+  /** A diamond pack can't be shot down in its first seconds after it drops. */
+  crateSafe(c: Crate) { return !!c.diamond && !c.landed && c.t < DIAMOND_SAFE; }
   crateLost(c: Crate) {
+    if (this.crateSafe(c)) { this.particles.push({ k: 'ring', x: c.x, y: c.y - 3, r: 4, grow: 24, life: .3, t: 0, vx: 0, vy: 0 }); return; }
     c.dead = true;
     this.explosion(c.x, c.y, .7, false);
     this.addScore(-500, c.x, c.y, 'Friendly fire');
@@ -2338,7 +2458,8 @@ export class Game {
       this.explosion(b.x, GROUND_Y - 10, 1.4, true);
       Sound.boom(true, this.panOf(b.x, GROUND_Y));
       this.vibrate(80);
-      if (b.id === 'turret' && !this.war) { this.gameOver(); return; }
+      // (an extra adventure turret can fall without ending the game)
+      if (b.id === 'turret' && !this.war && !(this.adventure && b.outpost)) { this.gameOver(); return; }
       this.labels.push({ text: `${b.name} destroyed`, x: b.x, y: GROUND_Y - 45, t: 0, life: 2.4, color: '#ff8a7a' });
       if (b.id === 'radar') this.tip('radar', 'Radar is down. No bomb shadows or plane arrows.');
       if (b.id === 'hangar') this.tip('hangar', 'Hangar is down. No more supply drops.');
@@ -2359,6 +2480,8 @@ export class Game {
     for (const b of this.buildings) {
       b.hit = Math.max(0, b.hit - dt * 3);
       // Mending: standing buildings slowly repair themselves during play
+      // adventure: a standing repair yard slowly repairs the turret
+      if (this.adventure && b.id === 'turret' && this.alive('repair') && !b.ruined && b.hp < b.max && !this.ended && this.phase !== 'idle') b.hp = Math.min(b.max, b.hp + b.max * MEND_RATE * dt);
       if (this.perks.has('mend') && !b.ruined && b.hp < b.max && !this.ended && this.phase !== 'idle') b.hp = Math.min(b.max, b.hp + b.max * MEND_RATE * dt);
       if (b.ruined) b.ruinT += dt;
       const frac = b.hp / b.max;

@@ -15,7 +15,9 @@ type BombRow = [id: number, kind: BombKind, x: number, y: number, angle: number,
 type CrateRow = [x: number, y: number, lz: number, landed: number, kind: number, sway: number, t: number, dodgeX: number];
 
 export interface Snap {
-  mode: GameMode; diff: Difficulty; phase: Phase; phaseT: number; wave: number; score: number; mult: number; left: number;
+  mode: GameMode; diff: Difficulty;
+  /** adventure: the levels and base parts that decide which buildings stand, so the phone's map has the same ones */
+  adv?: { parts: Game['adv']['parts']; turret: number; health: number }; phase: Phase; phaseT: number; wave: number; score: number; mult: number; left: number;
   aim: number; cam: number; gunX: number; viewX: number; pal: [PaletteId, PaletteId, number]; wind: number;
   shieldT: number; shieldFlash: number; nukeFlash: number; shake: number;
   weapon: WeaponId | null; ammo: number; guns: number; recoil: number; flash: number; lasing: boolean;
@@ -42,7 +44,7 @@ export function takeSnap(g: Game): Snap {
   g.fxLog = [];
   const b = g.bomber;
   return {
-    mode: g.mode, diff: g.difficulty, phase: g.phase, phaseT: r1(g.phaseT), wave: g.wave, score: g.score, mult: g.mult, left: g.planesLeft(),
+    mode: g.mode, diff: g.difficulty, adv: g.adventure ? { parts: g.adv.parts, turret: g.adv.turret, health: g.adv.health } : undefined, phase: g.phase, phaseT: r1(g.phaseT), wave: g.wave, score: g.score, mult: g.mult, left: g.planesLeft(),
     aim: r3(g.aim), cam: r3(g.cam), gunX: g.gunX, viewX: r1(g.viewX), pal: [g.palFrom, g.palTo, r3(g.palT)], wind: g.wind,
     shieldT: r1(g.shieldT), shieldFlash: r3(g.shieldFlash), nukeFlash: r3(g.nukeFlash), shake: r1(g.shake),
     weapon: g.weapon, ammo: r1(g.ammo), guns: g.guns, recoil: r3(g.recoil), flash: r3(g.flash), lasing: g.lasing,
@@ -80,6 +82,7 @@ export class Mirror {
   /** base: turns with the gun (the phone is turned too); level: the Base's view kept level, for aiming by touch */
   view: 'base' | 'level' | 'follow' | 'fixed' = 'base';
   private viewX = 0;
+  private advKey = '';
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
@@ -89,7 +92,13 @@ export class Mirror {
   apply(s: Snap) {
     const g = this.game;
     // a second turret changes the list of buildings, so the map starts over when it comes or goes
-    if (g.mode !== s.mode || !!s.gun2 !== (g.secondBaseName !== null)) { g.mode = s.mode; g.secondBaseName = s.gun2 ? s.gun2[0] : null; g.reset(); }
+    // so does buying a base part or a turret in adventure
+    const advKey = s.adv ? `${s.adv.parts.join()}|${s.adv.turret}|${s.adv.health}` : '';
+    if (g.mode !== s.mode || !!s.gun2 !== (g.secondBaseName !== null) || advKey !== this.advKey) {
+      g.mode = s.mode; g.secondBaseName = s.gun2 ? s.gun2[0] : null; g.coopAdv = true; this.advKey = advKey;
+      if (s.adv) Object.assign(g.adv, { parts: [...s.adv.parts], turret: s.adv.turret, health: s.adv.health });
+      g.reset();
+    }
     if (s.gun2 && g.gun2) [g.gun2.name, g.gun2.aim, g.gun2.recoil, g.gun2.flash] = s.gun2;
     g.difficulty = s.diff; g.phase = s.phase; g.phaseT = s.phaseT; g.wave = s.wave; g.score = s.score; g.mult = s.mult;
     g.planesLeft = () => s.left;

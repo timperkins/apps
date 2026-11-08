@@ -132,6 +132,7 @@ export class Renderer {
     ctx.translate(-game.viewX, 0);
     this.drawWorld(game, P);
     this.drawGun2(game, P);
+    this.drawAdvGuns(game, P);
     ctx.restore();
 
     ctx.save();
@@ -269,7 +270,7 @@ export class Renderer {
     ctx.translate(0, GROUND_Y); ctx.scale(1.15, 1.15); ctx.translate(-195, -800);
     if (P.lights > .02) {
       for (const [id, x, y, r] of LAMPS) {
-        if (game.b(id).ruined) continue;
+        if (!game.has(id) || game.b(id).ruined) continue;
         ctx.globalAlpha = P.lights * .55;
         ctx.drawImage(puff('#ffc56a'), x - r, y - r, r * 2, r * 2);
       }
@@ -336,7 +337,8 @@ export class Renderer {
         ctx.beginPath(); ctx.roundRect(fx - w / 2, y, w * frac, 1.6, .8); ctx.fill();
       }
       // the building's health in small white figures above it ("0%" once it is ruined)
-      const pct = b.ruined ? 0 : Math.max(1, Math.round(frac * 100));
+      // (in adventure the turret's is a share of a normal turret's, so a new adventure turret reads 20%)
+      const pct = game.adventure && b.id === 'turret' ? game.turretPct(b) : b.ruined ? 0 : Math.max(1, Math.round(frac * 100));
       // the turret's sits beside the gun barrel, which would otherwise cross it
       const tx = b.id === 'turret' ? fx + 16 : fx, ty = b.id === 'turret' ? FIRE_Y.turret - 2 : b.def.box[1] - (!b.ruined && frac < 1 ? 5.5 : 2.5);
       ctx.font = `600 4.6px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -591,6 +593,11 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-3, -3, 6, .6);
     if (!c.landed && Math.sin(this.time * 7) > .3) { ctx.drawImage(puff(crateTint(c)), -2, -6, 4, 4); }
     ctx.restore();
+    // a newly dropped diamond pack shimmers inside a shield while it can't be shot down
+    if (_game.crateSafe(c)) {
+      ctx.save(); ctx.globalAlpha = .45 + .25 * Math.sin(this.time * 10); ctx.strokeStyle = '#bff0ff'; ctx.lineWidth = .7;
+      ctx.beginPath(); ctx.arc(c.x + (c.dodgeX ?? 0), c.y - 2, 7, 0, 7); ctx.stroke(); ctx.restore();
+    }
     // gold and diamond packs sparkle
     if (c.gold || c.diamond) this.twinkles(c.x + (c.dodgeX ?? 0), c.y - 1.5, 14, 10, 1.7, c.diamond ? '#effcff' : '#fff3b8');
   }
@@ -740,13 +747,26 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /** Adventure: the extra turrets, drawn in the world at the main gun's aim. */
+  drawAdvGuns(game: Game, P: BlendedPalette) {
+    for (const b of game.advGuns()) this.drawBarrel(P, b.x, game.aim, game.recoil, game.flash);
+  }
   /** Co-op: the second Base player's turret, drawn in the world at its own aim, with its player's name. */
   drawGun2(game: Game, P: BlendedPalette) {
     const g = game.gun2, post = game.gun2Post();
     if (!g || !post || post.ruined) return;
     const ctx = this.ctx;
+    this.drawBarrel(P, g.x, g.aim, g.recoil, g.flash);
     ctx.save();
-    ctx.translate(g.x, 0); ctx.rotate(g.aim);
+    ctx.font = `500 7px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#9dd8ff'; ctx.globalAlpha = .9;
+    ctx.fillText(g.name, g.x, GROUND_Y + 9);
+    ctx.restore();
+  }
+  drawBarrel(P: BlendedPalette, x: number, aim: number, recoil: number, flash: number) {
+    const g = { recoil, flash };
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(x, 0); ctx.rotate(aim);
     ctx.fillStyle = P.bMetal;
     ctx.fillRect(-2.6, -18, 1.6, 16); ctx.fillRect(1, -18, 1.6, 16);
     const bar = ctx.createLinearGradient(-1.5, 0, 1.5, 0);
@@ -759,10 +779,6 @@ export class Renderer {
       ctx.drawImage(puff('#ffb04a'), -9, -63, 18, 18);
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     }
-    ctx.restore();
-    ctx.save();
-    ctx.font = `500 7px Jost, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#9dd8ff'; ctx.globalAlpha = .9;
-    ctx.fillText(g.name, g.x, GROUND_Y + 9);
     ctx.restore();
   }
 
