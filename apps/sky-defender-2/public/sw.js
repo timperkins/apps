@@ -1,7 +1,7 @@
 // Offline support. Pages are network-first so an update (including the home-screen
 // settings in index.html) shows up on the next launch; other files are cache-first
 // with a background refresh, and built assets have hashed names.
-const CACHE = 'skydef-v6';
+const CACHE = 'skydef-v7';
 // Built assets have hashed names, so only the entry points are listed; everything else
 // is cached the first time it is fetched.
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
