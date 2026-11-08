@@ -37,6 +37,11 @@ export const APPS: AppLink[] = [
     blurb: 'Step-by-step paper airplane folding, animated in 3D.',
   },
   {
+    name: 'My Hotel',
+    url: 'https://my-hotel.trom.dev',
+    blurb: 'Run a 3D hotel: check guests in, clean rooms and buy land. Play alone or with a friend.',
+  },
+  {
     name: 'Tim News',
     url: 'https://news.trom.dev',
     blurb: "Today's news, written up from real reporting, with local stories and topics you care about.",
