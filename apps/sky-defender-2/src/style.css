@@ -334,3 +334,12 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svres.on { border-color: var(--accent); background: rgba(255, 207, 140, .16); }
 .svres.done { opacity: .55; cursor: default; }
 .svres.done i { color: #9fe6a0; }
+.svinv.b-bturret { left: 112px; bottom: 292px; }
+.svinv.b-furnace { left: 14px; bottom: 344px; }
+.svinv.b-gen { left: 112px; bottom: 344px; }
+.svinv.b-pump { left: 14px; bottom: 396px; }
+.svinv.b-pipe { left: 112px; bottom: 396px; }
+.svinv.b-asm { left: 14px; bottom: 448px; }
+.svinv.b-tunnel { left: 112px; bottom: 448px; }
+.svinv.b-hub { left: 14px; bottom: 500px; }
+.svinv { font-size: 13px; padding: 6px 10px; }

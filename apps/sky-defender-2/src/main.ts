@@ -801,6 +801,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'A grabber (3 stone, <kbd>G</kbd> to place) picks stone up from behind it and puts it down in front: on a belt, or into the machine.',
     'After 8 minutes huge waves of bears come every minute, a little bigger each time. Build turrets before then!',
     'Science packs (5 stone) go into a lab (20 stone, <kbd>L</kbd>) with <kbd>T</kbd>. Press <kbd>Y</kbd> to pick an upgrade to research.',
+    'Later: furnaces (<kbd>F</kbd>) make bricks, generators (<kbd>V</kbd>) speed things up, pumps and pipes (<kbd>W</kbd>, <kbd>I</kbd>) cool turrets, assemblers (<kbd>A</kbd>) make packs, underground belts (<kbd>D</kbd>) and robot hubs (<kbd>O</kbd>).',
     'Need more room? Buy a bigger base (40, then 60 stone). More mines cost 30 stone (<kbd>N</kbd>) and more machines 45 (<kbd>K</kbd>).'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;

@@ -34,6 +34,14 @@
     <button id="svInvChest" class="svinv chest" hidden><span>Chest ×0</span><small>C: place</small></button>
     <button id="svInvMine" class="svinv mine" hidden><span>Mine ×0</span><small>N: place</small></button>
     <button id="svInvLab" class="svinv lab" hidden><span>Lab ×0</span><small>L: place</small></button>
+    <button id="svInv-bturret" class="svinv b-bturret" hidden><span>Brick turret ×0</span><small>J: place</small></button>
+    <button id="svInv-furnace" class="svinv b-furnace" hidden><span>Furnace ×0</span><small>F: place</small></button>
+    <button id="svInv-gen" class="svinv b-gen" hidden><span>Generator ×0</span><small>V: place</small></button>
+    <button id="svInv-pump" class="svinv b-pump" hidden><span>Pump ×0</span><small>W: place</small></button>
+    <button id="svInv-pipe" class="svinv b-pipe" hidden><span>Pipe ×0</span><small>I: place</small></button>
+    <button id="svInv-asm" class="svinv b-asm" hidden><span>Assembler ×0</span><small>A: place</small></button>
+    <button id="svInv-tunnel" class="svinv b-tunnel" hidden><span>Underground ×0</span><small>D: place</small></button>
+    <button id="svInv-hub" class="svinv b-hub" hidden><span>Robot hub ×0</span><small>O: place</small></button>
     <button id="svInvMachine" class="svinv machine" hidden><span>Machine ×0</span><small>K: place</small></button>
     <button id="svInvShort" class="svinv short" hidden><span>Belt 1 ×0</span><small>Q: place</small></button>
     <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
@@ -44,7 +52,7 @@
     <button id="svShopBtn" class="svbtn small" hidden><span>Shop</span><small>B</small></button>
     <div id="svShop" class="svshop" hidden>
       <h3>Shop</h3>
-      <p class="fine"><b id="svShopStone">0</b> stone</p>
+      <p class="fine"><b id="svShopStone">0</b> stone · <b id="svShopBricks">0</b> bricks</p>
       <div class="svitem">
         <div><b>Long belt</b><small>3 tiles long. Carries stone (and you). E to place, R turns it.</small></div>
         <button id="svBuyBelt" class="primary">5 stone</button>
@@ -85,6 +93,46 @@
       <div class="svitem">
         <div><b>Lab</b><small>Uses science packs to research. Y picks what. L to place.</small></div>
         <button id="svBuyLab" class="primary">20 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Furnace</b><small>Bakes stone into bricks. Feed it stone; bricks come out the front. F to place, R turns it.</small></div>
+        <button id="svBuy-furnace" class="primary">12 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Generator</b><small>Burns stone for power. Machines, labs, furnaces and assemblers nearby run twice as fast. V to place.</small></div>
+        <button id="svBuy-gen" class="primary">20 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Water pump</b><small>Pumps water into pipes. W to place.</small></div>
+        <button id="svBuy-pump" class="primary">15 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Pipes ×3</b><small>A turret touching pipes from a pump is cooled and shoots twice as fast. I to place.</small></div>
+        <button id="svBuy-pipe" class="primary">3 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Assembler</b><small>Makes a science pack from 5 stone (T switches to 3 short belts). A to place, R turns it.</small></div>
+        <button id="svBuy-asm" class="primary">35 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Underground belts ×2</b><small>Things go in one and come out the next one ahead, up to 6 tiles, under anything. D to place.</small></div>
+        <button id="svBuy-tunnel" class="primary">6 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Robot hub</b><small>Comes with 2 robots that bring things from chests to turrets, labs, machines and buildings. O to place.</small></div>
+        <button id="svBuy-hub" class="primary">40 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Robot</b><small>One more robot for a hub.</small></div>
+        <button id="svBuy-robot" class="primary">10 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Brick turret</b><small>Does 60% more damage and reaches farther. J to place.</small></div>
+        <button id="svBuy-bturret" class="primary">15 stone + 10 bricks</button>
+      </div>
+      <div class="svitem">
+        <div><b>Brick gate</b><small>Bears wait 10 seconds longer at the gate.</small></div>
+        <button id="svBuy-gate" class="primary">30 bricks</button>
       </div>
       <div class="svitem wide">
         <div><b>Bigger base</b><small>Moves your walls out for more room. Two steps.</small></div>
