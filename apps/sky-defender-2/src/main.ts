@@ -8,11 +8,12 @@ import { Sound } from './audio';
 import qrcode from 'qrcode-generator';
 import { CoopHost, LOCAL, MAX_PLAYERS, type Player } from './coop/host';
 import { BomberPad } from './coop/pad';
-import { randomName } from './coop/names';
+import { randomName, cleanName } from './coop/names';
 import type { ClientMsg, Role } from './coop/protocol';
 import { takeSnap } from './coop/mirror';
+import { Survival, AMMO, HATS, COLORS, drawPreview, type Loadout, type AmmoId, type HatId, type SurvivalResult } from './survival';
 
-type Mode = 'loading' | 'start' | 'play' | 'paused' | 'cards' | 'shop' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
+type Mode = 'loading' | 'survival' | 'survPause' | 'start' | 'play' | 'paused' | 'cards' | 'shop' | 'countdown' | 'results' | 'recal' | 'nosensor' | 'menu' | 'lobby';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; reduceMotion: boolean; }
 /** `wave` is the wave reached; war mode keeps the level instead, and `time` is the seconds survived. */
 interface ScoreEntry { score: number; wave: number; date: number; time?: number; won?: boolean; }
@@ -191,6 +192,7 @@ function renderScores() {
 }
 function best() { return scores.length ? scores[0].score : 0; }
 function startScreen() {
+  survival.stop();
   mode = 'start';
   game.reset();
   game.phase = 'idle';
@@ -728,6 +730,133 @@ function hintProgress(kind: 'fire' | 'tilt') {
 }
 function endHint() { hintState = null; $('hint').hidden = true; store.set('hinted', true); }
 
+/* ---------- survival ---------- */
+// A separate top-down game: the title screen's Survival row opens the loadout screen first.
+const isAmmo = (a: unknown): a is AmmoId => typeof a === 'string' && a in AMMO;
+const isHat = (h: unknown): h is HatId => typeof h === 'string' && h in HATS;
+const savedLoad = store.get<Partial<Loadout>>('survival.loadout', {});
+const loadout: Loadout = {
+  name: typeof savedLoad.name === 'string' && savedLoad.name.trim() ? cleanName(savedLoad.name) : randomName(),
+  color: typeof savedLoad.color === 'string' && COLORS.includes(savedLoad.color) ? savedLoad.color : COLORS[0],
+  hat: isHat(savedLoad.hat) ? savedLoad.hat : 'none',
+  ammo: isAmmo(savedLoad.ammo) ? savedLoad.ammo : 'normal',
+};
+const survival = new Survival($<HTMLCanvasElement>('sv'), $('svPad'), { over: survivalOver, pause: survivalPause });
+if (isComputer()) survival.helpText = 'Arrow keys to walk';
+if (Tilt.debug) (window as unknown as { __surv: unknown }).__surv = survival;
+function renderLoadout() {
+  const name = $<HTMLInputElement>('svName');
+  if (document.activeElement !== name) name.value = loadout.name;
+  $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
+  $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
+  $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
+  const b = store.get<number>('survival.best', 0);
+  $('svBest').textContent = b ? `Best ${clock(b)} survived` : '';
+  drawPreview($<HTMLCanvasElement>('svPreview'), loadout);
+  store.set('survival.loadout', loadout);
+}
+function openLoadout() {
+  Sound.init();
+  survival.stop();
+  renderLoadout();
+  show('survSetup'); mode = 'menu'; returnTo = 'start';
+}
+$('survivalBtn').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openLoadout(); });
+$('svName').addEventListener('input', () => { loadout.name = cleanName($<HTMLInputElement>('svName').value); renderLoadout(); });
+$('svName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); });
+$('svDice').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); Sound.ui(); loadout.name = randomName(loadout.name); $<HTMLInputElement>('svName').value = loadout.name; renderLoadout(); });
+$('survSetup').addEventListener('click', e => {
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a]');
+  if (!t) return;
+  Sound.ui();
+  if (t.dataset.c) loadout.color = t.dataset.c;
+  if (isHat(t.dataset.h)) loadout.hat = t.dataset.h;
+  if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
+  renderLoadout();
+});
+// the intro before the first run (and from "How to play" on the loadout screen)
+const INTRO: { icon: string; title: string; lines: string[] }[] = [
+  { icon: '🏹', title: 'Walk and shoot', lines: [
+    'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone.',
+    '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
+    'Your crossbow reloads after every shot. Normal ammo: 3 seconds, 3.5 damage. Bears have 10.5 health.'] },
+  { icon: '🐻', title: 'The bears', lines: [
+    'Bears wait outside the gate. The ring over each one counts down 30 seconds, then it comes in.',
+    'Inside, a bear swipes for 8% of your health every 5 seconds, and throws rocks for 9% from further away. Dodge the rocks!',
+    'You have 1,000,000 health and heal 1.2% every second. Red bubbles show what you lose.'] },
+  { icon: '⛏️', title: 'The mine', lines: [
+    'After 4 bears, bears only wait 20 seconds, but 40% fewer come. A mine, a machine and a shop pop up in your camp.',
+    'Stand next to the mine and press <kbd>M</kbd> to mine: 1 stone every 2 seconds.',
+    'With 10 stone, press <kbd>H</kbd> by the mine to hire a miner who digs 1 stone every 5 seconds for you. Extra miners cost 20 stone each.'] },
+  { icon: '⚙️', title: 'The machine', lines: [
+    'Walk to the machine and click it (or press <kbd>M</kbd>). It takes all your stone.',
+    'Each stone becomes 5 stone ammo after 4 seconds. Stone ammo does 1.7x damage.',
+    'Press <kbd>S</kbd> to switch between your ammo and stone ammo. Each stone shot uses one up.'] },
+  { icon: '🛒', title: 'Shop and belts', lines: [
+    'Walk to the shop and press <kbd>B</kbd> (or click it). A belt costs 5 stone, is 3 tiles long and goes in your inventory.',
+    'Press <kbd>E</kbd> (or tap the belt in the corner), then click a spot to place it. <kbd>R</kbd> turns it.',
+    'Belts carry stone, and you! Put one next to the mine and lead the line into the machine to make stone ammo by itself.',
+    'A turret (15 stone, <kbd>U</kbd> to place) shoots bears for 5.25 damage. Load it with stone ammo with <kbd>T</kbd>, or feed it stone with a belt.',
+    'A splitter (4 stone, <kbd>X</kbd>) splits stone left and right. A chest (10 stone, <kbd>C</kbd>) holds 200; <kbd>T</kbd> takes it out. Tap anything you placed to pick it up.',
+    'A grabber (3 stone, <kbd>G</kbd> to place) picks stone up from behind it and puts it down in front: on a belt, or into the machine.',
+    'After 8 minutes huge waves of bears come every minute, a little bigger each time. Build turrets before then!',
+    'Science packs (5 stone) go into a lab (20 stone, <kbd>L</kbd>) with <kbd>T</kbd>. Press <kbd>Y</kbd> to pick an upgrade to research.',
+    'Later: furnaces (<kbd>F</kbd>) make bricks, generators (<kbd>V</kbd>) speed things up, pumps and pipes (<kbd>W</kbd>, <kbd>I</kbd>) cool turrets, assemblers (<kbd>A</kbd>) make packs, underground belts (<kbd>D</kbd>) and robot hubs (<kbd>O</kbd>).',
+    'Need more room? Buy a bigger base (40, then 60 stone). More mines cost 30 stone (<kbd>N</kbd>) and more machines 45 (<kbd>K</kbd>).'] },
+];
+let introPage = 0, introThen: (() => void) | null = null;
+function showIntro(then: (() => void) | null) {
+  introPage = 0; introThen = then;
+  renderIntro(); show('survIntro'); mode = 'menu'; returnTo = 'start';
+}
+function renderIntro() {
+  const p = INTRO[introPage];
+  $('svIntroStep').textContent = `How to play · ${introPage + 1} of ${INTRO.length}`;
+  $('svIntroIcon').textContent = p.icon;
+  $('svIntroTitle').textContent = p.title;
+  $('svIntroText').innerHTML = p.lines.map(l => `<li>${l}</li>`).join('');
+  $('svIntroBack').style.visibility = introPage ? 'visible' : 'hidden';
+  $('svIntroNext').textContent = introPage < INTRO.length - 1 ? 'Next' : introThen ? 'Start' : 'Done';
+}
+function endIntro() {
+  store.set('survival.intro', true);
+  if (introThen) introThen(); else { renderLoadout(); show('survSetup'); }
+}
+$('svIntroNext').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (introPage < INTRO.length - 1) { introPage++; renderIntro(); } else endIntro(); });
+$('svIntroBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); if (introPage) { introPage--; renderIntro(); } });
+$('svIntroSkip').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); endIntro(); });
+$('svHow').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); showIntro(null); });
+function startSurvival() {
+  Sound.ui();
+  (document.activeElement as HTMLElement | null)?.blur?.();
+  show(null); setHud(false);
+  survival.start({ ...loadout });
+  mode = 'survival'; last = performance.now();
+}
+$('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('survival.intro', false)) startSurvival(); else showIntro(startSurvival); });
+$('svBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); startScreen(); });
+function survivalPause() {
+  if (mode !== 'survival') return;
+  survival.paused = true; mode = 'survPause'; show('survPause');
+}
+$('svResume').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.paused = false; show(null); mode = 'survival'; last = performance.now(); });
+$('svQuit').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.stop(); startScreen(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) survivalPause(); });
+function survivalOver(r: SurvivalResult) {
+  const best = store.get<number>('survival.best', 0);
+  const isBest = r.time > best;
+  if (isBest) store.set('survival.best', r.time);
+  $('svNewBest').hidden = !isBest || best === 0;
+  $('svTime').textContent = clock(r.time);
+  const stats: [string, string][] = [['Survived', clock(r.time)], ['Bears defeated', String(r.kills)], ['Shots', String(r.shots)], ['Hits', String(r.hits)], ['Best', clock(Math.max(best, r.time))]];
+  $('svStats').innerHTML = stats.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  // give the last hit a moment on screen before the results
+  setTimeout(() => { if (mode === 'survival') { mode = 'menu'; returnTo = 'start'; $('svPad').hidden = true; show('survOver'); } }, 900);
+}
+$('svAgain').addEventListener('click', e => { e.stopPropagation(); startSurvival(); });
+$('svChange').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openLoadout(); });
+$('svTitle').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); survival.stop(); startScreen(); });
+
 /* ---------- loop ---------- */
 let last = performance.now();
 function frame(now: number) {
@@ -735,6 +864,9 @@ function frame(now: number) {
   const dt = Math.max(0, Math.min(.05, (now - last) / 1000));
   last = now;
   if (mode === 'loading') return;
+  // survival draws on its own canvas over the stage; the results screen keeps the last frame
+  if (mode === 'survival' || mode === 'survPause') { survival.update(dt); survival.draw(dt); return; }
+  if (mode === 'menu' && !$<HTMLCanvasElement>('sv').hidden) return;
   const tiltRoll = Tilt.update(now / 1000, dt);
   // co-op: the Base aims from its phone unless it plays on this screen
   const localAim = !game.coop || localRole === 'base';
