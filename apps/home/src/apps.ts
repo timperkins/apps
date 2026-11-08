@@ -41,4 +41,9 @@ export const APPS: AppLink[] = [
     url: 'https://news.trom.dev',
     blurb: "Today's news, written up from real reporting, with local stories and topics you care about.",
   },
+  {
+    name: 'Bad Guys and Good Guys',
+    url: 'https://bad-guys-good-guys.trom.dev',
+    blurb: 'Brawl your way home on the last day of school, with up to four friends joining by code or QR.',
+  },
 ];
