@@ -28,6 +28,9 @@ export const SURVIVAL = {
   splitTime: .3,        // seconds between stones out of a splitter
   chestCost: 10,        // stone for a chest
   chestSize: 200,       // a chest holds 200 stone
+  mineCost: 30,         // stone for an extra mine
+  machineCost: 45,      // stone for an extra machine
+  expandCosts: [40, 60], // stone to make the base bigger, step by step
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
@@ -62,14 +65,19 @@ export interface SurvivalResult { time: number; kills: number; shots: number; hi
 
 // world layout (world units; the whole map is scaled to fit the screen)
 const W = 600, H = 920;
-const WALL = { x0: 110, x1: 490, y0: 400, y1: 860, t: 14 };
+/** The base's walls. They move out when the base is expanded, so this object changes during a run. */
+const BASE_WALL = { x0: 110, x1: 490, y0: 400, y1: 860 };
+const EXPANSIONS = [BASE_WALL, { x0: 65, x1: 535, y0: 400, y1: 883 }, { x0: 20, x1: 580, y0: 400, y1: 906 }];
+const WALL = { ...BASE_WALL, t: 14 };
 const GATE = { x: 300, w: 74 };
 const GUY_R = 13, BEAR_R = 18, STONE = '#a9a59c';
 // belts sit on a grid inside the walls
-const TILE = 24, GX0 = WALL.x0 + WALL.t, GY0 = WALL.y0 + WALL.t;
-const COLS = Math.floor((WALL.x1 - WALL.t - GX0) / TILE), ROWS = Math.floor((WALL.y1 - WALL.t - GY0) / TILE);
+// the grid covers the biggest base; only tiles inside the current walls can be used
+const BIGGEST = EXPANSIONS[EXPANSIONS.length - 1];
+const TILE = 24, GX0 = BIGGEST.x0 + WALL.t, GY0 = BIGGEST.y0 + WALL.t;
+const COLS = Math.floor((BIGGEST.x1 - WALL.t - GX0) / TILE), ROWS = Math.floor((BIGGEST.y1 - WALL.t - GY0) / TILE);
 const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const; // right, down, left, up
-const SHOP = { x: WALL.x1 - 62, y: WALL.y1 - 62, r: 26 };
+const SHOP = { x: BASE_WALL.x1 - 62, y: BASE_WALL.y1 - 62, r: 26 };
 /** Something on the ground or a belt: a stone, or (ammo) a piece of stone ammo from the machine. */
 interface Item { x: number; y: number; gone?: boolean; ammo?: boolean; }
 /** What a chest holds. */
@@ -78,12 +86,18 @@ interface Chest { stone: number; ammo: number; }
 interface Grabber { d: number; t: number; carry: boolean; ammo?: boolean; }
 /** A turret shoots the nearest bear in range, one ammo a shot. */
 interface Turret { ammo: number; cd: number; face: number; }
-type Placeable = 'belt' | 'short' | 'grab' | 'turret' | 'split' | 'chest';
+type Placeable = 'belt' | 'short' | 'grab' | 'turret' | 'split' | 'chest' | 'mine' | 'machine';
 /** A splitter takes stone in and sends it out to its left and right in turn. */
 interface Splitter { d: number; buf: boolean[]; side: number; t: number; }
 // where hired miners stand, relative to the mine
 const MINER_SPOTS = [[-4, 30], [32, 22], [-30, 26], [36, -8], [8, -32], [-32, -14]] as const;
-const MINE = { x: WALL.x0 + 62, y: WALL.y0 + 95, r: 24 }, MACHINE = { x: WALL.x1 - 62, y: WALL.y0 + 215, r: 26 }, NEAR = 58;
+const MINE_R = 24, MACHINE_R = 26, NEAR = 58;
+const FIRST_MINE = { x: BASE_WALL.x0 + 62, y: BASE_WALL.y0 + 95 }, FIRST_MACHINE = { x: BASE_WALL.x1 - 62, y: BASE_WALL.y0 + 215 };
+interface Spot { x: number; y: number; r: number; }
+/** A machine and its work: stone waiting, the batch timer and ammo waiting for a grabber. */
+interface Machine extends Spot { queue: number; batchT: number; ammo: number; }
+/** Everything big in the camp (shop, mines, machines), which belts can't go on. Kept up to date by the game. */
+let structs: Spot[] = [];
 
 type BearState = 'walk' | 'wait' | 'enter' | 'inside' | 'dead';
 interface Bear { tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; }
@@ -116,9 +130,9 @@ export class Survival {
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
   private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
-  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private invSplit = 0; private invChest = 0; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private machineAmmo = 0; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
+  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private invSplit = 0; private invChest = 0; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Spot[] = []; private machines: Machine[] = []; private mineAt: Spot | null = null; private expansion = 0; private invMine = 0; private invMachine = 0; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
-  private miners: number[] = []; private popT = 0; private stones = 0; private queue = 0; private batchT = 0; private stoneAmmo = 0; private useStone = false;
+  private miners: number[] = []; private popT = 0; private stones = 0; private stoneAmmo = 0; private useStone = false;
 
   constructor(private canvas: HTMLCanvasElement, private pad: HTMLElement, private hooks: SurvivalHooks) {
     this.ctx = canvas.getContext('2d')!;
@@ -160,11 +174,16 @@ export class Survival {
     btn('#svInvShort', () => this.togglePlacing('short'));
     btn('#svInvSplit', () => this.togglePlacing('split'));
     btn('#svInvChest', () => this.togglePlacing('chest'));
+    btn('#svInvMine', () => this.togglePlacing('mine'));
+    btn('#svInvMachine', () => this.togglePlacing('machine'));
     btn('#svLoad', () => this.useNear());
     btn('#svRotate', () => this.rotate());
     pad.querySelector('#svBuyBelt')!.addEventListener('click', e => { e.stopPropagation(); this.buyBelt(); });
     pad.querySelector('#svBuyGrab')!.addEventListener('click', e => { e.stopPropagation(); this.buyGrabber(); });
     pad.querySelector('#svBuySplit')!.addEventListener('click', e => { e.stopPropagation(); this.buy('split'); });
+    pad.querySelector('#svBuyMine')!.addEventListener('click', e => { e.stopPropagation(); this.buy('mine'); });
+    pad.querySelector('#svBuyMachine')!.addEventListener('click', e => { e.stopPropagation(); this.buy('machine'); });
+    pad.querySelector('#svBuyExpand')!.addEventListener('click', e => { e.stopPropagation(); this.expand(); });
     pad.querySelector('#svBuyChest')!.addEventListener('click', e => { e.stopPropagation(); this.buy('chest'); });
     pad.querySelector('#svBuyShort')!.addEventListener('click', e => { e.stopPropagation(); this.buyShort(); });
     pad.querySelector('#svBuyTurret')!.addEventListener('click', e => { e.stopPropagation(); this.buyTurret(); });
@@ -180,6 +199,8 @@ export class Survival {
       if (k === 'q') { if (!e.repeat) this.togglePlacing('short'); return; }
       if (k === 'x') { if (!e.repeat) this.togglePlacing('split'); return; }
       if (k === 'c') { if (!e.repeat) this.togglePlacing('chest'); return; }
+      if (k === 'n') { if (!e.repeat) this.togglePlacing('mine'); return; }
+      if (k === 'k') { if (!e.repeat) this.togglePlacing('machine'); return; }
       if (k === 't') { if (!e.repeat) this.useNear(); return; }
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
       if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
@@ -205,8 +226,10 @@ export class Survival {
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
     this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = [];
     this.belts.clear(); this.items = []; this.inv = 0; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop();
-    this.invGrab = 0; this.placeType = 'belt'; this.grabbers.clear(); this.invTurret = 0; this.turrets.clear(); this.invShort = 0; this.tap = null; this.invSplit = 0; this.invChest = 0; this.splitters.clear(); this.chests.clear(); this.machineAmmo = 0;
-    this.stones = 0; this.queue = 0; this.batchT = 0; this.stoneAmmo = 0; this.useStone = false;
+    this.invGrab = 0; this.placeType = 'belt'; this.grabbers.clear(); this.invTurret = 0; this.turrets.clear(); this.invShort = 0; this.tap = null; this.invSplit = 0; this.invChest = 0; this.splitters.clear(); this.chests.clear();
+    this.mines = [{ ...FIRST_MINE, r: MINE_R }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: 0, batchT: 0, ammo: 0 }]; this.mineAt = null;
+    this.expansion = 0; Object.assign(WALL, BASE_WALL); this.invMine = 0; this.invMachine = 0; this.updateStructs();
+    this.stones = 0; this.stoneAmmo = 0; this.useStone = false;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say('Bears are coming. Shoot them before they get in!');
@@ -222,7 +245,8 @@ export class Survival {
     if (this.placing) { const t = tileAt(wx, wy); if (t) { this.placeAt(t.c, t.r); return; } }
     // a tap on the machine uses it, a tap on the shop opens it
     if (this.mineOn) {
-      if (Math.hypot(wx - MACHINE.x, wy - MACHINE.y) < MACHINE.r + 10) { this.useMachine(); return; }
+      const tm = this.machines.find(m => Math.hypot(wx - m.x, wy - m.y) < m.r + 10);
+      if (tm) { this.useMachine(tm); return; }
       if (Math.hypot(wx - SHOP.x, wy - SHOP.y) < SHOP.r + 10) { this.openShop(); return; }
     }
     // anywhere on the map works as a joystick: drag from where the finger lands
@@ -275,19 +299,31 @@ export class Survival {
   /** M: start or stop mining when next to the mine, or use the machine when next to it. */
   private action() {
     if (!this.mineOn) return;
-    if (dist(this.x, this.y, MINE.x, MINE.y) < NEAR) {
-      this.mining = !this.mining; this.mineT = 0;
-      if (this.mining) this.face = Math.atan2(MINE.y - this.y, MINE.x - this.x);
+    const mine = near(this.mines, this.x, this.y), mach = near(this.machines, this.x, this.y);
+    if (mine) {
+      this.mining = !this.mining; this.mineT = 0; this.mineAt = mine;
+      if (this.mining) this.face = Math.atan2(mine.y - this.y, mine.x - this.x);
       Sound.ui();
-    } else if (dist(this.x, this.y, MACHINE.x, MACHINE.y) < NEAR) this.useMachine();
-    else this.bubble(this.x, this.y - 30, 'Walk to the mine or the machine', 'info');
+    } else if (mach) this.useMachine(mach);
+    else this.bubble(this.x, this.y - 30, 'Walk to a mine or a machine', 'info');
+  }
+  /** Keeps the list of big things (for where belts can go) up to date. */
+  private updateStructs() { structs = [SHOP, ...this.mines, ...this.machines]; }
+  /** Bigger base: the walls move out. */
+  private expand() {
+    if (this.expansion >= SURVIVAL.expandCosts.length) return;
+    const cost = SURVIVAL.expandCosts[this.expansion];
+    if (this.stones < cost) { Sound.denied(); return; }
+    this.stones -= cost; this.expansion++;
+    Object.assign(WALL, EXPANSIONS[this.expansion]);
+    this.say('Your base got bigger!'); Sound.pop(); this.renderShop();
   }
   /** The machine takes all your stone; each stone is a batch that gives 5 stone ammo after 4 seconds. */
-  private useMachine() {
-    if (dist(this.x, this.y, MACHINE.x, MACHINE.y) > NEAR) { this.bubble(MACHINE.x, MACHINE.y - 36, 'Walk to the machine', 'info'); Sound.denied(); return; }
-    if (!this.stones) { this.bubble(MACHINE.x, MACHINE.y - 36, 'No stone to put in', 'info'); Sound.denied(); return; }
-    this.bubble(MACHINE.x, MACHINE.y - 36, `${this.stones} stone in`, 'info');
-    this.queue += this.stones; this.stones = 0;
+  private useMachine(m: Machine) {
+    if (dist(this.x, this.y, m.x, m.y) > NEAR) { this.bubble(m.x, m.y - 36, 'Walk to the machine', 'info'); Sound.denied(); return; }
+    if (!this.stones) { this.bubble(m.x, m.y - 36, 'No stone to put in', 'info'); Sound.denied(); return; }
+    this.bubble(m.x, m.y - 36, `${this.stones} stone in`, 'info');
+    m.queue += this.stones; this.stones = 0;
     Sound.thump();
   }
   /* ---------- shop, inventory and belts ---------- */
@@ -303,9 +339,14 @@ export class Survival {
   private renderShop() {
     this.pad.querySelector('#svShopStone')!.textContent = String(this.stones);
     (this.pad.querySelector('#svBuySplit') as HTMLButtonElement).disabled = this.stones < SURVIVAL.splitterCost;
+    (this.pad.querySelector('#svBuyMine') as HTMLButtonElement).disabled = this.stones < SURVIVAL.mineCost;
+    (this.pad.querySelector('#svBuyMachine') as HTMLButtonElement).disabled = this.stones < SURVIVAL.machineCost;
+    const ex = this.pad.querySelector('#svBuyExpand') as HTMLButtonElement, maxed = this.expansion >= SURVIVAL.expandCosts.length;
+    ex.textContent = maxed ? 'Biggest' : `${SURVIVAL.expandCosts[this.expansion]} stone`;
+    ex.disabled = maxed || this.stones < SURVIVAL.expandCosts[this.expansion];
     (this.pad.querySelector('#svBuyChest') as HTMLButtonElement).disabled = this.stones < SURVIVAL.chestCost;
     (this.pad.querySelector('#svBuyShort') as HTMLButtonElement).disabled = this.stones < SURVIVAL.shortBeltCost;
-    const have = [this.inv ? `${this.inv} long belt${this.inv > 1 ? 's' : ''}` : '', this.invShort ? `${this.invShort} short belt${this.invShort > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : '', this.invSplit ? `${this.invSplit} splitter${this.invSplit > 1 ? 's' : ''}` : '', this.invChest ? `${this.invChest} chest${this.invChest > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
+    const have = [this.inv ? `${this.inv} long belt${this.inv > 1 ? 's' : ''}` : '', this.invShort ? `${this.invShort} short belt${this.invShort > 1 ? 's' : ''}` : '', this.invGrab ? `${this.invGrab} grabber${this.invGrab > 1 ? 's' : ''}` : '', this.invTurret ? `${this.invTurret} turret${this.invTurret > 1 ? 's' : ''}` : '', this.invSplit ? `${this.invSplit} splitter${this.invSplit > 1 ? 's' : ''}` : '', this.invChest ? `${this.invChest} chest${this.invChest > 1 ? 's' : ''}` : '', this.invMine ? `${this.invMine} mine${this.invMine > 1 ? 's' : ''}` : '', this.invMachine ? `${this.invMachine} machine${this.invMachine > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ');
     (this.pad.querySelector('#svBuyTurret') as HTMLButtonElement).disabled = this.stones < SURVIVAL.turretCost;
     this.pad.querySelector('#svShopInv')!.textContent = have ? `In your inventory: ${have}` : '';
     (this.pad.querySelector('#svBuyBelt') as HTMLButtonElement).disabled = this.stones < SURVIVAL.beltCost;
@@ -326,10 +367,11 @@ export class Survival {
     this.stones -= SURVIVAL.turretCost; this.invTurret++;
     Sound.pop(); this.renderShop();
   }
-  private buy(type: 'split' | 'chest') {
-    const cost = type === 'split' ? SURVIVAL.splitterCost : SURVIVAL.chestCost;
+  private buy(type: 'split' | 'chest' | 'mine' | 'machine') {
+    const cost = { split: SURVIVAL.splitterCost, chest: SURVIVAL.chestCost, mine: SURVIVAL.mineCost, machine: SURVIVAL.machineCost }[type];
     if (this.stones < cost) { Sound.denied(); return; }
-    this.stones -= cost; if (type === 'split') this.invSplit++; else this.invChest++;
+    this.stones -= cost;
+    if (type === 'split') this.invSplit++; else if (type === 'chest') this.invChest++; else if (type === 'mine') this.invMine++; else this.invMachine++;
     Sound.pop(); this.renderShop();
   }
   /** The chest next to the guy, if any. */
@@ -360,12 +402,13 @@ export class Survival {
     best.ammo += this.stoneAmmo; this.stoneAmmo = 0; this.useStone = false;
     Sound.thump();
   }
-  private count(type: Placeable) { return { belt: this.inv, short: this.invShort, grab: this.invGrab, turret: this.invTurret, split: this.invSplit, chest: this.invChest }[type]; }
+  private count(type: Placeable) { return { belt: this.inv, short: this.invShort, grab: this.invGrab, turret: this.invTurret, split: this.invSplit, chest: this.invChest, mine: this.invMine, machine: this.invMachine }[type]; }
   /** Puts one stone into whatever is at (c, r): the machine, a turret, a chest, a splitter or a free belt. False if it can't take it. */
   private deliver(c: number, r: number, ammo = false) {
     const x = tileX(c), y = tileY(r), key = c + ',' + r;
     // the machine only takes raw stone
-    if (this.isMachine(c, r)) { if (ammo) return false; this.queue++; this.bubble(MACHINE.x, MACHINE.y - 36, 'Stone in', 'info'); return true; }
+    const m = this.isMachine(c, r);
+    if (m) { if (ammo) return false; m.queue++; this.bubble(m.x, m.y - 36, 'Stone in', 'info'); return true; }
     const tu = this.turrets.get(key); if (tu) { tu.ammo++; return true; }
     const ch = this.chests.get(key); if (ch) { if (ch.stone + ch.ammo >= SURVIVAL.chestSize) return false; if (ammo) ch.ammo++; else ch.stone++; return true; }
     const sp = this.splitters.get(key); if (sp) { if (sp.buf.length >= 4) return false; sp.buf.push(ammo); return true; }
@@ -373,10 +416,13 @@ export class Survival {
     return false;
   }
   /** The tile at (c, r) is the machine's side, where belts and grabbers meet it. */
-  private isMachine(c: number, r: number) { return dist(tileX(c), tileY(r), MACHINE.x, MACHINE.y) < MACHINE.r + 24 && !this.taken(c, r); }
+  private isMachine(c: number, r: number) {
+    if (this.taken(c, r)) return null;
+    return this.machines.find(m => dist(tileX(c), tileY(r), m.x, m.y) < m.r + 24) ?? null;
+  }
   /** A grabber with the machine behind it pulls stone ammo out of it. */
-  private machineGrabbed() {
-    for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[gr.d]; if (this.isMachine(c - dx, r - dy)) return true; }
+  private machineGrabbed(m: Machine) {
+    for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[gr.d]; if (this.isMachine(c - dx, r - dy) === m) return true; }
     return false;
   }
   private buyShort() {
@@ -400,7 +446,7 @@ export class Survival {
   private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
-    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${({ belt: 'long belts', short: 'short belts', grab: 'grabbers', turret: 'turrets', split: 'splitters', chest: 'chests' })[type]}. Buy them at the shop`, 'info'); Sound.denied(); return; }
+    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${({ belt: 'long belts', short: 'short belts', grab: 'grabbers', turret: 'turrets', split: 'splitters', chest: 'chests', mine: 'mines', machine: 'machines' })[type]}. Buy them at the shop`, 'info'); Sound.denied(); return; }
     this.placing = true; this.placeType = type; this.hover = null;
     Sound.click();
   }
@@ -419,8 +465,26 @@ export class Survival {
     const d = DIRS[Math.round(((this.face % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 2)) % 4];
     return tileAt(this.x + d[0] * TILE, this.y + d[1] * TILE);
   }
+  /** Can a new mine or machine (radius rr) go with its centre on tile (c, r)? */
+  private bigFits(c: number, r: number, rr: number) {
+    const x = tileX(c), y = tileY(r);
+    if (x - rr < WALL.x0 + WALL.t + 4 || x + rr > WALL.x1 - WALL.t - 4 || y - rr < WALL.y0 + WALL.t + 4 || y + rr > WALL.y1 - WALL.t - 4) return false;
+    if (structs.some(o => dist(x, y, o.x, o.y) < rr + o.r + 16)) return false;
+    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
+    return true;
+  }
   private placeAt(c: number, r: number) {
     const key = c + ',' + r;
+    if (this.placeType === 'mine' || this.placeType === 'machine') {
+      if (!this.count(this.placeType)) { this.placing = false; return; }
+      const rr = this.placeType === 'mine' ? MINE_R : MACHINE_R;
+      if (!this.bigFits(c, r, rr)) { this.bubble(tileX(c), tileY(r) - 30, 'Not enough room there', 'info'); Sound.denied(); return; }
+      if (this.placeType === 'mine') { this.mines.push({ x: tileX(c), y: tileY(r), r: rr }); this.invMine--; }
+      else { this.machines.push({ x: tileX(c), y: tileY(r), r: rr, queue: 0, batchT: 0, ammo: 0 }); this.invMachine--; }
+      this.updateStructs(); Sound.thump();
+      if (!this.count(this.placeType)) this.placing = false;
+      return;
+    }
     if (this.turnTile(key)) return;
     if (!this.count(this.placeType)) { this.placing = false; return; }
     if (this.turrets.has(key) || this.chests.has(key)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
@@ -457,10 +521,10 @@ export class Survival {
     this.bubble(this.x, this.y - 30, 'Stand on a belt or face a grabber to turn it', 'info');
   }
   /** New stone goes onto a belt that touches the mine, or into your pocket. */
-  private giveStone(x: number, y: number) {
-    let best: { c: number; r: number } | null = null, bd = MINE.r + 34;
+  private giveStone(x: number, y: number, mine: Spot) {
+    let best: { c: number; r: number } | null = null, bd = mine.r + 34;
     for (const key of this.belts.keys()) {
-      const [c, r] = key.split(',').map(Number), d = dist(tileX(c), tileY(r), MINE.x, MINE.y);
+      const [c, r] = key.split(',').map(Number), d = dist(tileX(c), tileY(r), mine.x, mine.y);
       if (d < bd) { bd = d; best = { c, r }; }
     }
     if (best && this.items.length < 80) { this.items.push({ x: tileX(best.c), y: tileY(best.r) }); this.bubble(x, y, '+1 stone on the belt', 'info'); }
@@ -499,7 +563,7 @@ export class Survival {
           const bk = (c - dx) + ',' + (r - dy), ch = this.chests.get(bk);
           if (ch && ch.ammo) { ch.ammo--; gr.carry = true; gr.ammo = true; gr.t = 0; }
           else if (ch && ch.stone) { ch.stone--; gr.carry = true; gr.ammo = false; gr.t = 0; }
-          else if (this.machineAmmo > 0 && this.isMachine(c - dx, r - dy)) { this.machineAmmo--; gr.carry = true; gr.ammo = true; gr.t = 0; }
+          else { const bm = this.isMachine(c - dx, r - dy); if (bm && bm.ammo > 0) { bm.ammo--; gr.carry = true; gr.ammo = true; gr.t = 0; } }
         }
         continue;
       }
@@ -531,12 +595,17 @@ export class Survival {
     if (got) { this.items = this.items.filter(it => !it.gone); Sound.click(); }
   }
 
+  /** Miners are shared out between the mines: the mine and the spot round it for miner i. */
+  private minerSpot(i: number): [Spot, number, number] {
+    const n = this.mines.length, [ox, oy] = MINER_SPOTS[Math.floor(i / n) % MINER_SPOTS.length];
+    return [this.mines[i % n], ox, oy];
+  }
   private minerCost() { return this.miners.length ? SURVIVAL.extraMinerCost : SURVIVAL.minerCost; }
   /** H next to the mine: hire a miner (30 stone, then 20 for each extra one), who digs a stone every 5 seconds for you. */
   private hire() {
     if (!this.mineOn) return;
-    if (this.miners.length >= SURVIVAL.maxMiners) { this.bubble(this.x, this.y - 30, 'No room for more miners', 'info'); Sound.denied(); return; }
-    if (dist(this.x, this.y, MINE.x, MINE.y) > NEAR) { this.bubble(this.x, this.y - 30, 'Walk to the mine to hire a miner', 'info'); Sound.denied(); return; }
+    if (this.miners.length >= SURVIVAL.maxMiners * this.mines.length) { this.bubble(this.x, this.y - 30, 'No room for more miners. Buy another mine', 'info'); Sound.denied(); return; }
+    if (!near(this.mines, this.x, this.y)) { this.bubble(this.x, this.y - 30, 'Walk to the mine to hire a miner', 'info'); Sound.denied(); return; }
     const cost = this.minerCost();
     if (this.stones < cost) { this.bubble(this.x, this.y - 30, `${this.miners.length ? 'An extra' : 'A'} miner costs ${cost} stone`, 'info'); Sound.denied(); return; }
     this.stones -= cost; this.miners.push(Math.random() * SURVIVAL.minerEvery * .5);
@@ -586,30 +655,33 @@ export class Survival {
     // mining: a stone every 4 seconds while next to the mine
     this.swing = Math.max(0, this.swing - dt);
     if (this.mineOn) this.popT += dt;
-    if (this.mining) {
-      if (m > 0 || dist(this.x, this.y, MINE.x, MINE.y) > NEAR) this.mining = false;
+    const mineAt = this.mineAt;
+    if (this.mining && mineAt) {
+      if (m > 0 || dist(this.x, this.y, mineAt.x, mineAt.y) > NEAR) this.mining = false;
       else {
-        this.face = Math.atan2(MINE.y - this.y, MINE.x - this.x);
+        this.face = Math.atan2(mineAt.y - this.y, mineAt.x - this.x);
         if (this.swing <= 0) { this.swing = 1; Sound.click(); }
         this.mineT += dt;
-        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.giveStone(MINE.x, MINE.y - 30); Sound.thump(); }
+        if (this.mineT >= SURVIVAL.mineEvery) { this.mineT -= SURVIVAL.mineEvery; this.giveStone(mineAt.x, mineAt.y - 30, mineAt); Sound.thump(); }
       }
     }
     for (let i = 0; i < this.miners.length; i++) {
       this.miners[i] += dt;
-      if (this.miners[i] >= SURVIVAL.minerEvery) { this.miners[i] -= SURVIVAL.minerEvery; const [ox, oy] = MINER_SPOTS[i]; this.giveStone(MINE.x + ox, MINE.y + oy - 18); }
+      if (this.miners[i] >= SURVIVAL.minerEvery) { this.miners[i] -= SURVIVAL.minerEvery; const [mine, ox, oy] = this.minerSpot(i); this.giveStone(mine.x + ox, mine.y + oy - 18, mine); }
     }
     this.moveItems(dt);
-    if (this.queue > 0) {
-      this.batchT += dt;
-      if (this.batchT >= SURVIVAL.batchTime) {
-        this.batchT -= SURVIVAL.batchTime; this.queue--;
-        // with a grabber pulling from the machine, the ammo waits in the machine for it; otherwise it's yours
-        if (this.machineGrabbed()) this.machineAmmo += SURVIVAL.batchAmmo; else this.stoneAmmo += SURVIVAL.batchAmmo;
-        this.bubble(MACHINE.x, MACHINE.y - 36, `+${SURVIVAL.batchAmmo} stone ammo`, 'info'); Sound.pop();
-      }
-    } else this.batchT = 0;
-    if (this.machineAmmo && !this.machineGrabbed()) { this.stoneAmmo += this.machineAmmo; this.machineAmmo = 0; }
+    for (const mc of this.machines) {
+      if (mc.queue > 0) {
+        mc.batchT += dt;
+        if (mc.batchT >= SURVIVAL.batchTime) {
+          mc.batchT -= SURVIVAL.batchTime; mc.queue--;
+          // with a grabber pulling from the machine, the ammo waits in the machine for it; otherwise it's yours
+          if (this.machineGrabbed(mc)) mc.ammo += SURVIVAL.batchAmmo; else this.stoneAmmo += SURVIVAL.batchAmmo;
+          this.bubble(mc.x, mc.y - 36, `+${SURVIVAL.batchAmmo} stone ammo`, 'info'); Sound.pop();
+        }
+      } else mc.batchT = 0;
+      if (mc.ammo && !this.machineGrabbed(mc)) { this.stoneAmmo += mc.ammo; mc.ammo = 0; }
+    }
 
     // more bears as time goes on
     this.spawnT -= dt;
@@ -832,6 +904,7 @@ export class Survival {
     this.drawCamp(g);
     // scenery outside
     for (const d of this.decor) {
+      if (d.k !== 2 && d.x > WALL.x0 - 8 && d.x < WALL.x1 + 8 && d.y > WALL.y0 - 8 && d.y < WALL.y1 + 8) continue; // cleared when the base grew
       if (d.k === 0) { // tree
         g.fillStyle = '#2d4a22'; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
         g.fillStyle = '#3c5f2c'; g.beginPath(); g.arc(d.x - d.r * .25, d.y - d.r * .25, d.r * .65, 0, 7); g.fill();
@@ -856,10 +929,15 @@ export class Survival {
     if (this.placing) {
       const t = this.ghost();
       if (t) {
-        const taken = this.taken(t.c, t.r);
-        const bad = taken ? false : blockedTile(t.c, t.r);
+        const big = this.placeType === 'mine' || this.placeType === 'machine';
+        const taken = !big && this.taken(t.c, t.r);
+        const bad = big ? !this.bigFits(t.c, t.r, this.placeType === 'mine' ? MINE_R : MACHINE_R) : taken ? false : blockedTile(t.c, t.r);
         g.globalAlpha = .6;
-        if (!taken) {
+        if (big) {
+          const rr = this.placeType === 'mine' ? MINE_R : MACHINE_R;
+          g.fillStyle = bad ? 'rgba(255,90,80,.35)' : 'rgba(255,245,234,.25)'; g.beginPath(); g.arc(tileX(t.c), tileY(t.r), rr, 0, 7); g.fill();
+          g.fillStyle = '#fff5ea'; g.font = '600 11px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(this.placeType === 'mine' ? 'Mine' : 'Machine', tileX(t.c), tileY(t.r) + 4);
+        } else if (!taken) {
           if (this.placeType === 'belt' || this.placeType === 'short') { const [dx, dy] = DIRS[this.placeDir]; for (let i = 0; i < (this.placeType === 'belt' ? SURVIVAL.beltLength : 1); i++) { const cc = t.c + dx * i, rr = t.r + dy * i; if (cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS || (i && (blockedTile(cc, rr) || this.taken(cc, rr)))) break; paintBelt(g, tileX(cc), tileY(rr), this.placeDir, this.t); } }
           else if (this.placeType === 'grab') paintGrabber(g, tileX(t.c), tileY(t.r), { d: this.placeDir, t: 0, carry: false });
           else if (this.placeType === 'split') paintSplitter(g, tileX(t.c), tileY(t.r), this.placeDir);
@@ -934,64 +1012,64 @@ export class Survival {
   }
 
   private drawMineAndMachine(g: CanvasRenderingContext2D) {
+    for (const mine of this.mines) this.drawMine(g, mine);
+    for (const mc of this.machines) this.drawMachine(g, mc);
+    // hired miners stand round the mines, swinging picks
+    this.miners.forEach((mt, i) => paintMiner(g, this.minerSpot(i), mt));
+    g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
+    this.mines.forEach((mine, j) => {
+      const n = this.miners.filter((_, i) => i % this.mines.length === j).length;
+      g.fillText(n ? `Mine (${n} miner${n > 1 ? 's' : ''})` : 'Mine', mine.x + (n ? 40 : 0), mine.y + (n ? 52 : 34));
+    });
+    // mining progress ring
+    if (this.mining && this.mineAt) {
+      g.strokeStyle = '#c7c2b8'; g.lineWidth = 3;
+      g.beginPath(); g.arc(this.mineAt.x, this.mineAt.y, this.mineAt.r + 8, -Math.PI / 2, -Math.PI / 2 + this.mineT / SURVIVAL.mineEvery * Math.PI * 2); g.stroke();
+    }
+  }
+
+  private drawMine(g: CanvasRenderingContext2D, mine: Spot) {
     const pop = Math.min(1, this.popT * 2);
-    // the mine: a heap of grey rock
-    g.save(); g.translate(MINE.x, MINE.y); g.scale(pop, pop);
+    // a heap of grey rock
+    g.save(); g.translate(mine.x, mine.y); g.scale(pop, pop);
     g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(4, 6, 28, 20, 0, 0, 7); g.fill();
     g.fillStyle = '#6f6c66'; g.beginPath(); g.moveTo(-26, 10); g.lineTo(-18, -12); g.lineTo(-4, -22); g.lineTo(14, -16); g.lineTo(26, 2); g.lineTo(18, 16); g.lineTo(-12, 18); g.closePath(); g.fill();
     g.fillStyle = '#8f8b84'; g.beginPath(); g.moveTo(-14, -8); g.lineTo(-3, -17); g.lineTo(10, -12); g.lineTo(4, 0); g.lineTo(-10, 2); g.closePath(); g.fill();
     g.fillStyle = '#c7c2b8'; g.beginPath(); g.arc(12, 6, 3, 0, 7); g.arc(-8, 10, 2.5, 0, 7); g.fill();
-    if (this.mining && this.swing > .7) { g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const a = i * 1.6 + this.t * 3; g.beginPath(); g.moveTo(Math.cos(a) * 14, Math.sin(a) * 14); g.lineTo(Math.cos(a) * 22, Math.sin(a) * 22); g.stroke(); } }
+    if (this.mining && this.mineAt === mine && this.swing > .7) { g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 2; for (let i = 0; i < 4; i++) { const a = i * 1.6 + this.t * 3; g.beginPath(); g.moveTo(Math.cos(a) * 14, Math.sin(a) * 14); g.lineTo(Math.cos(a) * 22, Math.sin(a) * 22); g.stroke(); } }
     g.restore();
-    // the machine: a metal box with a hopper, a light while it works and a progress bar
-    g.save(); g.translate(MACHINE.x, MACHINE.y); g.scale(pop, pop);
+  }
+
+  /** A metal box with a hopper, a light while it works and a progress bar. */
+  private drawMachine(g: CanvasRenderingContext2D, mc: Machine) {
+    const pop = Math.min(1, this.popT * 2);
+    g.save(); g.translate(mc.x, mc.y); g.scale(pop, pop);
     g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-22, -18, 50, 44);
     g.fillStyle = '#5b6670'; g.fillRect(-26, -22, 52, 44);
     g.fillStyle = '#7d8a95'; g.fillRect(-20, -16, 24, 18);
     g.fillStyle = '#3a4249'; g.beginPath(); g.moveTo(8, -18); g.lineTo(22, -18); g.lineTo(18, -6); g.lineTo(12, -6); g.closePath(); g.fill();
-    g.fillStyle = this.queue ? (Math.sin(this.t * 10) > 0 ? '#ffcf4a' : '#a07a20') : '#3c4a3c'; g.beginPath(); g.arc(16, 10, 4, 0, 7); g.fill();
-    if (this.queue) { g.fillStyle = '#222'; g.fillRect(-20, 8, 26, 6); g.fillStyle = '#9fe0b0'; g.fillRect(-20, 8, 26 * this.batchT / SURVIVAL.batchTime, 6); }
+    g.fillStyle = mc.queue ? (Math.sin(this.t * 10) > 0 ? '#ffcf4a' : '#a07a20') : '#3c4a3c'; g.beginPath(); g.arc(16, 10, 4, 0, 7); g.fill();
+    if (mc.queue) { g.fillStyle = '#222'; g.fillRect(-20, 8, 26, 6); g.fillStyle = '#9fe0b0'; g.fillRect(-20, 8, 26 * mc.batchT / SURVIVAL.batchTime, 6); }
     g.restore();
-    // hired miners stand round the mine, swinging picks at it
-    this.miners.forEach((mt, i) => {
-      const [ox, oy] = MINER_SPOTS[i], mx = MINE.x + ox, my = MINE.y + oy, sw = Math.sin(mt / SURVIVAL.minerEvery * Math.PI * 10) * .6;
-      g.save(); g.translate(mx, my);
-      g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(2, 3, 11, 9, 0, 0, 7); g.fill();
-      g.rotate(Math.atan2(-oy, -ox));
-      g.fillStyle = '#7a5a3a'; g.beginPath(); g.ellipse(0, 0, 8, 10, 0, 0, 7); g.fill();
-      g.save(); g.rotate(sw);
-      g.strokeStyle = '#5a3d22'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(4, 2); g.lineTo(18, 2); g.stroke();
-      g.strokeStyle = '#9aa0a6'; g.lineWidth = 3; g.beginPath(); g.moveTo(18, -6); g.quadraticCurveTo(22, 2, 18, 10); g.stroke();
-      g.restore();
-      g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(0, 0, 5.5, 0, 7); g.fill();
-      g.fillStyle = '#e0b43a'; g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill(); g.fillStyle = '#fff6b0'; g.beginPath(); g.arc(4, 0, 1.8, 0, 7); g.fill();
-      g.restore();
-    });
-    // labels
     g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
-    g.fillText(this.miners.length ? `Mine (${this.miners.length} miner${this.miners.length > 1 ? 's' : ''})` : 'Mine', MINE.x + (this.miners.length ? 40 : 0), MINE.y + (this.miners.length ? 52 : 34));
-    g.fillText(this.queue ? `Machine (${this.queue} left)` : 'Machine', MACHINE.x, MACHINE.y + 38);
-    if (this.machineAmmo) { g.fillStyle = '#7fc8ff'; g.fillText(`${this.machineAmmo} ammo ready`, MACHINE.x, MACHINE.y + 51); }
-    // mining progress ring
-    if (this.mining) {
-      g.strokeStyle = '#c7c2b8'; g.lineWidth = 3;
-      g.beginPath(); g.arc(MINE.x, MINE.y, MINE.r + 8, -Math.PI / 2, -Math.PI / 2 + this.mineT / SURVIVAL.mineEvery * Math.PI * 2); g.stroke();
-    }
+    g.fillText(mc.queue ? `Machine (${mc.queue} left)` : 'Machine', mc.x, mc.y + 38);
+    if (mc.ammo) { g.fillStyle = '#7fc8ff'; g.fillText(`${mc.ammo} ammo ready`, mc.x, mc.y + 51); }
   }
 
   private drawCamp(g: CanvasRenderingContext2D) {
     // tent
-    const tx = WALL.x0 + 70, ty = WALL.y1 - 90;
+    const tx = BASE_WALL.x0 + 70, ty = BASE_WALL.y1 - 90;
     g.fillStyle = '#b88a4a'; g.beginPath(); g.moveTo(tx - 38, ty + 30); g.lineTo(tx, ty - 30); g.lineTo(tx + 38, ty + 30); g.closePath(); g.fill();
     g.fillStyle = '#8f6633'; g.beginPath(); g.moveTo(tx, ty - 30); g.lineTo(tx + 38, ty + 30); g.lineTo(tx, ty + 30); g.closePath(); g.fill();
     // fire pit
-    const fx = GATE.x + 70, fy = WALL.y1 - 130, f = .8 + Math.sin(this.t * 13) * .15;
+    const fx = GATE.x + 70, fy = BASE_WALL.y1 - 130, f = .8 + Math.sin(this.t * 13) * .15;
     g.fillStyle = '#5d5148'; for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; g.beginPath(); g.arc(fx + Math.cos(a) * 15, fy + Math.sin(a) * 15, 4.5, 0, 7); g.fill(); }
     g.fillStyle = '#ff9a3a'; g.beginPath(); g.arc(fx, fy, 9 * f, 0, 7); g.fill();
     g.fillStyle = '#ffe08a'; g.beginPath(); g.arc(fx, fy, 4.5 * f, 0, 7); g.fill();
     // crates
-    g.fillStyle = '#9a6a3a'; g.fillRect(WALL.x1 - 70, WALL.y0 + 40, 34, 34); g.fillRect(WALL.x1 - 50, WALL.y0 + 80, 30, 30);
-    g.strokeStyle = '#6a4626'; g.lineWidth = 2; g.strokeRect(WALL.x1 - 70, WALL.y0 + 40, 34, 34); g.strokeRect(WALL.x1 - 50, WALL.y0 + 80, 30, 30);
+    const W1 = BASE_WALL.x1, Y0 = BASE_WALL.y0;
+    g.fillStyle = '#9a6a3a'; g.fillRect(W1 - 70, Y0 + 40, 34, 34); g.fillRect(W1 - 50, Y0 + 80, 30, 30);
+    g.strokeStyle = '#6a4626'; g.lineWidth = 2; g.strokeRect(W1 - 70, Y0 + 40, 34, 34); g.strokeRect(W1 - 50, Y0 + 80, 30, 30);
   }
 
   private drawWalls(g: CanvasRenderingContext2D) {
@@ -1148,14 +1226,14 @@ export class Survival {
     const r = this.reload / AMMO[this.load.ammo].reload;
     this.pad.style.setProperty('--reload', String(r));
     this.pad.classList.toggle('loading', this.reload > 0);
-    const nearMine = this.mineOn && dist(this.x, this.y, MINE.x, MINE.y) < NEAR, nearMachine = this.mineOn && dist(this.x, this.y, MACHINE.x, MACHINE.y) < NEAR;
+    const nearMine = this.mineOn && !!near(this.mines, this.x, this.y), nearMachine = this.mineOn && !!near(this.machines, this.x, this.y);
     const mb = this.pad.querySelector<HTMLElement>('#svMine')!, ab = this.pad.querySelector<HTMLElement>('#svAmmoBtn')!;
     mb.hidden = !nearMine && !nearMachine;
     const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
     ab.hidden = !this.stoneAmmo && !this.useStone;
     const hb = this.pad.querySelector<HTMLElement>('#svHire')!;
-    hb.hidden = !nearMine || this.miners.length >= SURVIVAL.maxMiners;
+    hb.hidden = !nearMine || this.miners.length >= SURVIVAL.maxMiners * this.mines.length;
     const hl = `H: ${this.minerCost()} stone`;
     if (hb.lastElementChild!.textContent !== hl) hb.lastElementChild!.textContent = hl;
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
@@ -1182,7 +1260,7 @@ export class Survival {
     it.classList.toggle('on', this.placing && this.placeType === 'turret');
     const tl = `Turret ×${this.invTurret}`;
     if (it.firstElementChild!.textContent !== tl) it.firstElementChild!.textContent = tl;
-    for (const [id, type, label] of [['#svInvSplit', 'split', 'Splitter'], ['#svInvChest', 'chest', 'Chest']] as const) {
+    for (const [id, type, label] of [['#svInvSplit', 'split', 'Splitter'], ['#svInvChest', 'chest', 'Chest'], ['#svInvMine', 'mine', 'Mine'], ['#svInvMachine', 'machine', 'Machine']] as const) {
       const el = this.pad.querySelector<HTMLElement>(id)!, n = this.count(type), on = this.placing && this.placeType === type;
       el.hidden = !n && !on; el.classList.toggle('on', on);
       const tx = `${label} ×${n}`;
@@ -1197,7 +1275,7 @@ export class Survival {
     if (lb.firstElementChild!.textContent !== ll) lb.firstElementChild!.textContent = ll;
     const standing = tileAt(this.x, this.y);
     this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const help = this.placing ? (this.placeType === 'turret' || this.placeType === 'chest' ? `Tap a spot to place the ${this.placeType}.` : `Tap a spot to place the ${({ grab: 'grabber', split: 'splitter' } as Record<string, string>)[this.placeType] ?? 'belt'}. R turns it.`) : this.helpText;
+    const help = this.placing ? (['turret', 'chest', 'mine', 'machine'].includes(this.placeType) ? `Tap a spot to place the ${this.placeType}.` : `Tap a spot to place the ${({ grab: 'grabber', split: 'splitter' } as Record<string, string>)[this.placeType] ?? 'belt'}. R turns it.`) : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
     if (hp.textContent !== help) hp.textContent = help;
     if (this.shopOpen) this.renderShop();
@@ -1245,12 +1323,35 @@ export function drawPreview(c: HTMLCanvasElement, L: Loadout) {
 const tileX = (c: number) => GX0 + c * TILE + TILE / 2, tileY = (r: number) => GY0 + r * TILE + TILE / 2;
 function tileAt(x: number, y: number) {
   const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE);
-  return c >= 0 && r >= 0 && c < COLS && r < ROWS ? { c, r } : null;
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return null;
+  // only tiles inside the walls as they are now
+  const cx = GX0 + c * TILE + TILE / 2, cy = GY0 + r * TILE + TILE / 2;
+  return cx >= WALL.x0 + WALL.t + 6 && cx <= WALL.x1 - WALL.t - 6 && cy >= WALL.y0 + WALL.t + 6 && cy <= WALL.y1 - WALL.t - 6 ? { c, r } : null;
 }
 /** Belts can't go on the mine, the machine or the shop. */
 function blockedTile(c: number, r: number) {
   const x = tileX(c), y = tileY(r);
-  return [MINE, MACHINE, SHOP].some(o => dist(x, y, o.x, o.y) < o.r + 10);
+  return structs.some(o => dist(x, y, o.x, o.y) < o.r + 10);
+}
+/** A hired miner at its spot by a mine, swinging a pick at it. */
+function paintMiner(g: CanvasRenderingContext2D, [mine, ox, oy]: [Spot, number, number], mt: number) {
+  const sw = Math.sin(mt / SURVIVAL.minerEvery * Math.PI * 10) * .6;
+  g.save(); g.translate(mine.x + ox, mine.y + oy);
+  g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(2, 3, 11, 9, 0, 0, 7); g.fill();
+  g.rotate(Math.atan2(-oy, -ox));
+  g.fillStyle = '#7a5a3a'; g.beginPath(); g.ellipse(0, 0, 8, 10, 0, 0, 7); g.fill();
+  g.save(); g.rotate(sw);
+  g.strokeStyle = '#5a3d22'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(4, 2); g.lineTo(18, 2); g.stroke();
+  g.strokeStyle = '#9aa0a6'; g.lineWidth = 3; g.beginPath(); g.moveTo(18, -6); g.quadraticCurveTo(22, 2, 18, 10); g.stroke();
+  g.restore();
+  g.fillStyle = '#e0b43a'; g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill(); g.fillStyle = '#fff6b0'; g.beginPath(); g.arc(4, 0, 1.8, 0, 7); g.fill();
+  g.restore();
+}
+/** The nearest spot in a list within reach of (x, y), if any. */
+function near<T extends Spot>(list: T[], x: number, y: number): T | null {
+  let best: T | null = null, bd = NEAR;
+  for (const o of list) { const d = dist(x, y, o.x, o.y); if (d < bd) { bd = d; best = o; } }
+  return best;
 }
 /** A splitter: stone comes in, and goes out to the left and right in turn. */
 function paintSplitter(g: CanvasRenderingContext2D, x: number, y: number, d: number) {

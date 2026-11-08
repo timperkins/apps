@@ -318,3 +318,7 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svshop .svitem b { font-size: 14px; }
 .svshop .svitem small { font-size: 11px; }
 .svshop .svitem button.primary { padding: 7px 8px; font-size: 13px; width: 100%; }
+.svinv.mine { left: 14px; bottom: 240px; }
+.svinv.machine { left: 112px; bottom: 240px; }
+.svshop .svitem.wide { grid-column: 1 / -1; flex-direction: row; align-items: center; }
+.svshop .svitem.wide button.primary { width: auto; flex: none; }
