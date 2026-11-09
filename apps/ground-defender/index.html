@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Ground Defender</title>
+<meta name="description" content="Defend your camp from bears. Mine, build, research and destroy the bear spawners.">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ground Defender">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Jost:wght@400;500&display=swap">
+</head>
+<body>
+<div id="safe"></div>
+<div id="topbar"></div>
+<div id="stage">
+  <canvas id="sv"></canvas>
+  <div id="svPad" hidden>
+    <button id="svPause" class="hudbtn" aria-label="Pause">
+      <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
+    </button>
+    <p id="svHelp">Drag anywhere to walk</p>
+    <button id="svInv" class="svinv" hidden><span>Belt 3 ×0</span><small>E: place</small></button>
+    <button id="svInvSplit" class="svinv split" hidden><span>Splitter ×0</span><small>X: place</small></button>
+    <button id="svInvChest" class="svinv chest" hidden><span>Chest ×0</span><small>C: place</small></button>
+    <button id="svInvMine" class="svinv mine" hidden><span>Mine ×0</span><small>N: place</small></button>
+    <button id="svInvLab" class="svinv lab" hidden><span>Lab ×0</span><small>L: place</small></button>
+    <button id="svInv-bturret" class="svinv b-bturret" hidden><span>Brick turret ×0</span><small>J: place</small></button>
+    <button id="svInv-furnace" class="svinv b-furnace" hidden><span>Furnace ×0</span><small>F: place</small></button>
+    <button id="svInv-gen" class="svinv b-gen" hidden><span>Generator ×0</span><small>V: place</small></button>
+    <button id="svInv-pump" class="svinv b-pump" hidden><span>Pump ×0</span><small>W: place</small></button>
+    <button id="svInv-pipe" class="svinv b-pipe" hidden><span>Pipe ×0</span><small>I: place</small></button>
+    <button id="svInv-asm" class="svinv b-asm" hidden><span>Assembler ×0</span><small>A: place</small></button>
+    <button id="svInv-tunnel" class="svinv b-tunnel" hidden><span>Underground ×0</span><small>D: place</small></button>
+    <button id="svInv-hub" class="svinv b-hub" hidden><span>Robot hub ×0</span><small>O: place</small></button>
+    <button id="svInv-rapid" class="svinv b-rapid" hidden><span>Rapid crossbow ×0</span><small>5: place</small></button>
+    <button id="svInv-rocket" class="svinv b-rocket" hidden><span>Rocket launcher ×0</span><small>6: place</small></button>
+    <button id="svInv-iron" class="svinv b-iron" hidden><span>Iron mine ×0</span><small>1: place</small></button>
+    <button id="svInv-copper" class="svinv b-copper" hidden><span>Copper mine ×0</span><small>2: place</small></button>
+    <button id="svInv-gold" class="svinv b-gold" hidden><span>Gold mine ×0</span><small>3: place</small></button>
+    <button id="svInv-diamond" class="svinv b-diamond" hidden><span>Diamond mine ×0</span><small>4: place</small></button>
+    <button id="svInvMachine" class="svinv machine" hidden><span>Machine ×0</span><small>K: place</small></button>
+    <button id="svInvShort" class="svinv short" hidden><span>Belt 1 ×0</span><small>Q: place</small></button>
+    <button id="svInvGrab" class="svinv grab" hidden><span>Grabber ×0</span><small>G: place</small></button>
+    <button id="svInvTurret" class="svinv turret" hidden><span>Turret ×0</span><small>U: place</small></button>
+    <button id="svLoad" class="svbtn small" hidden><span>Load</span><small>T</small></button>
+    <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
+    <button id="svLabBtn" class="svbtn small" hidden><span>Research</span><small>Y</small></button>
+    <button id="svShopBtn" class="svbtn small" hidden><span>Shop</span><small>B</small></button>
+    <div id="svShop" class="svshop" hidden>
+      <h3>Shop</h3>
+      <p class="fine"><b id="svShopStone">0</b> stone · <b id="svShopBricks">0</b> bricks</p>
+      <p class="fine" id="svShopMetal"></p>
+      <div class="svitem">
+        <div><b>Long belt</b><small>3 tiles long. Carries stone (and you). E to place, R turns it.</small></div>
+        <button id="svBuyBelt" class="primary">5 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Short belts ×3</b><small>Three 1-tile belts for corners and gaps. Q to place.</small></div>
+        <button id="svBuyShort" class="primary">5 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Grabber</b><small>Moves stone from behind it to in front, e.g. into a chest, or ammo out of the machine. G to place.</small></div>
+        <button id="svBuyGrab" class="primary">3 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Turret</b><small>Shoots bears for 5.25. Load stone ammo with T, or feed it stone. U to place.</small></div>
+        <button id="svBuyTurret" class="primary">15 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Splitter</b><small>Sends stone left and right in turn, half each way. X to place.</small></div>
+        <button id="svBuySplit" class="primary">4 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Chest</b><small>Holds 200 stone or ammo. T takes it out, or a grabber. C to place.</small></div>
+        <button id="svBuyChest" class="primary">10 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Mine</b><small>Another mine to dig at, with room for 6 more miners. N to place.</small></div>
+        <button id="svBuyMine" class="primary">30 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Machine</b><small>Another machine for making stone ammo. K to place.</small></div>
+        <button id="svBuyMachine" class="primary">45 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Science pack</b><small>Put packs in a lab with T to research upgrades.</small></div>
+        <button id="svBuyPack" class="primary">5 stone</button>
+        <button id="svBuyPack5" class="primary">5 for 25</button>
+      </div>
+      <div class="svitem">
+        <div><b>Lab</b><small>Uses science packs to research. Y picks what. L to place.</small></div>
+        <button id="svBuyLab" class="primary">20 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Furnace</b><small>Bakes stone into bricks. Feed it stone; bricks come out the front. F to place, R turns it.</small></div>
+        <button id="svBuy-furnace" class="primary">12 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Generator</b><small>Burns stone for power. Machines, labs, furnaces and assemblers nearby run twice as fast. V to place.</small></div>
+        <button id="svBuy-gen" class="primary">20 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Water pump</b><small>Pumps water into pipes. W to place.</small></div>
+        <button id="svBuy-pump" class="primary">15 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Pipes ×3</b><small>A turret touching pipes from a pump is cooled and shoots twice as fast. I to place.</small></div>
+        <button id="svBuy-pipe" class="primary">3 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Assembler</b><small>Makes a science pack from 5 stone (T switches to 3 short belts). A to place, R turns it.</small></div>
+        <button id="svBuy-asm" class="primary">35 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Underground belts ×2</b><small>Things go in one and come out the next one ahead, up to 6 tiles, under anything. D to place.</small></div>
+        <button id="svBuy-tunnel" class="primary">6 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Robot hub</b><small>Comes with 2 robots that bring things from chests to turrets, labs, machines and buildings. O to place.</small></div>
+        <button id="svBuy-hub" class="primary">40 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Robot</b><small>One more robot for a hub.</small></div>
+        <button id="svBuy-robot" class="primary">10 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Brick turret</b><small>Does 60% more damage and reaches farther. J to place.</small></div>
+        <button id="svBuy-bturret" class="primary">15 stone + 10 bricks</button>
+      </div>
+      <div class="svitem">
+        <div><b>Brick gate</b><small>Bears wait 10 seconds longer at the gate.</small></div>
+        <button id="svBuy-gate" class="primary">30 bricks</button>
+      </div>
+      <div class="svitem">
+        <div><b>Iron mine</b><small>Dig iron with M, or hire miners. Iron makes 6 iron ammo (9.5 damage) in a machine. 1 to place.</small></div>
+        <button id="svBuy-iron" class="primary">100 stone</button>
+      </div>
+      <div class="svitem">
+        <div><b>Copper mine</b><small>Copper makes 8 copper ammo (8.55 damage) in a machine. 2 to place.</small></div>
+        <button id="svBuy-copper" class="primary">100 stone + 75 iron</button>
+      </div>
+      <div class="svitem">
+        <div><b>Gold mine</b><small>Gold makes 12 gold ammo (11.5 damage) in a machine. 3 to place.</small></div>
+        <button id="svBuy-gold" class="primary">125 stone + 100 iron + 50 copper</button>
+      </div>
+      <div class="svitem">
+        <div><b>Diamond mine</b><small>A diamond makes 16 diamond ammo (15 damage) in a machine. 4 to place.</small></div>
+        <button id="svBuy-diamond" class="primary">150 stone + 100 iron + 75 copper + 50 gold</button>
+      </div>
+      <div class="svitem" hidden>
+        <div><b>Rapid crossbow</b><small>0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo. Load it like a turret. 5 to place.</small></div>
+        <button id="svBuy-rapid" class="primary">50 stone + 10 iron</button>
+      </div>
+      <div class="svitem" hidden>
+        <div><b>Rocket launcher</b><small>Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T. 6 to place.</small></div>
+        <button id="svBuy-rocket" class="primary">40 stone + 20 iron</button>
+      </div>
+      <div class="svitem wide">
+        <div><b>Bigger base</b><small>Moves your walls out for more room. Two steps.</small></div>
+        <button id="svBuyExpand" class="primary">40 stone</button>
+      </div>
+      <p class="fine" id="svShopInv"></p>
+      <p class="fine">Tap anything you placed to pick it back up.</p>
+      <button class="ghost small" id="svShopClose">Close (B)</button>
+    </div>
+    <div id="svLab" class="svshop svlab" hidden>
+      <h3>Research</h3>
+      <p class="fine" id="svLabInfo"></p>
+      <div id="svResList" class="svreslist"></div>
+      <p class="fine">Each lab with packs in it uses one every 2 seconds. Put packs in with T.</p>
+      <button class="ghost small" id="svLabClose">Close (Y)</button>
+    </div>
+    <div id="svRecipe" class="svshop svrecipe" hidden>
+      <h3>Machine</h3>
+      <p class="fine">Pick what this machine makes from stone. Iron, copper, gold and diamonds always make their own ammo.</p>
+      <div class="seg" role="radiogroup" aria-label="Recipe">
+        <button role="radio" id="svRecAmmo" aria-checked="true">Ammo<small>1 stone: 5 stone ammo</small></button>
+        <button role="radio" id="svRecRocket" aria-checked="false">Rocket ammo<small>10 stone: 1 rocket</small></button>
+      </div>
+      <button class="primary" id="svRecPut">Put your stone and metal in</button>
+      <button class="ghost small" id="svRecClose">Close (M)</button>
+    </div>
+    <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>
+    <button id="svMine" class="svbtn small" hidden><span>Mine</span><small>M</small></button>
+    <button id="svHire" class="svbtn small hire" hidden><span>Miner</span><small>H: 30 stone</small></button>
+    <button id="svAmmoBtn" class="svbtn small" hidden><span>Normal</span><small>S: ammo</small></button>
+    <button id="svTarget" class="svbtn aim"><span>Shoot bear</span><small>Space</small></button>
+  </div>
+
+
+  <div id="version" aria-hidden="true"></div>
+
+  <section id="survSetup" class="screen">
+    <h2>Ground Defender</h2>
+    <p class="lead">Get your little guy ready</p>
+    <div class="svform">
+      <label class="svfield"><span>Name</span><span class="svname"><input id="svName" maxlength="16" autocomplete="off" spellcheck="false"><button class="ghost small" id="svDice" aria-label="Random name">🎲</button></span></label>
+      <div class="svfield"><span>Colour</span><div class="swatches" id="svColors"></div></div>
+      <div class="svfield"><span>Hat</span><div class="seg small" id="svHats"></div></div>
+      <div class="svfield"><span>Ammo</span><div class="svammo" id="svAmmo"></div></div>
+    </div>
+    <canvas id="svPreview" width="120" height="120" aria-hidden="true"></canvas>
+    <button class="primary" id="svGo">Start</button>
+    <p class="fine" id="svBest"></p>
+    <div class="row"><button class="ghost small" id="svHow">How to play</button><button class="ghost small" data-open="settings">Settings</button></div>
+  </section>
+
+  <section id="survIntro" class="screen">
+    <p class="fine" id="svIntroStep"></p>
+    <div class="svintro-icon" id="svIntroIcon" aria-hidden="true"></div>
+    <h2 id="svIntroTitle"></h2>
+    <ul class="svintro" id="svIntroText"></ul>
+    <div class="row"><button class="ghost" id="svIntroBack">Back</button><button class="primary" id="svIntroNext">Next</button></div>
+    <button class="ghost small" id="svIntroSkip">Skip</button>
+  </section>
+
+  <section id="survPause" class="screen">
+    <h2>Paused</h2>
+    <button class="primary" id="svResume">Resume</button>
+    <div class="settings-inline"></div>
+    <button class="ghost small" id="svQuit">Quit to title</button>
+  </section>
+
+  <section id="survOver" class="screen">
+    <h2 id="svOverTitle">The bears got you</h2>
+    <div id="svNewBest" class="newbest" hidden>New best time</div>
+    <div class="big" id="svTime">0:00</div>
+    <dl class="stats" id="svStats"></dl>
+    <button class="primary" id="svAgain">Play again</button>
+    <button class="ghost" id="svChange">Change your guy</button>
+    
+  </section>
+
+  <section id="settings" class="screen">
+    <h2>Settings</h2>
+    <div class="settings-inline"></div>
+    <button class="ghost" data-close>Done</button>
+    <p class="fine" id="buildInfo"></p>
+  </section>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
