@@ -17,6 +17,8 @@ Walk with the arrow keys on a computer, or drag anywhere on a phone. Space shoot
 
 ## What's new compared with Sky Defender 2 Survival
 
+- **No camp.** There is no fence and no gates (`NO_BASE` in `game.ts`; set it to false for the old walled camp). Bears come straight for you from the spawners, and have 5 health. You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates. Belts cost 2 stone and 1 gear (for 2).
+
 - **Bigger map.** The map is 6600 × 6600 world units and the camera follows the guy; the camp stays the same size in the middle. A small map in the top-right corner shows the ore patches (in their colours), the fence, spawners, bears and you. You can walk out of the camp through any gate, and bears outside come for you when you get close (`chaseRange`).
 - **Bear spawners.** Bears only come from 4 to 6 spawners far out in the woods, about 2,000 to 3,100 units from the camp (100 health each). For the first 15 minutes each spawner makes a bear every 100 seconds, then every 12 seconds, while there are fewer than 6 bears on the map. Tapping a spawner makes it send a bear right away; huge waves come out of the spawners on top of that. A destroyed spawner comes back somewhere else in the woods 30 seconds later, so there is no winning: the score is how long you survive.
 - **Gates and waves.** Huge waves at 12, 20 and 28 minutes (then every 8 minutes), 12 bears and 2 more each time. At 8 minutes gates open on the other 3 sides of the camp. At 20 minutes 3 more gates open and bears take 40 seconds at a gate to get in. Bears go to the gate nearest their spawner, and walk round the fence to get there.

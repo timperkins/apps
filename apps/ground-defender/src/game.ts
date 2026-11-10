@@ -9,7 +9,7 @@ export const SURVIVAL = {
   bearHit: .08,         // a bear hit takes 8% of max health
   bearCooldown: 5,      // seconds between one bear's hits
   heal: .012,           // the guy heals 1.2% of max health every second
-  bearHp: 10.5,
+  bearHp: 5,
   gateWait: 30,         // seconds a bear waits at the gate before it comes in
   gateWaitLater: 20,    // ...and after the first 4 bears are defeated
   rushKills: 4,         // bears to defeat before the gate wait drops and the mine and machine appear
@@ -161,7 +161,7 @@ const half = (c: Cost) => Object.fromEntries((Object.entries(c) as [Kind, number
 const R = (id: string, cat: RecCat, inp: Cost, time: number, n: number, desc: string, unlock?: ResId, asm = true): Rec => ({ id, cat, out: id as Kind, n, time: time / 2, in: half(inp), unlock, asm, desc });
 const RECIPES: Rec[] = [
   // logistics
-  R('belt', 'logistics', { gear: 1, ironPlate: 1 }, .5, 2, 'Carries things (and you) along. Place it, then drag to lay a line. R turns it.'),
+  R('belt', 'logistics', { stone: 4, gear: 2 }, .5, 2, 'Carries things (and you) along. Place it, then drag to lay a line. R turns it.'),
   R('grab', 'logistics', { circuit: 1, gear: 1, ironPlate: 1 }, .5, 1, 'Moves things from the tile behind it to the tile in front: off belts, into furnaces, out of chests.'),
   R('split', 'logistics', { circuit: 5, ironPlate: 5, belt: 4 }, 1, 1, 'Sends things left and right in turn, half each way.', 'logistics'),
   R('tunnel', 'logistics', { ironPlate: 10, belt: 5 }, 1, 2, 'Things go in one and come out the next one ahead, up to 6 tiles, under anything.', 'logistics'),
@@ -235,7 +235,9 @@ function gateAt(g: Gate) {
   return { x, y, nx, ny, ox: x + nx * k, oy: y + ny * k, ix: x - nx * k, iy: y - ny * k };
 }
 /** Is (x, y) inside the fence? */
-const insideBase = (x: number, y: number) => x > WALL.x0 && x < WALL.x1 && y > WALL.y0 && y < WALL.y1;
+/** No camp: no fence, no gates; bears come straight for you. (false brings the old walled camp back.) */
+const NO_BASE = true;
+const insideBase = (x: number, y: number) => !NO_BASE && x > WALL.x0 && x < WALL.x1 && y > WALL.y0 && y < WALL.y1;
 const GUY_R = 13, BEAR_R = 18, STONE = '#a9a59c';
 // belts sit on a grid inside the walls
 // the grid covers the biggest base; only tiles inside the current walls can be used
@@ -533,7 +535,8 @@ export class Survival {
     this.mines = [{ ...FIRST_MINE, r: MINE_R, ore: 'stone' }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: [], batchT: 0, out: [], recipe: 'ammo' }]; this.mineAt = null;
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
     // you start with a furnace and a few iron plates, like a new settler
-    this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8; this.useAmmo = null; this.closeRecipe();
+    this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
+    Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, ammo: 100, turret: 2, gen: 1 }); this.useAmmo = null; this.closeRecipe();
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
@@ -701,7 +704,7 @@ export class Survival {
   }
   /** The ore patch you're standing on or next to, if it has ore left. */
   private nearPatch() { return this.patches.find(p => p.left > 0 && inPatch(p, this.x, this.y, 20)) ?? null; }
-  private rebuildWalls() { this.walls = wallRects(this.gates); fence = this.walls; }
+  private rebuildWalls() { this.walls = NO_BASE ? [] : wallRects(this.gates); fence = this.walls; }
   /** Keeps the list of big things (for where belts can go) up to date. */
   private updateStructs() { structs = [...this.mines, ...this.machines]; }
   /** Bigger base: the walls move out. */
@@ -765,7 +768,7 @@ export class Survival {
   }
   private closeShop() { this.shopOpen = false; this.pad.querySelector<HTMLElement>('#svShop')!.hidden = true; }
   private invTab: RecCat = 'logistics'; private invSel = 'belt'; private invSig = '';
-  private unlocked(r: Rec) { return !r.unlock || this.done.has(r.unlock); }
+  private unlocked(r: Rec) { if (NO_BASE && (r.id === 'gate' || r.id === 'expand')) return false; return !r.unlock || this.done.has(r.unlock); }
   /** What a recipe takes right now (the bigger base costs more each step). */
   private recCost(r: Rec): Cost {
     if (r.id === 'expand') return this.expansion >= SURVIVAL.expandCosts.length ? {} : { stone: SURVIVAL.expandCosts[this.expansion] };
@@ -1264,7 +1267,7 @@ export class Survival {
     const list = this.pad.querySelector<HTMLElement>('#svResList')!;
     const name = (id: string) => RESEARCH.find(x => x.id === id)!.name;
     // what you can research now first, then what needs something else first, then what's done
-    const order = [...RESEARCH].sort((a, b) => (this.done.has(a.id) ? 2 : this.canResearch(a.id) ? 0 : 1) - (this.done.has(b.id) ? 2 : this.canResearch(b.id) ? 0 : 1));
+    const order = RESEARCH.filter(x => !(NO_BASE && x.id === 'walls')).sort((a, b) => (this.done.has(a.id) ? 2 : this.canResearch(a.id) ? 0 : 1) - (this.done.has(b.id) ? 2 : this.canResearch(b.id) ? 0 : 1));
     const html = order.map(r => {
       const done = this.done.has(r.id), on = this.researching === r.id, p = Math.floor(this.progress[r.id] ?? 0), can = this.canResearch(r.id);
       const packs = r.packs === 2 ? '<em class="pk red"></em><em class="pk green"></em>' : '<em class="pk red"></em>';
@@ -1785,11 +1788,11 @@ export class Survival {
     }
 
     // gates: 3 more after 8 minutes (one on each other side), 3 more after 20 minutes
-    if (this.gateStage === 0 && this.t >= SURVIVAL.moreGates) {
+    if (!NO_BASE && this.gateStage === 0 && this.t >= SURVIVAL.moreGates) {
       this.gateStage = 1; this.gates.push(...MORE_GATES.map(([side, at]) => ({ side, at, open: 0 }))); this.rebuildWalls();
       this.say('Gates opened on the other 3 sides!', 4); Sound.alarm();
     }
-    if (this.gateStage === 1 && this.t >= SURVIVAL.allGates) {
+    if (!NO_BASE && this.gateStage === 1 && this.t >= SURVIVAL.allGates) {
       this.gateStage = 2; this.gates.push(...LAST_GATES.map(([side, at]) => ({ side, at, open: 0 }))); this.rebuildWalls();
       this.gateWait = SURVIVAL.gateWaitLate;
       this.say('3 more gates! Bears now take 40 seconds to get in', 5); Sound.alarm();
@@ -1997,7 +2000,7 @@ export class Survival {
     // keep the spot clear of the fence
     for (let i = 0; i < 40 && nearFence(tx, ty, BEAR_R + 12); i++) { tx += G.nx * 10; ty += G.ny * 10; }
     const x = sp.x + (Math.random() - .5) * 20, y = sp.y + (Math.random() - .5) * 20;
-    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
+    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -2152,6 +2155,7 @@ export class Survival {
     if (this.decorOff?.of !== this.patches) this.decorOff = { of: this.patches, set: new Set(this.decor.flatMap((d, i) => d.k !== 2 && this.patches.some(p => inPatch(p, d.x, d.y, d.r * .6)) ? [i] : [])) };
     const off = this.decorOff.set;
     for (const [i, d] of this.decor.entries()) if (d.k === 0 && !off.has(i) && this.seen(d.x, d.y)) { g.beginPath(); g.arc(d.x + 6, d.y + 8, d.r * 1.1, 0, 7); g.fill(); }
+    if (!NO_BASE) {
     // worn paths out from each gate
     g.fillStyle = '#6f6a45';
     for (const gt of this.gates) {
@@ -2165,6 +2169,7 @@ export class Survival {
     for (const d of this.decor) if (d.k === 2) { g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill(); }
     // a campfire and a tent so it reads as a camp
     this.drawCamp(g);
+    }
     // scenery outside
     for (const [i, d] of this.decor.entries()) {
       if (off.has(i) || !this.seen(d.x, d.y)) continue;
@@ -2207,7 +2212,7 @@ export class Survival {
         g.strokeStyle = bad ? '#ff6a5a' : '#fff5ea'; g.lineWidth = 2; g.strokeRect(GX0 + t.c * TILE + 1, GY0 + t.r * TILE + 1, TILE - 2, TILE - 2);
       }
     }
-    this.drawWalls(g);
+    if (!NO_BASE) this.drawWalls(g);
     // dead bears fade, then the rest on top
     for (const b of this.bears) if (b.state === 'dead') this.drawBear(g, b);
     for (const b of this.bears) if (b.state !== 'dead') this.drawBear(g, b);
@@ -2298,7 +2303,7 @@ export class Survival {
       g.fillStyle = L.dark; g.beginPath(); g.arc(px, py, r + .8, 0, 7); g.fill();
       g.fillStyle = L.ore; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill();
     }
-    g.strokeStyle = '#c9a77a'; g.lineWidth = 1.5; g.strokeRect(x0 + WALL.x0 * k, y0 + WALL.y0 * k, (WALL.x1 - WALL.x0) * k, (WALL.y1 - WALL.y0) * k);
+    if (!NO_BASE) g.strokeStyle = '#c9a77a', g.lineWidth = 1.5, g.strokeRect(x0 + WALL.x0 * k, y0 + WALL.y0 * k, (WALL.x1 - WALL.x0) * k, (WALL.y1 - WALL.y0) * k);
     for (const sp of this.spawners) { g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
     g.fillStyle = '#e8c49a';
     for (const b of this.bears) if (b.state !== 'dead') g.fillRect(x0 + b.x * k - 1, y0 + b.y * k - 1, 2, 2);
@@ -2528,7 +2533,7 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
-    g.fillText(`${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    g.fillText(NO_BASE ? `${inside} bear${inside === 1 ? '' : 's'} after you · ${sps} spawner${sps === 1 ? '' : 's'}` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;
@@ -2709,6 +2714,7 @@ function segHits(ax: number, ay: number, bx: number, by: number, x0: number, y0:
 }
 /** Where to head for (tx, ty) from outside the fence: straight there, or round a corner of the fence first. */
 function around(x: number, y: number, tx: number, ty: number): [number, number] {
+  if (NO_BASE) return [tx, ty];
   const m = BEAR_R + 8, x0 = WALL.x0 - m, x1 = WALL.x1 + m, y0 = WALL.y0 - m, y1 = WALL.y1 + m;
   // hugging the fence: step straight out first
   if (x > x0 + 2 && x < x1 - 2 && y > y0 + 2 && y < y1 - 2) {

@@ -128,19 +128,18 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🏹', title: 'Walk and shoot', lines: [
     'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone. The map is big: the small map in the corner shows where everything is.',
     '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear (or bear spawner) in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
-    'You can walk out of your camp through any open gate, but bears outside will come for you.'] },
+    'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
-    'Bears wait outside a gate. The ring over each one counts down, then it comes in. Inside, a bear swipes for 8% of your health and throws rocks for 9%.'] },
-  { icon: '🚪', title: 'Gates and huge waves', lines: [
+    'A bear swipes for 8% of your health and throws rocks for 9%.'] },
+  { icon: '🌊', title: 'Huge waves', lines: [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
-    `At ${min(SURVIVAL.moreGates)} minutes gates open on the other 3 sides of your camp.`,
-    `At ${min(SURVIVAL.allGates)} minutes 3 more gates open and bears come from everywhere, but they take ${SURVIVAL.gateWaitLate} seconds to get in.`] },
+    'You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates.'] },
   { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
     'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> to dig by hand.',
-    'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. You start with a furnace and 8 iron plates.',
+    'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. ',
     'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. The ammo machine turns stone into stone ammo, and plates, bars and cut diamonds into strong metal ammo: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). <kbd>S</kbd> switches ammo.'] },
   { icon: '⚙️', title: 'Crafting', lines: [
     'Press <kbd>Shift</kbd> (or the Inventory button) for your inventory on the left and crafting on the right, in tabs: Logistics, Production, Parts and Combat.',
