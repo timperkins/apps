@@ -227,7 +227,6 @@ const PLACE_INFO: Record<Placeable, [string, string, string]> = {
   machine: ['⚙️', 'Machine', 'K'], furnace: ['🔥', 'Furnace', 'F'], gen: ['⚡', 'Generator', 'V'], asm: ['🏭', 'Assembler', 'A'], lab: ['🔬', 'Lab', 'L'],
   turret: ['🏹', 'Turret', 'U'], bturret: ['🏰', 'Brick turret', 'J'], rapid: ['💨', 'Rapid crossbow', '5'], rocket: ['🚀', 'Rocket launcher', '6'],
 };
-const REC_ICON: Record<string, string> = { ...Object.fromEntries(Object.entries(PLACE_INFO).map(([k, v]) => [k, v[0]])), robot: '🛸', gate: '🚧', expand: '🧱', pack: '🧪' };
 /** One of the newer one-tile buildings. inp: stone waiting (or fuel stone), out: things made and waiting. */
 interface Bld { type: BType; d: number; inp: number; out: number; t: number; fuel: number; recipe: 'pack' | 'belt'; robots: number; }
 /** A flying robot that carries one thing from a chest to whatever needs it. */
@@ -604,7 +603,6 @@ export class Survival {
   private openShop() {
     this.shopOpen = true; this.stick = null; this.keys.clear(); this.mining = false; this.placing = false; this.invSig = '';
     const sh = this.pad.querySelector<HTMLElement>('#svShop')!;
-    sh.classList.toggle('narrow', this.pad.clientWidth < 640);
     this.renderShop();
     sh.hidden = false;
     Sound.ui();
@@ -643,6 +641,59 @@ export class Survival {
     ];
     return r;
   }
+  private iconCache = new Map<string, string>();
+  /** A picture of a thing drawn just as it looks in the world, as an image URL (made once, then kept). */
+  private icon(id: string): string {
+    const hit = this.iconCache.get(id);
+    if (hit) return hit;
+    const px = 96, cv = document.createElement('canvas'); cv.width = cv.height = px;
+    const g = cv.getContext('2d')!;
+    const big = ['mine', 'machine', ...ORES].includes(id), box = id.startsWith('k-') || id === 'pack' ? 17 : big ? 60 : id === 'belt' ? 46 : id === 'gate' || id === 'expand' ? 76 : 30;
+    g.translate(px / 2, px / 2); g.scale(px / box, px / box);
+    const bld = (type: BType, fuel = 0): Bld => ({ type, d: 0, inp: 0, out: 0, t: 0, fuel, recipe: 'pack', robots: 0 });
+    const tur = (kind: TKind): Turret => ({ ammo: { ammo: 1, rocket: 1 }, cd: 0, face: -Math.PI / 4, kind });
+    if (id.startsWith('k-')) paintItem(g, 0, 0, id.slice(2) as Kind);
+    else if (id === 'pack') paintPack(g, 0, 0);
+    else if (id === 'belt') for (const x of [-TILE, 0, TILE]) paintBelt(g, x, 0, 0, 0);
+    else if (id === 'short') paintBelt(g, 0, 0, 0, 0);
+    else if (id === 'grab') paintGrabber(g, 0, 0, { d: 0, t: 0, carry: false, k: 'stone' });
+    else if (id === 'split') paintSplitter(g, 0, 0, 0);
+    else if (id === 'chest') paintChest(g, 0, 0);
+    else if (id === 'lab') paintLab(g, 0, 0, 0);
+    else if (id === 'gen') paintBld(g, 0, 0, bld('gen', 1), 0);
+    else if ((BTYPES as string[]).includes(id)) paintBld(g, 0, 0, bld(id as BType), 0);
+    else if (id === 'turret' || id === 'rapid' || id === 'rocket') paintTurret(g, 0, 0, tur(id));
+    else if (id === 'bturret') paintTurret(g, 0, 0, tur('brick'));
+    else if (id === 'mine' || ORES.includes(id as Ore)) {
+      const keep = [this.popT, this.mining]; this.popT = 9; this.mining = false;
+      this.drawMine(g, { x: 0, y: 0, r: 26, ore: id === 'mine' ? 'stone' : id as Ore });
+      [this.popT, this.mining] = keep as [number, boolean];
+    } else if (id === 'machine') {
+      const keep = this.popT; this.popT = 9;
+      g.save(); g.beginPath(); g.rect(-30, -30, 60, 56); g.clip();
+      this.drawMachine(g, { x: 0, y: 0, r: 26, queue: [], batchT: 0, out: [], recipe: 'ammo' });
+      g.restore(); this.popT = keep;
+    } else if (id === 'robot') {
+      g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(4, 10, 5, 2.5, 0, 0, 7); g.fill();
+      g.fillStyle = '#d8dee4'; g.beginPath(); g.arc(0, 0, 5.5, 0, 7); g.fill();
+      g.fillStyle = '#3a4a52'; g.fillRect(-3, -1.5, 6, 2.5);
+      g.strokeStyle = '#9aa6b0'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(-8, -5); g.lineTo(8, -5); g.stroke();
+    } else if (id === 'gate') {
+      // the gate's two doors and posts, in brick
+      g.fillStyle = '#a8503a'; g.fillRect(-26, -5, 52, 10);
+      g.strokeStyle = '#7a3526'; g.lineWidth = 1; for (const x of [-13, 0, 13]) { g.beginPath(); g.moveTo(x, -5); g.lineTo(x, 5); g.stroke(); }
+      g.fillStyle = '#4a3219'; for (const x of [-28, 28]) { g.beginPath(); g.arc(x, 0, 9, 0, 7); g.fill(); }
+    } else if (id === 'expand') {
+      // a corner of the log fence with arrows pushing it out
+      const t = WALL.t;
+      for (let i = 0; i < 5; i++) for (const [x, y] of [[-16 + i * 9, -8], [-16, -8 + i * 9]]) { g.fillStyle = i % 2 ? '#6d4a2a' : '#7c5631'; g.beginPath(); g.arc(x, y, t * .55, 0, 7); g.fill(); g.fillStyle = '#a07a4c'; g.beginPath(); g.arc(x - 1, y - 1, t * .28, 0, 7); g.fill(); }
+      g.strokeStyle = '#ffcf8c'; g.lineWidth = 3; g.beginPath(); g.moveTo(-6, 2); g.lineTo(-26, -18); g.stroke();
+      g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(-30, -22); g.lineTo(-18, -20); g.lineTo(-28, -10); g.fill();
+    }
+    const url = cv.toDataURL();
+    this.iconCache.set(id, url);
+    return url;
+  }
   private canCraft(rc: Recipe) { return !rc.locked && (rc.ok ?? this.afford(rc.cost)); }
   private craft(id: string, n = 1) {
     const rc = this.recipes().find(x => x.id === id);
@@ -664,19 +715,20 @@ export class Survival {
     if (sig === this.invSig) return;
     this.invSig = sig;
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    const slots = Math.max(32, Math.ceil(items.length / 8) * 8);
+    const slots = Math.max(30, Math.ceil(items.length / 5) * 5);
     let h = '';
     for (let i = 0; i < slots; i++) {
       const it = items[i];
-      h += it ? `<button class="slot${it.place ? ' placeable' : ''}" ${it.place ? `data-place="${it.place}"` : ''} title="${esc(it.name)}${it.place ? ' (tap to place)' : ''}"><i${it.color ? ` style="color:${it.color}"` : ''}>${it.icon}</i><b>${it.n}</b>${it.key ? `<small>${it.key}</small>` : ''}<span>${esc(it.name)}</span></button>` : '<div class="slot empty"></div>';
+      h += it ? `<button class="slot${it.place ? ' placeable' : ''}" ${it.place ? `data-place="${it.place}"` : ''} title="${esc(it.name)}${it.place ? ' (tap to place)' : ''}"><img src="${this.icon(it.place ?? it.id)}" alt=""><b>${it.n}</b>${it.key ? `<small>${it.key}</small>` : ''}<span>${esc(it.name)}</span></button>` : '<div class="slot empty"></div>';
     }
     this.pad.querySelector('#svInvGrid')!.innerHTML = h;
-    this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}"><i>${REC_CATS[c][0]}</i><span>${REC_CATS[c][1]}</span></button>`).join('');
+    this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}" title="${REC_CATS[c][1]}"><i>${REC_CATS[c][0]}</i></button>`).join('');
+    this.pad.querySelector('#svRecCat')!.textContent = REC_CATS[this.invTab][1];
     const mine = recs.filter(r => r.cat === this.invTab);
     if (!mine.some(r => r.id === this.invSel)) this.invSel = mine[0].id;
-    this.pad.querySelector('#svRecGrid')!.innerHTML = mine.map(r => `<button class="slot rec${this.canCraft(r) ? '' : ' no'}${r.locked ? ' locked' : ''}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(r.name)}"><i>${r.locked ? '🔒' : REC_ICON[r.id] ?? '❔'}</i><span>${esc(r.name)}</span></button>`).join('');
+    this.pad.querySelector('#svRecGrid')!.innerHTML = mine.map(r => `<button class="slot rec${this.canCraft(r) ? '' : ' no'}${r.locked ? ' locked' : ''}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(r.name)}"><img src="${this.icon(r.id)}" alt="">${r.locked ? '<em>🔒</em>' : ''}<span>${esc(r.name)}</span></button>`).join('');
     const r = recs.find(x => x.id === this.invSel)!;
-    const cost = (Object.entries(r.cost) as [keyof Cost, number][]).map(([k, n]) => `<span class="chip${this.bag[k] >= n ? '' : ' short'}">${KIND_ICON[k]} ${n} ${KIND_NAME[k]} <em>(${Math.floor(this.bag[k])})</em></span>`).join('') || '<span class="chip">Free</span>';
+    const cost = (Object.entries(r.cost) as [keyof Cost, number][]).map(([k, n]) => `<span class="chip${this.bag[k] >= n ? '' : ' short'}"><img src="${this.icon('k-' + k)}" alt=""> ${n} ${KIND_NAME[k]} <em>(${Math.floor(this.bag[k])})</em></span>`).join('') || '<span class="chip">Free</span>';
     this.pad.querySelector('#svRecInfo')!.innerHTML = `<b>${esc(r.name)}</b><small>${r.locked ? 'Research this at a lab first. ' : ''}${esc(r.desc)}</small><div class="chips">${cost}<span class="makes">→ ${esc(r.makes)}</span></div>`
       + `<div class="craftbtns"><button class="primary" data-craft="1"${this.canCraft(r) ? '' : ' disabled'}>Craft</button>${['robot', 'gate', 'expand', 'hub'].includes(r.id) ? '' : `<button class="ghost" data-craft="5"${this.canCraft(r) ? '' : ' disabled'}>Craft 5</button>`}</div>`;
   }
@@ -1675,32 +1727,7 @@ export class Survival {
     for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
     this.drawBelts(g);
     if (this.mineOn) { this.drawMineAndMachine(g); }
-    for (const it of this.items) {
-      if (it.k === 'brick') {
-        g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(it.x - 5, it.y - 2, 12, 7);
-        g.fillStyle = '#b5523a'; g.fillRect(it.x - 6, it.y - 4, 12, 7); g.fillStyle = '#d97a5a'; g.fillRect(it.x - 6, it.y - 4, 12, 2);
-        continue;
-      }
-      if (it.k === 'pack') { paintPack(g, it.x, it.y); continue; }
-      if (isAmmoKind(it.k)) {
-        // ammo: a bolt with a coloured band (blue for stone ammo, the metal's colour for metal ammo)
-        g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(it.x - 5, it.y - 1, 12, 5);
-        g.fillStyle = it.k === 'ammo' ? STONE : KIND_DOT[it.k]; g.beginPath(); g.moveTo(it.x + 7, it.y); g.lineTo(it.x + 2, it.y - 4); g.lineTo(it.x - 6, it.y - 3); g.lineTo(it.x - 6, it.y + 3); g.lineTo(it.x + 2, it.y + 4); g.closePath(); g.fill();
-        g.fillStyle = it.k === 'ammo' ? '#7fc8ff' : '#3a3a3a'; g.fillRect(it.x - 3, it.y - 3, 2.5, 6);
-        continue;
-      }
-      if (it.k === 'rocket') { paintRocket(g, it.x, it.y, 0, .8); continue; }
-      if (ORES.includes(it.k as Ore)) {
-        // a nugget of metal (a diamond is a little gem)
-        g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(it.x + 1.5, it.y + 2, 5, 0, 7); g.fill();
-        g.fillStyle = KIND_DOT[it.k]; g.beginPath(); g.moveTo(it.x, it.y - 6); g.lineTo(it.x + 5.5, it.y - 1); g.lineTo(it.x + 3, it.y + 5); g.lineTo(it.x - 3.5, it.y + 5); g.lineTo(it.x - 5.5, it.y - 1); g.closePath(); g.fill();
-        g.fillStyle = 'rgba(255,255,255,.6)'; g.beginPath(); g.arc(it.x - 1.5, it.y - 1.5, 1.6, 0, 7); g.fill();
-        continue;
-      }
-      g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(it.x + 1.5, it.y + 2, 5.5, 0, 7); g.fill();
-      g.fillStyle = STONE; g.beginPath(); g.arc(it.x, it.y, 5.5, 0, 7); g.fill();
-      g.fillStyle = '#d0ccc2'; g.beginPath(); g.arc(it.x - 1.5, it.y - 1.5, 2, 0, 7); g.fill();
-    }
+    for (const it of this.items) paintItem(g, it.x, it.y, it.k);
     if (this.placing) {
       const t = this.ghost();
       if (t) {
@@ -2300,6 +2327,33 @@ function near<T extends Spot>(list: T[], x: number, y: number): T | null {
   let best: T | null = null, bd = NEAR;
   for (const o of list) { const d = dist(x, y, o.x, o.y); if (d < bd) { bd = d; best = o; } }
   return best;
+}
+/** One thing lying on a belt (or in an inventory slot). */
+function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
+  if (k === 'brick') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 5, y - 2, 12, 7);
+    g.fillStyle = '#b5523a'; g.fillRect(x - 6, y - 4, 12, 7); g.fillStyle = '#d97a5a'; g.fillRect(x - 6, y - 4, 12, 2);
+    return;
+  }
+  if (k === 'pack') { paintPack(g, x, y); return; }
+  if (isAmmoKind(k)) {
+    // ammo: a bolt with a coloured band (blue for stone ammo, the metal's colour for metal ammo)
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 5, y - 1, 12, 5);
+    g.fillStyle = k === 'ammo' ? STONE : KIND_DOT[k]; g.beginPath(); g.moveTo(x + 7, y); g.lineTo(x + 2, y - 4); g.lineTo(x - 6, y - 3); g.lineTo(x - 6, y + 3); g.lineTo(x + 2, y + 4); g.closePath(); g.fill();
+    g.fillStyle = k === 'ammo' ? '#7fc8ff' : '#3a3a3a'; g.fillRect(x - 3, y - 3, 2.5, 6);
+    return;
+  }
+  if (k === 'rocket') { paintRocket(g, x, y, 0, .8); return; }
+  if (ORES.includes(k as Ore)) {
+    // a nugget of metal (a diamond is a little gem)
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(x + 1.5, y + 2, 5, 0, 7); g.fill();
+    g.fillStyle = KIND_DOT[k]; g.beginPath(); g.moveTo(x, y - 6); g.lineTo(x + 5.5, y - 1); g.lineTo(x + 3, y + 5); g.lineTo(x - 3.5, y + 5); g.lineTo(x - 5.5, y - 1); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.6)'; g.beginPath(); g.arc(x - 1.5, y - 1.5, 1.6, 0, 7); g.fill();
+    return;
+  }
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(x + 1.5, y + 2, 5.5, 0, 7); g.fill();
+  g.fillStyle = STONE; g.beginPath(); g.arc(x, y, 5.5, 0, 7); g.fill();
+  g.fillStyle = '#d0ccc2'; g.beginPath(); g.arc(x - 1.5, y - 1.5, 2, 0, 7); g.fill();
 }
 /** A small rocket pointing along angle a, with a flame. */
 function paintRocket(g: CanvasRenderingContext2D, x: number, y: number, a: number, k: number) {
