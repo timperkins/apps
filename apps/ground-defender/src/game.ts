@@ -76,7 +76,10 @@ export const SURVIVAL = {
   gateWaitLate: 40,     // ...and from then on bears take 40 seconds to get in
   spawnerHp: 100,
   spawnerMin: 4, spawnerMax: 6,
+  spawnerFar: 4,        // spawners are 4 times as far out as they first were
   spawnEvery: 5,        // each spawner makes a bear every 5 seconds
+  spawnEarly: 50,       // ...but only one every 50 seconds for the first 15 minutes
+  earlyTime: 900,
   maxBears: 6,          // ...while there are fewer than 6 bears on the map (huge waves come on top)
   chaseRange: 130,      // a bear outside goes for you when you walk this close
   oreMineCost: { iron: { stone: 100 }, copper: { stone: 100, iron: 75 }, gold: { stone: 125, iron: 100, copper: 50 }, diamond: { stone: 150, iron: 100, copper: 75, gold: 50 } } as Record<Ore, Cost>,
@@ -140,14 +143,16 @@ export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId
 export interface SurvivalResult { time: number; kills: number; shots: number; hits: number; damage: number; won: boolean; spawners: number; }
 
 // world layout (world units). The map is much bigger than the screen; the camera follows the guy.
-const W = 1800, H = 1800;
+const W = 6600, H = 6600;
+/** The middle of the map, where the camp is. The old map was 1800 wide with the camp at 900; everything is offset by OFF. */
+const CX = W / 2, CY = H / 2, OFF = CX - 900;
 /** How much of the map the screen shows at once (it is scaled to fit). */
 const VIEW_W = 640, VIEW_H = 800;
 /** The base's walls. They move out when the base is expanded, so this object changes during a run. */
-const BASE_WALL = { x0: 710, x1: 1090, y0: 670, y1: 1130 };
-const EXPANSIONS = [BASE_WALL, { x0: 665, x1: 1135, y0: 670, y1: 1153 }, { x0: 620, x1: 1180, y0: 670, y1: 1176 }];
+const BASE_WALL = { x0: 710 + OFF, x1: 1090 + OFF, y0: 670 + OFF, y1: 1130 + OFF };
+const EXPANSIONS = [BASE_WALL, { x0: 665 + OFF, x1: 1135 + OFF, y0: 670 + OFF, y1: 1153 + OFF }, { x0: 620 + OFF, x1: 1180 + OFF, y0: 670 + OFF, y1: 1176 + OFF }];
 const WALL = { ...BASE_WALL, t: 14 };
-const GATE = { x: 900, w: 74 };
+const GATE = { x: CX, w: 74 };
 /** Gates: the first one at the top; 3 more (one per other side) after 8 minutes; 3 more after 20 minutes. */
 const FIRST_GATES: [Gate['side'], number][] = [[0, .5]];
 const MORE_GATES: [Gate['side'], number][] = [[1, .5], [2, .5], [3, .5]]; // sides: 0 top, 1 right, 2 bottom, 3 left
@@ -251,6 +256,9 @@ interface Rocket { x: number; y: number; a: number; t: number; spin: number; tar
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info'; }
 
+/** A saved run, as plain JSON. */
+export type SaveData = Record<string, unknown>;
+
 export interface SurvivalHooks { over(r: SurvivalResult): void; pause(): void; }
 
 export class Survival {
@@ -259,7 +267,7 @@ export class Survival {
   private ctx: CanvasRenderingContext2D;
   private load!: Loadout;
   private hp = SURVIVAL.maxHp;
-  private x = 900; private y = 940; private face = -Math.PI / 2;
+  private x = CX; private y = CY + 40; private face = -Math.PI / 2;
   private reload = 0;
   private bears: Bear[] = [];
   private bolts: Bolt[] = [];
@@ -268,7 +276,7 @@ export class Survival {
   private shots = 0; private hits = 0; private damage = 0;
   private hurtFlash = 0; private walk = 0;
   private gates: Gate[] = []; private spawners: Spawner[] = []; private rockets: Rocket[] = []; private spawnerKills = 0;
-  private gateStage = 0; private camX = 900; private camY = 900; private walls: Rect[] = [];
+  private gateStage = 0; private camX = CX; private camY = CY; private walls: Rect[] = [];
   /** The turret you tapped: tap a bear or spawner next to make it the turret's target. */
   private picked: string | null = null;
   private bag: Bag = emptyBag(); private useAmmo: AmmoKind | null = null;
@@ -293,7 +301,7 @@ export class Survival {
     let seed = 7;
     const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const big = EXPANSIONS[EXPANSIONS.length - 1];
-    for (let i = 0; i < 420; i++) {
+    for (let i = 0; i < 420 * (W * H) / (1800 * 1800); i++) {
       const x = rnd() * W, y = rnd() * H;
       const inBase = x > big.x0 - 40 && x < big.x1 + 40 && y > big.y0 - 40 && y < big.y1 + 40;
       const nearGate = Math.abs(x - GATE.x) < 120 && y < WALL.y0;
@@ -396,7 +404,7 @@ export class Survival {
 
   start(load: Loadout) {
     this.load = load;
-    this.hp = SURVIVAL.maxHp; this.x = 900; this.y = 960; this.face = -Math.PI / 2; this.reload = 0;
+    this.hp = SURVIVAL.maxHp; this.x = CX; this.y = CY + 60; this.face = -Math.PI / 2; this.reload = 0;
     this.bears = []; this.bolts = []; this.bubbles = [];
     this.t = 0; this.healT = 0; this.waveT = SURVIVAL.waveStart; this.waveN = 0; this.waveLeft = 0; this.waveGap = 0; this.waveWarned = false; this.kills = 0; this.shots = 0; this.hits = 0; this.damage = 0;
     this.hurtFlash = 0; this.keys.clear(); this.stick = null;
@@ -405,8 +413,8 @@ export class Survival {
     const n = SURVIVAL.spawnerMin + Math.floor(Math.random() * (SURVIVAL.spawnerMax - SURVIVAL.spawnerMin + 1)), a0 = Math.random() * Math.PI * 2;
     this.spawners = [];
     for (let i = 0; i < n; i++) {
-      const a = a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2, d = 520 + Math.random() * 260;
-      this.spawners.push({ x: clamp(900 + Math.cos(a) * d, 70, W - 70), y: clamp(900 + Math.sin(a) * d, 70, H - 70), hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
+      const a = a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2, d = (520 + Math.random() * 260) * SURVIVAL.spawnerFar;
+      this.spawners.push({ x: clamp(CX + Math.cos(a) * d, 70, W - 70), y: clamp(CY + Math.sin(a) * d, 70, H - 70), hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
     }
     this.camX = this.x; this.camY = this.y;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
@@ -421,6 +429,49 @@ export class Survival {
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say(`Bears are coming from ${n} spawners. Destroy them all to win!`, 4);
+  }
+  /* ---------- save and load ---------- */
+  /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
+  private static SAVED = ['hp', 'x', 'y', 'face', 'reload', 't', 'healT', 'waveT', 'waveN', 'waveLeft', 'waveGap', 'waveWarned', 'nextId', 'kills', 'shots', 'hits', 'damage',
+    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'useAmmo', 'invT', 'invOre', 'gateWait', 'mineOn', 'mineT', 'items', 'inv', 'placeDir',
+    'invGrab', 'invTurret', 'invShort', 'invSplit', 'invChest', 'machines', 'expansion', 'invMine', 'invMachine', 'invLab', 'researching', 'progress', 'invB', 'invBTurret',
+    'brickGate', 'robotT', 'miners', 'popT', 'load'] as const;
+  /** Everything needed to carry on this run later, as plain JSON. */
+  save(): SaveData {
+    const me = this as unknown as Record<string, unknown>, o: Record<string, unknown> = { v: 1 };
+    for (const k of Survival.SAVED) o[k] = me[k];
+    o.gates = this.gates.map(g => ({ ...g, open: 0 }));
+    o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
+    o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
+    o.done = [...this.done];
+    o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
+    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers'] as const) o[k] = [...this[k]];
+    // robots drop whatever they are carrying into your pocket
+    o.robots = this.robots.map(r => ({ x: r.x, y: r.y, hub: r.hub, k: null, src: null, dst: null }));
+    for (const r of this.robots) if (r.k) (o.bag as Bag)[r.k]++;
+    return JSON.parse(JSON.stringify(o));
+  }
+  /** Carries on a saved run. */
+  restore(d: SaveData) {
+    this.start(d.load as Loadout);
+    const me = this as unknown as Record<string, unknown>;
+    for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
+    this.bag = { ...emptyBag(), ...(d.bag as Bag) };
+    this.gates = d.gates as Gate[];
+    this.bears = (d.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
+    this.mines = d.mines as Mine[]; this.mineAt = this.mines[d.mineAt as number] ?? null; this.mining = false;
+    this.done = new Set(d.done as ResId[]);
+    resetStats(); for (const id of this.done) applyResearch(id);
+    this.turrets = new Map((d.turrets as [string, Turret & { target: { bear?: number; spawner?: number } | null }][]).map(([k, tu]) => {
+      const tg = tu.target, target = !tg ? null : tg.bear !== undefined ? this.bears.find(b => b.id === tg.bear) ?? null : this.spawners[tg.spawner!] ?? null;
+      return [k, { ...tu, target }];
+    }));
+    this.belts = new Map(d.belts as [string, number][]); this.splitters = new Map(d.splitters as [string, Splitter][]);
+    this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
+    this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]);
+    this.robots = d.robots as Robot[];
+    Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0;
+    this.say('Game loaded', 2);
   }
   stop() { this.running = false; this.paused = false; this.canvas.hidden = true; this.pad.hidden = true; this.keys.clear(); this.stick = null; }
 
@@ -913,6 +964,9 @@ export class Survival {
       if (!this.turrets.has(key)) { Sound.click(); return; }
     }
     if (t && this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
+    // tap a spawner: it makes a bear right away
+    const sp = this.spawners.find(s => !s.dead && dist(s.x, s.y, x, y) < SPAWNER_R + 12);
+    if (sp) { this.spawnBear(sp, false); this.bubble(sp.x, sp.y - 40, 'A bear!', 'info'); Sound.tone('sawtooth', 160, 90, .3, .1); return; }
     if (t) this.pickUp(t.c, t.r);
   }
   /** The bear or spawner under world point (x, y), if any. */
@@ -1220,7 +1274,7 @@ export class Survival {
       sp.hurt = Math.max(0, sp.hurt - dt);
       sp.t -= dt;
       if (sp.t > 0) continue;
-      sp.t = SURVIVAL.spawnEvery / (this.mineOn ? SURVIVAL.mineBears : 1);
+      sp.t = this.t < SURVIVAL.earlyTime ? SURVIVAL.spawnEarly : SURVIVAL.spawnEvery / (this.mineOn ? SURVIVAL.mineBears : 1);
       if (steady < SURVIVAL.maxBears) { this.spawnBear(sp, false); steady++; }
     }
     // huge waves at 8, 13 and 18 minutes (then every 5 minutes), out of the spawners, on top of the steady bears

@@ -1,6 +1,6 @@
 // App shell: layout (portrait column), screens, the game loop and saved settings.
 import './style.css';
-import { Survival, AMMO, HATS, COLORS, SURVIVAL, drawPreview, type Loadout, type AmmoId, type HatId, type SurvivalResult } from './game';
+import { Survival, AMMO, HATS, COLORS, SURVIVAL, drawPreview, type Loadout, type AmmoId, type HatId, type SurvivalResult, type SaveData } from './game';
 import { Sound } from './audio';
 import { randomName, cleanName } from './names';
 
@@ -131,7 +131,8 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'You can walk out of your camp through any open gate, but bears outside will come for you.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
-    `Each spawner makes a bear every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Destroy every spawner to win!`,
+    `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. Destroy every spawner to win!`,
+    'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
     'Bears wait outside a gate. The ring over each one counts down, then it comes in. Inside, a bear swipes for 8% of your health and throws rocks for 9%.'] },
   { icon: '🚪', title: 'Gates and huge waves', lines: [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
@@ -180,11 +181,55 @@ function start() {
 $('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('intro', false)) start(); else showIntro(start); });
 function pause() {
   if (mode !== 'play') return;
-  game.paused = true; mode = 'paused'; show('survPause');
+  game.paused = true; mode = 'paused'; $('svSaved').textContent = ''; show('survPause'); pausedAt = performance.now();
 }
+let pausedAt = 0;
+// Esc on the pause screen carries on
+addEventListener('keydown', e => { if (e.key === 'Escape' && mode === 'paused' && performance.now() - pausedAt > 150 && $('survPause').classList.contains('show')) { game.paused = false; show(null); mode = 'play'; last = performance.now(); } });
 $('svResume').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); game.paused = false; show(null); mode = 'play'; last = performance.now(); });
 $('svQuit').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openLoadout(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+/* ---------- save and load ---------- */
+// Saves live on this device, newest first. Esc (or the pause button) pauses; the pause screen has Save and Load.
+interface Save { id: number; date: number; time: number; name: string; data: SaveData; }
+const MAX_SAVES = 12;
+const saves = () => store.get<Save[]>('saves', []);
+$('svSave').addEventListener('click', e => {
+  e.stopPropagation(); Sound.ui();
+  const data = game.save(), list = saves(), time = Number(data.t) || 0;
+  const n = (list.reduce((m, s) => Math.max(m, s.id), 0)) + 1;
+  list.unshift({ id: n, date: Date.now(), time, name: `Save ${n}`, data });
+  let kept = list.slice(0, MAX_SAVES);
+  // if the device is out of room, drop the oldest saves until it fits
+  for (;;) {
+    try { localStorage.setItem('grounddef.saves', JSON.stringify(kept)); break; }
+    catch { if (kept.length <= 1) { $('svSaved').textContent = 'Not enough room on this device to save'; return; } kept = kept.slice(0, -1); }
+  }
+  $('svSaved').textContent = `Saved as Save ${n} (${clock(time)} in)`;
+});
+let savesFrom = 'survPause';
+function openSaves(from: string) {
+  savesFrom = from;
+  const list = saves();
+  $('saveList').innerHTML = list.length ? list.map(s => `<li><div><b>${s.name}</b><small>${clock(s.time)} in · ${new Date(s.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small></div><button class="primary small" data-load="${s.id}">Load</button><button class="ghost small" data-del="${s.id}" aria-label="Delete ${s.name}">✕</button></li>`).join('') : '<li class="empty">No saves yet. Pause with Esc and press Save.</li>';
+  show('saves');
+}
+$('svLoadGame').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); openSaves('survPause'); });
+$('svLoadTitle').addEventListener('click', e => { e.stopPropagation(); Sound.init(); Sound.ui(); openSaves('survSetup'); });
+$('svSavesBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); show(savesFrom); });
+$('saveList').addEventListener('click', e => {
+  const t = e.target as HTMLElement, load = t.closest<HTMLElement>('[data-load]'), del = t.closest<HTMLElement>('[data-del]');
+  if (del) { e.stopPropagation(); Sound.ui(); store.set('saves', saves().filter(s => s.id !== Number(del.dataset.del))); openSaves(savesFrom); return; }
+  if (!load) return;
+  e.stopPropagation();
+  const s = saves().find(s => s.id === Number(load.dataset.load));
+  if (!s) return;
+  Sound.init(); Sound.ui();
+  show(null); $('svSaved').textContent = '';
+  game.restore(s.data);
+  mode = 'play'; last = performance.now();
+});
+
 function gameOver(r: SurvivalResult) {
   const best = store.get<number>('best', 0);
   const isBest = r.time > best;

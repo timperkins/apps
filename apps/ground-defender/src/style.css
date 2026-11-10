@@ -349,3 +349,10 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svshop.svrecipe { display: flex; width: min(320px, calc(100% - 32px)); }
 .svrecipe .seg button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 12px; }
 .svrecipe .seg button small { font-size: 11px; opacity: .75; }
+
+.savelist { list-style: none; margin: 0; padding: 0; width: min(340px, 100%); display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.savelist li { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; text-align: left; }
+.savelist li div { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.savelist li small { opacity: .7; font-size: 12px; }
+.savelist li.empty { justify-content: center; opacity: .7; }
+.savelist li button { width: auto; min-width: 0; flex: none; padding: 8px 14px; }

@@ -209,7 +209,7 @@
     <canvas id="svPreview" width="120" height="120" aria-hidden="true"></canvas>
     <button class="primary" id="svGo">Start</button>
     <p class="fine" id="svBest"></p>
-    <div class="row"><button class="ghost small" id="svHow">How to play</button><button class="ghost small" data-open="settings">Settings</button></div>
+    <div class="row"><button class="ghost small" id="svHow">How to play</button><button class="ghost small" id="svLoadTitle">Load</button><button class="ghost small" data-open="settings">Settings</button></div>
   </section>
 
   <section id="survIntro" class="screen">
@@ -224,8 +224,16 @@
   <section id="survPause" class="screen">
     <h2>Paused</h2>
     <button class="primary" id="svResume">Resume</button>
+    <div class="row"><button class="ghost" id="svSave">Save</button><button class="ghost" id="svLoadGame">Load</button></div>
+    <p class="fine" id="svSaved"></p>
     <div class="settings-inline"></div>
     <button class="ghost small" id="svQuit">Quit to title</button>
+  </section>
+
+  <section id="saves" class="screen">
+    <h2>Load a game</h2>
+    <ol id="saveList" class="savelist"></ol>
+    <button class="ghost" id="svSavesBack">Back</button>
   </section>
 
   <section id="survOver" class="screen">
