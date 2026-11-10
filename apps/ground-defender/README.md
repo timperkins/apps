@@ -20,25 +20,35 @@ Walk with the arrow keys on a computer, or drag anywhere on a phone. Space shoot
 - **Bigger map.** The map is 6600 × 6600 world units and the camera follows the guy; the camp stays the same size in the middle. A small map in the top-right corner shows the fence, spawners, bears and you. You can walk out of the camp through any gate, and bears outside come for you when you get close (`chaseRange`).
 - **Bear spawners.** Bears only come from 4 to 6 spawners far out in the woods, about 2,000 to 3,100 units from the camp (100 health each). For the first 15 minutes each spawner makes a bear every 50 seconds, then every 5 seconds, while there are fewer than 6 bears on the map. Tapping a spawner makes it send a bear right away; huge waves come out of the spawners on top of that. A destroyed spawner comes back somewhere else in the woods 30 seconds later, so there is no winning: the score is how long you survive.
 - **Gates and waves.** Huge waves at 8, 13 and 18 minutes (then every 5 minutes), 12 bears and 2 more each time. At 8 minutes gates open on the other 3 sides of the camp. At 20 minutes 3 more gates open and bears take 40 seconds at a gate to get in. Bears go to the gate nearest their spawner, and walk round the fence to get there.
-- **Metal mines.** You can craft an iron mine (100 stone), a copper mine (100 stone, 75 iron), a gold mine (125 stone, 100 iron, 50 copper) and a diamond mine (150 stone, 100 iron, 75 copper, 50 gold). Dig with M or hire miners as with the stone mine; belts, grabbers, chests and robots carry metal like stone.
-- **Metal ammo.** Metal put into a machine makes ammo (a machine works on one material at a time, so it only takes more of what is already in it): 1 iron makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold 12 (11.5), 1 diamond 16 (15). S cycles your crossbow through loadout, stone and metal ammo; turrets take any of them (best first).
-- **Research.** Two more lab upgrades. *Rapid crossbow* (60 packs) unlocks a turret for 10 iron and 50 stone that does 0.75 damage every 0.05 seconds and uses 0.8% of one ammo per shot. *Rocket launcher* (80 packs) unlocks a turret for 40 stone and 20 iron that fires rockets for 70 damage: each rocket swirls round a loop, then homes in on its bear or spawner. Once rockets are researched, tapping a machine opens a recipe picker: ammo, or rocket ammo (10 stone per rocket).
+- **Ore patches.** Patches of stone, iron, copper, gold and gems lie in the woods. Stand on one and press M (or Dig) to dig by hand, or put a drill on it: drills need power and push ore onto the belt in front of them. Patches run out.
+- **Smelting.** A furnace turns ore into plates (iron, copper), gold bars and cut gems. Furnaces burn nothing; they just take a few seconds per plate.
+- **Parts.** Gears (2 iron plates), wire (1 copper plate makes 2) and circuits (1 iron plate and 3 wire) go into most buildings.
+- **Timed crafting.** Each recipe takes time. Crafting adds it to a queue on the left of the screen, and any missing parts are queued and made first. Tap a queued item to cancel it and get its things back.
+- **Assemblers.** An assembler can be set to any recipe it can make. Tap it to pick the recipe and fill it; grabbers and robots feed it and take out what it makes. It needs power.
+- **Power.** Generators burn stone. Poles carry power to each other (7 tiles) and power drills, assemblers and labs within 2 tiles. Unpowered buildings show a red bolt.
+- **Science and research.** Labs use science packs (copper plate and gear) and, for later research, logistic packs (grabber and belt). The lab screen shows the research tree; each item needs the ones before it.
+- **Quickbar.** Ten slots at the bottom-left hold the placeable things you carry; tap one or press 1-0 to place it.
+- **Pollution.** Drills, furnaces, assemblers, generators and machines pollute. The more pollution, the more often spawners send bears, the more bears there can be, and the tougher they are. It fades slowly.
+- **Picking up buildings.** Tap a placed building (or its panel's Pick up button) to pick it up with what is in it.
+- **Metal ammo.** Plates put into a machine make ammo (a machine works on one material at a time, so it only takes more of what is already in it): 1 iron plate makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold bar 12 (11.5), 1 gem 16 (15). S cycles your crossbow through loadout, stone and metal ammo; turrets take any of them (best first).
+- **Research.** *Rapid crossbow* unlocks a turret that does 0.75 damage every 0.05 seconds and uses 0.8% of one ammo per shot. *Rocket launcher* unlocks a turret that fires rockets for 70 damage: each rocket swirls round a loop, then homes in on its bear or spawner. Once rockets are researched, a machine's panel can switch to rocket ammo (10 stone per rocket).
 - **Save and load.** Esc (or the pause button) pauses. The pause screen has Save, which keeps the run on this device (up to 12 saves, newest first), and Load, which lists every save to carry on from or delete. The title screen has Load too.
-- **Inventory and crafting.** There is no shop. Shift (or the Inventory button) opens your inventory: the left half is a grid of slots with everything you carry, and the right half has the crafting recipes in four tabs (Logistics, Production, Combat, Science). Tap a recipe to see what it costs, tap it again or press Craft to make it. Tap something placeable in your inventory to put it down. The game keeps running while it is open.
+- **Inventory and crafting.** There is no shop. Shift (or the Inventory button) opens your inventory: the left half is a grid of slots with everything you carry, and the right half has the crafting recipes in four tabs (Logistics, Production, Parts, Combat). Only researched recipes show. Tap a recipe to see what it costs (yellow means missing parts will be made first), tap it again or press Craft to queue it. Tap something placeable in your inventory to put it down. The game keeps running while it is open.
 - **Turret targeting.** Tap a turret, then tap a bear or spawner: the turret shoots only that target (when in range) until it is destroyed. Tap the turret again to pick it up.
 
 ## Guesses we made
 
 The paper didn't say these, so they are starting points to change:
 
-- **Diamonds:** a diamond mine (150 stone, 100 iron, 75 copper, 50 gold) whose diamonds make 16 ammo at 15 damage each, carrying on the pattern of the other metals.
+- **Gems:** gems make 16 ammo at 15 damage each, carrying on the pattern of the other metals.
+- **Factory numbers:** recipe costs and times, drill speed, pole reach and pollution amounts are all first guesses in `SURVIVAL` and `RECIPES`.
 - **"Takes .8% of an ammo":** read as 0.8% of one ammo per rapid crossbow shot, so one ammo lasts 125 shots.
 - **Max of 6 bears:** read as 6 bears on the map at once from all spawners together (huge waves come on top).
-- **Research costs** (60 and 80 packs), the rocket launcher's price (40 stone, 20 iron), its range (620) and reload (3 s), and which side the extra gates go on.
+- **Research costs**, the rocket launcher's price, its range (620) and reload (3 s), and which side the extra gates go on.
 
 ## Code map
 
-- `src/game.ts` the game: rules, the map, bears, spawners, gates, mines, machines, turrets, rockets and drawing. All the numbers are in `SURVIVAL`, `METAL`, `AMMO` and `RESEARCH` at the top.
+- `src/game.ts` the game: rules, the map, bears, spawners, gates, ore patches, crafting, furnaces, assemblers, power, machines, turrets, rockets and drawing. All the numbers are in `SURVIVAL`, `METAL`, `AMMO`, `RECIPES` and `RESEARCH` at the top.
 - `src/main.ts` screens (title and loadout, how to play, pause, results), settings, saved best time, the loop.
 - `src/audio.ts` synthesised sound (copied from Sky Defender 2).
 - `src/names.ts` random names for your guy.

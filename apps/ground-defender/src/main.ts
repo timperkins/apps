@@ -138,18 +138,23 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
     `At ${min(SURVIVAL.moreGates)} minutes gates open on the other 3 sides of your camp.`,
     `At ${min(SURVIVAL.allGates)} minutes 3 more gates open and bears come from everywhere, but they take ${SURVIVAL.gateWaitLate} seconds to get in.`] },
-  { icon: '⛏️', title: 'Mines and the machine', lines: [
-    'After 4 bears, a mine and a machine pop up. Press <kbd>M</kbd> next to the mine to dig stone, or hire miners with <kbd>H</kbd>.',
-    'Click the machine (or press <kbd>M</kbd>) to put your stone in: each stone makes 5 stone ammo. <kbd>S</kbd> switches ammo.',
-    'Craft an iron mine (100 stone), a copper mine (75 iron, 100 stone), a gold mine (125 stone, 100 iron, 50 copper) or a diamond mine. Put metal in a machine for strong ammo: 1 iron makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold 12 (11.5), 1 diamond 16 (15).'] },
-  { icon: '🎯', title: 'Turrets', lines: [
-    'Press <kbd>Shift</kbd> (or the Inventory button) to open your inventory: what you carry on the left, crafting recipes in tabs on the right. Craft turrets there, place them with <kbd>U</kbd> and load them with <kbd>T</kbd>, or feed them with belts and grabbers.',
+  { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
+    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> to dig by hand.',
+    'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. You start with a furnace and 8 iron plates.',
+    'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. The ammo machine turns stone into stone ammo, and plates, bars and cut diamonds into strong metal ammo: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). <kbd>S</kbd> switches ammo.'] },
+  { icon: '⚙️', title: 'Crafting', lines: [
+    'Press <kbd>Shift</kbd> (or the Inventory button) for your inventory on the left and crafting on the right, in tabs: Logistics, Production, Parts and Combat.',
+    'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
+    'Anything you can place goes on the quickbar at the bottom left: tap it or press <kbd>1</kbd> to <kbd>0</kbd>, then tap the map. Drag to lay a line of belts. <kbd>R</kbd> turns things. Tap anything you placed to pick it back up, machines and mines too.'] },
+  { icon: '🏭', title: 'Your factory', lines: [
+    'Drills go on ore patches and dig by themselves, dropping ore in front onto a belt. Grabbers move things off belts into furnaces, assemblers, chests and turrets, and back out.',
+    'Drills, assemblers and labs need power: a generator burning stone, and power poles (each one powers what is next to it and joins other poles up to 7 tiles away). A red lightning bolt means no power.',
+    'Tap an assembler to pick what it makes. Then grabbers feed it and it makes that thing by itself, from gears to science packs to turrets.',
+    'Your factory makes pollution (top right). The more pollution, the more often bears come, and the tougher they get.'] },
+  { icon: '🎯', title: 'Turrets and research', lines: [
+    'Turrets shoot bears and spawners. Load them with <kbd>T</kbd>, or feed them ammo with belts and grabbers.',
     'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed. Tap the turret twice to pick it up.',
-    'Research (labs and science packs, <kbd>Y</kbd>) unlocks the <b>rapid crossbow</b> (10 iron, 50 stone: 0.75 damage every 0.05 s, 0.8% of an ammo a shot) and the <b>rocket launcher</b> (70 damage). Once rockets are researched, click a machine to pick its recipe: ammo, or rocket ammo for 10 stone.'] },
-  { icon: '🛒', title: 'Building', lines: [
-    'Belts (<kbd>E</kbd>, <kbd>Q</kbd>) carry stone, metal and you. <kbd>R</kbd> turns things. Grabbers (<kbd>G</kbd>), splitters (<kbd>X</kbd>) and chests (<kbd>C</kbd>) move and store it.',
-    'Later: furnaces (<kbd>F</kbd>) make bricks, generators (<kbd>V</kbd>) speed things up, pumps and pipes (<kbd>W</kbd>, <kbd>I</kbd>) cool turrets, assemblers (<kbd>A</kbd>), underground belts (<kbd>D</kbd>) and robot hubs (<kbd>O</kbd>).',
-    'Metal mines go anywhere inside your walls: <kbd>1</kbd> iron, <kbd>2</kbd> copper, <kbd>3</kbd> gold, <kbd>4</kbd> diamond. <kbd>5</kbd> places a rapid crossbow and <kbd>6</kbd> a rocket launcher.'] },
+    'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
 function showIntro(then: (() => void) | null) { introPage = 0; introThen = then; renderIntro(); show('survIntro'); }

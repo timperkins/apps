@@ -93,43 +93,102 @@ export const SURVIVAL = {
   waveGrow: 2,          // each wave after that has 2 more
   bearSpeed: 20,        // slow
   bearSpeedInside: 26,
+  digEvery: 1,          // digging an ore patch by hand gives one ore a second
+  drillEvery: 2,        // a drill digs one ore every 2 seconds
+  poleReach: 7,         // power poles connect up to 7 tiles apart (and to generators that close)
+  poleSupply: 2,        // buildings up to 2 tiles from a pole get its power
+  pollution: { drill: 1, furnace: .6, asm: .4, gen: 1.5, machine: .5 } as Record<string, number>, // pollution a second while working
+  pollutionFade: .02,   // 2% of the pollution clears every second
+  queueMax: 30,         // crafts you can line up
 };
 
-/** Things the labs can research, cheapest first. */
+/** The research tree. cost: research units; packs 1 = each unit takes a red science pack, 2 = a red and a green one.
+ *  needs: research that has to be done first. */
 export const RESEARCH = [
-  { id: 'sharp', name: 'Sharper bolts', desc: 'Your crossbow does 25% more damage', cost: 20 },
-  { id: 'string', name: 'Tighter string', desc: 'Your crossbow reloads 20% faster', cost: 25 },
-  { id: 'belts', name: 'Quick belts', desc: 'Belts move 50% faster', cost: 30 },
-  { id: 'grab', name: 'Nimble grabbers', desc: 'Grabbers move stone twice as fast', cost: 35 },
-  { id: 'picks', name: 'Strong picks', desc: 'You and your miners dig 30% faster', cost: 40 },
-  { id: 'packed', name: 'Packed ammo', desc: 'Machines make 7 stone ammo per stone instead of 5', cost: 50 },
-  { id: 'range', name: 'Long-range turrets', desc: 'Turrets reach 30% farther', cost: 60 },
-  { id: 'heavy', name: 'Heavy turret bolts', desc: 'Turrets do 40% more damage', cost: 70 },
-  { id: 'armor', name: 'Leather armor', desc: 'Bears hurt you 25% less', cost: 85 },
-  { id: 'heal', name: 'Fast healing', desc: 'Heal 2% a second instead of 1.2%', cost: 100 },
-  { id: 'rapid', name: 'Rapid crossbow', desc: 'Unlocks the rapid crossbow recipe (10 iron, 50 stone): 0.75 damage every 0.05 s', cost: 60 },
-  { id: 'rocket', name: 'Rocket launcher', desc: 'Unlocks the rocket launcher (70 damage) and the rocket ammo recipe in machines', cost: 80 },
+  { id: 'automation', name: 'Automation', desc: 'Unlocks the assembler, which makes any recipe by itself', cost: 10, packs: 1, needs: [] },
+  { id: 'logistics', name: 'Logistics', desc: 'Unlocks splitters and underground belts', cost: 15, packs: 1, needs: [] },
+  { id: 'bricks', name: 'Brickwork', desc: 'Unlocks the brick turret and the brick gate', cost: 15, packs: 1, needs: [] },
+  { id: 'sharp', name: 'Sharper bolts', desc: 'Your crossbow does 25% more damage', cost: 20, packs: 1, needs: [] },
+  { id: 'walls', name: 'Bigger base', desc: 'Lets you move your walls out for more room', cost: 20, packs: 1, needs: [] },
+  { id: 'picks', name: 'Strong picks', desc: 'You, your miners and drills dig 30% faster', cost: 25, packs: 1, needs: [] },
+  { id: 'string', name: 'Tighter string', desc: 'Your crossbow reloads 20% faster', cost: 25, packs: 1, needs: ['sharp'] },
+  { id: 'belts', name: 'Quick belts', desc: 'Belts move 50% faster', cost: 30, packs: 1, needs: ['logistics'] },
+  { id: 'grab', name: 'Nimble grabbers', desc: 'Grabbers move things twice as fast', cost: 30, packs: 1, needs: ['automation'] },
+  { id: 'logsci', name: 'Green science', desc: 'Unlocks green science packs, which the later research needs', cost: 30, packs: 1, needs: ['automation', 'logistics'] },
+  { id: 'packed', name: 'Packed ammo', desc: 'Ammo machines make 7 stone ammo per stone instead of 5', cost: 40, packs: 1, needs: ['automation'] },
+  { id: 'range', name: 'Long-range turrets', desc: 'Turrets reach 30% farther', cost: 40, packs: 2, needs: ['logsci'] },
+  { id: 'cooling', name: 'Water cooling', desc: 'Unlocks pumps and pipes: turrets touching water pipes shoot twice as fast', cost: 30, packs: 2, needs: ['logsci'] },
+  { id: 'armor', name: 'Leather armor', desc: 'Bears hurt you 25% less', cost: 40, packs: 2, needs: ['logsci'] },
+  { id: 'heavy', name: 'Heavy turret bolts', desc: 'Turrets do 40% more damage', cost: 50, packs: 2, needs: ['range'] },
+  { id: 'robots', name: 'Robots', desc: 'Unlocks robot hubs and robots, which carry things from chests', cost: 60, packs: 2, needs: ['logsci'] },
+  { id: 'heal', name: 'Fast healing', desc: 'Heal 2% a second instead of 1.2%', cost: 60, packs: 2, needs: ['armor'] },
+  { id: 'rapid', name: 'Rapid crossbow', desc: 'Unlocks the rapid crossbow: 0.75 damage every 0.05 s', cost: 60, packs: 2, needs: ['range'] },
+  { id: 'rocket', name: 'Rocket launcher', desc: 'Unlocks the rocket launcher (70 damage) and the rocket recipe in ammo machines', cost: 80, packs: 2, needs: ['rapid'] },
 ] as const;
 type ResId = typeof RESEARCH[number]['id'];
 /** Numbers that research can change; reset at the start of each run. */
-const ST = { beltSpeed: 0, grabTime: 0, mineEvery: 0, minerEvery: 0, batchAmmo: 0, turretRange: 0, turretDamage: 0, heal: 0, boltMul: 1, reloadMul: 1, armor: 1 };
+const ST = { beltSpeed: 0, grabTime: 0, mineEvery: 0, minerEvery: 0, batchAmmo: 0, turretRange: 0, turretDamage: 0, heal: 0, boltMul: 1, reloadMul: 1, armor: 1, digMul: 1 };
 function resetStats() {
-  Object.assign(ST, { beltSpeed: SURVIVAL.beltSpeed, grabTime: SURVIVAL.grabTime, mineEvery: SURVIVAL.mineEvery, minerEvery: SURVIVAL.minerEvery, batchAmmo: SURVIVAL.batchAmmo, turretRange: SURVIVAL.turretRange, turretDamage: SURVIVAL.turretDamage, heal: SURVIVAL.heal, boltMul: 1, reloadMul: 1, armor: 1 });
+  Object.assign(ST, { beltSpeed: SURVIVAL.beltSpeed, grabTime: SURVIVAL.grabTime, mineEvery: SURVIVAL.mineEvery, minerEvery: SURVIVAL.minerEvery, batchAmmo: SURVIVAL.batchAmmo, turretRange: SURVIVAL.turretRange, turretDamage: SURVIVAL.turretDamage, heal: SURVIVAL.heal, boltMul: 1, reloadMul: 1, armor: 1, digMul: 1 });
 }
 function applyResearch(id: ResId) {
   if (id === 'sharp') ST.boltMul = 1.25;
   else if (id === 'string') ST.reloadMul = .8;
   else if (id === 'belts') ST.beltSpeed = SURVIVAL.beltSpeed * 1.5;
   else if (id === 'grab') ST.grabTime = SURVIVAL.grabTime / 2;
-  else if (id === 'picks') { ST.mineEvery = SURVIVAL.mineEvery * .7; ST.minerEvery = SURVIVAL.minerEvery * .7; }
+  else if (id === 'picks') { ST.mineEvery = SURVIVAL.mineEvery * .7; ST.minerEvery = SURVIVAL.minerEvery * .7; ST.digMul = 1 / .7; }
   else if (id === 'packed') ST.batchAmmo = 7;
   else if (id === 'range') ST.turretRange = SURVIVAL.turretRange * 1.3;
   else if (id === 'heavy') ST.turretDamage = SURVIVAL.turretDamage * 1.4;
   else if (id === 'armor') ST.armor = .75;
   else if (id === 'heal') ST.heal = .02;
-  // rapid and rocket unlock things in the shop and the machine; see this.done
+  // the rest unlock recipes; see RECIPES[].unlock
 }
 resetStats();
+
+/** Crafting tabs. */
+type RecCat = 'logistics' | 'production' | 'parts' | 'combat';
+const REC_CATS: Record<RecCat, [string, string]> = { logistics: ['⏩', 'Logistics'], production: ['⛏️', 'Production'], parts: ['⚙️', 'Parts'], combat: ['🏹', 'Combat'] };
+/** A recipe: what goes in, what comes out (n of it), and how many seconds it takes. hand: you can make it yourself;
+ *  asm: an assembler can make it. unlock: the research it needs. Recipes without an out are special (done at once). */
+interface Rec { id: string; cat: RecCat; out?: Kind; n: number; time: number; in: Cost; unlock?: ResId; asm: boolean; desc: string; }
+const R = (id: string, cat: RecCat, inp: Cost, time: number, n: number, desc: string, unlock?: ResId, asm = true): Rec => ({ id, cat, out: id as Kind, n, time, in: inp, unlock, asm, desc });
+const RECIPES: Rec[] = [
+  // logistics
+  R('belt', 'logistics', { gear: 1, ironPlate: 1 }, .5, 2, 'Carries things (and you) along. Place it, then drag to lay a line. R turns it.'),
+  R('grab', 'logistics', { circuit: 1, gear: 1, ironPlate: 1 }, .5, 1, 'Moves things from the tile behind it to the tile in front: off belts, into furnaces, out of chests.'),
+  R('split', 'logistics', { circuit: 5, ironPlate: 5, belt: 4 }, 1, 1, 'Sends things left and right in turn, half each way.', 'logistics'),
+  R('tunnel', 'logistics', { ironPlate: 10, belt: 5 }, 1, 2, 'Things go in one and come out the next one ahead, up to 6 tiles, under anything.', 'logistics'),
+  R('chest', 'logistics', { stone: 8 }, .5, 1, 'Holds 200 things. T takes them out, or a grabber.'),
+  R('pole', 'logistics', { stone: 1, wire: 2 }, .5, 2, 'Carries power from a generator. Buildings next to a pole get power; poles connect up to 7 tiles apart.'),
+  R('pipe', 'logistics', { ironPlate: 1 }, .5, 1, 'Carries water from a pump to turrets.', 'cooling'),
+  R('pump', 'logistics', { circuit: 2, gear: 1, pipe: 1 }, 2, 1, 'Pumps water into pipes. A turret touching wet pipes shoots twice as fast.', 'cooling'),
+  R('hub', 'logistics', { circuit: 20, gear: 20, ironPlate: 20 }, 5, 1, 'Robots live here and bring things from chests to turrets, labs, machines and buildings. Comes with 2 robots.', 'robots'),
+  R('robot', 'logistics', { circuit: 3, gear: 2, ironPlate: 2 }, 2, 1, 'One more robot. Press T next to a robot hub to put it in.', 'robots'),
+  // production
+  R('drill', 'production', { circuit: 3, gear: 5, ironPlate: 10 }, 2, 1, 'Put it on an ore patch and it digs by itself, dropping the ore in front. Needs power.'),
+  R('furnace', 'production', { stone: 5 }, .5, 1, 'Smelts ore: iron and copper into plates, gold into bars, diamonds into cut diamonds, stone into bricks.'),
+  R('machine', 'production', { gear: 10, circuit: 5, stone: 20 }, 3, 1, 'Makes ammo out of stone, plates, gold bars and cut diamonds (or rockets once researched).'),
+  R('asm', 'production', { circuit: 3, gear: 5, ironPlate: 9 }, .5, 1, 'Tap it to pick a recipe; it makes it by itself from what grabbers bring. Needs power.', 'automation'),
+  R('gen', 'production', { gear: 8, ironPlate: 10, stone: 5 }, 2, 1, 'Burns stone for power, which poles carry to drills, assemblers and labs.'),
+  R('lab', 'production', { circuit: 10, gear: 10, belt: 4 }, 2, 1, 'Uses science packs to research. Y picks what. Needs power.'),
+  // parts
+  R('gear', 'parts', { ironPlate: 2 }, .5, 1, 'A part for belts, grabbers, drills, turrets and lots more.'),
+  R('wire', 'parts', { copperPlate: 1 }, .5, 2, 'A part for circuits and power poles.'),
+  R('circuit', 'parts', { ironPlate: 1, wire: 3 }, .5, 1, 'A part for grabbers, drills, assemblers and labs.'),
+  R('pack', 'parts', { copperPlate: 1, gear: 1 }, 5, 1, 'Red science. Labs use it for research.'),
+  R('pack2', 'parts', { grab: 1, belt: 1 }, 6, 1, 'Green science. The later research needs it as well as red.', 'logsci'),
+  // combat
+  R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
+  R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
+  R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
+  R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
+  { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
+  { id: 'expand', cat: 'combat', n: 1, time: 0, in: { stone: 40 }, unlock: 'walls', asm: false, desc: 'Moves your walls out for more room.' },
+];
+const REC = Object.fromEntries(RECIPES.map(r => [r.id, r])) as Record<string, Rec>;
+/** The recipe that makes a thing, if you can make it. */
+const recFor = (k: Kind) => RECIPES.find(r => r.out === k);
 
 export type AmmoId = 'normal' | 'quick' | 'heavy';
 export const AMMO: Record<AmmoId, { name: string; reload: number; damage: number; color: string; desc: string }> = {
@@ -172,81 +231,105 @@ const GUY_R = 13, BEAR_R = 18, STONE = '#a9a59c';
 // belts sit on a grid inside the walls
 // the grid covers the biggest base; only tiles inside the current walls can be used
 const BIGGEST = EXPANSIONS[EXPANSIONS.length - 1];
-const TILE = 24, GX0 = BIGGEST.x0 + WALL.t, GY0 = BIGGEST.y0 + WALL.t;
-const COLS = Math.floor((BIGGEST.x1 - WALL.t - GX0) / TILE), ROWS = Math.floor((BIGGEST.y1 - WALL.t - GY0) / TILE);
+// the tile grid covers the whole map; it lines up with the old camp-only grid, which started OLD_C columns and OLD_R rows in
+const TILE = 24, OLD_C = Math.floor((BIGGEST.x0 + WALL.t) / TILE), OLD_R = Math.floor((BIGGEST.y0 + WALL.t) / TILE);
+const GX0 = BIGGEST.x0 + WALL.t - OLD_C * TILE, GY0 = BIGGEST.y0 + WALL.t - OLD_R * TILE;
+const COLS = Math.floor((W - GX0) / TILE), ROWS = Math.floor((H - GY0) / TILE);
 const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const; // right, down, left, up
-/** Something on the ground or a belt: a stone, or (ammo) a piece of stone ammo from the machine. */
+/** Raw ore you dig, and what it smelts into in a furnace. */
 export type Ore = 'iron' | 'copper' | 'gold' | 'diamond';
 const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 /** Ammo you can shoot or load into turrets: stone ammo ('ammo') or metal ammo. */
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
-type Kind = 'stone' | 'brick' | 'pack' | Ore | AmmoKind | 'rocket';
-/** Each metal put in a machine makes this much ammo, and each shot does this much damage. Diamonds are our own guess. */
-export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; name: string; color: string }> = {
-  iron: { per: 6, dmg: 9.5, ammo: 'ironAmmo', name: 'Iron', color: '#c9ccd2' },
-  copper: { per: 8, dmg: 8.55, ammo: 'copperAmmo', name: 'Copper', color: '#e08a4a' },
-  gold: { per: 12, dmg: 11.5, ammo: 'goldAmmo', name: 'Gold', color: '#ffd34a' },
-  diamond: { per: 16, dmg: 15, ammo: 'diamondAmmo', name: 'Diamond', color: '#8ff0ff' },
+/** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
+const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket',
+  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher'] as const;
+type Kind = typeof ITEMS[number];
+/** Things you can put down on the map. */
+type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher';
+const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher'];
+const isPlaceable = (k: string): k is Placeable => (PLACEABLES as string[]).includes(k);
+/** Each metal: its smelted form, and how much ammo one of those makes in a machine (and its damage). Diamonds are our own guess. */
+export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; plate: Kind; name: string; color: string }> = {
+  iron: { per: 6, dmg: 9.5, ammo: 'ironAmmo', plate: 'ironPlate', name: 'Iron', color: '#c9ccd2' },
+  copper: { per: 8, dmg: 8.55, ammo: 'copperAmmo', plate: 'copperPlate', name: 'Copper', color: '#e08a4a' },
+  gold: { per: 12, dmg: 11.5, ammo: 'goldAmmo', plate: 'goldBar', name: 'Gold', color: '#ffd34a' },
+  diamond: { per: 16, dmg: 15, ammo: 'diamondAmmo', plate: 'gem', name: 'Diamond', color: '#8ff0ff' },
 };
+/** What a furnace makes out of each thing. */
+const SMELT: Partial<Record<Kind, Kind>> = { stone: 'brick', iron: 'ironPlate', copper: 'copperPlate', gold: 'goldBar', diamond: 'gem' };
+/** What goes into the ammo machine: stone, or a smelted metal. */
+const plateOre = (k: Kind): Ore | null => ORES.find(o => METAL[o].plate === k) ?? null;
+const MACHINE_IN: Kind[] = ['stone', 'ironPlate', 'copperPlate', 'goldBar', 'gem'];
 /** Best ammo first: turrets and the auto-pick use them in this order. */
 const AMMO_KINDS: AmmoKind[] = ['diamondAmmo', 'goldAmmo', 'ironAmmo', 'copperAmmo', 'ammo'];
 const AMMO_NAME: Record<AmmoKind, string> = { ammo: 'Stone', ironAmmo: 'Iron', copperAmmo: 'Copper', goldAmmo: 'Gold', diamondAmmo: 'Diamond' };
 const metalOf = (a: AmmoKind) => METAL[ORES.find(o => METAL[o].ammo === a)!];
-export const costText = (c: Cost) => (Object.entries(c) as [keyof Cost, number][]).map(([k, n]) => `${n} ${k === 'brick' ? 'bricks' : k === 'diamond' ? 'diamonds' : k}`).join(' + ');
 const isAmmoKind = (k: Kind): k is AmmoKind => (AMMO_KINDS as Kind[]).includes(k);
-type Cost = Partial<Record<'stone' | 'brick' | Ore, number>>;
-type RecCat = 'logistics' | 'production' | 'combat' | 'science';
-interface Recipe { id: string; cat: RecCat; name: string; makes: string; desc: string; cost: Cost; ok?: boolean; locked?: boolean; craft: () => void; }
-const REC_CATS: Record<RecCat, [string, string]> = { logistics: ['⏩', 'Logistics'], production: ['⛏️', 'Production'], combat: ['🏹', 'Combat'], science: ['🧪', 'Science'] };
+type Cost = Partial<Record<Kind, number>>;
+export const costText = (c: Cost) => (Object.entries(c) as [Kind, number][]).map(([k, n]) => `${n} ${KIND_NAME[k]}`).join(' + ');
 interface Item { x: number; y: number; gone?: boolean; k: Kind; skip?: string; }
-const KINDS: Kind[] = ['rocket', ...AMMO_KINDS, 'pack', 'brick', ...ORES, 'stone'];
+const KINDS: Kind[] = [...ITEMS];
 /** A bag of things: your pocket, or what a chest holds. */
 type Bag = Record<Kind, number>;
 const emptyBag = (): Bag => Object.fromEntries(KINDS.map(k => [k, 0])) as Bag;
 type Chest = Bag;
-const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + ch[k], 0);
-const KIND_NAME: Record<Kind, string> = { stone: 'stone', brick: 'bricks', pack: 'packs', iron: 'iron', copper: 'copper', gold: 'gold', diamond: 'diamonds', ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets' };
-/** A grabber picks stone up from the tile behind it and puts it down on the tile in front. */
+const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
+const KIND_NAME: Record<Kind, string> = {
+  stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
+  gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbows', launcher: 'rocket launchers',
+};
+/** One of a thing, for labels: "Iron plate". */
+const ONE_NAME: Record<Kind, string> = {
+  stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
+  gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow', launcher: 'Rocket launcher',
+};
+/** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
 /** A turret shoots the nearest bear or spawner in range (or the one you picked), one ammo a shot.
  *  kind: a plain turret, a brick turret, a rapid crossbow or a rocket launcher (which only takes rockets). */
 type TKind = 'turret' | 'brick' | 'rapid' | 'rocket';
 interface Turret { ammo: Partial<Record<AmmoKind | 'rocket', number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
-const TNAME: Record<TKind, string> = { turret: 'turret', brick: 'brick turret', rapid: 'rapid crossbow', rocket: 'rocket launcher' };
+const T_ITEM: Record<TKind, Placeable> = { turret: 'turret', brick: 'bturret', rapid: 'rapid', rocket: 'launcher' };
+const ITEM_T: Partial<Record<Placeable, TKind>> = { turret: 'turret', bturret: 'brick', rapid: 'rapid', launcher: 'rocket' };
 const tAmmo = (tu: Turret) => Object.values(tu.ammo).reduce((a, n) => a + (n ?? 0), 0);
-type BType = 'furnace' | 'gen' | 'pump' | 'pipe' | 'asm' | 'tunnel' | 'hub';
-const KIND_ICON: Record<Kind, string> = { stone: '🪨', brick: '🧱', pack: '🧪', iron: '🔩', copper: '🟠', gold: '🪙', diamond: '💎', ammo: '➶', ironAmmo: '➶', copperAmmo: '➶', goldAmmo: '➶', diamondAmmo: '➶', rocket: '🚀' };
-type Placeable = 'belt' | 'short' | 'grab' | 'turret' | 'split' | 'chest' | 'mine' | 'machine' | 'lab' | 'bturret' | 'rapid' | 'rocket' | Ore | BType;
-const BTYPES: BType[] = ['furnace', 'gen', 'pump', 'pipe', 'asm', 'tunnel', 'hub'];
-const BNAME: Record<BType, string> = { furnace: 'Furnace', gen: 'Generator', pump: 'Pump', pipe: 'Pipe', asm: 'Assembler', tunnel: 'Underground belt', hub: 'Robot hub' };
-/** Inventory slots for things you place: icon, name, hotkey (in the order they show). */
-const PLACE_INFO: Record<Placeable, [string, string, string]> = {
-  belt: ['⏩', 'Long belt', 'E'], short: ['▶️', 'Short belt', 'Q'], grab: ['🦾', 'Grabber', 'G'], split: ['🔀', 'Splitter', 'X'], tunnel: ['🕳️', 'Underground belt', 'D'], chest: ['📦', 'Chest', 'C'],
-  hub: ['🤖', 'Robot hub', 'O'], pump: ['🚰', 'Water pump', 'W'], pipe: ['🔧', 'Pipe', 'I'],
-  mine: ['⛏️', 'Stone mine', 'N'], iron: ['🔩', 'Iron mine', '1'], copper: ['🟠', 'Copper mine', '2'], gold: ['🪙', 'Gold mine', '3'], diamond: ['💎', 'Diamond mine', '4'],
-  machine: ['⚙️', 'Machine', 'K'], furnace: ['🔥', 'Furnace', 'F'], gen: ['⚡', 'Generator', 'V'], asm: ['🏭', 'Assembler', 'A'], lab: ['🔬', 'Lab', 'L'],
-  turret: ['🏹', 'Turret', 'U'], bturret: ['🏰', 'Brick turret', 'J'], rapid: ['💨', 'Rapid crossbow', '5'], rocket: ['🚀', 'Rocket launcher', '6'],
-};
-/** One of the newer one-tile buildings. inp: stone waiting (or fuel stone), out: things made and waiting. */
-interface Bld { type: BType; d: number; inp: number; out: number; t: number; fuel: number; recipe: 'pack' | 'belt'; robots: number; }
+/** One-tile buildings. */
+type BType = 'furnace' | 'gen' | 'pump' | 'pipe' | 'asm' | 'tunnel' | 'hub' | 'drill' | 'pole';
+const BTYPES: BType[] = ['furnace', 'gen', 'pump', 'pipe', 'asm', 'tunnel', 'hub', 'drill', 'pole'];
+const BNAME: Record<BType, string> = { furnace: 'Furnace', gen: 'Generator', pump: 'Pump', pipe: 'Pipe', asm: 'Assembler', tunnel: 'Underground belt', hub: 'Robot hub', drill: 'Drill', pole: 'Power pole' };
+/** Buildings that need power to run. */
+const ELECTRIC: BType[] = ['drill', 'asm'];
+/** Hotkeys for placing things (the quickbar also has 1 to 0). */
+const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', split: 'X', tunnel: 'D', chest: 'C', pole: 'O', drill: 'N', furnace: 'F', machine: 'K', asm: 'A', lab: 'L', gen: 'V', pump: 'W', pipe: 'I', turret: 'U', bturret: 'J' };
+/** A one-tile building. inp/inpK: what's waiting to go in (one kind at a time), out/outK: what it made.
+ *  buf: an assembler's ingredients. recipe: what an assembler makes. pi: the ore patch a drill sits on. */
+interface Bld { type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
 /** A flying robot that carries one thing from a chest to whatever needs it. */
 interface Robot { x: number; y: number; hub: string; k: Kind | null; src: { x: number; y: number; take: () => boolean; kind?: Kind } | null; dst: { x: number; y: number; give: () => boolean; id: string } | null; }
-const KIND_DOT: Record<Kind, string> = { stone: '#d0ccc2', ammo: '#7fc8ff', brick: '#d97a5a', pack: '#7fd6c2', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a' };
+const KIND_DOT: Record<Kind, string> = Object.fromEntries(KINDS.map(k => [k, '#d0ccc2'])) as Record<Kind, string>;
+Object.assign(KIND_DOT, { ammo: '#7fc8ff', brick: '#d97a5a', pack: '#e0524a', pack2: '#5fbf86', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironPlate: METAL.iron.color, copperPlate: METAL.copper.color, goldBar: METAL.gold.color, gem: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a', gear: '#9aa0a6', wire: '#e08a4a', circuit: '#4caf50' });
 /** A lab and the science packs in it. */
-interface Lab { packs: number; t: number; }
-/** A splitter takes stone in and sends it out to its left and right in turn. */
+interface Lab { packs: number; packs2?: number; t: number; }
+/** A splitter takes things in and sends them out to its left and right in turn. */
 interface Splitter { d: number; buf: Kind[]; side: number; t: number; }
 // where hired miners stand, relative to the mine
 const MINER_SPOTS = [[-4, 30], [32, 22], [-30, 26], [36, -8], [8, -32], [-32, -14]] as const;
 const MINE_R = 24, MACHINE_R = 26, NEAR = 58;
 const FIRST_MINE = { x: BASE_WALL.x0 + 62, y: BASE_WALL.y0 + 95 }, FIRST_MACHINE = { x: BASE_WALL.x1 - 62, y: BASE_WALL.y0 + 215 };
 interface Spot { x: number; y: number; r: number; }
-/** A mine: stone, or one of the metals. */
+/** A mine: stone, or one of the metals (metal mines only come from old saves). */
 interface Mine extends Spot { ore: 'stone' | Ore; }
-/** A machine and its work: raw stone and metal waiting, the batch timer, things made waiting for a grabber,
+/** An ammo machine and its work: stone or smelted metal waiting, the batch timer, things made waiting for a grabber,
  *  and its recipe for stone: stone ammo, or (once researched) a rocket from 10 stone. */
 interface Machine extends Spot { queue: Kind[]; batchT: number; out: Kind[]; recipe: 'ammo' | 'rocket'; }
-/** Everything big in the camp (shop, mines, machines), which belts can't go on. Kept up to date by the game. */
+/** A patch of ore out in the woods: dig it by hand or put drills on it. It runs out. */
+interface Patch { x: number; y: number; r: number; ore: 'stone' | Ore; left: number; max: number; seed: number; }
+/** Everything big in the camp (mines, machines), which belts can't go on. Kept up to date by the game. */
 let structs: Spot[] = [];
 
 /** walk: to a spot outside its gate; wait: there; enter: through the gate; chase: after you, anywhere. */
@@ -260,7 +343,7 @@ const isBear = (t: Target): t is Bear => 'state' in t;
 const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
 const SPAWNER_R = 26;
 /** Things that take up a big round spot (mines and machines), not a tile. */
-const isBig = (p: Placeable) => p === 'mine' || p === 'machine' || ORES.includes(p as Ore);
+const isBig = (p: Placeable) => p === 'mine' || p === 'machine';
 /** A gate in the fence: which side, and where along it (0 to 1). */
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
 interface Bolt { stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
@@ -293,7 +376,6 @@ export class Survival {
   /** The turret you tapped: tap a bear or spawner next to make it the turret's target. */
   private picked: string | null = null;
   private bag: Bag = emptyBag(); private useAmmo: AmmoKind | null = null;
-  private invT = { rapid: 0, rocket: 0 }; private invOre: Record<Ore, number> = { iron: 0, copper: 0, gold: 0, diamond: 0 };
   private recipeFor: Machine | null = null;
   private keys = new Set<string>();
   private stick: { id: number; ox: number; oy: number; dx: number; dy: number } | null = null;
@@ -303,8 +385,24 @@ export class Survival {
   private rocks: Rock[] = [];
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
-  private belts = new Map<string, number>(); private items: Item[] = []; private inv = 0; private placing = false; private placeDir = 0;
-  private invGrab = 0; private placeType: Placeable = 'belt'; private invTurret = 0; private invShort = 0; private invSplit = 0; private invChest = 0; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Mine[] = []; private machines: Machine[] = []; private mineAt: Mine | null = null; private expansion = 0; private invMine = 0; private invMachine = 0; private invLab = 0; private labs = new Map<string, Lab>(); private researching: ResId | null = null; private progress: Record<string, number> = {}; private done = new Set<ResId>(); labOpen = false; private blds = new Map<string, Bld>(); private invB: Record<BType, number> = { furnace: 0, gen: 0, pump: 0, pipe: 0, asm: 0, tunnel: 0, hub: 0 }; private invBTurret = 0; private brickGate = false; private robots: Robot[] = []; private robotT = 0; private coolT = 0; private tap: { id: number; x: number; y: number; t: number } | null = null; private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
+  private belts = new Map<string, number>(); private items: Item[] = []; private placing = false; private placeDir = 0;
+  private placeType: Placeable = 'belt'; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Mine[] = []; private machines: Machine[] = []; private mineAt: Mine | null = null; private expansion = 0;
+  private labs = new Map<string, Lab>(); private researching: ResId | null = null; private progress: Record<string, number> = {}; private done = new Set<ResId>(); labOpen = false;
+  private blds = new Map<string, Bld>(); private brickGate = false; private robots: Robot[] = []; private robotT = 0; private coolT = 0; private tap: { id: number; x: number; y: number; t: number } | null = null;
+  private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
+  /** Ore patches out in the woods, and the one you're digging by hand. */
+  private patches: Patch[] = []; private digAt: Patch | null = null;
+  /** Things being crafted, first one first. Each has the raw things it took (given back if cancelled). */
+  private queue: { id: string; b: number; t: number; internal: number; raw: Cost; job: number; top: boolean }[] = []; private jobN = 0;
+  /** The quickbar: 10 slots of things to place. */
+  private quick: (Placeable | null)[] = Array(10).fill(null);
+  /** Pollution from your factory; the more there is, the more bears come and the tougher they are. */
+  private pollution = 0;
+  /** Which tiles have power, worked out every half second. */
+  private powerT = 0; private poweredSet = new Set<string>(); private poleLinks: [string, string][] = [];
+  /** The building whose panel is open (an assembler or a furnace). */
+  private bldOpen: string | null = null;
+  private dragPlace: { id: number; last: string } | null = null;
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miners: number[] = []; private popT = 0;
 
@@ -326,6 +424,7 @@ export class Survival {
     canvas.addEventListener('pointermove', e => this.move(e));
     const up = (e: PointerEvent) => {
       if (this.stick && this.stick.id === e.pointerId) this.stick = null;
+      if (this.dragPlace && this.dragPlace.id === e.pointerId) this.dragPlace = null;
       // a quick tap (not a drag): on a turret it picks the turret (tap a bear or spawner next to aim it,
       // or the turret again to pick it up); on a belt, grabber or anything else you placed, picks it up
       const tp = this.tap; this.tap = null;
@@ -343,21 +442,21 @@ export class Survival {
     btn('#svAmmoBtn', () => this.switchAmmo());
     btn('#svHire', () => this.hire());
     btn('#svShopBtn', () => this.openShop());
-    btn('#svInv', () => this.togglePlacing('belt'));
-    btn('#svInvGrab', () => this.togglePlacing('grab'));
-    btn('#svInvTurret', () => this.togglePlacing('turret'));
-    btn('#svInvShort', () => this.togglePlacing('short'));
-    btn('#svInvSplit', () => this.togglePlacing('split'));
-    btn('#svInvChest', () => this.togglePlacing('chest'));
-    btn('#svInvMine', () => this.togglePlacing('mine'));
-    btn('#svInvMachine', () => this.togglePlacing('machine'));
     btn('#svLoad', () => this.useNear());
-    btn('#svInvLab', () => this.togglePlacing('lab'));
-    for (const b of [...BTYPES, 'bturret'] as Placeable[]) btn('#svInv-' + b, () => this.togglePlacing(b));
-    for (const b of ['rapid', 'rocket', ...ORES] as Placeable[]) btn('#svInv-' + b, () => this.togglePlacing(b));
+    pad.querySelector('#svQuick')!.addEventListener('pointerdown', e => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-q]'); e.preventDefault(); e.stopPropagation();
+      if (el && this.running && !this.paused) this.useQuick(Number(el.dataset.q));
+    });
+    pad.querySelector('#svQueue')!.addEventListener('pointerdown', e => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-job]'); e.preventDefault(); e.stopPropagation();
+      if (el && this.running && !this.paused) this.cancelJob(Number(el.dataset.job));
+    });
+    pad.querySelector('#svBld')!.addEventListener('click', e => this.bldClick(e as MouseEvent));
+    pad.querySelector('#svBld')!.addEventListener('pointerdown', e => e.stopPropagation());
     pad.querySelector('#svRecAmmo')!.addEventListener('click', e => { e.stopPropagation(); this.setRecipe('ammo'); });
     pad.querySelector('#svRecRocket')!.addEventListener('click', e => { e.stopPropagation(); this.setRecipe('rocket'); });
-    pad.querySelector('#svRecPut')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (m) this.feedMachine(m); });
+    pad.querySelector('#svRecPut')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (m) this.useMachine(m); });
+    pad.querySelector('#svRecPick')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (!m) return; if (dist(this.x, this.y, m.x, m.y) > NEAR * 1.6) { this.bubble(m.x, m.y - 36, 'Walk to the machine to pick it up', 'info'); Sound.denied(); return; } this.pickUpBig(m); });
     pad.querySelector('#svRecClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeRecipe(); });
     btn('#svLabBtn', () => this.openLab());
     btn('#svRotate', () => this.rotate());
@@ -370,22 +469,14 @@ export class Survival {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
       if (this.labOpen) { if (k === 'y' || k === 'Escape') this.closeLab(); return; }
+      if (this.bldOpen) { if (k === 't' || k === 'Escape') this.closeBld(); return; }
       if (this.recipeFor) { if (k === 'm' || k === 'Escape') this.closeRecipe(); else if (k === '1') this.setRecipe('ammo'); else if (k === '2') this.setRecipe('rocket'); return; }
       if (this.shopOpen) { if ((k === 'Shift' || k === 'b' || k === 'Escape') && !e.repeat) this.closeShop(); else if (k === 'Enter' && !e.repeat) this.craft(this.invSel); return; }
       if (k === 'Shift' || k === 'b') { if (!e.repeat) this.openShop(); return; }
-      if (k === 'e') { if (!e.repeat) this.togglePlacing('belt'); return; }
-      if (k === 'g') { if (!e.repeat) this.togglePlacing('grab'); return; }
-      if (k === 'u') { if (!e.repeat) this.togglePlacing('turret'); return; }
-      if (k === 'q') { if (!e.repeat) this.togglePlacing('short'); return; }
-      if (k === 'x') { if (!e.repeat) this.togglePlacing('split'); return; }
-      if (k === 'c') { if (!e.repeat) this.togglePlacing('chest'); return; }
-      if (k === 'n') { if (!e.repeat) this.togglePlacing('mine'); return; }
-      if (k === 'k') { if (!e.repeat) this.togglePlacing('machine'); return; }
-      if (k === 'l') { if (!e.repeat) this.togglePlacing('lab'); return; }
-      const dk = ({ '1': 'iron', '2': 'copper', '3': 'gold', '4': 'diamond', '5': 'rapid', '6': 'rocket' } as Record<string, Placeable>)[k];
-      if (dk) { if (!e.repeat) this.togglePlacing(dk); return; }
-      const bk = ({ f: 'furnace', v: 'gen', w: 'pump', i: 'pipe', a: 'asm', d: 'tunnel', o: 'hub', j: 'bturret' } as Record<string, Placeable>)[k];
-      if (bk) { if (!e.repeat) this.togglePlacing(bk); return; }
+      const qn = '1234567890'.indexOf(k);
+      if (qn >= 0) { if (!e.repeat) this.useQuick(qn); return; }
+      const pk = (Object.entries(PLACE_KEY) as [Placeable, string][]).find(([, key]) => key.toLowerCase() === k);
+      if (pk) { if (!e.repeat) this.togglePlacing(pk[0]); return; }
       if (k === 'y') { if (!e.repeat) this.openLab(); return; }
       if (k === 't') { if (!e.repeat) this.useNear(); return; }
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
@@ -419,14 +510,17 @@ export class Survival {
     }
     this.camX = this.x; this.camY = this.y;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
-    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = [];
-    this.belts.clear(); this.items = []; this.inv = 0; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop();
-    this.invGrab = 0; this.placeType = 'belt'; this.grabbers.clear(); this.invTurret = 0; this.turrets.clear(); this.invShort = 0; this.tap = null; this.invSplit = 0; this.invChest = 0; this.splitters.clear(); this.chests.clear();
+    this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = []; this.digAt = null;
+    this.belts.clear(); this.items = []; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop(); this.closeBld();
+    this.placeType = 'belt'; this.grabbers.clear(); this.turrets.clear(); this.tap = null; this.splitters.clear(); this.chests.clear();
     this.mines = [{ ...FIRST_MINE, r: MINE_R, ore: 'stone' }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: [], batchT: 0, out: [], recipe: 'ammo' }]; this.mineAt = null;
-    this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.invMine = 0; this.invMachine = 0; this.updateStructs();
-    this.bag = emptyBag(); this.useAmmo = null; this.invT = { rapid: 0, rocket: 0 }; this.invOre = { iron: 0, copper: 0, gold: 0, diamond: 0 }; this.closeRecipe();
-    this.blds.clear(); for (const b of BTYPES) this.invB[b] = 0; this.invBTurret = 0; this.brickGate = false; this.robots = []; this.robotT = 0;
-    this.invLab = 0; this.labs.clear(); this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
+    this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
+    // you start with a furnace and a few iron plates, like a new settler
+    this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8; this.useAmmo = null; this.closeRecipe();
+    this.quick = Array(10).fill(null); this.syncQuick();
+    this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
+    this.labs.clear(); this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
+    this.patches = genPatches(this.spawners); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say(`Bears are coming from ${n} spawners. Destroyed ones come back, so hold out as long as you can!`, 4);
@@ -434,12 +528,11 @@ export class Survival {
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
   private static SAVED = ['hp', 'x', 'y', 'face', 'reload', 't', 'healT', 'waveT', 'waveN', 'waveLeft', 'waveGap', 'waveWarned', 'nextId', 'kills', 'shots', 'hits', 'damage',
-    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'useAmmo', 'invT', 'invOre', 'gateWait', 'mineOn', 'mineT', 'items', 'inv', 'placeDir',
-    'invGrab', 'invTurret', 'invShort', 'invSplit', 'invChest', 'machines', 'expansion', 'invMine', 'invMachine', 'invLab', 'researching', 'progress', 'invB', 'invBTurret',
-    'brickGate', 'robotT', 'miners', 'popT', 'load'] as const;
+    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'useAmmo', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
+    'machines', 'expansion', 'researching', 'progress', 'brickGate', 'robotT', 'miners', 'popT', 'load', 'patches', 'queue', 'jobN', 'quick', 'pollution'] as const;
   /** Everything needed to carry on this run later, as plain JSON. */
   save(): SaveData {
-    const me = this as unknown as Record<string, unknown>, o: Record<string, unknown> = { v: 1 };
+    const me = this as unknown as Record<string, unknown>, o: Record<string, unknown> = { v: 2 };
     for (const k of Survival.SAVED) o[k] = me[k];
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
@@ -454,10 +547,12 @@ export class Survival {
   }
   /** Carries on a saved run. */
   restore(d: SaveData) {
+    if ((d.v as number) < 2) d = migrateSave(d);
     this.start(d.load as Loadout);
     const me = this as unknown as Record<string, unknown>;
     for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
     this.bag = { ...emptyBag(), ...(d.bag as Bag) };
+    this.quick = ((d.quick as (Placeable | null)[]) ?? Array(10).fill(null)).slice(0, 10); this.syncQuick();
     this.gates = d.gates as Gate[];
     this.bears = (d.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
     this.mines = d.mines as Mine[]; this.mineAt = this.mines[d.mineAt as number] ?? null; this.mining = false;
@@ -471,7 +566,7 @@ export class Survival {
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]);
     this.robots = d.robots as Robot[];
-    Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0;
+    Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
   }
   stop() { this.running = false; this.paused = false; this.canvas.hidden = true; this.pad.hidden = true; this.keys.clear(); this.stick = null; }
@@ -482,17 +577,42 @@ export class Survival {
     if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor) return;
     const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
     // placing a belt: tap the spot
-    if (this.placing) { const t = tileAt(wx, wy); if (t) { this.placeAt(t.c, t.r); return; } }
+    if (this.placing) {
+      const t = tileAt(wx, wy);
+      if (t) {
+        this.placeAt(t.c, t.r);
+        // keep the finger down and drag to lay a line of belts (or poles, pipes...)
+        if (this.placing) this.dragPlace = { id: e.pointerId, last: t.c + ',' + t.r };
+        return;
+      }
+    }
     // a tap on the machine uses it
     if (this.mineOn) {
       const tm = this.machines.find(m => Math.hypot(wx - m.x, wy - m.y) < m.r + 10);
-      if (tm) { this.useMachine(tm); return; }
+      if (tm) { this.openRecipe(tm); return; }
     }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
     this.tap = { id: e.pointerId, x: e.offsetX, y: e.offsetY, t: e.timeStamp };
   }
   private move(e: PointerEvent) {
+    const dp = this.dragPlace;
+    if (dp && dp.id === e.pointerId && this.placing && !isBig(this.placeType)) {
+      const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
+      if (t && t.c + ',' + t.r !== dp.last) {
+        const [lc, lr] = dp.last.split(',').map(Number), dc = t.c - lc, dr = t.r - lr;
+        // a belt points the way you drag; only one step at a time, straight
+        if (Math.abs(dc) + Math.abs(dr) === 1) {
+          if (this.placeType === 'belt') {
+            const d = DIRS.findIndex(([x, y]) => x === dc && y === dr);
+            this.placeDir = d; if (this.belts.has(dp.last)) this.belts.set(dp.last, d);
+          }
+          if (!this.taken(t.c, t.r)) this.placeAt(t.c, t.r);
+        }
+        dp.last = t.c + ',' + t.r;
+      }
+      return;
+    }
     // with a mouse, the belt being placed follows the pointer
     if (this.placing && e.pointerType === 'mouse') {
       const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
@@ -538,18 +658,23 @@ export class Survival {
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
   }
 
-  /** M: start or stop mining when next to the mine, or use the machine when next to it. */
+  /** M: start or stop digging at the mine or an ore patch, or use the ammo machine when next to it. */
   private action() {
-    if (!this.mineOn) return;
-    const mine = near(this.mines, this.x, this.y), mach = near(this.machines, this.x, this.y);
+    const mine = this.mineOn ? near(this.mines, this.x, this.y) : null, mach = this.mineOn ? near(this.machines, this.x, this.y) : null, patch = this.nearPatch();
+    if (this.mining || this.digAt) { this.mining = false; this.digAt = null; Sound.ui(); return; }
     if (mine) {
-      this.mining = !this.mining; this.mineT = 0; this.mineAt = mine;
-      if (this.mining) this.face = Math.atan2(mine.y - this.y, mine.x - this.x);
+      this.mining = true; this.mineT = 0; this.mineAt = mine;
+      this.face = Math.atan2(mine.y - this.y, mine.x - this.x);
       Sound.ui();
     } else if (mach) this.useMachine(mach);
-    else this.bubble(this.x, this.y - 30, 'Walk to a mine or a machine', 'info');
+    else if (patch) {
+      this.digAt = patch; this.mineT = 0; this.face = Math.atan2(patch.y - this.y, patch.x - this.x);
+      Sound.ui();
+    } else this.bubble(this.x, this.y - 30, 'Walk to an ore patch, the mine or the ammo machine', 'info');
   }
-  private rebuildWalls() { this.walls = wallRects(this.gates); }
+  /** The ore patch you're standing on or next to, if it has ore left. */
+  private nearPatch() { return this.patches.find(p => p.left > 0 && dist(this.x, this.y, p.x, p.y) < p.r + 20) ?? null; }
+  private rebuildWalls() { this.walls = wallRects(this.gates); fence = this.walls; }
   /** Keeps the list of big things (for where belts can go) up to date. */
   private updateStructs() { structs = [...this.mines, ...this.machines]; }
   /** Bigger base: the walls move out. */
@@ -563,19 +688,18 @@ export class Survival {
     for (const b of this.bears) if (b.state === 'walk' || b.state === 'wait') collide(b, BEAR_R, this.walls);
     this.say('Your base got bigger!'); Sound.pop(); this.renderShop();
   }
-  /** Tapping the machine: once rockets are researched it opens the recipe picker; otherwise it takes your stone and metal. */
+  /** M next to an ammo machine: put your stone or plates in. */
   private useMachine(m: Machine) {
     if (dist(this.x, this.y, m.x, m.y) > NEAR) { this.bubble(m.x, m.y - 36, 'Walk to the machine', 'info'); Sound.denied(); return; }
-    if (this.done.has('rocket')) { this.openRecipe(m); return; }
     this.feedMachine(m);
   }
-  /** The machine takes all your stone and metal. Each stone is a batch of stone ammo (or 10 stone make a rocket);
-   *  each iron, copper, gold or diamond is a batch of that metal's ammo. */
+  /** The ammo machine takes your stone, or one smelted metal (plates, gold bars, cut diamonds). Each stone is a batch of
+   *  stone ammo (or 10 stone make a rocket); each plate is a batch of that metal's ammo. */
   private feedMachine(m: Machine) {
-    const n = this.bag.stone + ORES.reduce((a, o) => a + this.bag[o], 0);
-    if (!n) { this.bubble(m.x, m.y - 36, 'No stone or metal to put in', 'info'); Sound.denied(); return; }
+    const ins = MACHINE_IN.filter(k => this.bag[k] > 0);
+    if (!ins.length) { this.bubble(m.x, m.y - 36, 'No stone or plates to put in. Smelt ore in a furnace for plates', 'info'); Sound.denied(); return; }
     // a machine works on one material at a time: it only takes more of what is already in it
-    const k = (['stone', ...ORES] as Kind[]).find(x => this.bag[x] > 0 && this.machineTakes(m, x));
+    const k = ins.find(x => this.machineTakes(m, x));
     if (!k) { const inside = KIND_NAME[m.queue[0]]; this.bubble(m.x, m.y - 36, `This machine is busy with ${inside}. It only takes ${inside} until it's done`, 'info'); Sound.denied(); return; }
     this.bubble(m.x, m.y - 36, `${this.bag[k]} ${KIND_NAME[k]} in`, 'info');
     for (let i = 0; i < this.bag[k]; i++) m.queue.push(k);
@@ -583,7 +707,7 @@ export class Survival {
     Sound.thump();
   }
   /** A machine only takes one material at a time: anything while it's empty, then only more of the same. */
-  private machineTakes(m: Machine, k: Kind) { return (k === 'stone' || ORES.includes(k as Ore)) && (!m.queue.length || m.queue[0] === k); }
+  private machineTakes(m: Machine, k: Kind) { return MACHINE_IN.includes(k) && (!m.queue.length || m.queue[0] === k); }
   private openRecipe(m: Machine) {
     this.recipeFor = m; this.stick = null; this.keys.clear(); this.mining = false;
     this.renderRecipe();
@@ -592,60 +716,150 @@ export class Survival {
   }
   private renderRecipe() {
     const m = this.recipeFor; if (!m) return;
+    this.pad.querySelector<HTMLElement>('#svRecSeg')!.hidden = !this.done.has('rocket');
     this.pad.querySelector('#svRecAmmo')!.setAttribute('aria-checked', String(m.recipe === 'ammo'));
     this.pad.querySelector('#svRecRocket')!.setAttribute('aria-checked', String(m.recipe === 'rocket'));
-    const n = this.bag.stone + ORES.reduce((a, o) => a + this.bag[o], 0);
-    (this.pad.querySelector('#svRecPut') as HTMLButtonElement).disabled = !n;
+    (this.pad.querySelector('#svRecPut') as HTMLButtonElement).disabled = !MACHINE_IN.some(k => this.bag[k] > 0);
   }
   private setRecipe(r: Machine['recipe']) { if (this.recipeFor) { this.recipeFor.recipe = r; Sound.click(); this.renderRecipe(); } }
   private closeRecipe() { this.recipeFor = null; this.pad.querySelector<HTMLElement>('#svRecipe')!.hidden = true; }
-  /** What one batch of this raw thing makes in a machine: [kind, how many]. */
+  /** What one batch of this thing makes in a machine: [kind, how many]. */
   private batchOf(m: Machine, k: Kind): [Kind, number] {
     if (k === 'stone') return m.recipe === 'rocket' ? ['rocket', 1] : ['ammo', ST.batchAmmo];
-    const o = k as Ore; return [METAL[o].ammo, METAL[o].per];
+    const o = plateOre(k) ?? (ORES.includes(k as Ore) ? k as Ore : 'iron'); return [METAL[o].ammo, METAL[o].per];
   }
-  /* ---------- shop, inventory and belts ---------- */
+  /* ---------- inventory, crafting and the crafting queue ---------- */
   /** The inventory screen (Shift): what you carry on the left, crafting recipes in tabs on the right. */
   private openShop() {
-    this.shopOpen = true; this.stick = null; this.keys.clear(); this.mining = false; this.placing = false; this.invSig = '';
-    const sh = this.pad.querySelector<HTMLElement>('#svShop')!;
+    this.shopOpen = true; this.stick = null; this.keys.clear(); this.mining = false; this.digAt = null; this.placing = false; this.invSig = '';
     this.renderShop();
-    sh.hidden = false;
+    this.pad.querySelector<HTMLElement>('#svShop')!.hidden = false;
     Sound.ui();
   }
   private closeShop() { this.shopOpen = false; this.pad.querySelector<HTMLElement>('#svShop')!.hidden = true; }
   private invTab: RecCat = 'logistics'; private invSel = 'belt'; private invSig = '';
-  private recipes(): Recipe[] {
-    const S = SURVIVAL, st = (n: number): Cost => ({ stone: n });
-    const cb = (b: BType | 'bturret' | 'robot' | 'gate'): Cost => { const [s1, br] = this.costB(b), c: Cost = {}; if (s1) c.stone = s1; if (br) c.brick = br; return c; };
-    const maxed = this.expansion >= S.expandCosts.length;
-    const r: Recipe[] = [
-      { id: 'belt', cat: 'logistics', name: 'Long belt', makes: '1 long belt (3 tiles)', desc: 'Carries stone (and you). E to place, R turns it.', cost: st(S.beltCost), craft: () => this.buyBelt() },
-      { id: 'short', cat: 'logistics', name: 'Short belts', makes: '3 short belts', desc: 'One-tile belts for corners and gaps. Q to place.', cost: st(S.shortBeltCost), craft: () => this.buyShort() },
-      { id: 'grab', cat: 'logistics', name: 'Grabber', makes: '1 grabber', desc: 'Moves things from behind it to in front, e.g. into a chest, or ammo out of a machine. G to place.', cost: st(S.grabberCost), craft: () => this.buyGrabber() },
-      { id: 'split', cat: 'logistics', name: 'Splitter', makes: '1 splitter', desc: 'Sends things left and right in turn. X to place.', cost: st(S.splitterCost), craft: () => this.buy('split') },
-      { id: 'tunnel', cat: 'logistics', name: 'Underground belts', makes: '2 underground belts', desc: 'Things go in one and come out the next one ahead, up to 6 tiles, under anything. D to place.', cost: cb('tunnel'), craft: () => this.buyB('tunnel') },
-      { id: 'chest', cat: 'logistics', name: 'Chest', makes: '1 chest', desc: 'Holds 200 things. T takes them out, or a grabber. C to place.', cost: st(S.chestCost), craft: () => this.buy('chest') },
-      { id: 'hub', cat: 'logistics', name: 'Robot hub', makes: '1 robot hub with 2 robots', desc: 'Robots bring things from chests to turrets, labs, machines and buildings. O to place.', cost: cb('hub'), craft: () => this.buyB('hub') },
-      { id: 'robot', cat: 'logistics', name: 'Robot', makes: '1 robot', desc: 'One more robot for your emptiest hub. Needs a hub placed first.', cost: cb('robot'), ok: this.canBuyB('robot'), craft: () => this.buyB('robot') },
-      { id: 'pump', cat: 'logistics', name: 'Water pump', makes: '1 pump', desc: 'Pumps water into pipes. W to place.', cost: cb('pump'), craft: () => this.buyB('pump') },
-      { id: 'pipe', cat: 'logistics', name: 'Pipes', makes: `${S.pipePack} pipes`, desc: 'A turret touching pipes from a pump is cooled and shoots twice as fast. I to place.', cost: cb('pipe'), craft: () => this.buyB('pipe') },
-      { id: 'mine', cat: 'production', name: 'Stone mine', makes: '1 mine', desc: 'Another mine to dig at, with room for 6 more miners. N to place.', cost: st(S.mineCost), craft: () => this.buy('mine') },
-      ...ORES.map((o, i): Recipe => ({ id: o, cat: 'production', name: `${METAL[o].name} mine`, makes: `1 ${o} mine`, desc: `Dig ${o} with M, or hire miners. ${o === 'diamond' ? 'A diamond' : '1 ' + o} makes ${METAL[o].per} ${o} ammo (${METAL[o].dmg} damage) in a machine. ${i + 1} to place.`, cost: S.oreMineCost[o], craft: () => this.buyX(o) })),
-      { id: 'machine', cat: 'production', name: 'Machine', makes: '1 machine', desc: 'Turns stone and metal into ammo (and rockets once researched). K to place.', cost: st(S.machineCost), craft: () => this.buy('machine') },
-      { id: 'furnace', cat: 'production', name: 'Furnace', makes: '1 furnace', desc: 'Bakes stone into bricks. Feed it stone; bricks come out the front. F to place, R turns it.', cost: cb('furnace'), craft: () => this.buyB('furnace') },
-      { id: 'gen', cat: 'production', name: 'Generator', makes: '1 generator', desc: 'Burns stone for power. Machines, labs, furnaces and assemblers nearby run twice as fast. V to place.', cost: cb('gen'), craft: () => this.buyB('gen') },
-      { id: 'asm', cat: 'production', name: 'Assembler', makes: '1 assembler', desc: 'Makes a science pack from 5 stone (T switches it to 3 short belts). A to place, R turns it.', cost: cb('asm'), craft: () => this.buyB('asm') },
-      { id: 'turret', cat: 'combat', name: 'Turret', makes: '1 turret', desc: 'Shoots bears. Load ammo with T, or feed it with belts. U to place.', cost: st(S.turretCost), craft: () => this.buyTurret() },
-      { id: 'bturret', cat: 'combat', name: 'Brick turret', makes: '1 brick turret', desc: 'Does 60% more damage and reaches farther. J to place.', cost: cb('bturret'), craft: () => this.buyB('bturret') },
-      { id: 'rapid', cat: 'combat', name: 'Rapid crossbow', makes: '1 rapid crossbow', desc: '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo. 5 to place.', cost: S.rapidCost, locked: !this.done.has('rapid'), craft: () => this.buyX('rapid') },
-      { id: 'rocket', cat: 'combat', name: 'Rocket launcher', makes: '1 rocket launcher', desc: 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T. 6 to place.', cost: S.rocketCost, locked: !this.done.has('rocket'), craft: () => this.buyX('rocket') },
-      { id: 'gate', cat: 'combat', name: 'Brick gate', makes: 'Stronger gates', desc: this.brickGate ? 'Built.' : 'Bears wait 10 seconds longer at the gates.', cost: cb('gate'), ok: this.canBuyB('gate'), craft: () => this.buyB('gate') },
-      { id: 'expand', cat: 'combat', name: 'Bigger base', makes: 'Walls move out', desc: maxed ? 'Your base is as big as it gets.' : `Moves your walls out for more room. Step ${this.expansion + 1} of ${S.expandCosts.length}.`, cost: maxed ? {} : st(S.expandCosts[this.expansion]), ok: !maxed && this.bag.stone >= S.expandCosts[this.expansion], craft: () => this.expand() },
-      { id: 'pack', cat: 'science', name: 'Science pack', makes: '1 science pack', desc: 'Put packs in a lab with T to research upgrades.', cost: st(S.packCost), craft: () => this.buyPacks(1) },
-      { id: 'lab', cat: 'science', name: 'Lab', makes: '1 lab', desc: 'Uses science packs to research. Y picks what. L to place.', cost: st(S.labCost), craft: () => this.buy('lab') },
-    ];
-    return r;
+  private unlocked(r: Rec) { return !r.unlock || this.done.has(r.unlock); }
+  /** What a recipe takes right now (the bigger base costs more each step). */
+  private recCost(r: Rec): Cost {
+    if (r.id === 'expand') return this.expansion >= SURVIVAL.expandCosts.length ? {} : { stone: SURVIVAL.expandCosts[this.expansion] };
+    return r.in;
+  }
+  private afford(c: Cost) { return (Object.entries(c) as [Kind, number][]).every(([k, n]) => this.bag[k] >= n); }
+  /** Works out how to make `want` of recipe id from what's in `real` (which it takes things out of), making missing parts
+   *  first if you know how. Adds the crafting steps to `steps`, parts first; returns the step that makes it, or null. */
+  private plan(id: string, want: number, real: Bag, steps: Survival['queue'], job: number, depth = 0): Survival['queue'][number] | null {
+    const r = REC[id];
+    if (!r || !r.out || !this.unlocked(r) || depth > 6) return null;
+    const b = Math.ceil(want / r.n), raw: Cost = {};
+    for (const [k, q] of Object.entries(r.in) as [Kind, number][]) {
+      const need = q * b, take = Math.min(real[k], need);
+      real[k] -= take; if (take) raw[k] = take;
+      const short = need - take;
+      if (short > 0) {
+        const sub = recFor(k);
+        if (!sub) return null;
+        const st = this.plan(sub.id, short, real, steps, job, depth + 1);
+        if (!st) return null;
+        st.internal += short;
+      }
+    }
+    const step = { id, b, t: 0, internal: 0, raw, job, top: depth === 0 };
+    steps.push(step);
+    return step;
+  }
+  /** Can you make n of this (making parts on the way if needed)? 'have': everything's in your pocket already. */
+  private canMake(r: Rec, n = 1): 'have' | 'parts' | false {
+    if (!this.unlocked(r)) return false;
+    if (!r.out) return r.id === 'gate' && this.brickGate ? false : r.id === 'expand' && this.expansion >= SURVIVAL.expandCosts.length ? false : this.afford(this.recCost(r)) ? 'have' : false;
+    if ((Object.entries(r.in) as [Kind, number][]).every(([k, q]) => this.bag[k] >= q * Math.ceil(n / r.n))) return 'have';
+    return this.plan(r.id, n, { ...this.bag }, [], 0) ? 'parts' : false;
+  }
+  /** Craft: special recipes happen at once; the rest go in the crafting queue (taking their things now). */
+  private craft(id: string, n = 1) {
+    const r = REC[id];
+    if (!r) return;
+    this.invSel = id;
+    if (!r.out) {
+      if (!this.canMake(r)) { Sound.denied(); this.renderShop(); return; }
+      if (id === 'expand') this.expand();
+      else if (id === 'gate') { for (const [k, q] of Object.entries(r.in) as [Kind, number][]) this.bag[k] -= q; this.brickGate = true; this.say('Brick gate built: bears wait 10 seconds longer'); Sound.pop(); }
+      this.renderShop(); return;
+    }
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      if (this.queue.length >= SURVIVAL.queueMax) { this.bubble(this.x, this.y - 30, 'The crafting queue is full', 'info'); break; }
+      const real = { ...this.bag }, steps: Survival['queue'] = [], job = ++this.jobN;
+      if (!this.plan(id, r.n, real, steps, job)) break;
+      this.bag = real; this.queue.push(...steps); made++;
+    }
+    if (!made) { Sound.denied(); this.bubble(this.x, this.y - 30, `Not enough to make a ${ONE_NAME[r.out].toLowerCase()}`, 'info'); }
+    else Sound.click();
+    this.renderShop();
+  }
+  /** The crafting queue: one step at a time. Parts made for something else in the queue go straight into it. */
+  private runQueue(dt: number) {
+    const st = this.queue[0];
+    if (!st) return;
+    const r = REC[st.id];
+    st.t += dt;
+    if (st.t < r.time * st.b) return;
+    this.queue.shift();
+    const n = r.n * st.b - st.internal;
+    if (n > 0) this.bag[r.out!] += n;
+    if (st.internal > 0) { const m = this.madeFor.get(st.job) ?? {}; m[r.out!] = (m[r.out!] ?? 0) + st.internal; this.madeFor.set(st.job, m); }
+    if (st.top) this.madeFor.delete(st.job);
+    if (st.top) { this.bubble(this.x, this.y - 30, `+${r.n * st.b} ${r.n * st.b === 1 ? ONE_NAME[r.out!].toLowerCase() : KIND_NAME[r.out!]}`, 'info'); Sound.pop(); }
+    if (isPlaceable(r.out!)) this.syncQuick();
+  }
+  /** Tap a job in the queue to cancel it: you get back what it took (and any parts it already made). */
+  private cancelJob(job: number) {
+    const steps = this.queue.filter(q => q.job === job);
+    if (!steps.length) return;
+    for (const st of steps) for (const [k, n] of Object.entries(st.raw) as [Kind, number][]) this.bag[k] += n;
+    // parts this job already made were kept for it; they come back too
+    this.queue = this.queue.filter(q => q.job !== job);
+    const made = this.madeFor.get(job); if (made) { for (const [k, n] of Object.entries(made) as [Kind, number][]) this.bag[k] += n; this.madeFor.delete(job); }
+    this.bubble(this.x, this.y - 30, 'Crafting cancelled', 'info'); Sound.click();
+  }
+  /** Parts finished for a job that's still in the queue (so cancelling can give them back). */
+  private madeFor = new Map<number, Cost>();
+  /** What you carry, in inventory order. */
+  private invItems() { return KINDS.filter(k => this.bag[k] > 0).map(k => ({ k, n: Math.floor(this.bag[k]) })); }
+  private renderShop() {
+    if (!this.shopOpen) return;
+    const items = this.invItems(), recs = RECIPES.filter(r => r.cat === this.invTab && this.unlocked(r));
+    const state = recs.map(r => this.canMake(r));
+    const sig = JSON.stringify([items, state, this.invTab, this.invSel, this.expansion, this.brickGate, [...this.done]]);
+    if (sig === this.invSig) return;
+    this.invSig = sig;
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const slots = Math.max(30, Math.ceil(items.length / 5) * 5);
+    let h = '';
+    for (let i = 0; i < slots; i++) {
+      const it = items[i], pl = it && isPlaceable(it.k);
+      h += it ? `<button class="slot${pl ? ' placeable' : ''}" ${pl ? `data-place="${it.k}"` : ''} title="${esc(ONE_NAME[it.k])}${pl ? ' (tap to place)' : ''}"><img src="${this.icon(it.k)}" alt=""><b>${it.n}</b>${pl && PLACE_KEY[it.k as Placeable] ? `<small>${PLACE_KEY[it.k as Placeable]}</small>` : ''}<span>${esc(ONE_NAME[it.k])}</span></button>` : '<div class="slot empty"></div>';
+    }
+    this.pad.querySelector('#svInvGrid')!.innerHTML = h;
+    this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}" title="${REC_CATS[c][1]}"><i>${REC_CATS[c][0]}</i></button>`).join('');
+    this.pad.querySelector('#svRecCat')!.textContent = REC_CATS[this.invTab][1];
+    if (!recs.some(r => r.id === this.invSel)) this.invSel = recs[0]?.id ?? 'belt';
+    this.pad.querySelector('#svRecGrid')!.innerHTML = recs.map((r, i) => `<button class="slot rec${state[i] === 'have' ? '' : state[i] === 'parts' ? ' parts' : ' no'}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(this.recName(r))}"><img src="${this.icon(r.out ?? r.id)}" alt="">${r.n > 1 ? `<b>${r.n}</b>` : ''}</button>`).join('');
+    const r = REC[this.invSel], can = this.canMake(r), cost = this.recCost(r);
+    const chips = (Object.entries(cost) as [Kind, number][]).map(([k, n]) => `<span class="chip${this.bag[k] >= n ? '' : recFor(k) ? ' part' : ' short'}"><img src="${this.icon(k)}" alt=""> ${n} ${KIND_NAME[k]} <em>(${Math.floor(this.bag[k])})</em></span>`).join('') || '<span class="chip">Nothing</span>';
+    const done = (r.id === 'gate' && this.brickGate) || (r.id === 'expand' && this.expansion >= SURVIVAL.expandCosts.length);
+    this.pad.querySelector('#svRecInfo')!.innerHTML = `<b>${esc(this.recName(r))}</b><small>${done ? 'Done.' : esc(r.desc)}</small><div class="chips">${chips}<span class="makes">→ ${r.out ? `${r.n} ${r.n === 1 ? ONE_NAME[r.out].toLowerCase() : KIND_NAME[r.out]}${r.time ? `, ${r.time} s` : ''}` : 'at once'}</span></div>`
+      + (can === 'parts' ? '<small class="partsnote">Missing parts get made first.</small>' : '')
+      + `<div class="craftbtns"><button class="primary" data-craft="1"${can ? '' : ' disabled'}>Craft</button>${r.out ? `<button class="ghost" data-craft="5"${can ? '' : ' disabled'}>Craft 5</button>` : ''}</div>`;
+  }
+  private recName(r: Rec) { return r.out ? ONE_NAME[r.out] : r.id === 'gate' ? 'Brick gate' : 'Bigger base'; }
+  private invClick(e: MouseEvent) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-place],[data-tab],[data-rec],[data-craft]');
+    e.stopPropagation();
+    if (!el || !this.running || this.paused) return;
+    if (el.dataset.place) { const p = el.dataset.place as Placeable; this.closeShop(); this.togglePlacing(p); return; }
+    if (el.dataset.tab) { this.invTab = el.dataset.tab as RecCat; Sound.click(); this.renderShop(); return; }
+    if (el.dataset.rec) { if (this.invSel !== el.dataset.rec) { this.invSel = el.dataset.rec; Sound.click(); this.renderShop(); } else this.craft(el.dataset.rec); return; }
+    if (el.dataset.craft) this.craft(this.invSel, Number(el.dataset.craft));
   }
   private iconCache = new Map<string, string>();
   /** A picture of a thing drawn just as it looks in the world, as an image URL (made once, then kept). */
@@ -654,37 +868,16 @@ export class Survival {
     if (hit) return hit;
     const px = 96, cv = document.createElement('canvas'); cv.width = cv.height = px;
     const g = cv.getContext('2d')!;
-    const big = ['mine', 'machine', ...ORES].includes(id), box = id.startsWith('k-') || id === 'pack' ? 17 : big ? 60 : id === 'belt' ? 46 : id === 'gate' || id === 'expand' ? 76 : 30;
+    const pl = isPlaceable(id), box = id === 'machine' ? 60 : id === 'gate' || id === 'expand' ? 76 : pl || id === 'robot' ? 30 : 17;
     g.translate(px / 2, px / 2); g.scale(px / box, px / box);
-    const bld = (type: BType, fuel = 0): Bld => ({ type, d: 0, inp: 0, out: 0, t: 0, fuel, recipe: 'pack', robots: 0 });
-    const tur = (kind: TKind): Turret => ({ ammo: { ammo: 1, rocket: 1 }, cd: 0, face: -Math.PI / 4, kind });
-    if (id.startsWith('k-')) paintItem(g, 0, 0, id.slice(2) as Kind);
-    else if (id === 'pack') paintPack(g, 0, 0);
-    else if (id === 'belt') for (const x of [-TILE, 0, TILE]) paintBelt(g, x, 0, 0, 0);
-    else if (id === 'short') paintBelt(g, 0, 0, 0, 0);
-    else if (id === 'grab') paintGrabber(g, 0, 0, { d: 0, t: 0, carry: false, k: 'stone' });
-    else if (id === 'split') paintSplitter(g, 0, 0, 0);
-    else if (id === 'chest') paintChest(g, 0, 0);
-    else if (id === 'lab') paintLab(g, 0, 0, 0);
-    else if (id === 'gen') paintBld(g, 0, 0, bld('gen', 1), 0);
-    else if ((BTYPES as string[]).includes(id)) paintBld(g, 0, 0, bld(id as BType), 0);
-    else if (id === 'turret' || id === 'rapid' || id === 'rocket') paintTurret(g, 0, 0, tur(id));
-    else if (id === 'bturret') paintTurret(g, 0, 0, tur('brick'));
-    else if (id === 'mine' || ORES.includes(id as Ore)) {
-      const keep = [this.popT, this.mining]; this.popT = 9; this.mining = false;
-      this.drawMine(g, { x: 0, y: 0, r: 26, ore: id === 'mine' ? 'stone' : id as Ore });
-      [this.popT, this.mining] = keep as [number, boolean];
-    } else if (id === 'machine') {
+    if (id === 'machine') {
       const keep = this.popT; this.popT = 9;
       g.save(); g.beginPath(); g.rect(-30, -30, 60, 56); g.clip();
       this.drawMachine(g, { x: 0, y: 0, r: 26, queue: [], batchT: 0, out: [], recipe: 'ammo' });
       g.restore(); this.popT = keep;
-    } else if (id === 'robot') {
-      g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(4, 10, 5, 2.5, 0, 0, 7); g.fill();
-      g.fillStyle = '#d8dee4'; g.beginPath(); g.arc(0, 0, 5.5, 0, 7); g.fill();
-      g.fillStyle = '#3a4a52'; g.fillRect(-3, -1.5, 6, 2.5);
-      g.strokeStyle = '#9aa6b0'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(-8, -5); g.lineTo(8, -5); g.stroke();
-    } else if (id === 'gate') {
+    } else if (pl) paintPlaceable(g, 0, 0, id as Placeable, 0, 0);
+    else if (id === 'robot') paintRobot(g, 0, 0, 0);
+    else if (id === 'gate') {
       // the gate's two doors and posts, in brick
       g.fillStyle = '#a8503a'; g.fillRect(-26, -5, 52, 10);
       g.strokeStyle = '#7a3526'; g.lineWidth = 1; for (const x of [-13, 0, 13]) { g.beginPath(); g.moveTo(x, -5); g.lineTo(x, 5); g.stroke(); }
@@ -695,143 +888,197 @@ export class Survival {
       for (let i = 0; i < 5; i++) for (const [x, y] of [[-16 + i * 9, -8], [-16, -8 + i * 9]]) { g.fillStyle = i % 2 ? '#6d4a2a' : '#7c5631'; g.beginPath(); g.arc(x, y, t * .55, 0, 7); g.fill(); g.fillStyle = '#a07a4c'; g.beginPath(); g.arc(x - 1, y - 1, t * .28, 0, 7); g.fill(); }
       g.strokeStyle = '#ffcf8c'; g.lineWidth = 3; g.beginPath(); g.moveTo(-6, 2); g.lineTo(-26, -18); g.stroke();
       g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(-30, -22); g.lineTo(-18, -20); g.lineTo(-28, -10); g.fill();
-    }
+    } else paintItem(g, 0, 0, id as Kind);
     const url = cv.toDataURL();
     this.iconCache.set(id, url);
     return url;
   }
-  private canCraft(rc: Recipe) { return !rc.locked && (rc.ok ?? this.afford(rc.cost)); }
-  private craft(id: string, n = 1) {
-    const rc = this.recipes().find(x => x.id === id);
-    if (!rc) return;
-    this.invSel = id;
-    if (rc.locked || !this.canCraft(rc)) { Sound.denied(); this.renderShop(); return; }
-    for (let i = 0; i < n; i++) { const r2 = this.recipes().find(x => x.id === id)!; if (!this.canCraft(r2)) break; r2.craft(); }
+  /* ---------- the panel for a furnace or an assembler ---------- */
+  private openBld(key: string) {
+    if (!this.blds.has(key)) return;
+    this.bldOpen = key; this.stick = null; this.keys.clear(); this.mining = false; this.digAt = null; this.bldSig = '';
+    this.renderBld();
+    this.pad.querySelector<HTMLElement>('#svBld')!.hidden = false;
+    Sound.ui();
   }
-  /** What you carry: raw things first, then things you can place. */
-  private invItems(): { id: string; icon: string; color?: string; name: string; n: number; place?: Placeable; key?: string }[] {
-    const raw = (['stone', 'brick', ...ORES, 'pack', ...AMMO_KINDS, 'rocket'] as Kind[]).map(k => ({ id: 'k-' + k, icon: KIND_ICON[k], color: isAmmoKind(k) && k !== 'ammo' ? metalOf(k).color : undefined, name: KIND_NAME[k][0].toUpperCase() + KIND_NAME[k].slice(1), n: Math.floor(this.bag[k]) }));
-    const pl = (Object.keys(PLACE_INFO) as Placeable[]).map(p => ({ id: 'p-' + p, icon: PLACE_INFO[p][0], name: PLACE_INFO[p][1], key: PLACE_INFO[p][2], n: this.count(p), place: p }));
-    return [...raw, ...pl].filter(x => x.n > 0);
-  }
-  private renderShop() {
-    if (!this.shopOpen) return;
-    const items = this.invItems(), recs = this.recipes();
-    const sig = JSON.stringify([items.map(i => i.id + i.n), recs.map(r => r.id + this.canCraft(r) + !!r.locked + r.desc), this.invTab, this.invSel, Object.values(this.bag)]);
-    if (sig === this.invSig) return;
-    this.invSig = sig;
-    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    const slots = Math.max(30, Math.ceil(items.length / 5) * 5);
-    let h = '';
-    for (let i = 0; i < slots; i++) {
-      const it = items[i];
-      h += it ? `<button class="slot${it.place ? ' placeable' : ''}" ${it.place ? `data-place="${it.place}"` : ''} title="${esc(it.name)}${it.place ? ' (tap to place)' : ''}"><img src="${this.icon(it.place ?? it.id)}" alt=""><b>${it.n}</b>${it.key ? `<small>${it.key}</small>` : ''}<span>${esc(it.name)}</span></button>` : '<div class="slot empty"></div>';
+  private closeBld() { this.bldOpen = null; this.pad.querySelector<HTMLElement>('#svBld')!.hidden = true; }
+  private bldSig = '';
+  private renderBld() {
+    const key = this.bldOpen, b = key ? this.blds.get(key) : undefined;
+    if (!key || !b) { this.closeBld(); return; }
+    const [c, r] = key.split(',').map(Number), near = dist(this.x, this.y, tileX(c), tileY(r)) < NEAR * 1.6;
+    const rc = REC[b.recipe], power = this.hasPower(key);
+    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done]]);
+    if (sig === this.bldSig) return;
+    this.bldSig = sig;
+    const chip = (k: Kind, n: number, of?: number) => `<span class="chip"><img src="${this.icon(k)}" alt=""> ${n}${of !== undefined ? `/${of}` : ''} ${KIND_NAME[k]}</span>`;
+    let h = `<h3>${BNAME[b.type]}</h3>`;
+    if (b.type === 'asm') {
+      h += `<p class="fine">${power ? 'Powered.' : '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.'} Pick what it makes; grabbers bring the parts in and take what it makes out the front.</p>`;
+      h += '<div class="slots">' + RECIPES.filter(x => x.out && x.asm && this.unlocked(x)).map(x => `<button class="slot rec${x.id === b.recipe ? ' sel' : ''}" data-asm="${x.id}" title="${ONE_NAME[x.out!]}"><img src="${this.icon(x.out!)}" alt="">${x.n > 1 ? `<b>${x.n}</b>` : ''}</button>`).join('') + '</div>';
+      if (rc) {
+        h += `<div class="recinfo"><b>Makes ${rc.n} ${rc.n === 1 ? ONE_NAME[rc.out!].toLowerCase() : KIND_NAME[rc.out!]} every ${rc.time} s</b><div class="chips">${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => chip(k, b.buf?.[k] ?? 0, q)).join('')}</div>`;
+        h += `<div class="bar"><span style="width:${Math.min(100, b.t / rc.time * 100)}%"></span></div>${b.out ? `<div class="chips">Made: ${chip(b.outK!, b.out)}</div>` : ''}</div>`;
+      }
+    } else {
+      h += `<p class="fine">Smelts iron and copper ore into plates, gold ore into bars, rough diamonds into cut diamonds and stone into bricks. Grabbers can fill and empty it.</p>`;
+      h += `<div class="recinfo"><div class="chips">In: ${b.inp && b.inpK ? chip(b.inpK, b.inp) : '<span class="chip">nothing</span>'} → Out: ${b.out && b.outK ? chip(b.outK, b.out) : '<span class="chip">nothing</span>'}</div><div class="bar"><span style="width:${b.inp ? Math.min(100, b.t / SURVIVAL.furnaceTime * 100) : 0}%"></span></div></div>`;
     }
-    this.pad.querySelector('#svInvGrid')!.innerHTML = h;
-    this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}" title="${REC_CATS[c][1]}"><i>${REC_CATS[c][0]}</i></button>`).join('');
-    this.pad.querySelector('#svRecCat')!.textContent = REC_CATS[this.invTab][1];
-    const mine = recs.filter(r => r.cat === this.invTab && !r.locked);
-    if (!mine.some(r => r.id === this.invSel)) this.invSel = mine[0].id;
-    this.pad.querySelector('#svRecGrid')!.innerHTML = mine.map(r => `<button class="slot rec${this.canCraft(r) ? '' : ' no'}${r.locked ? ' locked' : ''}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(r.name)}"><img src="${this.icon(r.id)}" alt=""><span>${esc(r.name)}</span></button>`).join('');
-    const r = recs.find(x => x.id === this.invSel)!;
-    const cost = (Object.entries(r.cost) as [keyof Cost, number][]).map(([k, n]) => `<span class="chip${this.bag[k] >= n ? '' : ' short'}"><img src="${this.icon('k-' + k)}" alt=""> ${n} ${KIND_NAME[k]} <em>(${Math.floor(this.bag[k])})</em></span>`).join('') || '<span class="chip">Free</span>';
-    this.pad.querySelector('#svRecInfo')!.innerHTML = `<b>${esc(r.name)}</b><small>${esc(r.desc)}</small><div class="chips">${cost}<span class="makes">→ ${esc(r.makes)}</span></div>`
-      + `<div class="craftbtns"><button class="primary" data-craft="1"${this.canCraft(r) ? '' : ' disabled'}>Craft</button>${['robot', 'gate', 'expand', 'hub'].includes(r.id) ? '' : `<button class="ghost" data-craft="5"${this.canCraft(r) ? '' : ' disabled'}>Craft 5</button>`}</div>`;
+    h += `<div class="craftbtns"><button class="primary" data-bld="fill"${near ? '' : ' disabled'}>${b.type === 'asm' ? 'Put parts in' : 'Put ore in'}${b.out ? ' and take out' : ''}</button><button class="ghost" data-bld="pick"${near ? '' : ' disabled'}>Pick up</button><button class="ghost" data-bld="close">Close</button></div>`;
+    if (!near) h += '<p class="fine">Walk closer to put things in or pick it up.</p>';
+    this.pad.querySelector('#svBld')!.innerHTML = h;
   }
-  private invClick(e: MouseEvent) {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-place],[data-tab],[data-rec],[data-craft]');
+  private bldClick(e: MouseEvent) {
     e.stopPropagation();
-    if (!el || !this.running || this.paused) return;
-    if (el.dataset.place) { const p = el.dataset.place as Placeable; this.closeShop(); this.togglePlacing(p); return; }
-    if (el.dataset.tab) { this.invTab = el.dataset.tab as RecCat; Sound.click(); this.renderShop(); return; }
-    if (el.dataset.rec) { if (this.invSel !== el.dataset.rec) { this.invSel = el.dataset.rec; Sound.click(); this.renderShop(); } else this.craft(el.dataset.rec); return; }
-    if (el.dataset.craft) this.craft(this.invSel, Number(el.dataset.craft));
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-asm],[data-bld]'), key = this.bldOpen;
+    if (!el || !key || !this.running || this.paused) return;
+    const b = this.blds.get(key); if (!b) { this.closeBld(); return; }
+    if (el.dataset.asm) {
+      if (b.recipe !== el.dataset.asm) {
+        // switching recipe gives back the old parts
+        for (const [k, n] of Object.entries(b.buf ?? {}) as [Kind, number][]) this.bag[k] += n;
+        if (b.out && b.outK) this.bag[b.outK] += b.out;
+        b.buf = {}; b.out = 0; b.outK = undefined; b.t = 0; b.recipe = el.dataset.asm;
+        Sound.click();
+      }
+    } else if (el.dataset.bld === 'fill') this.fillBld(key);
+    else if (el.dataset.bld === 'pick') { const [c, r] = key.split(',').map(Number); this.closeBld(); this.pickUp(c, r); return; }
+    else if (el.dataset.bld === 'close') { this.closeBld(); return; }
+    this.bldSig = ''; this.renderBld();
   }
-  private buyBelt() {
-    if (this.bag.stone < SURVIVAL.beltCost) { Sound.denied(); return; }
-    this.bag.stone -= SURVIVAL.beltCost; this.inv++;
-    Sound.pop(); this.renderShop();
+  /* ---------- the quickbar ---------- */
+  /** Anything placeable you have that isn't on the quickbar goes in the first empty slot. */
+  private syncQuick() {
+    for (const p of PLACEABLES) if (this.bag[p] > 0 && !this.quick.includes(p)) { const i = this.quick.indexOf(null); if (i >= 0) this.quick[i] = p; }
   }
-  private buyGrabber() {
-    if (this.bag.stone < SURVIVAL.grabberCost) { Sound.denied(); return; }
-    this.bag.stone -= SURVIVAL.grabberCost; this.invGrab++;
-    Sound.pop(); this.renderShop();
+  private quickSig = '';
+  /** Draws the quickbar and the crafting queue (only when they change). */
+  private renderQuick() {
+    const q0 = this.queue[0], qr = q0 ? REC[q0.id] : undefined, prog = q0 && qr ? Math.floor(q0.t / (qr.time * q0.b) * 20) : 0;
+    const jobs = [...new Map(this.queue.filter(q => q.top).map(q => [q.job, q])).values()];
+    const sig = JSON.stringify([this.quick, this.quick.map(p => p ? this.bag[p] : 0), this.placing && this.placeType, jobs.map(j => j.job), prog]);
+    if (sig === this.quickSig) return;
+    this.quickSig = sig;
+    this.pad.querySelector('#svQuick')!.innerHTML = this.quick.map((p, i) => p
+      ? `<button class="qslot${this.placing && this.placeType === p ? ' on' : ''}${this.bag[p] ? '' : ' none'}" data-q="${i}" title="${ONE_NAME[p]}"><img src="${this.icon(p)}" alt=""><b>${this.bag[p]}</b><small>${(i + 1) % 10}</small></button>`
+      : `<div class="qslot empty"><small>${(i + 1) % 10}</small></div>`).join('');
+    const firstJob = q0?.job;
+    this.pad.querySelector('#svQueue')!.innerHTML = jobs.slice(0, 8).map(j => {
+      const r = REC[j.id], cur = j.job === firstJob;
+      return `<button class="qjob" data-job="${j.job}" title="Tap to cancel"><img src="${this.icon(r.out!)}" alt="">${cur ? `<span style="height:${prog * 5}%"></span>` : ''}</button>`;
+    }).join('') + (jobs.length > 8 ? `<i>+${jobs.length - 8}</i>` : '');
   }
-  private buyTurret() {
-    if (this.bag.stone < SURVIVAL.turretCost) { Sound.denied(); return; }
-    this.bag.stone -= SURVIVAL.turretCost; this.invTurret++;
-    Sound.pop(); this.renderShop();
-  }
-  private buy(type: 'split' | 'chest' | 'mine' | 'machine' | 'lab') {
-    const cost = { split: SURVIVAL.splitterCost, chest: SURVIVAL.chestCost, mine: SURVIVAL.mineCost, machine: SURVIVAL.machineCost, lab: SURVIVAL.labCost }[type];
-    if (this.bag.stone < cost) { Sound.denied(); return; }
-    this.bag.stone -= cost;
-    if (type === 'split') this.invSplit++; else if (type === 'chest') this.invChest++; else if (type === 'mine') this.invMine++; else if (type === 'lab') this.invLab++; else this.invMachine++;
-    Sound.pop(); this.renderShop();
-  }
-  private costX(b: 'rapid' | 'rocket' | Ore): Cost { return b === 'rapid' ? SURVIVAL.rapidCost : b === 'rocket' ? SURVIVAL.rocketCost : SURVIVAL.oreMineCost[b]; }
-  private afford(c: Cost) { return (Object.entries(c) as [keyof Cost, number][]).every(([k, n]) => this.bag[k] >= n); }
-  /** Buys a rapid crossbow, a rocket launcher or a metal mine into your inventory. */
-  private buyX(b: 'rapid' | 'rocket' | Ore) {
-    const c = this.costX(b);
-    if ((b === 'rapid' || b === 'rocket') && !this.done.has(b)) { Sound.denied(); return; }
-    if (!this.afford(c)) { Sound.denied(); return; }
-    for (const [k, n] of Object.entries(c) as [keyof Cost, number][]) this.bag[k] -= n;
-    if (b === 'rapid' || b === 'rocket') this.invT[b]++; else this.invOre[b]++;
-    Sound.pop(); this.renderShop();
-  }
-  private costB(b: BType | 'bturret' | 'robot' | 'gate'): [number, number] {
-    return ({ furnace: [SURVIVAL.furnaceCost, 0], gen: [SURVIVAL.genCost, 0], pump: [SURVIVAL.pumpCost, 0], pipe: [SURVIVAL.pipeCost, 0], asm: [SURVIVAL.asmCost, 0], tunnel: [SURVIVAL.tunnelCost, 0], hub: [SURVIVAL.hubCost, 0], bturret: [SURVIVAL.bTurretCost, SURVIVAL.bTurretBricks], robot: [SURVIVAL.robotCost, 0], gate: [0, SURVIVAL.brickGate] } as Record<string, [number, number]>)[b];
-  }
-  private canBuyB(b: BType | 'bturret' | 'robot' | 'gate') {
-    const [st, br] = this.costB(b);
-    if (b === 'gate' && this.brickGate) return false;
-    if (b === 'robot' && ![...this.blds.values()].some(x => x.type === 'hub')) return false;
-    return this.bag.stone >= st && this.bag.brick >= br;
-  }
-  private buyB(b: BType | 'bturret' | 'robot' | 'gate') {
-    if (!this.canBuyB(b)) { Sound.denied(); return; }
-    const [st, br] = this.costB(b); this.bag.stone -= st; this.bag.brick -= br;
-    if (b === 'gate') { this.brickGate = true; this.say('Brick gate built: bears wait 10 seconds longer'); }
-    else if (b === 'robot') { const hk = [...this.blds.entries()].filter(([, x]) => x.type === 'hub').sort((a, c) => a[1].robots - c[1].robots)[0][0]; this.blds.get(hk)!.robots++; this.robots.push(this.newRobot(hk)); }
-    else if (b === 'bturret') this.invBTurret++;
-    else this.invB[b] += b === 'pipe' ? SURVIVAL.pipePack : b === 'tunnel' ? 2 : 1;
-    Sound.pop(); this.renderShop();
+  /** 1 to 0 or a tap on a quickbar slot: pick that thing up to place it (again to put it away). */
+  private useQuick(i: number) {
+    const p = this.quick[i];
+    if (!p) { Sound.denied(); return; }
+    if (this.shopOpen) this.closeShop();
+    this.togglePlacing(p);
   }
   private newRobot(hk: string): Robot { const [c, r] = hk.split(',').map(Number); return { x: tileX(c), y: tileY(r), hub: hk, k: null, src: null, dst: null }; }
   /** Puts a thing in your pocket. */
   private pocket(k: Kind, n = 1) { this.bag[k] += n; }
-  /** A belt, grabber or robot hands a building one thing. */
+  /** A belt, grabber or robot hands a building one thing. False if it can't take it. */
   private feedBld(b: Bld, k: Kind) {
-    if (k !== 'stone' || !['furnace', 'gen', 'asm'].includes(b.type)) return false;
-    if (b.inp >= (b.type === 'asm' ? SURVIVAL.asmStone * 2 : 10)) return false;
-    b.inp++; return true;
-  }
-  /** Is (x, y) near a generator that's burning? */
-  private powered(x: number, y: number) {
-    for (const [key, b] of this.blds) { if (b.type !== 'gen' || b.fuel <= 0) continue; const [c, r] = key.split(',').map(Number); if (dist(x, y, tileX(c), tileY(r)) < SURVIVAL.powerRange) return true; }
+    if (b.type === 'furnace') {
+      if (!SMELT[k] || b.inp >= 10 || (b.inp > 0 && b.inpK !== k)) return false;
+      b.inpK = k; b.inp++; return true;
+    }
+    if (b.type === 'gen') { if (k !== 'stone' || b.inp >= 10) return false; b.inp++; return true; }
+    if (b.type === 'asm') {
+      const r = REC[b.recipe]; if (!r) return false;
+      const q = r.in[k]; if (!q) return false;
+      b.buf ??= {};
+      if ((b.buf[k] ?? 0) >= q * 2) return false;
+      b.buf[k] = (b.buf[k] ?? 0) + 1; return true;
+    }
+    if (b.type === 'hub') { if (k !== 'robot') return false; return true; }
     return false;
   }
-  /** Furnaces, generators, assemblers, pipes and robots. */
+  /** What a building wants brought to it, for robots. */
+  private bldWants(b: Bld): Kind[] {
+    if (b.type === 'furnace') return b.inp >= 3 ? [] : b.inp ? [b.inpK!] : ['iron', 'copper', 'gold', 'diamond', 'stone'];
+    if (b.type === 'gen') return b.inp < 3 ? ['stone'] : [];
+    if (b.type === 'asm') { const r = REC[b.recipe]; if (!r) return []; return (Object.entries(r.in) as [Kind, number][]).filter(([k, q]) => (b.buf?.[k] ?? 0) < q).map(([k]) => k); }
+    return [];
+  }
+  /** Is this tile's building getting power? */
+  private hasPower(key: string) { return this.poweredSet.has(key); }
+  /** Works out the power: poles join up (and to generators) within reach; a network with a burning generator powers
+   *  drills, assemblers and labs near its poles. */
+  private updatePower() {
+    const nodes: { key: string; c: number; r: number; gen: boolean }[] = [];
+    for (const [key, b] of this.blds) if (b.type === 'pole' || b.type === 'gen') { const [c, r] = key.split(',').map(Number); nodes.push({ key, c, r, gen: b.type === 'gen' }); }
+    const parent = nodes.map((_, i) => i), find = (i: number): number => parent[i] === i ? i : (parent[i] = find(parent[i]));
+    this.poleLinks = [];
+    for (let i = 0; i < nodes.length; i++) for (let j = 0; j < i; j++) {
+      const a = nodes[i], b = nodes[j];
+      if (a.gen && b.gen) continue;
+      if (Math.hypot(a.c - b.c, a.r - b.r) > SURVIVAL.poleReach + .01) continue;
+      parent[find(i)] = find(j); this.poleLinks.push([a.key, b.key]);
+    }
+    const fuel = new Map<number, boolean>(), gens = new Map<number, string[]>();
+    nodes.forEach((n, i) => { if (!n.gen) return; const b = this.blds.get(n.key)!, root = find(i); if (b.fuel > 0 || b.inp > 0) fuel.set(root, true); gens.set(root, [...(gens.get(root) ?? []), n.key]); });
+    this.poweredSet.clear(); this.genLoad.clear();
+    const consumers: string[] = [...this.labs.keys()];
+    for (const [key, b] of this.blds) if (ELECTRIC.includes(b.type)) consumers.push(key);
+    const load = new Map<number, number>();
+    for (const key of consumers) {
+      const [c, r] = key.split(',').map(Number);
+      const i = nodes.findIndex(n => !n.gen && Math.max(Math.abs(n.c - c), Math.abs(n.r - r)) <= SURVIVAL.poleSupply);
+      if (i < 0) continue;
+      const root = find(i);
+      if (!fuel.get(root)) continue;
+      this.poweredSet.add(key); load.set(root, (load.get(root) ?? 0) + 1);
+    }
+    // generators burn fuel faster the more they power
+    for (const [root, n] of load) { const gs = gens.get(root) ?? []; for (const g of gs) this.genLoad.set(g, Math.max(.5, n / (4 * gs.length))); }
+  }
+  private genLoad = new Map<string, number>();
+  /** Furnaces, drills, assemblers, generators, pipes and robots. */
   private runBlds(dt: number) {
+    this.powerT -= dt;
+    if (this.powerT <= 0) { this.powerT = .5; this.updatePower(); }
+    const P = SURVIVAL.pollution;
     for (const [key, b] of this.blds) {
       const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r), [dx, dy] = DIRS[b.d];
       if (b.type === 'gen') {
+        const rate = this.genLoad.get(key) ?? 0;
+        if (!rate) continue;
         if (b.fuel <= 0 && b.inp > 0) { b.inp--; b.fuel += SURVIVAL.genBurn; }
-        b.fuel = Math.max(0, b.fuel - dt);
+        if (b.fuel > 0) { b.fuel = Math.max(0, b.fuel - dt * rate); this.pollution += P.gen * dt; }
         continue;
       }
-      if (b.type !== 'furnace' && b.type !== 'asm') continue;
-      const need = b.type === 'furnace' ? 1 : SURVIVAL.asmStone, time = b.type === 'furnace' ? SURVIVAL.furnaceTime : SURVIVAL.asmTime;
+      if (b.type !== 'furnace' && b.type !== 'asm' && b.type !== 'drill') continue;
       // things made go out the front, onto a belt or into whatever is there
-      if (b.out > 0 && this.deliver(c + dx, r + dy, b.type === 'furnace' ? 'brick' : 'pack')) b.out--;
-      if (b.out > 0 && dist(this.x, this.y, x, y) < NEAR) { this.pocket(b.type === 'furnace' ? 'brick' : 'pack', b.out); this.bubble(x, y - 20, `+${b.out} ${b.type === 'furnace' ? 'brick' : 'pack'}${b.out > 1 ? 's' : ''}`, 'info'); b.out = 0; }
-      if (b.inp < need || b.out >= 10) { b.t = 0; continue; }
-      b.t += dt * (this.powered(x, y) ? 2 : 1);
-      if (b.t < time) continue;
-      b.t = 0; b.inp -= need;
-      if (b.type === 'asm' && b.recipe === 'belt') { this.invShort += 3; this.bubble(x, y - 20, '+3 short belts', 'info'); }
-      else b.out++;
+      if (b.out > 0 && b.outK && this.deliver(c + dx, r + dy, b.outK)) { b.out--; if (!b.out) b.outK = undefined; }
+      if (b.type === 'drill') {
+        const p = b.pi !== undefined ? this.patches[b.pi] : undefined;
+        if (!p || p.left <= 0 || b.out >= 5 || !this.hasPower(key)) continue;
+        b.t += dt * ST.digMul;
+        this.pollution += P.drill * dt;
+        if (b.t < SURVIVAL.drillEvery) continue;
+        b.t = 0; p.left--; b.out++; b.outK = p.ore;
+        if (p.left <= 0) this.bubble(x, y - 20, 'This ore patch has run out', 'info');
+        continue;
+      }
+      if (b.type === 'furnace') {
+        const mk = b.inpK ? SMELT[b.inpK] : undefined;
+        if (!b.inp || !mk || b.out >= 10 || (b.out > 0 && b.outK !== mk)) { b.t = 0; continue; }
+        b.t += dt; this.pollution += P.furnace * dt;
+        if (b.t < SURVIVAL.furnaceTime) continue;
+        b.t = 0; b.inp--; b.out++; b.outK = mk;
+        if (!b.inp) b.inpK = undefined;
+        continue;
+      }
+      // an assembler: when it has everything for its recipe (and power), it makes it
+      const rc = REC[b.recipe];
+      if (!rc || !rc.out || !this.hasPower(key) || b.out >= rc.n * 2 || (Object.entries(rc.in) as [Kind, number][]).some(([k, q]) => (b.buf?.[k] ?? 0) < q)) { b.t = 0; continue; }
+      b.t += dt; this.pollution += P.asm * dt;
+      if (b.t < rc.time) continue;
+      b.t = 0;
+      for (const [k, q] of Object.entries(rc.in) as [Kind, number][]) b.buf![k] = (b.buf![k] ?? 0) - q;
+      b.out += rc.n; b.outK = rc.out;
     }
     // water: a turret touching pipes that lead to a pump is cooled and reloads twice as fast
     this.coolT -= dt;
@@ -875,9 +1122,9 @@ export class Survival {
     // what needs something, and what kind
     const needs: { id: string; x: number; y: number; kinds: Kind[]; give: (k: Kind) => boolean }[] = [];
     for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? ['rocket'] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
-    for (const [key, lb] of this.labs) if (lb.packs < 10) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'l' + key, x: tileX(c), y: tileY(r), kinds: ['pack'], give: () => { lb.packs++; return true; } }); }
-    this.machines.forEach((m, i) => { if (m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: ([...ORES, 'stone'] as Kind[]).filter(k => this.machineTakes(m, k)), give: k => { if (!this.machineTakes(m, k)) return false; m.queue.push(k); return true; } }); });
-    for (const [key, b] of this.blds) if (['furnace', 'gen', 'asm'].includes(b.type) && b.inp < 3) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'b' + key, x: tileX(c), y: tileY(r), kinds: ['stone'], give: () => this.feedBld(b, 'stone') }); }
+    for (const [key, lb] of this.labs) if (lb.packs < 10 || (lb.packs2 ?? 0) < 10) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'l' + key, x: tileX(c), y: tileY(r), kinds: [...(lb.packs < 10 ? ['pack'] : []), ...((lb.packs2 ?? 0) < 10 ? ['pack2'] : [])] as Kind[], give: k => this.feedLab(lb, k) }); }
+    this.machines.forEach((m, i) => { if (m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: MACHINE_IN.filter(k => this.machineTakes(m, k)), give: k => { if (!this.machineTakes(m, k)) return false; m.queue.push(k); return true; } }); });
+    for (const [key, b] of this.blds) { const kinds = this.bldWants(b); if (kinds.length) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'b' + key, x: tileX(c), y: tileY(r), kinds, give: k => this.feedBld(b, k) }); } }
     for (const n of needs) {
       if (busy.has(n.id)) continue;
       for (const k of n.kinds) for (const [ck, ch] of this.chests) {
@@ -899,89 +1146,124 @@ export class Survival {
     if (!a) return false;
     tu.ammo[a] = (tu.ammo[a] ?? 0) + 1; return true;
   }
-  private buyPacks(n: number) {
-    if (this.bag.stone < SURVIVAL.packCost * n) { Sound.denied(); return; }
-    this.bag.stone -= SURVIVAL.packCost * n; this.bag.pack += n;
-    Sound.pop(); this.renderShop();
+
+  /** A lab takes red and green science packs, up to the lab's size of each. */
+  private feedLab(lb: Lab, k: Kind) {
+    if (k === 'pack' && lb.packs < SURVIVAL.labSize) { lb.packs++; return true; }
+    if (k === 'pack2' && (lb.packs2 ?? 0) < SURVIVAL.labSize) { lb.packs2 = (lb.packs2 ?? 0) + 1; return true; }
+    return false;
   }
   /* ---------- labs and research ---------- */
-  private nearLab() {
-    for (const [key, lab] of this.labs) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) return lab; }
-    return null;
-  }
+
   /** T next to a lab: put your science packs in it. */
   private loadLab(lab: Lab) {
-    const n = Math.min(this.bag.pack, SURVIVAL.labSize - lab.packs);
-    if (!n) { this.bubble(this.x, this.y - 30, this.bag.pack ? 'The lab is full' : 'No science packs. Craft them in your inventory (Shift)', 'info'); Sound.denied(); return; }
-    lab.packs += n; this.bag.pack -= n;
+    let n = 0;
+    for (const k of ['pack', 'pack2'] as Kind[]) while (this.bag[k] > 0 && this.feedLab(lab, k)) { this.bag[k]--; n++; }
+    if (!n) { this.bubble(this.x, this.y - 30, this.bag.pack || this.bag.pack2 ? 'The lab is full' : 'No science packs. Craft them in your inventory (Shift)', 'info'); Sound.denied(); return; }
     this.bubble(this.x, this.y - 30, `${n} pack${n > 1 ? 's' : ''} in`, 'info'); Sound.thump();
     if (!this.researching) this.bubble(this.x, this.y - 46, 'Pick something to research (Y)', 'info');
   }
   private openLab() {
-    if (!this.labs.size && !this.invLab) { this.bubble(this.x, this.y - 30, 'Craft a lab in your inventory first (Shift)', 'info'); Sound.denied(); return; }
+    if (!this.labs.size && !this.bag.lab) { this.bubble(this.x, this.y - 30, 'Craft a lab in your inventory first (Shift)', 'info'); Sound.denied(); return; }
     this.labOpen = true; this.stick = null; this.keys.clear();
     this.renderLab();
     this.pad.querySelector<HTMLElement>('#svLab')!.hidden = false;
     Sound.ui();
   }
   private closeLab() { this.labOpen = false; this.pad.querySelector<HTMLElement>('#svLab')!.hidden = true; }
+  private canResearch(id: ResId) { const r = RESEARCH.find(x => x.id === id)!; return !this.done.has(id) && (r.needs as readonly ResId[]).every(n => this.done.has(n)); }
   private pickResearch(id: ResId) {
-    if (this.done.has(id)) return;
+    if (!this.canResearch(id)) { Sound.denied(); return; }
     this.researching = id; Sound.click(); this.renderLab();
   }
   private renderLab() {
-    const inLabs = [...this.labs.values()].reduce((a, l) => a + l.packs, 0);
-    this.pad.querySelector('#svLabInfo')!.textContent = `${this.labs.size} lab${this.labs.size === 1 ? '' : 's'} · ${inLabs} packs in labs · ${this.bag.pack} in your pocket`;
+    const red = [...this.labs.values()].reduce((a, l) => a + l.packs, 0), green = [...this.labs.values()].reduce((a, l) => a + (l.packs2 ?? 0), 0);
+    const unpowered = [...this.labs.keys()].filter(k => !this.hasPower(k)).length;
+    this.pad.querySelector('#svLabInfo')!.textContent = `${this.labs.size} lab${this.labs.size === 1 ? '' : 's'}${unpowered ? ` (${unpowered} without power)` : ''} · in labs: ${red} red, ${green} green packs · in your pocket: ${this.bag.pack} red, ${this.bag.pack2} green`;
     const list = this.pad.querySelector<HTMLElement>('#svResList')!;
-    const html = RESEARCH.map(r => {
-      const done = this.done.has(r.id), on = this.researching === r.id, p = Math.floor(this.progress[r.id] ?? 0);
-      return `<button class="svres${done ? ' done' : ''}${on ? ' on' : ''}" data-res="${r.id}"${done ? ' disabled' : ''}><b>${r.name}</b><small>${r.desc}</small><i>${done ? 'Done' : `${p}/${r.cost} packs`}</i><span style="width:${Math.min(100, p / r.cost * 100)}%"></span></button>`;
+    const name = (id: string) => RESEARCH.find(x => x.id === id)!.name;
+    // what you can research now first, then what needs something else first, then what's done
+    const order = [...RESEARCH].sort((a, b) => (this.done.has(a.id) ? 2 : this.canResearch(a.id) ? 0 : 1) - (this.done.has(b.id) ? 2 : this.canResearch(b.id) ? 0 : 1));
+    const html = order.map(r => {
+      const done = this.done.has(r.id), on = this.researching === r.id, p = Math.floor(this.progress[r.id] ?? 0), can = this.canResearch(r.id);
+      const packs = r.packs === 2 ? '<em class="pk red"></em><em class="pk green"></em>' : '<em class="pk red"></em>';
+      const sub = done ? 'Done' : can ? `${p}/${r.cost} ${packs}` : `Needs ${(r.needs as readonly string[]).filter(n => !this.done.has(n as ResId)).map(name).join(' and ')}`;
+      return `<button class="svres${done ? ' done' : ''}${on ? ' on' : ''}${!done && !can ? ' locked' : ''}" data-res="${r.id}"${done || !can ? ' disabled' : ''}><b>${r.name}</b><small>${r.desc}</small><i>${sub}</i><span style="width:${Math.min(100, p / r.cost * 100)}%"></span></button>`;
     }).join('');
     if (list.dataset.html !== html) { list.innerHTML = html; list.dataset.html = html; }
   }
-  /** Labs with packs in them work on the chosen research, one pack every 2 seconds each. */
+  /** Powered labs with the right packs work on the chosen research: one unit (a red pack, plus a green one if it
+   *  needs it) every 2 seconds each. */
   private runLabs(dt: number) {
     const id = this.researching;
+    if (!id) { for (const lab of this.labs.values()) lab.t = 0; return; }
+    const r = RESEARCH.find(x => x.id === id)!;
     for (const [lk, lab] of this.labs) {
-      if (!id || !lab.packs) { lab.t = 0; continue; }
-      const [lc, lr] = lk.split(',').map(Number), lx = tileX(lc), ly = tileY(lr);
-      lab.t += dt * (this.powered(lx, ly) ? 2 : 1);
+      if (!lab.packs || (r.packs === 2 && !lab.packs2) || !this.hasPower(lk)) { lab.t = 0; continue; }
+      lab.t += dt;
       if (lab.t < SURVIVAL.labEvery) continue;
-      lab.t -= SURVIVAL.labEvery; lab.packs--;
-      const r = RESEARCH.find(x => x.id === id)!;
+      lab.t -= SURVIVAL.labEvery; lab.packs--; if (r.packs === 2) lab.packs2!--;
       this.progress[id] = (this.progress[id] ?? 0) + 1;
       if (this.progress[id] >= r.cost && this.researching === id) {
         this.done.add(id); applyResearch(id); this.researching = null;
-        this.say(`Research done: ${r.name}!`, 4); Sound.pop();
+        const un = RECIPES.filter(x => x.unlock === id).map(x => this.recName(x).toLowerCase());
+        this.say(`Research done: ${r.name}!${un.length ? ` You can now make: ${un.join(', ')}` : ''}`, 5); Sound.pop();
         return;
       }
     }
   }
-  /** The chest next to the guy, if any. */
-  private nearChest() {
-    for (const key of this.chests.keys()) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) return key; }
-    return null;
+
+  /** The nearest thing within reach that T works on: a lab, chest, turret or building. */
+  private nearUsable(): { kind: 'lab' | 'chest' | 'turret' | 'bld'; key: string } | null {
+    let best: { kind: 'lab' | 'chest' | 'turret' | 'bld'; key: string } | null = null, bd = NEAR;
+    const look = (kind: 'lab' | 'chest' | 'turret' | 'bld', keys: Iterable<string>) => {
+      for (const key of keys) {
+        if (kind === 'bld' && ['pipe', 'pump', 'pole', 'tunnel'].includes(this.blds.get(key)!.type)) continue;
+        const [c, r] = key.split(',').map(Number), d = dist(this.x, this.y, tileX(c), tileY(r)); if (d < bd) { bd = d; best = { kind, key }; }
+      }
+    };
+    look('lab', this.labs.keys()); look('chest', this.chests.keys()); look('turret', this.turrets.keys()); look('bld', this.blds.keys());
+    return best;
   }
-  /** T: take the stone out of a chest next to you, or load a turret next to you. */
+  /** T: use the nearest thing: load a lab or turret, empty a chest, or fill and empty a furnace, generator, drill,
+   *  robot hub or assembler. */
   private useNear() {
-    const lab = this.nearLab();
-    if (lab && this.bag.pack) { this.loadLab(lab); return; }
-    const ak = [...this.blds.entries()].find(([key, b]) => { if (b.type !== 'asm') return false; const [c, r] = key.split(',').map(Number); return dist(this.x, this.y, tileX(c), tileY(r)) < NEAR; });
-    if (ak && !this.nearChest()) { const b = ak[1]; b.recipe = b.recipe === 'pack' ? 'belt' : 'pack'; this.bubble(this.x, this.y - 30, b.recipe === 'pack' ? 'Assembler makes science packs' : 'Assembler makes short belts', 'info'); Sound.click(); return; }
-    const fk = [...this.blds.entries()].find(([key, b]) => { if (!['furnace', 'gen', 'asm'].includes(b.type)) return false; const [c, r] = key.split(',').map(Number); return dist(this.x, this.y, tileX(c), tileY(r)) < NEAR; });
-    if (fk && this.bag.stone && !this.nearChest() && !this.turretNear()) { const b = fk[1]; let n = 0; while (this.bag.stone && this.feedBld(b, 'stone')) { this.bag.stone--; n++; } this.bubble(this.x, this.y - 30, n ? `${n} stone in` : 'It is full', 'info'); Sound.thump(); return; }
-    const ck = this.nearChest();
-    const ch = ck ? this.chests.get(ck)! : null;
-    if (ch && (chestN(ch) > 0 || !this.loadable())) {
+    const u = this.nearUsable();
+    if (!u) { const m = this.mineOn ? near(this.machines, this.x, this.y) : null; if (m) { this.feedMachine(m); return; } this.bubble(this.x, this.y - 30, 'Walk up to something to use it', 'info'); Sound.denied(); return; }
+    if (u.kind === 'lab') { this.loadLab(this.labs.get(u.key)!); return; }
+    if (u.kind === 'turret') { this.loadTurret(); return; }
+    if (u.kind === 'chest') {
+      const ch = this.chests.get(u.key)!;
       if (!chestN(ch)) { this.bubble(this.x, this.y - 30, 'The chest is empty', 'info'); Sound.denied(); return; }
       this.bubble(this.x, this.y - 30, KINDS.filter(k => ch[k]).map(k => `+${ch[k]} ${KIND_NAME[k]}`).join(', '), 'info');
       for (const k of KINDS) { this.bag[k] += ch[k]; ch[k] = 0; }
-      Sound.thump();
+      this.syncQuick(); Sound.thump();
       return;
     }
-    this.loadTurret();
+    const b = this.blds.get(u.key)!;
+    if (b.type === 'asm' || b.type === 'furnace') { this.openBld(u.key); return; }
+    this.fillBld(u.key);
   }
-  private turretNear() { for (const key of this.turrets.keys()) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) return true; } return false; }
+  /** Takes out what a building made, then puts in what it can use from your pocket. */
+  private fillBld(key: string) {
+    const b = this.blds.get(key)!, [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
+    const said: string[] = [];
+    if (b.out > 0 && b.outK) { this.bag[b.outK] += b.out; said.push(`+${b.out} ${KIND_NAME[b.outK]}`); b.out = 0; b.outK = undefined; }
+    if (b.type === 'hub') {
+      const n = this.bag.robot;
+      if (n) { b.robots += n; for (let i = 0; i < n; i++) this.robots.push(this.newRobot(key)); this.bag.robot = 0; said.push(`${n} robot${n > 1 ? 's' : ''} in`); }
+    } else if (b.type === 'asm') {
+      const rc = REC[b.recipe];
+      if (rc) for (const k of Object.keys(rc.in) as Kind[]) { let n = 0; while (this.bag[k] > 0 && this.feedBld(b, k)) { this.bag[k]--; n++; } if (n) said.push(`${n} ${KIND_NAME[k]} in`); }
+    } else {
+      const order: Kind[] = b.type === 'gen' ? ['stone'] : b.type === 'furnace' ? [...(b.inpK ? [b.inpK] : []), 'iron', 'copper', 'gold', 'diamond', 'stone'] : [];
+      for (const k of order) { let n = 0; while (this.bag[k] > 0 && this.feedBld(b, k)) { this.bag[k]--; n++; } if (n) { said.push(`${n} ${KIND_NAME[k]} in`); break; } }
+    }
+    if (said.length) { this.bubble(x, y - 20, said.join(', '), 'info'); Sound.thump(); }
+    else { this.bubble(x, y - 20, b.type === 'furnace' ? 'Bring ore or stone to smelt' : b.type === 'gen' ? 'It burns stone' : b.type === 'hub' ? 'Craft robots to put in it' : b.type === 'drill' ? 'Nothing dug yet' : 'Nothing to put in', 'info'); Sound.denied(); }
+    if (this.bldOpen) this.renderBld();
+  }
+
   /** The turret next to the guy, if any. */
   private nearTurret() {
     let best: Turret | null = null, bd = NEAR;
@@ -997,7 +1279,7 @@ export class Survival {
   private loadTurret() {
     const best = this.nearTurret();
     if (!best) { this.bubble(this.x, this.y - 30, 'Walk to a turret to load it', 'info'); Sound.denied(); return; }
-    if (!this.loadable(best)) { this.bubble(this.x, this.y - 30, best.kind === 'rocket' ? 'No rockets. Make them in a machine (rocket recipe)' : 'No ammo to load. Make some in the machine', 'info'); Sound.denied(); return; }
+    if (!this.loadable(best)) { this.bubble(this.x, this.y - 30, best.kind === 'rocket' ? 'No rockets. Make them in an ammo machine (rocket recipe)' : 'No ammo to load. Make some in the ammo machine', 'info'); Sound.denied(); return; }
     const kinds: Kind[] = best.kind === 'rocket' ? ['rocket'] : AMMO_KINDS;
     let n = 0;
     for (const k of kinds) { while (this.bag[k] > 0 && this.feedTurret(best, k)) { this.bag[k]--; n++; } }
@@ -1005,20 +1287,38 @@ export class Survival {
     this.bubble(this.x, this.y - 30, `Loaded ${n} ${best.kind === 'rocket' ? 'rocket' : 'ammo'}${best.kind === 'rocket' && n > 1 ? 's' : ''}`, 'info');
     Sound.thump();
   }
-  private count(type: Placeable) { return ({ belt: this.inv, short: this.invShort, grab: this.invGrab, turret: this.invTurret, split: this.invSplit, chest: this.invChest, mine: this.invMine, machine: this.invMachine, lab: this.invLab, bturret: this.invBTurret, ...this.invB, ...this.invT, ...this.invOre } as Record<Placeable, number>)[type]; }
-  /** Puts one stone into whatever is at (c, r): the machine, a turret, a chest, a splitter or a free belt. False if it can't take it. */
+  private count(type: Placeable) { return this.bag[type]; }
+  /** Puts one thing into whatever is at (c, r): a machine, turret, lab, building, chest, splitter or a free belt. False if it can't take it. */
   private deliver(c: number, r: number, k: Kind = 'stone') {
     const x = tileX(c), y = tileY(r), key = c + ',' + r;
-    // the machine only takes raw stone and metal
     const m = this.isMachine(c, r);
-    if (m) { if (!this.machineTakes(m, k)) return false; m.queue.push(k); this.bubble(m.x, m.y - 36, `${KIND_NAME[k][0].toUpperCase() + KIND_NAME[k].slice(1)} in`, 'info'); return true; }
+    if (m) { if (!this.machineTakes(m, k)) return false; m.queue.push(k); this.bubble(m.x, m.y - 36, `${ONE_NAME[k]} in`, 'info'); return true; }
     const tu = this.turrets.get(key); if (tu) return this.feedTurret(tu, k);
-    const lb = this.labs.get(key); if (lb) { if (k !== 'pack' || lb.packs >= SURVIVAL.labSize) return false; lb.packs++; return true; }
-    const bd = this.blds.get(key); if (bd && bd.type !== 'tunnel') return this.feedBld(bd, k);
+    const lb = this.labs.get(key); if (lb) return this.feedLab(lb, k);
+    const bd = this.blds.get(key);
+    if (bd && bd.type === 'hub' && k === 'robot') { bd.robots++; this.robots.push(this.newRobot(key)); return true; }
+    if (bd && bd.type !== 'tunnel') return this.feedBld(bd, k);
     const ch = this.chests.get(key); if (ch) { if (chestN(ch) >= SURVIVAL.chestSize) return false; ch[k]++; return true; }
     const sp = this.splitters.get(key); if (sp) { if (sp.buf.length >= 4) return false; sp.buf.push(k); return true; }
     if (this.isBelt(key)) { if (this.items.some(o => !o.gone && dist(o.x, o.y, x, y) < 10)) return false; this.items.push({ x, y, k }); return true; }
     return false;
+  }
+  /** Would whatever is at (c, r) take this thing? (Grabbers only pick up what the thing in front of them can use.) */
+  private canTake(c: number, r: number, k: Kind) {
+    const key = c + ',' + r;
+    const m = this.isMachine(c, r); if (m) return this.machineTakes(m, k);
+    const tu = this.turrets.get(key); if (tu) return tu.kind === 'rocket' ? k === 'rocket' : k === 'stone' || isAmmoKind(k);
+    const lb = this.labs.get(key); if (lb) return (k === 'pack' && lb.packs < SURVIVAL.labSize) || (k === 'pack2' && (lb.packs2 ?? 0) < SURVIVAL.labSize);
+    const b = this.blds.get(key);
+    if (b && b.type !== 'tunnel') {
+      if (b.type === 'furnace') return !!SMELT[k] && b.inp < 10 && (!b.inp || b.inpK === k);
+      if (b.type === 'gen') return k === 'stone' && b.inp < 10;
+      if (b.type === 'asm') { const q = REC[b.recipe]?.in[k]; return !!q && (b.buf?.[k] ?? 0) < q * 2; }
+      if (b.type === 'hub') return k === 'robot';
+      return false;
+    }
+    const ch = this.chests.get(key); if (ch) return chestN(ch) < SURVIVAL.chestSize;
+    return true;
   }
   /** The tile at (c, r) is the machine's side, where belts and grabbers meet it. */
   private isMachine(c: number, r: number) {
@@ -1030,36 +1330,50 @@ export class Survival {
     for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[gr.d]; if (this.isMachine(c - dx, r - dy) === m) return true; }
     return false;
   }
-  private buyShort() {
-    if (this.bag.stone < SURVIVAL.shortBeltCost) { Sound.denied(); return; }
-    this.bag.stone -= SURVIVAL.shortBeltCost; this.invShort += SURVIVAL.shortBeltPack;
-    Sound.pop(); this.renderShop();
-  }
-  /** Tap a placed piece to put it back in your inventory. A belt tile comes back as a 1-tile belt. */
+  /** Tap a placed thing to put it back in your inventory, with whatever was in it. */
   private pickUp(c: number, r: number) {
     const key = c + ',' + r, x = tileX(c), y = tileY(r);
-    // stone on that spot goes in your pocket
+    // things lying on that spot go in your pocket
     const dropStone = () => { for (const it of this.items) { const t = tileAt(it.x, it.y); if (t && t.c === c && t.r === r) { it.gone = true; this.pocket(it.k); } } this.items = this.items.filter(it => !it.gone); };
-    if (this.belts.has(key)) { this.belts.delete(key); this.invShort++; dropStone(); this.bubble(x, y - 14, '+1 short belt', 'info'); }
-    else if (this.grabbers.has(key)) { const gk = this.grabbers.get(key)!; if (gk.carry) this.pocket(gk.k); this.grabbers.delete(key); this.invGrab++; this.bubble(x, y - 14, '+1 grabber', 'info'); }
-    else if (this.splitters.has(key)) { for (const a of this.splitters.get(key)!.buf) this.pocket(a); this.splitters.delete(key); this.invSplit++; this.bubble(x, y - 14, '+1 splitter', 'info'); }
-    else if (this.chests.has(key)) { const ch = this.chests.get(key)!, n = chestN(ch); for (const k of KINDS) this.bag[k] += ch[k]; this.chests.delete(key); this.invChest++; this.bubble(x, y - 14, n ? `+1 chest, ${n} things back` : '+1 chest', 'info'); }
+    let got: Placeable, extra = 0;
+    if (this.belts.has(key)) { this.belts.delete(key); dropStone(); got = 'belt'; }
+    else if (this.grabbers.has(key)) { const gk = this.grabbers.get(key)!; if (gk.carry) this.pocket(gk.k); this.grabbers.delete(key); got = 'grab'; }
+    else if (this.splitters.has(key)) { for (const a of this.splitters.get(key)!.buf) this.pocket(a); this.splitters.delete(key); got = 'split'; }
+    else if (this.chests.has(key)) { const ch = this.chests.get(key)!; extra = chestN(ch); for (const k of KINDS) this.bag[k] += ch[k]; this.chests.delete(key); got = 'chest'; }
     else if (this.blds.has(key)) {
       const b = this.blds.get(key)!;
-      if (b.type === 'furnace') this.bag.brick += b.out; if (b.type === 'asm') this.bag.pack += b.out; this.bag.stone += b.inp;
-      if (b.type === 'hub') { this.robots = this.robots.filter(rb => { if (rb.hub !== key) return true; if (rb.k) this.pocket(rb.k); return false; }); this.bag.stone += (b.robots - 2) * SURVIVAL.robotCost; }
-      this.blds.delete(key); this.invB[b.type]++; this.coolT = 0; this.bubble(x, y - 14, `+1 ${BNAME[b.type].toLowerCase()}`, 'info');
+      if (b.out && b.outK) { this.bag[b.outK] += b.out; extra += b.out; }
+      if (b.inp) { this.bag[b.type === 'gen' ? 'stone' : b.inpK ?? 'stone'] += b.inp; extra += b.inp; }
+      for (const [k, n] of Object.entries(b.buf ?? {}) as [Kind, number][]) { this.bag[k] += n; extra += n; }
+      if (b.type === 'hub') { this.robots = this.robots.filter(rb => { if (rb.hub !== key) return true; if (rb.k) this.pocket(rb.k); return false; }); this.bag.robot += Math.max(0, b.robots - 2); }
+      this.blds.delete(key); this.coolT = 0; this.powerT = 0; got = b.type;
+      if (this.bldOpen === key) this.closeBld();
     }
-    else if (this.labs.has(key)) { const lb = this.labs.get(key)!; this.bag.pack += lb.packs; this.labs.delete(key); this.invLab++; this.bubble(x, y - 14, lb.packs ? `+1 lab, ${lb.packs} packs back` : '+1 lab', 'info'); }
+    else if (this.labs.has(key)) { const lb = this.labs.get(key)!; this.bag.pack += lb.packs; this.bag.pack2 += lb.packs2 ?? 0; extra = lb.packs + (lb.packs2 ?? 0); this.labs.delete(key); got = 'lab'; }
     else if (this.turrets.has(key)) {
-      const tu = this.turrets.get(key)!, n = Math.floor(tAmmo(tu));
+      const tu = this.turrets.get(key)!; extra = Math.floor(tAmmo(tu));
       for (const [k, v] of Object.entries(tu.ammo) as [AmmoKind | 'rocket', number][]) this.bag[k] += Math.floor(v);
       this.turrets.delete(key); if (this.picked === key) this.picked = null;
-      if (tu.kind === 'brick') this.invBTurret++; else if (tu.kind === 'turret') this.invTurret++; else this.invT[tu.kind]++;
-      this.bubble(x, y - 14, n ? `+1 ${TNAME[tu.kind]}, ${n} ${tu.kind === 'rocket' ? 'rockets' : 'ammo'} back` : `+1 ${TNAME[tu.kind]}`, 'info');
+      got = T_ITEM[tu.kind];
     }
     else return;
+    this.bag[got]++; this.syncQuick();
+    this.bubble(x, y - 14, `+1 ${ONE_NAME[got].toLowerCase()}${extra ? `, ${extra} things back` : ''}`, 'info');
     Sound.click();
+  }
+  /** Picks up an ammo machine or a mine (a big round thing), with what's in it. */
+  private pickUpBig(s: Machine | Mine) {
+    if ('queue' in s) {
+      for (const k of [...s.queue, ...s.out]) this.bag[k]++;
+      this.machines = this.machines.filter(m => m !== s); this.bag.machine++;
+      if (this.recipeFor === s) this.closeRecipe();
+    } else {
+      if (this.mineAt === s) { this.mining = false; this.mineAt = null; }
+      this.mines = this.mines.filter(m => m !== s);
+      if (s.ore === 'stone') this.bag.mine++; else this.bag.drill++;
+    }
+    this.updateStructs(); this.syncQuick();
+    this.bubble(s.x, s.y - 30, `+1 ${'queue' in s ? 'ammo machine' : s.ore === 'stone' ? 'stone mine' : 'drill'}`, 'info'); Sound.click();
   }
   /** A quick tap on the map at world point (x, y). */
   private tapAt(x: number, y: number) {
@@ -1078,6 +1392,12 @@ export class Survival {
     // tap a spawner: it makes a bear right away
     const sp = this.spawners.find(s => !s.dead && dist(s.x, s.y, x, y) < SPAWNER_R + 12);
     if (sp) { this.spawnBear(sp, false); this.bubble(sp.x, sp.y - 40, 'A bear!', 'info'); Sound.tone('sawtooth', 160, 90, .3, .1); return; }
+    // a mine: pick it up
+    const mn = this.mines.find(m => dist(m.x, m.y, x, y) < m.r + 4);
+    if (mn) { this.pickUpBig(mn); return; }
+    // furnaces and assemblers open their panel (which has Pick up)
+    const b = t ? this.blds.get(key) : undefined;
+    if (b && (b.type === 'asm' || b.type === 'furnace')) { this.openBld(key); return; }
     if (t) this.pickUp(t.c, t.r);
   }
   /** The bear or spawner under world point (x, y), if any. */
@@ -1090,8 +1410,8 @@ export class Survival {
   private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
-    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${({ belt: 'long belts', short: 'short belts', grab: 'grabbers', turret: 'turrets', split: 'splitters', chest: 'chests', mine: 'mines', machine: 'machines', lab: 'labs', bturret: 'brick turrets', rapid: 'rapid crossbows', rocket: 'rocket launchers', iron: 'iron mines', copper: 'copper mines', gold: 'gold mines', diamond: 'diamond mines', furnace: 'furnaces', gen: 'generators', pump: 'pumps', pipe: 'pipes', asm: 'assemblers', tunnel: 'underground belts', hub: 'robot hubs' } as Record<Placeable, string>)[type]}. Craft them in your inventory (Shift)`, 'info'); Sound.denied(); return; }
-    this.placing = true; this.placeType = type; this.hover = null;
+    if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[type]}. Craft them in your inventory (Shift)`, 'info'); Sound.denied(); return; }
+    this.placing = true; this.placeType = type; this.hover = null; this.closeBld();
     Sound.click();
   }
   /** Turns whatever is on a tile; false if nothing is there. */
@@ -1102,71 +1422,64 @@ export class Survival {
     const sp = this.splitters.get(key);
     if (sp) { sp.d = (sp.d + 1) % 4; Sound.click(); return true; }
     const bd = this.blds.get(key);
-    if (bd && ['furnace', 'asm', 'tunnel'].includes(bd.type)) { bd.d = (bd.d + 1) % 4; Sound.click(); return true; }
+    if (bd && ['furnace', 'asm', 'tunnel', 'drill'].includes(bd.type)) { bd.d = (bd.d + 1) % 4; Sound.click(); return true; }
     return false;
   }
-  /** Where the belt would go: under the mouse, or the tile in front of the guy. */
+  /** Where the thing would go: under the mouse, or the tile in front of the guy. */
   private ghost() {
     if (this.hover && performance.now() - this.hover.t < 4000) return this.hover;
     const d = DIRS[Math.round(((this.face % (Math.PI * 2)) + Math.PI * 2) / (Math.PI / 2)) % 4];
     return tileAt(this.x + d[0] * TILE, this.y + d[1] * TILE);
   }
-  /** Can a new mine or machine (radius rr) go with its centre on tile (c, r)? */
+  /** Can a new mine or ammo machine (radius rr) go with its centre on tile (c, r)? Anywhere off the fence and clear of other things. */
   private bigFits(c: number, r: number, rr: number) {
     const x = tileX(c), y = tileY(r);
-    if (x - rr < WALL.x0 + WALL.t + 4 || x + rr > WALL.x1 - WALL.t - 4 || y - rr < WALL.y0 + WALL.t + 4 || y + rr > WALL.y1 - WALL.t - 4) return false;
+    if (x < rr || y < rr || x > W - rr || y > H - rr) return false;
+    if (this.walls.some(([ax, ay, bx, by]) => x > ax - rr - 4 && x < bx + rr + 4 && y > ay - rr - 4 && y < by + rr + 4)) return false;
     if (structs.some(o => dist(x, y, o.x, o.y) < rr + o.r + 16)) return false;
     for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs, this.blds] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
     return true;
   }
+  /** The ore patch under tile (c, r), if it has ore left. */
+  private patchAt(c: number, r: number) { const x = tileX(c), y = tileY(r); const i = this.patches.findIndex(p => p.left > 0 && dist(x, y, p.x, p.y) < p.r); return i; }
   private placeAt(c: number, r: number) {
-    const key = c + ',' + r;
-    if (isBig(this.placeType)) {
-      if (!this.count(this.placeType)) { this.placing = false; return; }
-      const rr = this.placeType === 'machine' ? MACHINE_R : MINE_R;
+    const key = c + ',' + r, type = this.placeType;
+    if (!this.count(type)) { this.placing = false; return; }
+    if (isBig(type)) {
+      const rr = type === 'machine' ? MACHINE_R : MINE_R;
       if (!this.bigFits(c, r, rr)) { this.bubble(tileX(c), tileY(r) - 30, 'Not enough room there', 'info'); Sound.denied(); return; }
-      if (this.placeType === 'mine') { this.mines.push({ x: tileX(c), y: tileY(r), r: rr, ore: 'stone' }); this.invMine--; }
-      else if (this.placeType === 'machine') { this.machines.push({ x: tileX(c), y: tileY(r), r: rr, queue: [], batchT: 0, out: [], recipe: 'ammo' }); this.invMachine--; }
-      else { const o = this.placeType as Ore; this.mines.push({ x: tileX(c), y: tileY(r), r: rr, ore: o }); this.invOre[o]--; this.say(`${METAL[o].name} mine built. Press M next to it to dig`, 3); }
-      this.updateStructs(); Sound.thump();
-      if (!this.count(this.placeType)) this.placing = false;
+      if (type === 'mine') this.mines.push({ x: tileX(c), y: tileY(r), r: rr, ore: 'stone' });
+      else this.machines.push({ x: tileX(c), y: tileY(r), r: rr, queue: [], batchT: 0, out: [], recipe: 'ammo' });
+      this.bag[type]--; this.updateStructs(); Sound.thump();
+      if (!this.count(type)) this.placing = false;
       return;
     }
     if (this.turnTile(key)) return;
-    if (!this.count(this.placeType)) { this.placing = false; return; }
-    if (this.turrets.has(key) || this.chests.has(key) || this.labs.has(key) || (this.blds.has(key) && !this.turnTile(key))) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
+    if (this.taken(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
     if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put that there", 'info'); Sound.denied(); return; }
-    if (this.placeType === 'belt') {
-      // one belt is 3 tiles long, laid from the spot in the direction it faces
-      const [dx, dy] = DIRS[this.placeDir];
-      for (let i = 0; i < SURVIVAL.beltLength; i++) {
-        const cc = c + dx * i, rr = r + dy * i;
-        if (i && (!tileAt(tileX(cc), tileY(rr)) || cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS || blockedTile(cc, rr) || this.taken(cc, rr))) break;
-        this.belts.set(cc + ',' + rr, this.placeDir);
-      }
-      this.inv--;
-    } else if (this.placeType === 'short') {
-      this.belts.set(key, this.placeDir); this.invShort--;
-    } else {
-      if (this.placeType === 'grab') { this.grabbers.set(key, { d: this.placeDir, t: 0, carry: false, k: 'stone' }); this.invGrab--; }
-      else if (this.placeType === 'split') { this.splitters.set(key, { d: this.placeDir, buf: [], side: 0, t: 0 }); this.invSplit--; }
-      else if (this.placeType === 'chest') { this.chests.set(key, emptyBag()); this.invChest--; }
-      else if (this.placeType === 'lab') { this.labs.set(key, { packs: 0, t: 0 }); this.invLab--; }
-      else if (this.placeType === 'bturret') { this.turrets.set(key, { ammo: {}, cd: 0, face: -Math.PI / 2, kind: 'brick' }); this.invBTurret--; this.coolT = 0; }
-      else if (this.placeType === 'rapid' || this.placeType === 'rocket') { this.turrets.set(key, { ammo: {}, cd: 0, face: -Math.PI / 2, kind: this.placeType }); this.invT[this.placeType]--; this.coolT = 0; }
-      else if (BTYPES.includes(this.placeType as BType)) {
-        const bt = this.placeType as BType;
-        this.blds.set(key, { type: bt, d: this.placeDir, inp: 0, out: 0, t: 0, fuel: 0, recipe: 'pack', robots: bt === 'hub' ? 2 : 0 }); this.invB[bt]--; this.coolT = 0;
-        if (bt === 'hub') { this.robots.push(this.newRobot(key), this.newRobot(key)); }
-      }
-      else if (this.placeType === 'turret') { this.turrets.set(key, { ammo: {}, cd: 0, face: -Math.PI / 2, kind: 'turret' }); this.invTurret--; this.coolT = 0; }
-      // stone lying on the spot goes back in your pocket
-      for (const it of this.items) { const t = tileAt(it.x, it.y); if (t && t.c === c && t.r === r) { it.gone = true; this.pocket(it.k); } } this.items = this.items.filter(it => !it.gone);
+    if (type === 'drill' && this.patchAt(c, r) < 0) { this.bubble(tileX(c), tileY(r) - 16, 'Put drills on an ore patch', 'info'); Sound.denied(); return; }
+    const tk = ITEM_T[type];
+    if (type === 'belt') this.belts.set(key, this.placeDir);
+    else if (type === 'grab') this.grabbers.set(key, { d: this.placeDir, t: 0, carry: false, k: 'stone' });
+    else if (type === 'split') this.splitters.set(key, { d: this.placeDir, buf: [], side: 0, t: 0 });
+    else if (type === 'chest') this.chests.set(key, emptyBag());
+    else if (type === 'lab') { this.labs.set(key, { packs: 0, packs2: 0, t: 0 }); this.powerT = 0; }
+    else if (tk) { this.turrets.set(key, { ammo: {}, cd: 0, face: -Math.PI / 2, kind: tk }); this.coolT = 0; }
+    else {
+      const bt = type as BType;
+      this.blds.set(key, { type: bt, d: this.placeDir, inp: 0, out: 0, t: 0, fuel: 0, recipe: '', robots: bt === 'hub' ? 2 : 0, pi: bt === 'drill' ? this.patchAt(c, r) : undefined });
+      this.coolT = 0; this.powerT = 0;
+      if (bt === 'hub') this.robots.push(this.newRobot(key), this.newRobot(key));
+      if (bt === 'asm') this.bubble(tileX(c), tileY(r) - 20, 'Tap it to pick a recipe', 'info');
+      if (ELECTRIC.includes(bt) && !this.blds.size) this.bubble(tileX(c), tileY(r) - 34, 'Needs power: a generator and poles', 'info');
     }
+    this.bag[type]--;
+    // things lying on the spot go back in your pocket
+    if (type !== 'belt') { for (const it of this.items) { const t = tileAt(it.x, it.y); if (t && t.c === c && t.r === r) { it.gone = true; this.pocket(it.k); } } this.items = this.items.filter(it => !it.gone); }
     Sound.thump();
-    if (!this.count(this.placeType)) this.placing = false;
+    if (!this.count(type)) this.placing = false;
   }
-  /** R: turn the belt being placed, or the belt under (or in front of) the guy. */
+  /** R: turn the thing being placed, or the belt under (or in front of) the guy. */
   private rotate() {
     if (this.placing) { this.placeDir = (this.placeDir + 1) % 4; Sound.click(); return; }
     for (const t of [tileAt(this.x, this.y), this.ghost()]) {
@@ -1228,14 +1541,14 @@ export class Survival {
     for (const [key, gr] of this.grabbers) {
       const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[gr.d];
       if (!gr.carry) {
-        const it = this.items.find(o => { if (o.gone) return false; const t = tileAt(o.x, o.y); return !!t && t.c === c - dx && t.r === r - dy; });
+        const it = this.items.find(o => { if (o.gone) return false; const t = tileAt(o.x, o.y); return !!t && t.c === c - dx && t.r === r - dy && this.canTake(c + dx, r + dy, o.k); });
         if (it) { it.gone = true; gr.carry = true; gr.k = it.k; gr.t = 0; }
         else {
           // or one out of a chest behind it (ammo first), or stone ammo out of the machine
           const bk = (c - dx) + ',' + (r - dy), ch = this.chests.get(bk);
-          const kk = ch ? KINDS.find(x => ch[x] > 0) : undefined, bb = this.blds.get(bk);
+          const kk = ch ? KINDS.find(x => ch[x] > 0 && this.canTake(c + dx, r + dy, x)) : undefined, bb = this.blds.get(bk);
           if (ch && kk) { ch[kk]--; gr.carry = true; gr.k = kk; gr.t = 0; }
-          else if (bb && bb.out > 0 && (bb.type === 'furnace' || bb.type === 'asm')) { bb.out--; gr.carry = true; gr.k = bb.type === 'furnace' ? 'brick' : 'pack'; gr.t = 0; }
+          else if (bb && bb.out > 0 && bb.outK && this.canTake(c + dx, r + dy, bb.outK)) { gr.k = bb.outK; bb.out--; if (!bb.out) bb.outK = undefined; gr.carry = true; gr.t = 0; }
           else { const bm = this.isMachine(c - dx, r - dy); if (bm && bm.out.length) { gr.k = bm.out.shift()!; gr.carry = true; gr.t = 0; } }
         }
         continue;
@@ -1342,7 +1655,21 @@ export class Survival {
         if (this.mineT >= ST.mineEvery) { this.mineT -= ST.mineEvery; this.giveStone(mineAt.x, mineAt.y - 30, mineAt); Sound.thump(); }
       }
     }
-    for (let i = 0; i < this.miners.length; i++) {
+    // digging an ore patch by hand
+    const dg = this.digAt;
+    if (dg) {
+      if (m > 0 || dg.left <= 0 || dist(this.x, this.y, dg.x, dg.y) > dg.r + 30) { this.digAt = null; if (dg.left <= 0) this.bubble(dg.x, dg.y - dg.r, 'This patch has run out', 'info'); }
+      else {
+        this.face = Math.atan2(dg.y - this.y, dg.x - this.x);
+        if (this.swing <= 0) { this.swing = 1; Sound.click(); }
+        this.mineT += dt * ST.digMul;
+        if (this.mineT >= SURVIVAL.digEvery) { this.mineT -= SURVIVAL.digEvery; dg.left--; this.bag[dg.ore]++; this.bubble(this.x, this.y - 30, `+1 ${dg.ore === 'stone' ? 'stone' : ONE_NAME[dg.ore].toLowerCase()}`, 'info'); Sound.thump(); }
+      }
+    }
+    this.runQueue(dt);
+    // pollution fades away slowly; the factory adds to it (in runBlds and the ammo machines)
+    this.pollution = Math.max(0, this.pollution - this.pollution * SURVIVAL.pollutionFade * dt);
+    for (let i = 0; i < this.miners.length && this.mines.length; i++) {
       this.miners[i] += dt;
       if (this.miners[i] >= ST.minerEvery) { this.miners[i] -= ST.minerEvery; const [mine, ox, oy] = this.minerSpot(i); this.giveStone(mine.x + ox, mine.y + oy - 18, mine); }
     }
@@ -1352,7 +1679,7 @@ export class Survival {
     for (const mc of this.machines) {
       const job = this.machineJob(mc);
       if (job) {
-        mc.batchT += dt * (this.powered(mc.x, mc.y) ? 2 : 1);
+        mc.batchT += dt; this.pollution += SURVIVAL.pollution.machine * dt;
         if (mc.batchT >= SURVIVAL.batchTime) {
           mc.batchT -= SURVIVAL.batchTime;
           const [out, n] = this.batchOf(mc, job);
@@ -1395,8 +1722,8 @@ export class Survival {
       sp.hurt = Math.max(0, sp.hurt - dt);
       sp.t -= dt;
       if (sp.t > 0) continue;
-      sp.t = this.t < SURVIVAL.earlyTime ? SURVIVAL.spawnEarly : SURVIVAL.spawnEvery / (this.mineOn ? SURVIVAL.mineBears : 1);
-      if (steady < SURVIVAL.maxBears) { this.spawnBear(sp, false); steady++; }
+      sp.t = (this.t < SURVIVAL.earlyTime ? SURVIVAL.spawnEarly : SURVIVAL.spawnEvery / (this.mineOn ? SURVIVAL.mineBears : 1)) / (1 + this.smog() * .5);
+      if (steady < SURVIVAL.maxBears + Math.floor(this.smog() * 2)) { this.spawnBear(sp, false); steady++; }
     }
     // huge waves at 8, 13 and 18 minutes (then every 5 minutes), out of the spawners, on top of the steady bears
     this.waveT -= dt;
@@ -1529,6 +1856,8 @@ export class Survival {
     if (this.hp <= 0) { this.hp = 0; this.end(false); }
 
   }
+  /** How polluted it is: 0 is clean, 1 for every 100 pollution (up to 10). */
+  private smog() { return Math.min(10, this.pollution / 100); }
   private rapidSnd = 0;
   private blasts: { x: number; y: number; t: number }[] = [];
   private end(won: boolean) {
@@ -1578,7 +1907,7 @@ export class Survival {
     // keep the spot clear of the fence
     for (let i = 0; i < 40 && nearFence(tx, ty, BEAR_R + 12); i++) { tx += G.nx * 10; ty += G.ny * 10; }
     const x = sp.x + (Math.random() - .5) * 20, y = sp.y + (Math.random() - .5) * 20;
-    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp, state: 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
+    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -1730,32 +2059,34 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
+    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r)) paintPatch(g, p);
     for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
     this.drawBelts(g);
     if (this.mineOn) { this.drawMineAndMachine(g); }
+    // power lines between poles
+    g.strokeStyle = 'rgba(40,30,20,.75)'; g.lineWidth = 1.2;
+    for (const [a, b] of this.poleLinks) { const [ac, ar] = a.split(',').map(Number), [bc, br] = b.split(',').map(Number); g.beginPath(); g.moveTo(tileX(ac), tileY(ar) - 9); g.quadraticCurveTo((tileX(ac) + tileX(bc)) / 2, (tileY(ar) + tileY(br)) / 2 - 3, tileX(bc), tileY(br) - 9); g.stroke(); }
     for (const it of this.items) paintItem(g, it.x, it.y, it.k);
     if (this.placing) {
       const t = this.ghost();
       if (t) {
-        const big = isBig(this.placeType);
+        const big = isBig(this.placeType), x = tileX(t.c), y = tileY(t.r);
         const taken = !big && this.taken(t.c, t.r);
-        const bad = big ? !this.bigFits(t.c, t.r, this.placeType === 'machine' ? MACHINE_R : MINE_R) : taken ? false : blockedTile(t.c, t.r);
+        const bad = big ? !this.bigFits(t.c, t.r, this.placeType === 'machine' ? MACHINE_R : MINE_R) : taken ? false : blockedTile(t.c, t.r) || (this.placeType === 'drill' && this.patchAt(t.c, t.r) < 0);
         g.globalAlpha = .6;
         if (big) {
           const rr = this.placeType === 'machine' ? MACHINE_R : MINE_R;
-          g.fillStyle = bad ? 'rgba(255,90,80,.35)' : 'rgba(255,245,234,.25)'; g.beginPath(); g.arc(tileX(t.c), tileY(t.r), rr, 0, 7); g.fill();
-          g.fillStyle = '#fff5ea'; g.font = '600 11px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(this.placeType === 'machine' ? 'Machine' : this.placeType === 'mine' ? 'Mine' : METAL[this.placeType as Ore].name + ' mine', tileX(t.c), tileY(t.r) + 4);
-        } else if (!taken) {
-          if (this.placeType === 'belt' || this.placeType === 'short') { const [dx, dy] = DIRS[this.placeDir]; for (let i = 0; i < (this.placeType === 'belt' ? SURVIVAL.beltLength : 1); i++) { const cc = t.c + dx * i, rr = t.r + dy * i; if (cc < 0 || rr < 0 || cc >= COLS || rr >= ROWS || (i && (blockedTile(cc, rr) || this.taken(cc, rr)))) break; paintBelt(g, tileX(cc), tileY(rr), this.placeDir, this.t); } }
-          else if (this.placeType === 'grab') paintGrabber(g, tileX(t.c), tileY(t.r), { d: this.placeDir, t: 0, carry: false, k: 'stone' });
-          else if (this.placeType === 'split') paintSplitter(g, tileX(t.c), tileY(t.r), this.placeDir);
-          else if (this.placeType === 'chest') paintChest(g, tileX(t.c), tileY(t.r));
-          else if (this.placeType === 'lab') paintLab(g, tileX(t.c), tileY(t.r), 0);
-          else if (this.placeType === 'bturret' || this.placeType === 'rapid' || this.placeType === 'rocket') paintTurret(g, tileX(t.c), tileY(t.r), { ammo: {}, cd: 0, face: -Math.PI / 2, kind: this.placeType === 'bturret' ? 'brick' : this.placeType });
-          else if (BTYPES.includes(this.placeType as BType)) { paintBld(g, tileX(t.c), tileY(t.r), { type: this.placeType as BType, d: this.placeDir, inp: 0, out: 0, t: 0, fuel: 0, recipe: 'pack', robots: 0 }, 0); if (this.placeType === 'gen') { g.strokeStyle = 'rgba(255,220,120,.6)'; g.setLineDash([5, 6]); g.beginPath(); g.arc(tileX(t.c), tileY(t.r), SURVIVAL.powerRange, 0, 7); g.stroke(); g.setLineDash([]); } }
-          else paintTurret(g, tileX(t.c), tileY(t.r), { ammo: {}, cd: 0, face: -Math.PI / 2, kind: 'turret' });
-        }
+          g.fillStyle = bad ? 'rgba(255,90,80,.35)' : 'rgba(255,245,234,.25)'; g.beginPath(); g.arc(x, y, rr, 0, 7); g.fill();
+          g.fillStyle = '#fff5ea'; g.font = '600 11px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(ONE_NAME[this.placeType], x, y + 4);
+        } else if (!taken) paintPlaceable(g, x, y, this.placeType, this.placeDir, this.t);
         g.globalAlpha = 1;
+        // where power reaches: round a pole (or a pole's reach to other poles)
+        if (this.placeType === 'pole' || this.placeType === 'gen') {
+          const sup = (SURVIVAL.poleSupply + .5) * TILE;
+          g.strokeStyle = 'rgba(255,220,120,.7)'; g.setLineDash([5, 6]); g.lineWidth = 1.5;
+          if (this.placeType === 'pole') g.strokeRect(x - sup, y - sup, sup * 2, sup * 2);
+          g.beginPath(); g.arc(x, y, SURVIVAL.poleReach * TILE, 0, 7); g.stroke(); g.setLineDash([]);
+        }
         g.strokeStyle = bad ? '#ff6a5a' : '#fff5ea'; g.lineWidth = 2; g.strokeRect(GX0 + t.c * TILE + 1, GY0 + t.r * TILE + 1, TILE - 2, TILE - 2);
       }
     }
@@ -1764,14 +2095,7 @@ export class Survival {
     for (const b of this.bears) if (b.state === 'dead') this.drawBear(g, b);
     for (const b of this.bears) if (b.state !== 'dead') this.drawBear(g, b);
     this.drawGuy(g);
-    for (const rb of this.robots) {
-      const bob = Math.sin(this.t * 6 + rb.x) * 1.5;
-      g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(rb.x + 4, rb.y + 10, 5, 2.5, 0, 0, 7); g.fill();
-      g.fillStyle = '#d8dee4'; g.beginPath(); g.arc(rb.x, rb.y + bob, 5.5, 0, 7); g.fill();
-      g.fillStyle = '#3a4a52'; g.fillRect(rb.x - 3, rb.y - 1.5 + bob, 6, 2.5);
-      g.strokeStyle = '#9aa6b0'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(rb.x - 8, rb.y - 5 + bob); g.lineTo(rb.x + 8, rb.y - 5 + bob); g.stroke();
-      if (rb.k) { g.fillStyle = KIND_DOT[rb.k]; g.beginPath(); g.arc(rb.x, rb.y + 7 + bob, 3, 0, 7); g.fill(); }
-    }
+    for (const rb of this.robots) paintRobot(g, rb.x, rb.y, Math.sin(this.t * 6 + rb.x) * 1.5, rb.k);
     for (const bo of this.bolts) {
       const a = Math.atan2(bo.vy, bo.vx);
       g.save(); g.translate(bo.x, bo.y); g.rotate(a);
@@ -1864,8 +2188,9 @@ export class Survival {
     if (this.placing) {
       // a faint grid while placing
       g.strokeStyle = 'rgba(255,245,234,.12)'; g.lineWidth = 1;
-      for (let c = 0; c <= COLS; c++) { g.beginPath(); g.moveTo(GX0 + c * TILE, GY0); g.lineTo(GX0 + c * TILE, GY0 + ROWS * TILE); g.stroke(); }
-      for (let r = 0; r <= ROWS; r++) { g.beginPath(); g.moveTo(GX0, GY0 + r * TILE); g.lineTo(GX0 + COLS * TILE, GY0 + r * TILE); g.stroke(); }
+      const v = this.view, c0 = Math.max(0, Math.floor((v.x0 - GX0) / TILE)), c1 = Math.min(COLS, Math.ceil((v.x1 - GX0) / TILE)), r0 = Math.max(0, Math.floor((v.y0 - GY0) / TILE)), r1 = Math.min(ROWS, Math.ceil((v.y1 - GY0) / TILE));
+      for (let c = c0; c <= c1; c++) { g.beginPath(); g.moveTo(GX0 + c * TILE, GY0 + r0 * TILE); g.lineTo(GX0 + c * TILE, GY0 + r1 * TILE); g.stroke(); }
+      for (let r = r0; r <= r1; r++) { g.beginPath(); g.moveTo(GX0 + c0 * TILE, GY0 + r * TILE); g.lineTo(GX0 + c1 * TILE, GY0 + r * TILE); g.stroke(); }
     }
     for (const [key, d] of this.belts) { const [c, r] = key.split(',').map(Number); paintBelt(g, tileX(c), tileY(r), d, this.t); }
     for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number); paintGrabber(g, tileX(c), tileY(r), gr); }
@@ -1879,13 +2204,16 @@ export class Survival {
       const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
       if (b.type === 'gen' && b.fuel > 0) { g.fillStyle = 'rgba(255,220,120,.06)'; g.beginPath(); g.arc(x, y, SURVIVAL.powerRange, 0, 7); g.fill(); }
       paintBld(g, x, y, b, this.t);
-      const lbl = b.type === 'furnace' ? (b.inp || b.out ? `${b.inp}→${b.out}` : '') : b.type === 'gen' ? (b.fuel > 0 ? `${Math.ceil(b.fuel + b.inp * SURVIVAL.genBurn)}s` : 'no fuel') : b.type === 'asm' ? `${b.recipe === 'pack' ? 'packs' : 'belts'} ${b.inp}/${SURVIVAL.asmStone}` : b.type === 'hub' ? `${b.robots} robots` : '';
-      if (lbl) { g.fillStyle = b.type === 'gen' && b.fuel <= 0 ? '#ff8a7a' : '#fff5ea'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(lbl, x, y + 21); }
+      const rc = REC[b.recipe];
+      const lbl = b.type === 'furnace' ? (b.inp || b.out ? `${b.inp}→${b.out}` : '') : b.type === 'gen' ? (b.fuel > 0 || b.inp ? `${Math.ceil(b.fuel + b.inp * SURVIVAL.genBurn)}s` : 'no fuel') : b.type === 'asm' ? (rc ? ONE_NAME[rc.out!] : 'tap me') : b.type === 'hub' ? `${b.robots} robots` : b.type === 'drill' ? (b.pi === undefined || (this.patches[b.pi]?.left ?? 0) <= 0 ? 'ran out' : '') : '';
+      if (lbl) { g.fillStyle = (b.type === 'gen' && b.fuel <= 0 && !b.inp) || lbl === 'ran out' ? '#ff8a7a' : '#fff5ea'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(lbl, x, y + 21); }
+      if (ELECTRIC.includes(b.type) && !this.hasPower(key)) paintNoPower(g, x + 8, y - 9, this.t);
     }
     for (const [key, lb] of this.labs) {
-      const [c, r] = key.split(',').map(Number), busy = !!this.researching && lb.packs > 0; paintLab(g, tileX(c), tileY(r), busy ? this.t : 0);
+      const [c, r] = key.split(',').map(Number), busy = !!this.researching && lb.packs > 0 && this.hasPower(key); paintLab(g, tileX(c), tileY(r), busy ? this.t : 0);
+      if (!this.hasPower(key)) paintNoPower(g, tileX(c) + 8, tileY(r) - 9, this.t);
       g.fillStyle = lb.packs ? '#fff5ea' : '#ff8a7a'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
-      g.fillText(lb.packs ? `${lb.packs} packs` : 'empty', tileX(c), tileY(r) + 21);
+      g.fillText(lb.packs || lb.packs2 ? `${lb.packs}${lb.packs2 ? ` + ${lb.packs2}` : ''} packs` : 'empty', tileX(c), tileY(r) + 21);
     }
     for (const [key, tu] of this.turrets) {
       const [c, r] = key.split(',').map(Number), n = tAmmo(tu); paintTurret(g, tileX(c), tileY(r), tu);
@@ -1899,7 +2227,7 @@ export class Survival {
     for (const mine of this.mines) this.drawMine(g, mine);
     for (const mc of this.machines) this.drawMachine(g, mc);
     // hired miners stand round the mines, swinging picks
-    this.miners.forEach((mt, i) => paintMiner(g, this.minerSpot(i), mt));
+    if (this.mines.length) this.miners.forEach((mt, i) => paintMiner(g, this.minerSpot(i), mt));
     g.fillStyle = '#fff5ea'; g.font = '600 12px Jost, sans-serif'; g.textAlign = 'center';
     this.mines.forEach((mine, j) => {
       const n = this.miners.filter((_, i) => i % this.mines.length === j).length;
@@ -2072,9 +2400,18 @@ export class Survival {
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
     g.fillText(`${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    // pollution: a small bar under the counts on the right
+    if (this.pollution > 1) {
+      const k2 = this.smog() / 10, pw = 90;
+      g.textAlign = 'right'; g.fillStyle = this.smog() > 3 ? '#ffb07a' : '#d9d4ca'; g.font = '500 12px Jost, sans-serif';
+      g.fillText(`Pollution ${Math.round(this.pollution)}`, cw - 14 - pw - 8, y + h + 38);
+      g.fillStyle = 'rgba(10,8,24,.6)'; roundRect(g, cw - 14 - pw, y + h + 29, pw, 10, 5); g.fill();
+      g.fillStyle = '#a8865a'; roundRect(g, cw - 14 - pw, y + h + 29, Math.max(6, pw * k2), 10, 5); g.fill();
+      g.font = '500 13px Jost, sans-serif';
+    }
     if (this.mineOn) {
       g.textAlign = 'left'; g.fillStyle = '#d9d4ca';
-      const res = [`Stone ${this.bag.stone}`, ...ORES.filter(o => this.bag[o]).map(o => `${METAL[o].name} ${this.bag[o]}`), this.bag.rocket ? `Rockets ${this.bag.rocket}` : ''].filter(Boolean).join('  ');
+      const res = [`Stone ${this.bag.stone}`, this.bag.ironPlate ? `Iron plates ${this.bag.ironPlate}` : '', this.bag.copperPlate ? `Copper plates ${this.bag.copperPlate}` : '', this.bag.rocket ? `Rockets ${this.bag.rocket}` : ''].filter(Boolean).join('  ');
       g.fillText(res, x, y + h + 38);
       g.fillStyle = this.useAmmo ? '#fff' : '#fff5ea';
       g.fillText(`Ammo: ${this.ammoName()}${this.useAmmo ? ` (${this.bag[this.useAmmo]} left)` : ''}`, x, y + h + 56);
@@ -2137,55 +2474,20 @@ export class Survival {
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
-    const inv = this.pad.querySelector<HTMLElement>('#svInv')!;
-    inv.hidden = !this.inv && !(this.placing && this.placeType === 'belt');
-    inv.classList.toggle('on', this.placing && this.placeType === 'belt');
-    const il = `Belt 3 ×${this.inv}`;
-    if (inv.firstElementChild!.textContent !== il) inv.firstElementChild!.textContent = il;
-    const ig = this.pad.querySelector<HTMLElement>('#svInvGrab')!;
-    ig.hidden = !this.invGrab && !(this.placing && this.placeType === 'grab');
-    ig.classList.toggle('on', this.placing && this.placeType === 'grab');
-    const gl = `Grabber ×${this.invGrab}`;
-    if (ig.firstElementChild!.textContent !== gl) ig.firstElementChild!.textContent = gl;
-    const is = this.pad.querySelector<HTMLElement>('#svInvShort')!;
-    is.hidden = !this.invShort && !(this.placing && this.placeType === 'short');
-    is.classList.toggle('on', this.placing && this.placeType === 'short');
-    const sl = `Belt 1 ×${this.invShort}`;
-    if (is.firstElementChild!.textContent !== sl) is.firstElementChild!.textContent = sl;
-    const it = this.pad.querySelector<HTMLElement>('#svInvTurret')!;
-    it.hidden = !this.invTurret && !(this.placing && this.placeType === 'turret');
-    it.classList.toggle('on', this.placing && this.placeType === 'turret');
-    const tl = `Turret ×${this.invTurret}`;
-    if (it.firstElementChild!.textContent !== tl) it.firstElementChild!.textContent = tl;
-    for (const [id, type, label] of [['#svInvSplit', 'split', 'Splitter'], ['#svInvChest', 'chest', 'Chest'], ['#svInvMine', 'mine', 'Mine'], ['#svInvMachine', 'machine', 'Machine'], ['#svInvLab', 'lab', 'Lab'], ['#svInv-bturret', 'bturret', 'Brick turret'], ['#svInv-rapid', 'rapid', 'Rapid crossbow'], ['#svInv-rocket', 'rocket', 'Rocket launcher'], ...ORES.map(o => ['#svInv-' + o, o, `${METAL[o].name} mine`] as const), ...BTYPES.map(b => ['#svInv-' + b, b, b === 'tunnel' ? 'Underground' : BNAME[b]] as const)] as const) {
-      const el = this.pad.querySelector<HTMLElement>(id)!, n = this.count(type), on = this.placing && this.placeType === type;
-      el.hidden = !n && !on; el.classList.toggle('on', on);
-      const tx = `${label} ×${n}`;
-      if (el.firstElementChild!.textContent !== tx) el.firstElementChild!.textContent = tx;
-    }
-    // inventory buttons stack in two columns from the bottom left, with no gaps
-    let slot = 0;
-    for (const el of this.pad.querySelectorAll<HTMLElement>('.svinv')) {
-      if (el.hidden) continue;
-      const l = (slot % 2 ? 112 : 14) + 'px', bt = (84 + Math.floor(slot / 2) * 52) + 'px';
-      if (el.style.left !== l) el.style.left = l;
-      if (el.style.bottom !== bt) el.style.bottom = bt;
-      slot++;
-    }
-    let nearTurret = false;
-    for (const key of this.turrets.keys()) { const [c, r] = key.split(',').map(Number); if (dist(this.x, this.y, tileX(c), tileY(r)) < NEAR) nearTurret = true; }
-    const ck = this.nearChest(), cch = ck ? this.chests.get(ck)! : null, chestFull = !!cch && chestN(cch) > 0;
-    const lb = this.pad.querySelector<HTMLElement>('#svLoad')!;
-    const labLoad = !!this.nearLab() && this.bag.pack > 0;
-    const canLoad = nearTurret && this.loadable() > 0;
-    lb.hidden = !(labLoad || chestFull || canLoad);
-    const ll = !labLoad && chestFull && !canLoad ? 'Take' : 'Load';
+    this.renderQuick();
+    const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
+    lb.hidden = !use || (use.kind === 'turret' && !this.loadable());
+    const ub = use?.kind === 'bld' ? this.blds.get(use.key) : undefined;
+    const ll = !use ? 'Use' : use.kind === 'chest' ? 'Take' : use.kind === 'lab' || use.kind === 'turret' ? 'Load' : ub && (ub.type === 'asm' || ub.type === 'furnace') ? 'Open' : 'Use';
     this.pad.querySelector<HTMLElement>('#svLabBtn')!.hidden = !this.labs.size || this.labOpen || this.shopOpen;
     if (this.labOpen) this.renderLab();
     if (lb.firstElementChild!.textContent !== ll) lb.firstElementChild!.textContent = ll;
     const standing = tileAt(this.x, this.y);
     this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const help = this.picked ? 'Tap a bear or spawner for this turret to shoot. Tap the turret again to pick it up.' : this.placing ? (['turret', 'chest', 'mine', 'machine', 'lab', 'gen', 'pump', 'pipe', 'hub', 'bturret', 'rapid', 'rocket', ...ORES].includes(this.placeType) ? `Tap a spot to place the ${({ bturret: 'brick turret', gen: 'generator', hub: 'robot hub', rapid: 'rapid crossbow', rocket: 'rocket launcher', iron: 'iron mine', copper: 'copper mine', gold: 'gold mine', diamond: 'diamond mine' } as Record<string, string>)[this.placeType] ?? this.placeType}.` : `Tap a spot to place the ${({ grab: 'grabber', split: 'splitter', furnace: 'furnace', asm: 'assembler', tunnel: 'underground belt' } as Record<string, string>)[this.placeType] ?? 'belt'}. R turns it.`) : this.helpText;
+    const pt = this.placeType, turns = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'].includes(pt);
+    const help = this.picked ? 'Tap a bear or spawner for this turret to shoot. Tap the turret again to pick it up.'
+      : this.placing ? `Tap to place the ${ONE_NAME[pt].toLowerCase()} (${this.bag[pt]} left)${pt === 'belt' || pt === 'pole' || pt === 'pipe' ? ', or drag to lay a line' : ''}.${turns ? ' R turns it.' : ''}${pt === 'drill' ? ' Drills go on ore patches.' : ''}`
+      : this.digAt ? `Digging ${this.digAt.ore === 'stone' ? 'stone' : ONE_NAME[this.digAt.ore].toLowerCase()} (${this.digAt.left} left). Walk away to stop.` : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
     if (hp.textContent !== help) hp.textContent = help;
     if (this.shopOpen) this.renderShop();
@@ -2296,18 +2598,58 @@ function around(x: number, y: number, tx: number, ty: number): [number, number] 
   }
   return first[4] >= 0 ? pts[first[4]] : [tx, ty];
 }
+/** Ore patches round the camp: stone, iron and copper close in, gold further out, diamonds out by the spawners. */
+function genPatches(spawners: Spawner[]): Patch[] {
+  const out: Patch[] = [], big = EXPANSIONS[EXPANSIONS.length - 1];
+  const plan: ['stone' | Ore, number, number][] = [['stone', 420, 800], ['iron', 420, 800], ['copper', 420, 800], ['iron', 800, 1400], ['copper', 800, 1400], ['stone', 800, 1400],
+    ['iron', 1300, 2000], ['copper', 1300, 2000], ['gold', 1100, 1800], ['gold', 1700, 2400], ['diamond', 2000, 2800], ['diamond', 2300, 3000], ['stone', 1600, 2600], ['iron', 2000, 2900], ['copper', 2000, 2900]];
+  const amount = { stone: 2500, iron: 2200, copper: 2200, gold: 1400, diamond: 900 };
+  for (const [ore, lo, hi] of plan) {
+    for (let tries = 0; tries < 60; tries++) {
+      const a = Math.random() * Math.PI * 2, d = lo + Math.random() * (hi - lo), r = 70 + Math.random() * 50;
+      const x = CX + Math.cos(a) * d, y = CY + Math.sin(a) * d;
+      if (x < r + 40 || y < r + 40 || x > W - r - 40 || y > H - r - 40) continue;
+      if (x > big.x0 - r - 150 && x < big.x1 + r + 150 && y > big.y0 - r - 150 && y < big.y1 + r + 150) continue;
+      if (Math.abs(x - GATE.x) < r + 90 && y < big.y0) continue; // keep the path to the top gate clear
+      if (out.some(p => dist(p.x, p.y, x, y) < p.r + r + 60) || spawners.some(sp => dist(sp.x, sp.y, x, y) < r + 90)) continue;
+      const n = Math.round(amount[ore] * (r / 95) ** 2);
+      out.push({ x, y, r, ore, left: n, max: n, seed: Math.floor(Math.random() * 1e9) });
+      break;
+    }
+  }
+  return out;
+}
+/** Turns a save from before the big inventory change into the new shape. */
+function migrateSave(d: SaveData): SaveData {
+  const o = { ...d } as Record<string, any>, bag = { ...(o.bag ?? {}) } as Record<string, number>;
+  const add = (k: string, n: number) => { if (n) bag[k] = (bag[k] ?? 0) + n; };
+  add('belt', (o.inv ?? 0) * 3 + (o.invShort ?? 0)); add('grab', o.invGrab ?? 0); add('turret', o.invTurret ?? 0); add('split', o.invSplit ?? 0); add('chest', o.invChest ?? 0);
+  add('machine', o.invMachine ?? 0); add('lab', o.invLab ?? 0); add('bturret', o.invBTurret ?? 0); add('rapid', o.invT?.rapid ?? 0); add('launcher', o.invT?.rocket ?? 0);
+  add('drill', (o.invMine ?? 0) + Object.values(o.invOre ?? {}).reduce((a: number, n) => a + (n as number), 0));
+  for (const [k, n] of Object.entries(o.invB ?? {})) add(k, n as number);
+  o.bag = bag;
+  // the tile grid now covers the whole map, so every tile moved over
+  const shift = (key: string) => { const [c, r] = key.split(',').map(Number); return (c + OLD_C) + ',' + (r + OLD_R); };
+  for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'turrets']) o[k] = (o[k] ?? []).map(([key, v]: [string, unknown]) => [shift(key), v]);
+  o.robots = (o.robots ?? []).map((r: Robot) => ({ ...r, hub: shift(r.hub) }));
+  for (const [, b] of o.blds as [string, Bld][]) if (typeof b.recipe !== 'string' || b.recipe === 'belt') b.recipe = b.type === 'asm' ? 'pack' : '';
+  o.v = 2;
+  return o;
+}
 /** A random spot far out in the woods, in direction a from the camp. */
 function spawnerSpot(a: number): [number, number] {
   const d = (520 + Math.random() * 260) * SURVIVAL.spawnerFar;
   return [clamp(CX + Math.cos(a) * d, 70, W - 70), clamp(CY + Math.sin(a) * d, 70, H - 70)];
 }
 const tileX = (c: number) => GX0 + c * TILE + TILE / 2, tileY = (r: number) => GY0 + r * TILE + TILE / 2;
+/** The fence as it is now (kept up to date by the game), so nothing gets built on it. */
+let fence: Rect[] = [];
 function tileAt(x: number, y: number) {
   const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE);
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return null;
-  // only tiles inside the walls as they are now
-  const cx = GX0 + c * TILE + TILE / 2, cy = GY0 + r * TILE + TILE / 2;
-  return cx >= WALL.x0 + WALL.t + 6 && cx <= WALL.x1 - WALL.t - 6 && cy >= WALL.y0 + WALL.t + 6 && cy <= WALL.y1 - WALL.t - 6 ? { c, r } : null;
+  // anywhere on the map except on the fence
+  const cx = GX0 + c * TILE + TILE / 2, cy = GY0 + r * TILE + TILE / 2, m = TILE / 2 - 2;
+  return fence.some(([ax, ay, bx, by]) => cx > ax - m && cx < bx + m && cy > ay - m && cy < by + m) ? null : { c, r };
 }
 /** Belts can't go on the mine, the machine or the shop. */
 function blockedTile(c: number, r: number) {
@@ -2341,7 +2683,46 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     g.fillStyle = '#b5523a'; g.fillRect(x - 6, y - 4, 12, 7); g.fillStyle = '#d97a5a'; g.fillRect(x - 6, y - 4, 12, 2);
     return;
   }
-  if (k === 'pack') { paintPack(g, x, y); return; }
+  if (k === 'pack' || k === 'pack2') { paintPack(g, x, y, k === 'pack' ? '#e0524a' : '#5fbf86'); return; }
+  if (k === 'ironPlate' || k === 'copperPlate') {
+    // a flat square plate with a shine
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 4.5, y - 3, 11, 9);
+    g.fillStyle = KIND_DOT[k]; g.fillRect(x - 5.5, y - 4.5, 11, 9);
+    g.fillStyle = 'rgba(255,255,255,.45)'; g.fillRect(x - 5.5, y - 4.5, 11, 2); g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = .8; g.strokeRect(x - 5.5, y - 4.5, 11, 9);
+    return;
+  }
+  if (k === 'goldBar') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 5, y - 1, 12, 6);
+    g.fillStyle = '#e8b92e'; g.beginPath(); g.moveTo(x - 6, y + 4); g.lineTo(x - 3.5, y - 3); g.lineTo(x + 3.5, y - 3); g.lineTo(x + 6, y + 4); g.closePath(); g.fill();
+    g.fillStyle = '#fff0a0'; g.fillRect(x - 3, y - 2.5, 6, 1.6);
+    return;
+  }
+  if (k === 'gem') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(x + 1.5, y + 2, 5, 0, 7); g.fill();
+    g.fillStyle = '#8ff0ff'; g.beginPath(); g.moveTo(x - 6, y - 2); g.lineTo(x - 3, y - 5); g.lineTo(x + 3, y - 5); g.lineTo(x + 6, y - 2); g.lineTo(x, y + 6); g.closePath(); g.fill();
+    g.strokeStyle = '#3fb8d0'; g.lineWidth = .8; g.beginPath(); g.moveTo(x - 6, y - 2); g.lineTo(x + 6, y - 2); g.moveTo(x - 2, y - 2); g.lineTo(x, y + 6); g.lineTo(x + 2, y - 2); g.stroke();
+    return;
+  }
+  if (k === 'gear') {
+    g.save(); g.translate(x, y); g.fillStyle = '#9aa0a6';
+    for (let i = 0; i < 8; i++) { g.rotate(Math.PI / 4); g.fillRect(-1.5, -6.5, 3, 3); }
+    g.beginPath(); g.arc(0, 0, 4.6, 0, 7); g.fill(); g.fillStyle = '#5a6066'; g.beginPath(); g.arc(0, 0, 1.8, 0, 7); g.fill();
+    g.restore(); return;
+  }
+  if (k === 'wire') {
+    g.strokeStyle = '#e08a4a'; g.lineWidth = 1.6;
+    for (let i = 0; i < 3; i++) { g.beginPath(); g.ellipse(x - 3 + i * 3, y, 2.4, 5, 0, 0, 7); g.stroke(); }
+    return;
+  }
+  if (k === 'circuit') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 4.5, y - 3, 11, 9);
+    g.fillStyle = '#3f8f45'; g.fillRect(x - 5.5, y - 4.5, 11, 9);
+    g.fillStyle = '#ffd34a'; g.fillRect(x - 3.5, y - 2.5, 3, 2); g.fillRect(x + 1, y + .5, 3, 2);
+    g.strokeStyle = '#c9e8b0'; g.lineWidth = .8; g.beginPath(); g.moveTo(x - 2, y - .5); g.lineTo(x - 2, y + 2.5); g.lineTo(x + 1, y + 2.5); g.stroke();
+    return;
+  }
+  if (k === 'robot') { g.save(); g.translate(x, y); g.scale(.85, .85); paintRobot(g, 0, 0, 0); g.restore(); return; }
+  if (isPlaceable(k)) { g.save(); g.translate(x, y); g.scale(.5, .5); if (k === 'machine' || k === 'mine') { g.fillStyle = k === 'machine' ? '#5b6670' : '#6f6c66'; g.fillRect(-11, -11, 22, 22); } else paintPlaceable(g, 0, 0, k, 0, 0); g.restore(); return; }
   if (isAmmoKind(k)) {
     // ammo: a bolt with a coloured band (blue for stone ammo, the metal's colour for metal ammo)
     g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 5, y - 1, 12, 5);
@@ -2393,11 +2774,49 @@ function paintLab(g: CanvasRenderingContext2D, x: number, y: number, t: number) 
   g.restore();
 }
 /** A science pack: a little teal bottle. */
-function paintPack(g: CanvasRenderingContext2D, x: number, y: number) {
+function paintPack(g: CanvasRenderingContext2D, x: number, y: number, color = '#e0524a') {
   g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(x + 1.5, y + 2.5, 5, 0, 7); g.fill();
-  g.fillStyle = '#7fd6c2'; g.beginPath(); g.arc(x, y + 1, 5, 0, 7); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(x, y + 1, 5, 0, 7); g.fill();
   g.fillStyle = '#e8e2d6'; g.fillRect(x - 2, y - 7, 4, 4);
-  g.fillStyle = '#c4f2e6'; g.beginPath(); g.arc(x - 1.5, y, 1.6, 0, 7); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.55)'; g.beginPath(); g.arc(x - 1.5, y, 1.6, 0, 7); g.fill();
+}
+/** A robot hovering, with a thing in its claws if it carries one. */
+function paintRobot(g: CanvasRenderingContext2D, x: number, y: number, bob: number, k: Kind | null = null) {
+  g.fillStyle = 'rgba(0,0,0,.2)'; g.beginPath(); g.ellipse(x + 4, y + 10, 5, 2.5, 0, 0, 7); g.fill();
+  g.fillStyle = '#d8dee4'; g.beginPath(); g.arc(x, y + bob, 5.5, 0, 7); g.fill();
+  g.fillStyle = '#3a4a52'; g.fillRect(x - 3, y - 1.5 + bob, 6, 2.5);
+  g.strokeStyle = '#9aa6b0'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x - 8, y - 5 + bob); g.lineTo(x + 8, y - 5 + bob); g.stroke();
+  if (k) { g.fillStyle = KIND_DOT[k]; g.beginPath(); g.arc(x, y + 7 + bob, 3, 0, 7); g.fill(); }
+}
+/** Any one-tile thing you can place, facing direction d (for the ghost while placing, and for icons). */
+function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Placeable, d: number, t: number) {
+  if (p === 'belt') paintBelt(g, x, y, d, t);
+  else if (p === 'grab') paintGrabber(g, x, y, { d, t: 0, carry: false, k: 'stone' });
+  else if (p === 'split') paintSplitter(g, x, y, d);
+  else if (p === 'chest') paintChest(g, x, y);
+  else if (p === 'lab') paintLab(g, x, y, 0);
+  else if (ITEM_T[p]) paintTurret(g, x, y, { ammo: { ammo: 1, rocket: 1 }, cd: 0, face: -Math.PI / 4, kind: ITEM_T[p]! });
+  else if ((BTYPES as string[]).includes(p)) paintBld(g, x, y, { type: p as BType, d, inp: 0, out: 0, t: 0, fuel: p === 'gen' ? 1 : 0, recipe: '', robots: 0 }, 0);
+}
+/** A little blinking red lightning bolt: this needs power. */
+function paintNoPower(g: CanvasRenderingContext2D, x: number, y: number, t: number) {
+  if (Math.sin(t * 5) < -.3) return;
+  g.fillStyle = '#ff5a4a'; g.beginPath(); g.moveTo(x + 1.5, y - 5); g.lineTo(x - 3, y + 1); g.lineTo(x, y + 1); g.lineTo(x - 1.5, y + 5); g.lineTo(x + 3, y - 1); g.lineTo(x, y - 1); g.closePath(); g.fill();
+}
+/** An ore patch: a cluster of rocks in its colour, fewer as it runs out. */
+function paintPatch(g: CanvasRenderingContext2D, p: Patch) {
+  let seed = p.seed || 1;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const color = p.ore === 'stone' ? '#a9a59c' : METAL[p.ore].color, dark = p.ore === 'stone' ? '#77736b' : shade(METAL[p.ore].color, -.4);
+  g.fillStyle = 'rgba(40,30,20,.18)'; g.beginPath(); g.arc(p.x, p.y, p.r, 0, 7); g.fill();
+  const n = Math.round(p.r * p.r / 120), show = Math.ceil(n * p.left / p.max);
+  for (let i = 0; i < n; i++) {
+    const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (p.r - 8), x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d, rr = 3 + rnd() * 4;
+    if (i >= show) continue;
+    g.fillStyle = dark; g.beginPath(); g.arc(x + 1, y + 1.5, rr, 0, 7); g.fill();
+    g.fillStyle = color; g.beginPath(); g.arc(x, y, rr, 0, 7); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.arc(x - rr * .3, y - rr * .3, rr * .35, 0, 7); g.fill();
+  }
 }
 /** The newer buildings, each on one tile. t > 0 animates them. */
 function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: number) {
@@ -2407,6 +2826,25 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
     g.fillStyle = '#4f7fa6'; g.beginPath(); g.arc(0, 0, b.type === 'pump' ? 10 : 5, 0, 7); g.fill();
     if (b.type === 'pump') { g.fillStyle = '#9fd4ff'; g.beginPath(); g.arc(0, 0, 5, 0, 7); g.fill(); g.strokeStyle = '#2d4e6a'; g.lineWidth = 2; g.beginPath(); g.moveTo(-6, -6); g.lineTo(6, 6); g.moveTo(6, -6); g.lineTo(-6, 6); g.stroke(); }
     else { g.fillStyle = '#9fd4ff'; g.beginPath(); g.arc(0, 0, 2.5, 0, 7); g.fill(); }
+    g.restore(); return;
+  }
+  if (b.type === 'pole') {
+    // a wooden pole with a cross-arm
+    g.fillStyle = 'rgba(0,0,0,.25)'; g.beginPath(); g.ellipse(3, 5, 5, 3, 0, 0, 7); g.fill();
+    g.fillStyle = '#7c5631'; g.fillRect(-2, -10, 4, 16);
+    g.fillStyle = '#5e3f22'; g.fillRect(-8, -9, 16, 3);
+    g.fillStyle = '#c9a24a'; g.beginPath(); g.arc(-6.5, -10, 1.6, 0, 7); g.arc(6.5, -10, 1.6, 0, 7); g.fill();
+    g.restore(); return;
+  }
+  if (b.type === 'drill') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -7, 22, 20);
+    g.fillStyle = '#c99a2e'; g.fillRect(-11, -11, 22, 22);
+    g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 1.5; g.strokeRect(-11, -11, 22, 22);
+    g.save(); g.rotate(t * 6);
+    g.fillStyle = '#5a5f66'; g.beginPath(); g.arc(0, 0, 6, 0, 7); g.fill();
+    g.strokeStyle = '#d0d4d8'; g.lineWidth = 2; g.beginPath(); g.moveTo(-5, 0); g.lineTo(5, 0); g.moveTo(0, -5); g.lineTo(0, 5); g.stroke();
+    g.restore();
+    g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(dx * 12, dy * 12); g.lineTo(dx * 8 - dy * 4, dy * 8 - dx * 4); g.lineTo(dx * 8 + dy * 4, dy * 8 + dx * 4); g.fill();
     g.restore(); return;
   }
   if (b.type === 'tunnel') {
@@ -2427,7 +2865,7 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
     g.fillStyle = b.fuel > 0 ? '#ffd76a' : '#7a7a70';
     g.beginPath(); g.moveTo(2, -8); g.lineTo(-5, 1); g.lineTo(0, 1); g.lineTo(-2, 8); g.lineTo(5, -1); g.lineTo(0, -1); g.closePath(); g.fill();
   } else if (b.type === 'asm') {
-    g.save(); g.rotate(b.inp >= SURVIVAL.asmStone ? t * 3 : 0);
+    g.save(); g.rotate(b.t > 0 ? t * 3 : 0);
     g.fillStyle = '#c9d3dc'; for (let i = 0; i < 6; i++) { g.rotate(Math.PI / 3); g.fillRect(-1.8, -8, 3.6, 4); }
     g.beginPath(); g.arc(0, 0, 5, 0, 7); g.fill(); g.fillStyle = '#5a6a7a'; g.beginPath(); g.arc(0, 0, 2, 0, 7); g.fill();
     g.restore();
