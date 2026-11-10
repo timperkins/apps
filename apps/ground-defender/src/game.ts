@@ -156,7 +156,9 @@ const REC_CATS: Record<RecCat, [string, string]> = { logistics: ['⏩', 'Logisti
 /** A recipe: what goes in, what comes out (n of it), and how many seconds it takes. hand: you can make it yourself;
  *  asm: an assembler can make it. unlock: the research it needs. Recipes without an out are special (done at once). */
 interface Rec { id: string; cat: RecCat; out?: Kind; n: number; time: number; in: Cost; unlock?: ResId; asm: boolean; desc: string; }
-const R = (id: string, cat: RecCat, inp: Cost, time: number, n: number, desc: string, unlock?: ResId, asm = true): Rec => ({ id, cat, out: id as Kind, n, time, in: inp, unlock, asm, desc });
+/** Every recipe costs half what is written below (rounded up) and takes half the time. */
+const half = (c: Cost) => Object.fromEntries((Object.entries(c) as [Kind, number][]).map(([k, q]) => [k, Math.ceil(q / 2)])) as Cost;
+const R = (id: string, cat: RecCat, inp: Cost, time: number, n: number, desc: string, unlock?: ResId, asm = true): Rec => ({ id, cat, out: id as Kind, n, time: time / 2, in: half(inp), unlock, asm, desc });
 const RECIPES: Rec[] = [
   // logistics
   R('belt', 'logistics', { gear: 1, ironPlate: 1 }, .5, 2, 'Carries things (and you) along. Place it, then drag to lay a line. R turns it.'),
@@ -177,8 +179,8 @@ const RECIPES: Rec[] = [
   R('gen', 'production', { gear: 8, ironPlate: 10, stone: 5 }, 2, 1, 'Burns stone for power, which poles carry to drills, assemblers and labs.'),
   R('lab', 'production', { circuit: 10, gear: 10, belt: 4 }, 2, 1, 'Uses science packs to research. Y picks what. Needs power.'),
   // parts
-  R('gear', 'parts', { ironPlate: 2 }, .5, 1, 'A part for belts, grabbers, drills, turrets and lots more.'),
-  R('wire', 'parts', { copperPlate: 1 }, .5, 2, 'A part for circuits and power poles.'),
+  R('gear', 'parts', { ironPlate: 2 }, .5, 2, 'A part for belts, grabbers, drills, turrets and lots more.'),
+  R('wire', 'parts', { copperPlate: 1 }, .5, 4, 'A part for circuits and power poles.'),
   R('circuit', 'parts', { ironPlate: 1, wire: 3 }, .5, 1, 'A part for grabbers, drills, assemblers and labs.'),
   R('pack', 'parts', { copperPlate: 1, gear: 1 }, 5, 1, 'Red science. Labs use it for research.'),
   R('pack2', 'parts', { grab: 1, belt: 1 }, 6, 1, 'Green science. The later research needs it as well as red.', 'logsci'),
