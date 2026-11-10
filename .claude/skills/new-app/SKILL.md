@@ -41,4 +41,3 @@ Follow the repo's CLAUDE.md:
 2. Push on `<name>/<short-description>` and open a PR.
 3. Wait for the preview run (`gh run list --branch <branch> --workflow preview.yml --limit 1`, then `gh run watch <run-id>`). The run calls `create-app` first, which sets up the site or backends, databases, TTL policies, domain and DNS.
 4. Send Tim the preview link.
-5. After the merge and a green prod run, add the app to `apps/home/src/apps.ts` in a `home/add-<name>` PR.
