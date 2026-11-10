@@ -621,7 +621,7 @@ export class IsoGame implements GameLike {
   }
 
   // A simplified picture for the globe: the bare ground, forests as a dark
-  // tint, and buildings and units as small blocks of their faction's colour.
+  // tint, the buildings themselves, and units as small dots of their colour.
   renderMap(): void {
     const c = this.ctx;
     c.drawImage(this.terrain.canvas, 0, 0);
@@ -632,18 +632,8 @@ export class IsoGame implements GameLike {
       const [sx, sy] = toScreen(p.x, p.y, p.z);
       c.fillRect(Math.round(sx) - 4, Math.round(sy) - 5, 8, 6);
     }
-    for (const b of this.buildings) {
-      const f = FACTIONS[b.f];
-      const [sx, sy] = toScreen(b.x, b.y);
-      const w = Math.round((b.art.rx + b.art.ry) * 1.3);
-      const h = Math.round((b.art.rx + b.art.ry) * 0.65);
-      const x = Math.round(sx - w / 2);
-      const y = Math.round(sy - h / 2);
-      c.fillStyle = css(f.dark);
-      c.fillRect(x - 1, y - 1, w + 2, h + 2);
-      c.fillStyle = css(f.main);
-      c.fillRect(x, y, w, h);
-    }
+    // the real building art: from orbit it shrinks to a speck of its own colours
+    for (const b of [...this.buildings].sort((a, b2) => a.x + a.y - b2.x - b2.y)) this.blit(b.art.spr, b.x, b.y, 0);
     for (const u of this.units) {
       const [sx, sy] = toScreen(u.x, u.y);
       c.fillStyle = css(FACTIONS[u.f].light);

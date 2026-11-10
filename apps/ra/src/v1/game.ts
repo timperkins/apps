@@ -554,23 +554,20 @@ export class Game {
   }
 
   // A simplified picture for the globe: the bare ground, forests as a dark
-  // tint, and buildings and units as small blocks of their faction's colour.
+  // tint, the buildings themselves, and units as small dots of their colour.
   renderMap(): void {
     const c = this.ctx;
     c.drawImage(this.terrain.canvas, 0, 0);
     const trees = new Set(this.trees);
     c.fillStyle = 'rgba(12,30,10,0.5)';
     for (const p of this.props) if (trees.has(p.img)) c.fillRect(Math.round(p.x) - 3, Math.round(p.y) - 5, 6, 6);
-    for (const b of this.buildings) {
-      const f = FACTIONS[b.f];
-      const w = Math.round(b.art.w * 0.7);
-      const h = Math.round(b.art.h * 0.5);
-      const x = Math.round(b.x - w / 2);
-      const y = Math.round(b.y - b.art.h * 0.4 - h / 2);
-      c.fillStyle = css(f.dark);
-      c.fillRect(x - 1, y - 1, w + 2, h + 2);
-      c.fillStyle = css(f.main);
-      c.fillRect(x, y, w, h);
+    // the real building art: from orbit it shrinks to a speck of its own colours
+    for (const b of [...this.buildings].sort((a, b2) => a.y - b2.y)) {
+      const ox = Math.round(b.x - b.art.w / 2);
+      const oy = Math.round(b.y - b.art.h);
+      c.fillStyle = 'rgba(0,0,0,0.28)';
+      c.fillRect(ox + 4, oy + Math.round(b.art.h * 0.3), b.art.w - 2, Math.round(b.art.h * 0.7));
+      c.drawImage(b.art.img, ox, oy);
     }
     for (const u of this.units) {
       c.fillStyle = css(FACTIONS[u.f].light);

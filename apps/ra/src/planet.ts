@@ -1,12 +1,15 @@
 // Draws the map as a tiny globe, for the zoomed-out space view and the minimap.
 //
-// The map wraps round both ways, so it can't be a true sphere's surface; the
-// globe instead always puts the camera on its equator and rolls the map through
-// it, both across and down. Map x maps to longitude (one lap = 360 degrees) and
-// map y to latitude (one lap = 180 degrees, top to bottom of the globe), so the
-// globe turns exactly the way the map pans, in every direction, and everything
-// on it stays the right way up. Simple sunlight and a thin atmosphere; every
-// pixel is cast back onto the sphere and looked up in a snapshot of the map.
+// The map wraps round both ways, so it can't be a true sphere's surface.
+// Instead the globe wraps the map round itself from the point under the
+// camera: each point on the globe is looked up by its distance and direction
+// from the centre of the disc (an azimuthal equidistant projection), with one
+// lap of the map equal to one lap of the globe. Every part of the map gets the
+// same treatment wherever it is, so panning just slides the map round the
+// globe without the stretching and pinching a latitude/longitude grid gives
+// near its poles, and everything stays the right way up. Simple sunlight and a
+// thin atmosphere; every pixel is cast back onto the sphere and looked up in a
+// snapshot of the map.
 import { hash2, wrapNoise } from './gfx';
 
 const TAU = Math.PI * 2;
@@ -98,23 +101,23 @@ export class Globe {
   // back unwrapped, within half a world of the view's centre longitude.
   pick(v: View, px: number, py: number): { x: number; y: number } | null {
     const nx = (px - v.cx) / v.r;
-    const ny = -(py - v.cy) / v.r;
-    const r2 = nx * nx + ny * ny;
-    if (r2 > 1) return null;
-    const nz = Math.sqrt(1 - r2);
-    const lat = Math.asin(Math.max(-1, Math.min(1, ny)));
-    const dl = Math.atan2(nx, nz);
-    return { x: v.x + (dl / TAU) * this.mw, y: v.y - (lat / Math.PI) * this.mh };
+    const ny = (py - v.cy) / v.r; // down
+    const s = Math.hypot(nx, ny);
+    if (s > 1) return null;
+    if (s < 1e-9) return { x: v.x, y: v.y };
+    const k = Math.asin(s) / s; // angle from the centre, per unit of disc radius
+    return { x: v.x + nx * k * (this.mw / TAU), y: v.y + ny * k * (this.mh / Math.PI) };
   }
 
   // Canvas position of a map point, or null if it is on the far side.
   project(v: View, x: number, y: number): [number, number] | null {
     const wrap = (d: number, p: number) => d - Math.round(d / p) * p;
-    const lat = (-wrap(y - v.y, this.mh) / this.mh) * Math.PI;
-    const dl = (wrap(x - v.x, this.mw) / this.mw) * TAU;
-    const Z = Math.cos(lat) * Math.cos(dl);
-    if (Z < 0) return null;
-    return [v.cx + Math.cos(lat) * Math.sin(dl) * v.r, v.cy - Math.sin(lat) * v.r];
+    const ax = (wrap(x - v.x, this.mw) / this.mw) * TAU;
+    const ay = (wrap(y - v.y, this.mh) / this.mh) * Math.PI;
+    const a = Math.hypot(ax, ay);
+    if (a > Math.PI / 2) return null;
+    const k = a < 1e-9 ? 1 : Math.sin(a) / a;
+    return [v.cx + ax * k * v.r, v.cy + ay * k * v.r];
   }
 
   // Render into a canvas. With `space`, the background is a star field;
@@ -141,10 +144,11 @@ export class Globe {
     const y0 = Math.max(0, Math.floor(v.cy - v.r * halo));
     const y1 = Math.min(H, Math.ceil(v.cy + v.r * halo));
     const inv = 1 / v.r;
-    const lonK = tw / TAU;
-    const latK = th / Math.PI;
-    const lon0 = (v.x / this.mw) * TAU;
-    const row0 = (v.y / this.mh) * th; // texture row at the centre
+    // texels per radian of arc, and the texel under the centre
+    const uK = tw / TAU;
+    const vK = th / Math.PI;
+    const u0 = (v.x / this.mw) * tw;
+    const t0 = (v.y / this.mh) * th;
     for (let py = y0; py < y1; py++) {
       const ny = -(py + 0.5 - v.cy) * inv;
       for (let px = x0; px < x1; px++) {
@@ -168,10 +172,12 @@ export class Globe {
           continue;
         }
         const nz = Math.sqrt(1 - r2);
-        const lat = Math.asin(ny > 1 ? 1 : ny < -1 ? -1 : ny);
-        let u = Math.floor((lon0 + Math.atan2(nx, nz)) * lonK) % tw;
+        // arc from the centre, along the pixel's direction from the centre
+        const sr = Math.sqrt(r2);
+        const k = sr < 1e-9 ? 1 : Math.asin(sr > 1 ? 1 : sr) / sr;
+        let u = Math.floor(u0 + nx * k * uK) % tw;
         if (u < 0) u += tw;
-        let t = Math.floor(row0 - lat * latK) % th;
+        let t = Math.floor(t0 - ny * k * vK) % th;
         if (t < 0) t += th;
         const c = tex[t * tw + u];
         const lit = 0.3 + 0.85 * Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2]);
