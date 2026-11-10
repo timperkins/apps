@@ -1,4 +1,4 @@
-import { css, dirIndex, hash2, rng } from '../gfx';
+import { SphereField, nearestCopy, overPole, css, dirIndex, hash2, rng } from '../gfx';
 import {
   BuildingArt,
   BuildingKind,
@@ -44,6 +44,9 @@ interface Unit {
   hp: number;
   idle: number;
   trackAcc: number;
+  // Laps around the world: the unit's unwrapped x is x + lap * w. It is set to
+  // the copy the player picked, so orders travel the way the player panned.
+  lap: number;
 }
 
 interface Building {
@@ -99,7 +102,6 @@ export class Game {
   rocks = makeRocks();
   bushes = makeBushes();
   time = 0;
-  box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   onSelect: (names: string[]) => void = () => {};
 
   private emit(): void {
@@ -107,7 +109,7 @@ export class Game {
   }
 
   constructor(
-    readonly ctx: CanvasRenderingContext2D,
+    public ctx: CanvasRenderingContext2D,
     public seed: number,
   ) {
     this.art = FACTIONS.map(makeFactionArt);
@@ -166,6 +168,7 @@ export class Game {
     place(take(BASE_B), 1, w * (portrait ? 0.5 : 0.74), h * (portrait ? 0.56 : 0.28));
 
     // Trees, rocks and bushes
+    this.forest = new SphereField(w, h, 60, this.seed + 500, 3);
     const forestSeed = this.seed + 400;
     for (let y = 4; y < h + 10; y += 5)
       for (let x = 2; x < w; x += 5) {
@@ -199,7 +202,7 @@ export class Game {
         if (!ok || x < 8 || y < 10 || x > w - 8 || y > h - 6) continue;
         if (kind !== 'heli' && this.buildings.some((b) => inside(x, y, { x: b.x - b.art.w / 2, y: b.y - b.art.h, w: b.art.w, h: b.art.h }, 2))) continue;
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0 });
+        this.units.push({ kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0 });
         return;
       }
     };
@@ -222,26 +225,17 @@ export class Game {
         ]
       : [
           [w * 0.3, h * 0.6],
-          [w * 0.62, h * 0.45],
+          [w * 0.8, h * 0.5],
         ];
     for (let f = 0; f < 2; f++) for (const [kind, c] of army) for (let i = 0; i < n(c); i++) spawn(kind, f, centres[f][0], centres[f][1], spreadR);
     for (let f = 0; f < 2; f++) for (let i = 0; i < n(1); i++) spawn('boat', f, w * 0.85, h * 0.85, Math.min(w, h) * 0.3);
     this.emit();
   }
 
+  private forest!: SphereField;
   private forestValue(x: number, y: number): number {
-    // reuse the terrain noise style: clumps of forest
-    let v = 0;
-    let amp = 0.5;
-    let f = 1 / 60;
-    let norm = 0;
-    for (let i = 0; i < 3; i++) {
-      v += amp * smoothNoise(x * f, y * f, this.seed + 500 + i);
-      norm += amp;
-      amp *= 0.5;
-      f *= 2;
-    }
-    return v / norm;
+    // clumps of forest
+    return this.forest.at(x, y);
   }
 
   private buildingArt(kind: BuildingKind, f: number): BuildingArt {
@@ -256,35 +250,49 @@ export class Game {
 
   // ---------- Input ----------
 
-  unitAt(x: number, y: number): Unit | null {
-    let best: Unit | null = null;
+  // x may be on any copy of the world; the nearest copy of each unit is tested.
+  unitAt(x: number, y: number): { u: Unit; lap: number } | null {
+    let best: { u: Unit; lap: number } | null = null;
     let bd = 1e9;
     for (const u of this.units) {
       const uy = u.kind === 'heli' ? u.y - 12 : u.y;
-      const d = Math.hypot(u.x - x, uy - y);
+      const lap = Math.round((x - u.x) / this.w);
+      const d = Math.hypot(u.x + lap * this.w - x, uy - y);
       if (d < STATS[u.kind].r + 3 && d < bd) {
         bd = d;
-        best = u;
+        best = { u, lap };
       }
     }
     return best;
   }
 
   click(x: number, y: number, add: boolean): void {
-    const u = this.unitAt(x, y);
-    if (u) {
+    const hit = this.unitAt(x, y);
+    if (hit) {
+      const u = hit.u;
       if (!add) for (const o of this.units) o.sel = false;
       u.sel = add ? !u.sel : true;
+      u.lap = hit.lap;
       this.emit();
       return;
     }
     this.order(x, y);
   }
 
-  order(x: number, y: number): void {
+  order(x: number, y: number, shortest = false): void {
     const sel = this.selected();
     if (!sel.length) return;
-    this.markers.push({ x, y, t: 0 });
+    const W = this.w;
+    if (shortest) {
+      // from the globe: take the shortest way, which may be over a pole
+      const r = sel[0];
+      [x, y] = nearestCopy(r.x, r.y, x, y, W, this.h);
+      for (const u of sel) u.lap = Math.round((x - u.x) / W);
+    }
+    const [fx, fy] = overPole(x, y, W, this.h);
+    this.markers.push({ x: ((fx % W) + W) % W, y: fy, t: 0 });
+    // Work in unwrapped coordinates: each unit is where the player last saw it.
+    const ux = (u: Unit) => u.x + u.lap * W;
     // Simple formation: grid slots around the target, nearest unit to nearest slot.
     const cols = Math.ceil(Math.sqrt(sel.length));
     const gap = 13;
@@ -299,14 +307,14 @@ export class Game {
       let bi = 0;
       let bd = 1e9;
       left.forEach((u, i) => {
-        const d = Math.hypot(u.x - sx, u.y - sy);
+        const d = Math.hypot(ux(u) - sx, u.y - sy);
         if (d < bd) {
           bd = d;
           bi = i;
         }
       });
       const u = left.splice(bi, 1)[0];
-      u.tx = sx;
+      u.tx = u.x + (sx - ux(u));
       u.ty = u.kind === 'heli' ? sy + 12 : sy;
       u.moving = true;
     }
@@ -317,11 +325,16 @@ export class Game {
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
+    const mid = (minx + maxx) / 2;
     for (const u of this.units) {
       const uy = u.kind === 'heli' ? u.y - 12 : u.y;
-      const hit = u.x >= minx - 2 && u.x <= maxx + 2 && uy >= miny - 2 && uy <= maxy + 2;
-      if (hit) u.sel = true;
-      else if (!add) u.sel = false;
+      const lap = Math.round((mid - u.x) / this.w);
+      const x = u.x + lap * this.w;
+      const hit = x >= minx - 2 && x <= maxx + 2 && uy >= miny - 2 && uy <= maxy + 2;
+      if (hit) {
+        u.sel = true;
+        u.lap = lap;
+      } else if (!add) u.sel = false;
     }
     this.emit();
   }
@@ -331,6 +344,10 @@ export class Game {
     const mine = this.units.filter((u) => u.f === 0);
     if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
     return { x: mine.reduce((s, u) => s + u.x, 0) / mine.length, y: mine.reduce((s, u) => s + u.y, 0) / mine.length };
+  }
+
+  selectedPoints(): [number, number][] {
+    return this.selected().map((u) => [u.x, u.y]);
   }
 
   deselect(): void {
@@ -392,6 +409,20 @@ export class Game {
           }
         }
       }
+      // over a pole: come down the far side of the globe, still heading for the target
+      if (u.y < 0 || u.y > this.h) {
+        [u.x, u.y] = overPole(u.x, u.y, this.w, this.h);
+        [u.tx, u.ty] = overPole(u.tx, u.ty, this.w, this.h);
+        u.a = Math.atan2(u.ty - u.y, u.tx - u.x);
+        u.turret = u.turretGoal = u.a;
+      }
+      // wrap around the world
+      if (u.x < 0 || u.x >= this.w) {
+        const k = Math.floor(u.x / this.w);
+        u.x -= k * this.w;
+        u.tx -= k * this.w;
+        u.lap += k;
+      }
       // turrets: follow the hull while moving, scan lazily when idle
       if (u.kind === 'light' || u.kind === 'heavy') {
         if (u.moving) u.turretGoal = u.a;
@@ -443,7 +474,9 @@ export class Game {
 
   // ---------- Rendering ----------
 
-  render(): void {
+  // The ground layer and the objects on it are drawn separately so main.ts can
+  // lay down the ground for every visible copy of the wrapped world first.
+  renderGround(): void {
     const c = this.ctx;
     const t = this.time;
     c.imageSmoothingEnabled = false;
@@ -489,6 +522,10 @@ export class Game {
       c.drawImage(spr.shadow[di], Math.round(u.x - spr.size / 2 + 4), Math.round(u.y - spr.size / 2 + 2));
     }
 
+  }
+
+  renderObjects(): void {
+    const c = this.ctx;
     // depth-sorted ground objects
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
@@ -509,22 +546,6 @@ export class Game {
 
     // aircraft on top
     for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
-
-    // drag box
-    if (this.box) {
-      const { x0, y0, x1, y1 } = this.box;
-      const x = Math.round(Math.min(x0, x1));
-      const y = Math.round(Math.min(y0, y1));
-      const w = Math.round(Math.abs(x1 - x0));
-      const h = Math.round(Math.abs(y1 - y0));
-      c.fillStyle = 'rgba(140,255,140,0.12)';
-      c.fillRect(x, y, w, h);
-      c.fillStyle = '#9dff9d';
-      c.fillRect(x, y, w, 1);
-      c.fillRect(x, y + h, w + 1, 1);
-      c.fillRect(x, y, 1, h);
-      c.fillRect(x + w, y, 1, h);
-    }
   }
 
   private drawRot(spr: RotSprite, x: number, y: number, a: number, shadow = true): void {
@@ -674,20 +695,6 @@ export class Game {
         break;
     }
   }
-}
-
-function smoothNoise(x: number, y: number, s: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const xf = x - xi;
-  const yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf);
-  const v = yf * yf * (3 - 2 * yf);
-  const a = hash2(xi, yi, s);
-  const b = hash2(xi + 1, yi, s);
-  const c = hash2(xi, yi + 1, s);
-  const d = hash2(xi + 1, yi + 1, s);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
 function angDiff(a: number, b: number): number {
