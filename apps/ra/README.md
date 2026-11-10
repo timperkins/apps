@@ -1,6 +1,6 @@
 # RA
 
-A pixel-art real-time strategy graphics test at [ra-rts.trom.dev](https://ra-rts.trom.dev).
+A pixel-art real-time strategy graphics test at [ra.trom.dev](https://ra.trom.dev).
 
 - The whole screen is a procedurally generated landscape: grass, a winding dirt road, rocky ridges, forests and a lake with a beach and shimmering surf.
 - Two factions (Cobalt and Ember) each have a base (HQ, factory, power plants, barracks, refinery, silos, radar, helipad, gun towers) and an army: tanks, scout buggies, an ore hauler, artillery, a copter, a patrol boat and infantry.

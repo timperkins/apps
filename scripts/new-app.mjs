@@ -31,8 +31,13 @@ const { values: opts, positionals } = parseArgs({
 });
 
 const name = positionals[0];
-if (!name || !/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/.test(name)) {
-  console.error('usage: new-app.mjs <name> [options]  (name: lowercase letters, digits and dashes, 3-30 chars)');
+if (!name || !/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/.test(name)) {
+  console.error('usage: new-app.mjs <name> [options]  (name: lowercase letters, digits and dashes, 2-30 chars)');
+  process.exit(2);
+}
+// Firestore database ids and App Hosting backend ids need at least 4 characters.
+if (name.length < 4 && (opts.firestore || opts.type === 'apphosting')) {
+  console.error('names shorter than 4 chars only work for static hosting apps without Firestore');
   process.exit(2);
 }
 if (!['hosting', 'apphosting'].includes(opts.type)) {

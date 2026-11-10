@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "trom-ra-rts",
+    "site": "trom-ra",
     "public": "dist",
     "ignore": [
       "firebase.json",
