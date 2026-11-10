@@ -15,14 +15,17 @@ export interface GameLike {
   generate(w: number, h: number): void;
   update(dt: number): void;
   renderGround(): void;
-  renderObjects(): void;
-  click(x: number, y: number, add: boolean): void;
+  // mirror: draw as seen past a pole, flipped north-south about y = mirror / 2
+  // with objects kept upright (see main.ts).
+  renderObjects(mirror?: number): void;
+  // mirrored: the tap or box was on a part of the view past a pole
+  click(x: number, y: number, add: boolean, mirrored?: boolean): void;
   // shortest: from the globe view, go the shortest way (maybe over a pole)
   // instead of the way the camera has panned.
   order(x: number, y: number, shortest?: boolean): void;
   // Map positions of the selected units, for the globe views.
   selectedPoints(): [number, number][];
-  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean, mirrored?: boolean): void;
   deselect(): void;
   focus(): { x: number; y: number };
 }

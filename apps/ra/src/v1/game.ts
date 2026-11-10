@@ -75,6 +75,7 @@ interface Particle {
   max: number;
   kind: 'smoke' | 'wake' | 'dust';
   size: number;
+  g?: number; // ground y it rose from, if not where it started
 }
 
 interface Marker {
@@ -251,11 +252,11 @@ export class Game {
   // ---------- Input ----------
 
   // x may be on any copy of the world; the nearest copy of each unit is tested.
-  unitAt(x: number, y: number): { u: Unit; lap: number } | null {
+  unitAt(x: number, y: number, mirrored = false): { u: Unit; lap: number } | null {
     let best: { u: Unit; lap: number } | null = null;
     let bd = 1e9;
     for (const u of this.units) {
-      const uy = u.kind === 'heli' ? u.y - 12 : u.y;
+      const uy = u.kind === 'heli' ? u.y + (mirrored ? 12 : -12) : u.y;
       const lap = Math.round((x - u.x) / this.w);
       const d = Math.hypot(u.x + lap * this.w - x, uy - y);
       if (d < STATS[u.kind].r + 3 && d < bd) {
@@ -266,8 +267,8 @@ export class Game {
     return best;
   }
 
-  click(x: number, y: number, add: boolean): void {
-    const hit = this.unitAt(x, y);
+  click(x: number, y: number, add: boolean, mirrored = false): void {
+    const hit = this.unitAt(x, y, mirrored);
     if (hit) {
       const u = hit.u;
       if (!add) for (const o of this.units) o.sel = false;
@@ -276,7 +277,7 @@ export class Game {
       this.emit();
       return;
     }
-    this.order(x, y);
+    this.order(x, y, mirrored);
   }
 
   order(x: number, y: number, shortest = false): void {
@@ -320,14 +321,14 @@ export class Game {
     }
   }
 
-  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean, mirrored = false): void {
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
     const mid = (minx + maxx) / 2;
     for (const u of this.units) {
-      const uy = u.kind === 'heli' ? u.y - 12 : u.y;
+      const uy = u.kind === 'heli' ? u.y + (mirrored ? 12 : -12) : u.y;
       const lap = Math.round((mid - u.x) / this.w);
       const x = u.x + lap * this.w;
       const hit = x >= minx - 2 && x <= maxx + 2 && uy >= miny - 2 && uy <= maxy + 2;
@@ -442,7 +443,7 @@ export class Game {
       b.phase += dt;
       if (b.kind === 'power' && Math.random() < dt * 5) {
         const stack = Math.random() < 0.5 ? 13 : 33;
-        this.particles.push({ x: b.x - b.art.w / 2 + stack + (Math.random() - 0.5) * 6, y: b.y - b.art.h + 6, vx: 3 + Math.random() * 3, vy: -6 - Math.random() * 4, life: 0, max: 2.5 + Math.random(), kind: 'smoke', size: 1.5 });
+        this.particles.push({ x: b.x - b.art.w / 2 + stack + (Math.random() - 0.5) * 6, y: b.y - b.art.h + 6, vx: 3 + Math.random() * 3, vy: -6 - Math.random() * 4, life: 0, max: 2.5 + Math.random(), kind: 'smoke', size: 1.5, g: b.y });
       }
       if (b.kind === 'tower') {
         if (Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
@@ -524,16 +525,26 @@ export class Game {
 
   }
 
-  renderObjects(): void {
+  // mirror: draw the map flipped north-south about y = mirror / 2 (the far
+  // side of a pole) with every object still upright: each one is moved, whole,
+  // so its foot point lands where the flipped ground puts it.
+  renderObjects(mirror?: number): void {
     const c = this.ctx;
+    const at = (a: number, draw: () => void) => {
+      if (mirror === undefined) return draw();
+      c.save();
+      c.translate(0, Math.round(mirror - 2 * a));
+      draw();
+      c.restore();
+    };
     // depth-sorted ground objects
-    type Item = { y: number; draw: () => void };
+    type Item = { y: number; a: number; draw: () => void };
     const items: Item[] = [];
-    for (const p of this.props) items.push({ y: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
-    for (const b of this.buildings) items.push({ y: b.y - 4, draw: () => this.drawBuilding(b) });
-    for (const u of this.units) if (u.kind !== 'heli') items.push({ y: u.y, draw: () => this.drawUnit(u) });
-    items.sort((a, b) => a.y - b.y);
-    for (const it of items) it.draw();
+    for (const p of this.props) items.push({ y: p.y, a: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
+    for (const b of this.buildings) items.push({ y: b.y - 4, a: b.y, draw: () => this.drawBuilding(b) });
+    for (const u of this.units) if (u.kind !== 'heli') items.push({ y: u.y, a: u.y, draw: () => this.drawUnit(u) });
+    items.sort(mirror === undefined ? (a, b) => a.y - b.y : (a, b) => b.y - a.y);
+    for (const it of items) at(it.a, it.draw);
 
     // smoke and dust drift above the ground objects
     for (const p of this.particles) {
@@ -541,11 +552,11 @@ export class Game {
       const k = p.life / p.max;
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle = p.kind === 'smoke' ? `rgba(215,215,210,${0.55 * (1 - k)})` : `rgba(160,140,100,${0.5 * (1 - k)})`;
-      c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+      at(p.g ?? p.y - p.vy * p.life, () => c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s));
     }
 
     // aircraft on top
-    for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
+    for (const u of this.units) if (u.kind === 'heli') at(u.y, () => this.drawUnit(u));
   }
 
   private drawRot(spr: RotSprite, x: number, y: number, a: number, shadow = true): void {

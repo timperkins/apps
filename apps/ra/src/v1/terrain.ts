@@ -1,7 +1,7 @@
 // Procedural landscape: grass, a dirt road, rocky ridges, a lake with a
 // beach, and dirt pads under buildings. Painted once per pixel into a canvas.
-// The map covers a whole tiny globe (see SphereField), with ice at the poles.
-import { RGB, SphereField, WrapNoise, around, hash2, hex, mix, polar, shade, wrapNoise } from '../gfx';
+// The map covers a whole tiny globe (see SphereField), with the same kind of land everywhere.
+import { RGB, SphereField, WrapNoise, around, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 
 export const enum K {
   Grass = 0,
@@ -10,7 +10,6 @@ export const enum K {
   Cliff = 3,
   Road = 4,
   Pad = 5,
-  Ice = 6,
 }
 
 // Road segments (and their copies one lap either way) with padded bounding
@@ -60,8 +59,6 @@ const ROCK_L = hex('#b3a78f');
 const ROCK = hex('#857a66');
 const ROCK_D = hex('#4b4337');
 const PAD = hex('#6e6452');
-const ICE = ['#c9d9e0', '#dbe7ec', '#eef5f7'].map(hex);
-const ICE_D = hex('#9fb7c4');
 
 function percentile(arr: Float32Array, q: number): number {
   const step = Math.max(1, Math.floor(arr.length / 20000));
@@ -115,9 +112,14 @@ export class Terrain {
 
   k(x: number, y: number): K {
     x = Math.floor(x);
-    y |= 0;
+    y = Math.floor(y);
+    // past a pole: the far side of the globe, half a world round
+    if (y < 0 || y >= this.h) {
+      y = y < 0 ? -1 - y : 2 * this.h - 1 - y;
+      x += this.w / 2;
+      if (y < 0 || y >= this.h) return K.Grass;
+    }
     if (x < 0 || x >= this.w) x = ((x % this.w) + this.w) % this.w;
-    if (y < 0 || y >= this.h) return K.Grass;
     return this.kind[y * this.w + x] as K;
   }
 
@@ -128,15 +130,14 @@ export class Terrain {
     const ridgeF = new SphereField(w, h, scale / 4, seed + 101, 5);
     const jitX = new SphereField(w, h, 40, seed + 7, 2);
     const jitY = new SphereField(w, h, 40, seed + 8, 2);
-    const iceF = new SphereField(w, h, 50, seed + 61, 3);
-    // Lake: biased towards the south, a little east of the second base.
+    // Water: lakes anywhere, with one likely just south-east of the second base.
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         const n = lakeF.at(x, y);
-        this.wv[i] = n * 0.9 + around(x / w, 0.9) * 0.45 + (y / h) * 0.65;
+        this.wv[i] = n * 0.9 + around(x / w, 0.88) * Math.max(0, 1 - Math.abs(y / h - 0.72) * 3.5) * 0.4;
         const r = 1 - Math.abs(ridgeF.at(x, y) * 2 - 1);
-        this.cv[i] = r - around(x / w, 0.85) * 0.25 - (y / h) * 0.05;
+        this.cv[i] = r - around(x / w, 0.85) * 0.2;
       }
     this.wThr = percentile(this.wv, 0.84);
     const sandThr = percentile(this.wv, 0.81);
@@ -157,8 +158,7 @@ export class Terrain {
         this.road[i] = roadDist(segs, jx, jy);
 
         let k = K.Grass;
-        if (polar(y, h) > 0.76 + (iceF.at(x, y) - 0.5) * 0.14) k = K.Ice;
-        else if (this.wv[i] > this.wThr) k = K.Water;
+        if (this.wv[i] > this.wThr) k = K.Water;
         else if (this.wv[i] > sandThr) k = K.Sand;
         else if (this.road[i] < 1) k = K.Road;
         else if (this.cv[i] > cThr) k = K.Cliff;
@@ -258,13 +258,6 @@ export class Terrain {
             else if (this.k(x, y + 2) !== K.Cliff) c = shade(ROCK_D, -0.15);
             else if (this.k(x, y + 3) !== K.Cliff) c = ROCK_D;
             c = shade(c, (rnd - 0.5) * 0.16);
-            break;
-          }
-          case K.Ice: {
-            const t = N(x, y, 12, seed + 70, 3);
-            c = ICE[Math.max(0, Math.min(2, Math.floor(t * 3 + (rnd - 0.5) * 0.8)))];
-            if (this.k(x, y - 1) !== K.Ice || this.k(x, y + 1) !== K.Ice) c = ICE_D; // the edge of the ice sheet
-            else if (N(x, y, 5, seed + 71, 2) > 0.7 && rnd < 0.5) c = shade(c, -0.12); // cracks and drifts
             break;
           }
           case K.Pad: {

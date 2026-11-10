@@ -5,8 +5,8 @@
 // The screen-space map covers a whole tiny globe: screen x is longitude and
 // wraps every `w` pixels, screen y runs pole to pole (see SphereField). On the
 // ground, one lap is the world-space shift (w/2, -w/2), so lookups first fold a
-// point back into the strip 0 <= sx < w. The poles are ice caps.
-import { RGB, SphereField, WrapNoise, around, fbm, hash2, hex, mix, polar, shade, wrapNoise } from '../gfx';
+// point back into the strip 0 <= sx < w. The land is the same all over.
+import { RGB, SphereField, WrapNoise, around, fbm, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 import { toScreen, toWorld } from './stack';
 
 export const enum K {
@@ -16,7 +16,6 @@ export const enum K {
   Road = 3,
   Pad = 4,
   High = 5, // plateau top
-  Ice = 6,
 }
 
 export const HP = 11; // plateau height in world units (= screen pixels)
@@ -35,8 +34,6 @@ const ROCK = hex('#8a7e69');
 const ROCK_D = hex('#5a5043');
 const CONC = hex('#8a877d');
 const CONC_D = hex('#5f5d56');
-const ICE = ['#c9d9e0', '#dbe7ec', '#eef5f7'].map(hex);
-const ICE_D = hex('#9fb7c4');
 const FLOWER = [hex('#e8dc72'), hex('#e6e0d0'), hex('#c98ac0')];
 
 function percentile(arr: Float32Array, q: number, mask?: (i: number) => boolean): number {
@@ -140,7 +137,15 @@ export class IsoTerrain {
   }
 
   private idx(wx: number, wy: number): number {
-    const sx = wx - wy;
+    let sx = wx - wy;
+    const sy = (wx + wy) / 2;
+    if (sy < 0 || sy >= this.h) {
+      // past a pole: the far side of the globe, half a world round
+      const fy = sy < 0 ? -sy : 2 * this.h - sy;
+      sx += this.w / 2;
+      wx = fy + sx / 2;
+      wy = fy - sx / 2;
+    }
     if (sx < 0 || sx >= this.w) {
       const k = Math.floor(sx / this.w) * (this.w / 2);
       wx -= k;
@@ -178,8 +183,6 @@ export class IsoTerrain {
     const highF = new SphereField(w, h, S / 5, seed + 211, 4);
     const jitX = new SphereField(w, h, 30, seed + 7, 2);
     const jitY = new SphereField(w, h, 30, seed + 8, 2);
-    const iceF = new SphereField(w, h, 50, seed + 61, 3);
-    const ice = new Uint8Array(gw * gh);
     const hv = new Float32Array(gw * gh);
     // Only cells inside the strip are ever looked up (see idx).
     const strip = new Uint8Array(gw * gh);
@@ -194,10 +197,9 @@ export class IsoTerrain {
         const fx = sx / w;
         const fy = sy / h;
         const n = lakeF.at(sx, sy);
-        this.wv[i] = n * 0.9 + around(fx, 0.9) * 0.45 + fy * 0.7;
+        this.wv[i] = n * 0.9 + around(fx, 0.88) * Math.max(0, 1 - Math.abs(fy - 0.74) * 3.5) * 0.4;
         const m = highF.at(sx, sy);
-        hv[i] = m - around(fx, 0.85) * 0.35 - fy * 0.15;
-        if (polar(sy, h) > 0.76 + (iceF.at(sx, sy) - 0.5) * 0.14) ice[i] = 1;
+        hv[i] = m - around(fx, 0.85) * 0.3;
       }
     const inStrip = (i: number) => strip[i] === 1;
     this.wThr = percentile(this.wv, 0.84, inStrip);
@@ -223,8 +225,7 @@ export class IsoTerrain {
         const jy = wy + (jitY.at(sx, sy) - 0.5) * 20;
         this.road[i] = roadDist(segs, jx, jy);
         let k = K.Grass;
-        if (ice[i]) k = K.Ice;
-        else if (this.wv[i] > this.wThr) k = K.Water;
+        if (this.wv[i] > this.wThr) k = K.Water;
         else if (this.wv[i] > sandThr) k = K.Sand;
         else if (this.road[i] < 1) k = K.Road;
         else if (hv[i] > hThr && this.road[i] > 1.8 && this.wv[i] < sandThr - 0.03) {
@@ -354,13 +355,6 @@ export class IsoTerrain {
               if (rd > 0.82 && rnd < 0.4) c = GRASS[2];
               if (N(wx, wy, 5, seed + 17, 2) > 0.72 && rd < 0.6) c = shade(mix(c, W_SHALLOW, 0.35), -0.15); // puddles
               if (rnd > 0.99) c = shade(ROCK, 0.1);
-              break;
-            }
-            case K.Ice: {
-              const t = this.ns(sx, sy, 12, seed + 70, 3);
-              c = ICE[Math.max(0, Math.min(2, Math.floor(t * 3 + (rnd - 0.5) * 0.8)))];
-              if (this.k(wx - 1, wy - 1) !== K.Ice) c = ICE_D; // the edge of the ice sheet
-              else if (this.ns(sx, sy, 5, seed + 71, 2) > 0.7 && rnd < 0.5) c = shade(c, -0.12);
               break;
             }
             case K.Pad: {

@@ -49,10 +49,29 @@ function save(key: string, v: string): void {
 let seed = Math.floor(Math.random() * 100000);
 let game: GameLike;
 let built = { w: 0, h: 0 }; // map size in art pixels
-// The camera is the map point at the centre of the screen. x is unwrapped: it
-// keeps counting as you go round the world, which is how orders know which way
-// round to send units.
+// The camera is the point at the centre of the screen on an endless "plane"
+// that unrolls the globe. x keeps counting as you go round the world, which is
+// how orders know which way round to send units. y keeps going too: past a pole
+// the map carries on upside down (north-south flipped, half a world round), just
+// as the ground does when you walk over a pole. See fold().
 const cen = { x: 0, y: 0 };
+
+// A plane point as a map point. Every other band of rows (past one pole, or
+// the other) is the map flipped north-south and shifted half a world round.
+function fold(px: number, py: number): { x: number; y: number; mirrored: boolean } {
+  const H = built.h;
+  const k = Math.floor(py / H);
+  if (k % 2 === 0) return { x: px, y: py - k * H, mirrored: false };
+  return { x: px + built.w / 2, y: (k + 1) * H - py, mirrored: true };
+}
+// A box on the plane as a box on the map, folded like its centre.
+function foldBox(x0: number, y0: number, x1: number, y1: number): [number, number, number, number, boolean] {
+  const H = built.h;
+  const k = Math.floor((y0 + y1) / 2 / H);
+  if (k % 2 === 0) return [x0, y0 - k * H, x1, y1 - k * H, false];
+  const dx = built.w / 2;
+  return [x0 + dx, (k + 1) * H - y0, x1 + dx, (k + 1) * H - y1, true];
+}
 const globe = new Globe();
 
 // ---------- Menu ----------
@@ -97,8 +116,10 @@ clearBtn.addEventListener('click', () => game?.deselect());
 // Everything on screen; from space, everything on the near side of the world.
 function selectView(add: boolean): void {
   if (!game) return;
-  if (planet) game.boxSelect(cen.x - built.w / 4, 0, cen.x + built.w / 4, built.h, add);
-  else game.boxSelect(camX(), camY(), camX() + canvas.width, camY() + canvas.height, add);
+  if (planet) {
+    const f = fold(cen.x, cen.y);
+    game.boxSelect(f.x - built.w / 4, 0, f.x + built.w / 4, built.h, add);
+  } else game.boxSelect(...foldBox(camX(), camY(), camX() + canvas.width, camY() + canvas.height), add);
 }
 
 function showSelection(names: string[]): void {
@@ -139,9 +160,10 @@ const worldFor = (w: number, h: number) => {
 const camX = () => cen.x - canvas.width / 2;
 const camY = () => cen.y - canvas.height / 2;
 
+// The camera can go anywhere; just keep its numbers from growing without end.
 function clampCen(): void {
-  if (planet) cen.y = Math.max(0, Math.min(built.h, cen.y));
-  else cen.y = Math.max(canvas.height / 2, Math.min(built.h - canvas.height / 2, cen.y));
+  const period = 2 * built.h; // two pole crossings bring you back the right way up
+  if (built.h && Math.abs(cen.y) > period * 4) cen.y -= Math.round(cen.y / period) * period;
 }
 
 // Size the canvas for the current zoom. In space the canvas stays at the
@@ -312,7 +334,8 @@ function drawMini(): void {
     const side = Math.floor(i / n);
     const x = side === 0 ? x0 + t * w : side === 1 ? x0 + w : side === 2 ? x0 + w - t * w : x0;
     const y = side === 0 ? y0 : side === 1 ? y0 + t * h : side === 2 ? y0 + h : y0 + h - t * h;
-    const p = globe.project(v, x, y);
+    const f = fold(x, y);
+    const p = globe.project(v, f.x, f.y);
     if (p) mctx.fillRect(Math.floor(p[0]), Math.floor(p[1]), 1, 1);
   }
   drawSelected(mctx, v, 2);
@@ -333,7 +356,7 @@ mini.addEventListener('pointermove', (e) => {
   if (!miniDrag.moved && Math.hypot(dx, dy) < 4) return;
   miniDrag.moved = true;
   const r = (miniView().r * mini.clientWidth) / mini.width;
-  cen.x -= (dx / r) * (built.w / TAU);
+  cen.x -= (dx / r) * (built.w / TAU) * Math.sign(Math.cos(lat0()) || 1);
   cen.y -= (dy / r) * (built.h / Math.PI);
   clampCen();
   miniDrag.x = e.clientX;
@@ -447,7 +470,8 @@ canvas.addEventListener('touchcancel', touchEnd);
 // Spin the globe by a drag of (dx, dy) client pixels.
 function spin(dx: number, dy: number): void {
   const r = spaceView().r * scale;
-  cen.x -= (dx / r) * (built.w / TAU);
+  // upside down (past a pole) the globe's east-west runs the other way
+  cen.x -= (dx / r) * (built.w / TAU) * Math.sign(Math.cos(lat0()) || 1);
   cen.y -= (dy / r) * (built.h / Math.PI);
   clampCen();
 }
@@ -469,7 +493,10 @@ canvas.addEventListener('pointerdown', (e) => {
   const p = toMap(e.clientX, e.clientY);
   if (e.button === 2) {
     if (planet) spaceTap(e, true);
-    else game.order(p.x, p.y);
+    else {
+      const f = fold(p.x, p.y);
+      game.order(f.x, f.y, f.mirrored);
+    }
     return;
   }
   down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || mode === 'pan' || e.button === 1 };
@@ -522,8 +549,10 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   if (!cancel) {
     if (planet) {
       if (!dragging) spaceTap(e);
-    } else if (!dragging) game.click(down.x, down.y, add);
-    else if (!down.pan) game.boxSelect(down.x, down.y, p.x, p.y, add);
+    } else if (!dragging) {
+      const f = fold(down.x, down.y);
+      game.click(f.x, f.y, add, f.mirrored);
+    } else if (!down.pan) game.boxSelect(...foldBox(down.x, down.y, p.x, p.y), add);
   }
   box = null;
   down = null;
@@ -604,23 +633,40 @@ function frame(now: number): void {
       globe.draw(ctx, v, true);
       drawSelected(ctx, v, 2);
     } else {
-      // one copy of the map for every lap of the world in view, ground first
+      // One copy of the map for every lap of the world in view, and for every
+      // band past a pole (flipped north-south, half a world round). Ground
+      // first, then objects, since sprites hang over the copies' edges.
+      const W = built.w;
+      const H = built.h;
       const ox = -Math.round(camX());
       const oy = -Math.round(camY());
-      const k0 = Math.floor(camX() / built.w);
-      const k1 = Math.floor((camX() + canvas.width) / built.w);
+      const pad = 80;
       ctx.fillStyle = '#22391b';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      for (let k = k0; k <= k1; k++) {
-        ctx.setTransform(1, 0, 0, 1, ox + k * built.w, oy);
-        game.renderGround();
-      }
-      // sprites hang over the map's edges, so copies just out of view count too
-      const j0 = Math.floor((camX() - 80) / built.w);
-      const j1 = Math.floor((camX() + canvas.width + 80) / built.w);
-      for (let k = j0; k <= j1; k++) {
-        ctx.setTransform(1, 0, 0, 1, ox + k * built.w, oy);
-        game.renderObjects();
+      const bands = (m: number) => [Math.floor((camY() - m) / H), Math.floor((camY() + canvas.height + m) / H)];
+      const laps = (m: number, shift: number) => [Math.floor((camX() - m - shift) / W), Math.floor((camX() + canvas.width + m - shift) / W)];
+      for (const layer of ['ground', 'objects'] as const) {
+        const m = layer === 'ground' ? 0 : pad;
+        const [b0, b1] = bands(m);
+        for (let k = b0; k <= b1; k++) {
+          const odd = k % 2 !== 0;
+          const shift = odd ? -W / 2 : 0;
+          const [l0, l1] = laps(m, shift);
+          for (let l = l0; l <= l1; l++) {
+            const x = ox + shift + l * W;
+            if (layer === 'ground') {
+              if (odd) ctx.setTransform(1, 0, 0, -1, x, oy + (k + 1) * H);
+              else ctx.setTransform(1, 0, 0, 1, x, oy + k * H);
+              game.renderGround();
+            } else if (odd) {
+              ctx.setTransform(1, 0, 0, 1, x, oy);
+              game.renderObjects((k + 1) * H);
+            } else {
+              ctx.setTransform(1, 0, 0, 1, x, oy + k * H);
+              game.renderObjects();
+            }
+          }
+        }
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       drawBox();
