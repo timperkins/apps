@@ -1,0 +1,143 @@
+:root {
+  --ink: #e9f0d8;
+  --panel: rgba(16, 22, 14, 0.78);
+  --edge: #5d6b4a;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1b2a16;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+#c {
+  position: fixed;
+  inset: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: crosshair;
+}
+
+#hud,
+#tools > *,
+#loading {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  color: var(--ink);
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+#hud {
+  left: calc(8px + env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 6px;
+  font-size: 12px;
+  max-width: calc(100vw - 250px);
+}
+
+#title {
+  font-size: 18px;
+  line-height: 1;
+  padding: 3px 6px;
+  background: #2c446b;
+  border: 1px solid #8fb2dc;
+  letter-spacing: 1px;
+}
+
+#sel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tools {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(8px + env(safe-area-inset-right));
+  display: flex;
+  gap: 6px;
+}
+
+#tools > * {
+  position: static;
+  pointer-events: auto;
+  font-size: 12px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+#tools > *:active {
+  transform: translateY(1px);
+}
+
+.ver {
+  display: flex;
+  align-items: center;
+  padding: 0 !important;
+}
+
+#version {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  padding: 5px 22px 5px 8px;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: calc(100% - 11px) 50%, calc(100% - 7px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+#version option {
+  color: #111;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+#regen {
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  color: var(--ink);
+}
+
+@media (max-width: 520px) {
+  #hud {
+    max-width: calc(100vw - 236px);
+  }
+  #sel {
+    display: none;
+  }
+  #tools > *,
+  #version {
+    font-size: 11px;
+  }
+}
+
+#loading {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 14px;
+  font-size: 14px;
+}

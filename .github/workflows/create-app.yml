@@ -92,7 +92,7 @@ jobs:
 
       - name: Check name
         run: |
-          [[ "$NAME" =~ ^[a-z][a-z0-9-]{1,28}[a-z0-9]$ ]] || { echo "::error::Bad app name: $NAME"; exit 1; }
+          [[ "$NAME" =~ ^[a-z][a-z0-9-]{0,28}[a-z0-9]$ ]] || { echo "::error::Bad app name: $NAME"; exit 1; }
           case '${{ inputs.type }}' in hosting|apphosting) ;; *) echo "::error::Bad app type: ${{ inputs.type }}"; exit 1 ;; esac
           # Backend names from app.json when the app folder exists (an app can keep an older backend,
           # or have no preview backend), else <name> and <name>-preview.
