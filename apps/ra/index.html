@@ -23,7 +23,17 @@
       <div id="title">RA</div>
       <div id="sel">Drag: select · Tap: move</div>
     </div>
-    <button id="regen" type="button" title="New map">New map</button>
+    <div id="tools">
+      <label class="ver">
+        <span class="sr">Version</span>
+        <select id="version" aria-label="Version">
+          <option value="2">v2 · Isometric</option>
+          <option value="1">v1 · Top-down</option>
+        </select>
+      </label>
+      <button id="regen" type="button" title="New map">New map</button>
+    </div>
+    <div id="loading" hidden>Drawing…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

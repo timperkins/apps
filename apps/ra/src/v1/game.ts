@@ -1,4 +1,4 @@
-import { css, dirIndex, hash2, rng } from './gfx';
+import { css, dirIndex, hash2, rng } from '../gfx';
 import {
   BuildingArt,
   BuildingKind,
@@ -100,7 +100,11 @@ export class Game {
   bushes = makeBushes();
   time = 0;
   box: { x0: number; y0: number; x1: number; y1: number } | null = null;
-  onSelect: (units: Unit[]) => void = () => {};
+  onSelect: (names: string[]) => void = () => {};
+
+  private emit(): void {
+    this.onSelect(this.selected().map((u) => STATS[u.kind].name));
+  }
 
   constructor(
     readonly ctx: CanvasRenderingContext2D,
@@ -222,7 +226,7 @@ export class Game {
         ];
     for (let f = 0; f < 2; f++) for (const [kind, c] of army) for (let i = 0; i < n(c); i++) spawn(kind, f, centres[f][0], centres[f][1], spreadR);
     for (let f = 0; f < 2; f++) for (let i = 0; i < n(1); i++) spawn('boat', f, w * 0.85, h * 0.85, Math.min(w, h) * 0.3);
-    this.onSelect([]);
+    this.emit();
   }
 
   private forestValue(x: number, y: number): number {
@@ -271,7 +275,7 @@ export class Game {
     if (u) {
       if (!add) for (const o of this.units) o.sel = false;
       u.sel = add ? !u.sel : true;
-      this.onSelect(this.selected());
+      this.emit();
       return;
     }
     this.order(x, y);
@@ -319,12 +323,12 @@ export class Game {
       if (hit) u.sel = true;
       else if (!add) u.sel = false;
     }
-    this.onSelect(this.selected());
+    this.emit();
   }
 
   deselect(): void {
     for (const u of this.units) u.sel = false;
-    this.onSelect([]);
+    this.emit();
   }
 
   selected(): Unit[] {

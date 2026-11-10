@@ -1,6 +1,6 @@
 // Procedural landscape: grass, a dirt road, rocky ridges, a lake with a
 // beach, and dirt pads under buildings. Painted once per pixel into a canvas.
-import { RGB, fbm, hash2, hex, mix, shade } from './gfx';
+import { RGB, fbm, hash2, hex, mix, shade } from '../gfx';
 
 export const enum K {
   Grass = 0,

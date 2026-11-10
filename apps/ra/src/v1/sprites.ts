@@ -1,5 +1,5 @@
 // All unit, building and prop art, drawn procedurally at native pixel size.
-import { Pix, RGB, Shader, hash2, hex, mix, rotFrames, shade } from './gfx';
+import { Pix, RGB, Shader, hash2, hex, mix, rotFrames, shade } from '../gfx';
 
 export interface Faction {
   name: string;
