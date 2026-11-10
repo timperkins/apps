@@ -98,8 +98,8 @@ function renderLoadout() {
   $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
   $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
   $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
-  const b = store.get<number>('best', 0), wins = store.get<number>('wins', 0);
-  $('svBest').textContent = [b ? `Best ${clock(b)} survived` : '', wins ? `${wins} win${wins > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+  const b = store.get<number>('best', 0);
+  $('svBest').textContent = b ? `Best ${clock(b)} survived` : '';
   drawPreview($<HTMLCanvasElement>('svPreview'), loadout);
   store.set('loadout', loadout);
 }
@@ -131,7 +131,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'You can walk out of your camp through any open gate, but bears outside will come for you.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
-    `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. Destroy every spawner to win!`,
+    `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
     'Bears wait outside a gate. The ring over each one counts down, then it comes in. Inside, a bear swipes for 8% of your health and throws rocks for 9%.'] },
   { icon: '🚪', title: 'Gates and huge waves', lines: [
@@ -234,8 +234,7 @@ function gameOver(r: SurvivalResult) {
   const best = store.get<number>('best', 0);
   const isBest = r.time > best;
   if (isBest) store.set('best', r.time);
-  if (r.won) store.set('wins', store.get<number>('wins', 0) + 1);
-  $('svOverTitle').textContent = r.won ? 'You destroyed every bear spawner!' : 'The bears got you';
+  $('svOverTitle').textContent = 'The bears got you';
   $('svNewBest').hidden = !isBest || best === 0;
   $('svTime').textContent = clock(r.time);
   const stats: [string, string][] = [['Survived', clock(r.time)], ['Bears defeated', String(r.kills)], ['Spawners destroyed', String(r.spawners)], ['Shots', String(r.shots)], ['Hits', String(r.hits)], ['Best', clock(Math.max(best, r.time))]];

@@ -18,7 +18,7 @@ Walk with the arrow keys on a computer, or drag anywhere on a phone. Space shoot
 ## What's new compared with Sky Defender 2 Survival
 
 - **Bigger map.** The map is 6600 × 6600 world units and the camera follows the guy; the camp stays the same size in the middle. A small map in the top-right corner shows the fence, spawners, bears and you. You can walk out of the camp through any gate, and bears outside come for you when you get close (`chaseRange`).
-- **Bear spawners.** Bears only come from 4 to 6 spawners far out in the woods, about 2,000 to 3,100 units from the camp (100 health each). For the first 15 minutes each spawner makes a bear every 50 seconds, then every 5 seconds, while there are fewer than 6 bears on the map. Tapping a spawner makes it send a bear right away; huge waves come out of the spawners on top of that. Destroy every spawner to win.
+- **Bear spawners.** Bears only come from 4 to 6 spawners far out in the woods, about 2,000 to 3,100 units from the camp (100 health each). For the first 15 minutes each spawner makes a bear every 50 seconds, then every 5 seconds, while there are fewer than 6 bears on the map. Tapping a spawner makes it send a bear right away; huge waves come out of the spawners on top of that. A destroyed spawner comes back somewhere else in the woods 30 seconds later, so there is no winning: the score is how long you survive.
 - **Gates and waves.** Huge waves at 8, 13 and 18 minutes (then every 5 minutes), 12 bears and 2 more each time. At 8 minutes gates open on the other 3 sides of the camp. At 20 minutes 3 more gates open and bears take 40 seconds at a gate to get in. Bears go to the gate nearest their spawner, and walk round the fence to get there.
 - **Metal mines.** The shop sells an iron mine (100 stone), a copper mine (100 stone, 75 iron), a gold mine (125 stone, 100 iron, 50 copper) and a diamond mine (150 stone, 100 iron, 75 copper, 50 gold). Dig with M or hire miners as with the stone mine; belts, grabbers, chests and robots carry metal like stone.
 - **Metal ammo.** Metal put into a machine makes ammo: 1 iron makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold 12 (11.5), 1 diamond 16 (15). S cycles your crossbow through loadout, stone and metal ammo; turrets take any of them (best first).
@@ -34,7 +34,6 @@ The paper didn't say these, so they are starting points to change:
 - **"Takes .8% of an ammo":** read as 0.8% of one ammo per rapid crossbow shot, so one ammo lasts 125 shots.
 - **Max of 6 bears:** read as 6 bears on the map at once from all spawners together (huge waves come on top).
 - **Research costs** (60 and 80 packs), the rocket launcher's price (40 stone, 20 iron), its range (620) and reload (3 s), and which side the extra gates go on.
-- **Winning:** destroying every spawner ends the run as a win.
 
 ## Code map
 

@@ -1,6 +1,6 @@
 // Ground Defender: a top-down survival game. A little guy with a crossbow defends a walled base
 // in a big map. Bears come out of bear spawners in the woods and gather at the gates; a bear that
-// has waited long enough at a gate comes in. Destroy every spawner to win.
+// has waited long enough at a gate comes in. A destroyed spawner comes back elsewhere 30 seconds later.
 import { Sound } from './audio';
 
 /** Tim's numbers. Damage and healing are shares of max health. */
@@ -76,7 +76,8 @@ export const SURVIVAL = {
   gateWaitLate: 40,     // ...and from then on bears take 40 seconds to get in
   spawnerHp: 100,
   spawnerMin: 4, spawnerMax: 6,
-  spawnerFar: 4,        // spawners are 4 times as far out as they first were
+  spawnerFar: 4,
+  spawnerBack: 30,      // a destroyed spawner comes back somewhere else after 30 seconds        // spawners are 4 times as far out as they first were
   spawnEvery: 5,        // each spawner makes a bear every 5 seconds
   spawnEarly: 50,       // ...but only one every 50 seconds for the first 15 minutes
   earlyTime: 900,
@@ -241,7 +242,8 @@ let structs: Spot[] = [];
 type BearState = 'walk' | 'wait' | 'enter' | 'chase' | 'dead';
 interface Bear { tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
 /** A bear spawner in the woods: a den that makes bears. */
-interface Spawner { x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; }
+/** respawn: seconds until a destroyed spawner comes back somewhere else. */
+interface Spawner { x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
 type Target = Bear | Spawner;
 const isBear = (t: Target): t is Bear => 'state' in t;
 const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
@@ -413,8 +415,8 @@ export class Survival {
     const n = SURVIVAL.spawnerMin + Math.floor(Math.random() * (SURVIVAL.spawnerMax - SURVIVAL.spawnerMin + 1)), a0 = Math.random() * Math.PI * 2;
     this.spawners = [];
     for (let i = 0; i < n; i++) {
-      const a = a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2, d = (520 + Math.random() * 260) * SURVIVAL.spawnerFar;
-      this.spawners.push({ x: clamp(CX + Math.cos(a) * d, 70, W - 70), y: clamp(CY + Math.sin(a) * d, 70, H - 70), hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
+      const [x, y] = spawnerSpot(a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2);
+      this.spawners.push({ x, y, hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
     }
     this.camX = this.x; this.camY = this.y;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
@@ -1270,7 +1272,17 @@ export class Survival {
     // bear spawners: each makes a bear every 5 seconds while there are fewer than 6 on the map
     let steady = this.bears.filter(b => b.state !== 'dead' && !b.wave).length;
     for (const sp of this.spawners) {
-      if (sp.dead) continue;
+      if (sp.dead) {
+        // a destroyed spawner comes back 30 seconds later, somewhere else in the woods
+        sp.respawn = (sp.respawn ?? SURVIVAL.spawnerBack) - dt;
+        if (sp.respawn <= 0) {
+          let [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
+          for (let i = 0; i < 20 && this.spawners.some(o => o !== sp && !o.dead && dist(o.x, o.y, x, y) < 600); i++) [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
+          Object.assign(sp, { x, y, hp: SURVIVAL.spawnerHp, t: SURVIVAL.spawnEvery, hurt: 0, dead: false, respawn: undefined });
+          this.say('A new bear spawner appeared!', 3); Sound.alarm();
+        }
+        continue;
+      }
       sp.hurt = Math.max(0, sp.hurt - dt);
       sp.t -= dt;
       if (sp.t > 0) continue;
@@ -1406,7 +1418,7 @@ export class Survival {
     this.bubbles = this.bubbles.filter(u => u.t < (u.kind === 'loss' ? 1.6 : 1.1));
 
     if (this.hp <= 0) { this.hp = 0; this.end(false); }
-    else if (this.spawners.every(s => s.dead)) this.end(true);
+
   }
   private rapidSnd = 0;
   private blasts: { x: number; y: number; t: number }[] = [];
@@ -1439,7 +1451,8 @@ export class Survival {
       t.hp = 0; t.dead = true; this.spawnerKills++;
       this.blasts.push({ x: t.x, y: t.y, t: 0 });
       const left = this.spawners.filter(s => !s.dead).length;
-      if (left) this.say(`Spawner destroyed! ${left} left`, 3);
+      this.say(`Spawner destroyed! A new one comes in ${SURVIVAL.spawnerBack} seconds${left ? '' : '. No spawners left for now'}`, 3);
+      t.respawn = SURVIVAL.spawnerBack;
       Sound.boom(true);
     }
   }
@@ -2213,6 +2226,11 @@ function around(x: number, y: number, tx: number, ty: number): [number, number] 
     }
   }
   return first[4] >= 0 ? pts[first[4]] : [tx, ty];
+}
+/** A random spot far out in the woods, in direction a from the camp. */
+function spawnerSpot(a: number): [number, number] {
+  const d = (520 + Math.random() * 260) * SURVIVAL.spawnerFar;
+  return [clamp(CX + Math.cos(a) * d, 70, W - 70), clamp(CY + Math.sin(a) * d, 70, H - 70)];
 }
 const tileX = (c: number) => GX0 + c * TILE + TILE / 2, tileY = (r: number) => GY0 + r * TILE + TILE / 2;
 function tileAt(x: number, y: number) {
