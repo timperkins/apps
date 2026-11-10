@@ -90,6 +90,7 @@ export const SURVIVAL = {
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
   rocketStone: 10,
   rgunReload: 1.5,
+  furnaceMax: 50,       // ore a furnace holds
   wallHp: 150, gateHp: 200, // your own walls and gates: bears bite them
   wallBite: 15, wallBiteEvery: 1, // damage a bear does to a wall in its way, and how often      // seconds between shots with the handheld rocket gun      // stone for one rocket in the machine
   waveSize: 12,         // bears in the first huge wave
@@ -311,7 +312,7 @@ const BNAME: Record<BType, string> = { furnace: 'Furnace', gen: 'Generator', pum
 /** Buildings that need power to run. */
 const ELECTRIC: BType[] = ['drill', 'asm'];
 /** Hotkeys for placing things (the quickbar also has 1 to 0). */
-const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', split: 'X', tunnel: 'D', chest: 'C', pole: 'O', drill: 'N', furnace: 'F', machine: 'K', asm: 'A', lab: 'L', gen: 'V', pump: 'W', pipe: 'I', turret: 'U', bturret: 'J' };
+const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', split: 'X', tunnel: 'Q', chest: 'C', pole: 'O', drill: 'N', furnace: 'F', machine: 'K', asm: 'A', lab: 'L', gen: 'V', pump: 'W', pipe: 'I', turret: 'U', bturret: 'J' };
 /** A one-tile building. inp/inpK: what's waiting to go in (one kind at a time), out/outK: what it made.
  *  buf: an assembler's ingredients. recipe: what an assembler makes. pi: the ore patch a drill sits on. */
 interface Bld { type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
@@ -405,7 +406,9 @@ export class Survival {
   /** Things being crafted, first one first. Each has the raw things it took (given back if cancelled). */
   private queue: { id: string; b: number; t: number; internal: number; raw: Cost; job: number; top: boolean }[] = []; private jobN = 0;
   /** The quickbar: 10 slots of things to place. */
-  private quick: (Placeable | null)[] = Array(10).fill(null);
+  private quick: (Kind | null)[] = Array(10).fill(null);
+  /** The thing in your hand (picked in the inventory or the quickbar): D puts one of it into whatever is in front of you. */
+  private hand: Kind | null = null;
   /** Pollution from your factory; the more there is, the more bears come and the tougher they are. */
   private pollution = 0;
   /** Which tiles have power, worked out every half second. */
@@ -453,6 +456,7 @@ export class Survival {
     btn('#svHire', () => this.hire());
     btn('#svShopBtn', () => this.openShop());
     btn('#svLoad', () => this.useNear());
+    btn('#svDrop', () => this.dropOne());
     pad.querySelector('#svQuick')!.addEventListener('pointerdown', e => {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-q]'); e.preventDefault(); e.stopPropagation();
       if (el && this.running && !this.paused) this.useQuick(Number(el.dataset.q));
@@ -488,6 +492,7 @@ export class Survival {
       const pk = (Object.entries(PLACE_KEY) as [Placeable, string][]).find(([, key]) => key.toLowerCase() === k);
       if (pk) { if (!e.repeat) this.togglePlacing(pk[0]); return; }
       if (k === 'y') { if (!e.repeat) this.openLab(); return; }
+      if (k === 'd') { this.dropOne(); return; }
       if (k === 't') { if (!e.repeat) this.useNear(); return; }
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
       if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
@@ -527,7 +532,7 @@ export class Survival {
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
     // you start with a furnace and a few iron plates, like a new settler
     this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8; this.useAmmo = null; this.closeRecipe();
-    this.quick = Array(10).fill(null); this.syncQuick();
+    this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
     this.patches = genPatches(this.spawners); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
@@ -562,7 +567,7 @@ export class Survival {
     const me = this as unknown as Record<string, unknown>;
     for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
     this.bag = { ...emptyBag(), ...(d.bag as Bag) };
-    this.quick = ((d.quick as (Placeable | null)[]) ?? Array(10).fill(null)).slice(0, 10); this.syncQuick();
+    this.quick = ((d.quick as (Kind | null)[]) ?? Array(10).fill(null)).slice(0, 10); this.syncQuick();
     this.gates = d.gates as Gate[];
     this.bears = (d.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
     this.mines = d.mines as Mine[]; this.mineAt = this.mines[d.mineAt as number] ?? null; this.mining = false;
@@ -849,7 +854,7 @@ export class Survival {
     if (!this.shopOpen) return;
     const items = this.invItems(), recs = RECIPES.filter(r => r.cat === this.invTab && this.unlocked(r));
     const state = recs.map(r => this.canMake(r));
-    const sig = JSON.stringify([items, state, this.invTab, this.invSel, this.expansion, this.brickGate, [...this.done]]);
+    const sig = JSON.stringify([items, state, this.invTab, this.invSel, this.expansion, this.brickGate, [...this.done], this.hand, this.quick]);
     if (sig === this.invSig) return;
     this.invSig = sig;
     const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -857,9 +862,12 @@ export class Survival {
     let h = '';
     for (let i = 0; i < slots; i++) {
       const it = items[i], pl = it && isPlaceable(it.k);
-      h += it ? `<button class="slot${pl ? ' placeable' : ''}" ${pl ? `data-place="${it.k}"` : ''} title="${esc(ONE_NAME[it.k])}${pl ? ' (tap to place)' : ''}"><img src="${this.icon(it.k)}" alt=""><b>${it.n}</b>${pl && PLACE_KEY[it.k as Placeable] ? `<small>${PLACE_KEY[it.k as Placeable]}</small>` : ''}<span>${esc(ONE_NAME[it.k])}</span></button>` : '<div class="slot empty"></div>';
+      h += it ? `<button class="slot${pl ? ' placeable' : ''}${this.hand === it.k ? ' sel' : ''}" data-item="${it.k}" title="${esc(ONE_NAME[it.k])}"><img src="${this.icon(it.k)}" alt=""><b>${it.n}</b>${pl && PLACE_KEY[it.k as Placeable] ? `<small>${PLACE_KEY[it.k as Placeable]}</small>` : ''}<span>${esc(ONE_NAME[it.k])}</span></button>` : '<div class="slot empty"></div>';
     }
     this.pad.querySelector('#svInvGrid')!.innerHTML = h;
+    const hd = this.hand;
+    this.pad.querySelector('#svInvHand')!.innerHTML = (hd ? `<div class="hand"><img src="${this.icon(hd)}" alt=""><span><b>${esc(ONE_NAME[hd])}</b> in your hand. Tap a quickbar slot to keep it there. D puts one into whatever is in front of you.</span>${isPlaceable(hd) && this.bag[hd] ? `<button class="primary small" data-handplace="${hd}">Place</button>` : ''}</div>` : '<p class="fine">Tap a thing to hold it. Then tap a quickbar slot to keep it there, or press D to put one into whatever is in front of you.</p>')
+      + `<div class="invquick">${this.quick.map((q, i) => `<button class="qslot${q && q === hd ? ' on' : ''}${q && !this.bag[q] ? ' none' : ''}" data-iq="${i}" title="${q ? esc(ONE_NAME[q]) : 'Empty'}">${q ? `<img src="${this.icon(q)}" alt=""><b>${Math.floor(this.bag[q])}</b>` : ''}<small>${(i + 1) % 10}</small></button>`).join('')}</div>`;
     this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}" title="${REC_CATS[c][1]}"><i>${REC_CATS[c][0]}</i></button>`).join('');
     this.pad.querySelector('#svRecCat')!.textContent = REC_CATS[this.invTab][1];
     if (!recs.some(r => r.id === this.invSel)) this.invSel = recs[0]?.id ?? 'belt';
@@ -873,10 +881,18 @@ export class Survival {
   }
   private recName(r: Rec) { return r.out ? ONE_NAME[r.out] : r.id === 'gate' ? 'Brick gate' : 'Bigger base'; }
   private invClick(e: MouseEvent) {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-place],[data-tab],[data-rec],[data-craft]');
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-item],[data-iq],[data-handplace],[data-tab],[data-rec],[data-craft]');
     e.stopPropagation();
     if (!el || !this.running || this.paused) return;
-    if (el.dataset.place) { const p = el.dataset.place as Placeable; this.closeShop(); this.togglePlacing(p); return; }
+    if (el.dataset.item) { const k = el.dataset.item as Kind; this.hand = this.hand === k ? null : k; Sound.click(); this.invSig = ''; this.renderShop(); return; }
+    if (el.dataset.iq) {
+      // a quickbar slot: the thing in your hand goes there (and stays, even when you run out); with nothing in hand it's cleared
+      const i = Number(el.dataset.iq);
+      if (this.hand) { const was = this.quick.indexOf(this.hand); if (was >= 0) this.quick[was] = this.quick[i]; this.quick[i] = this.hand; }
+      else this.quick[i] = null;
+      Sound.click(); this.invSig = ''; this.quickSig = ''; this.renderShop(); return;
+    }
+    if (el.dataset.handplace) { const p = el.dataset.handplace as Placeable; this.closeShop(); this.togglePlacing(p); return; }
     if (el.dataset.tab) { this.invTab = el.dataset.tab as RecCat; Sound.click(); this.renderShop(); return; }
     if (el.dataset.rec) { if (this.invSel !== el.dataset.rec) { this.invSel = el.dataset.rec; Sound.click(); this.renderShop(); } else this.craft(el.dataset.rec); return; }
     if (el.dataset.craft) this.craft(this.invSel, Number(el.dataset.craft));
@@ -928,7 +944,8 @@ export class Survival {
     if (!key || !b) { this.closeBld(); return; }
     const [c, r] = key.split(',').map(Number), near = dist(this.x, this.y, tileX(c), tileY(r)) < NEAR * 1.6;
     const rc = REC[b.recipe], power = this.hasPower(key);
-    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done]]);
+    const items = this.invItems();
+    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done], items]);
     if (sig === this.bldSig) return;
     this.bldSig = sig;
     const chip = (k: Kind, n: number, of?: number) => `<span class="chip"><img src="${this.icon(k)}" alt=""> ${n}${of !== undefined ? `/${of}` : ''} ${KIND_NAME[k]}</span>`;
@@ -944,15 +961,26 @@ export class Survival {
       h += `<p class="fine">Smelts iron and copper ore into plates, gold ore into bars, rough diamonds into cut diamonds and stone into bricks. Grabbers can fill and empty it.</p>`;
       h += `<div class="recinfo"><div class="chips">In: ${b.inp && b.inpK ? chip(b.inpK, b.inp) : '<span class="chip">nothing</span>'} → Out: ${b.out && b.outK ? chip(b.outK, b.out) : '<span class="chip">nothing</span>'}</div><div class="bar"><span style="width:${b.inp ? Math.min(100, b.t / SURVIVAL.furnaceTime * 100) : 0}%"></span></div></div>`;
     }
+    // your inventory: tap a thing to put it in (things it can't use stay faded and do nothing)
+    const takes = (k: Kind) => { const t = { ...b, buf: { ...b.buf } }; return this.feedBld(t, k); };
+    h += `<h4 class="invh">Your inventory <small>(tap to put in)</small></h4><div class="slots">${items.map(it => `<button class="slot${takes(it.k) ? '' : ' no'}" data-bitem="${it.k}" title="${ONE_NAME[it.k]}"><img src="${this.icon(it.k)}" alt=""><b>${it.n}</b></button>`).join('') || '<p class="fine">Empty</p>'}</div>`;
     h += `<div class="craftbtns"><button class="primary" data-bld="fill"${near ? '' : ' disabled'}>${b.type === 'asm' ? 'Put parts in' : 'Put ore in'}${b.out ? ' and take out' : ''}</button><button class="ghost" data-bld="pick"${near ? '' : ' disabled'}>Pick up</button><button class="ghost" data-bld="close">Close</button></div>`;
     if (!near) h += '<p class="fine">Walk closer to put things in or pick it up.</p>';
     this.pad.querySelector('#svBld')!.innerHTML = h;
   }
   private bldClick(e: MouseEvent) {
     e.stopPropagation();
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-asm],[data-bld]'), key = this.bldOpen;
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-asm],[data-bld],[data-bitem]'), key = this.bldOpen;
     if (!el || !key || !this.running || this.paused) return;
     const b = this.blds.get(key); if (!b) { this.closeBld(); return; }
+    if (el.dataset.bitem) {
+      // put all of that thing in that fits; anything it can't use does nothing
+      const k = el.dataset.bitem as Kind, [c, r] = key.split(',').map(Number);
+      if (dist(this.x, this.y, tileX(c), tileY(r)) > NEAR * 1.6) { this.bubble(tileX(c), tileY(r) - 20, 'Walk closer to put things in', 'info'); Sound.denied(); return; }
+      let n = 0; while (this.bag[k] >= 1 && this.feedBld(b, k)) { this.bag[k]--; n++; }
+      if (n) Sound.thump(); else Sound.click();
+      this.bldSig = ''; this.renderBld(); return;
+    }
     if (el.dataset.asm) {
       if (b.recipe !== el.dataset.asm) {
         // switching recipe gives back the old parts
@@ -976,11 +1004,11 @@ export class Survival {
   private renderQuick() {
     const q0 = this.queue[0], qr = q0 ? REC[q0.id] : undefined, prog = q0 && qr ? Math.floor(q0.t / (qr.time * q0.b) * 20) : 0;
     const jobs = [...new Map(this.queue.filter(q => q.top).map(q => [q.job, q])).values()];
-    const sig = JSON.stringify([this.quick, this.quick.map(p => p ? this.bag[p] : 0), this.placing && this.placeType, jobs.map(j => j.job), prog]);
+    const sig = JSON.stringify([this.quick, this.quick.map(p => p ? this.bag[p] : 0), this.placing && this.placeType, this.hand, jobs.map(j => j.job), prog]);
     if (sig === this.quickSig) return;
     this.quickSig = sig;
     this.pad.querySelector('#svQuick')!.innerHTML = this.quick.map((p, i) => p
-      ? `<button class="qslot${this.placing && this.placeType === p ? ' on' : ''}${this.bag[p] ? '' : ' none'}" data-q="${i}" title="${ONE_NAME[p]}"><img src="${this.icon(p)}" alt=""><b>${this.bag[p]}</b><small>${(i + 1) % 10}</small></button>`
+      ? `<button class="qslot${(this.placing && this.placeType === p) || (!this.placing && this.hand === p) ? ' on' : ''}${this.bag[p] ? '' : ' none'}" data-q="${i}" title="${ONE_NAME[p]}"><img src="${this.icon(p)}" alt=""><b>${Math.floor(this.bag[p])}</b><small>${(i + 1) % 10}</small></button>`
       : `<div class="qslot empty"><small>${(i + 1) % 10}</small></div>`).join('');
     const firstJob = q0?.job;
     this.pad.querySelector('#svQueue')!.innerHTML = jobs.slice(0, 8).map(j => {
@@ -993,7 +1021,38 @@ export class Survival {
     const p = this.quick[i];
     if (!p) { Sound.denied(); return; }
     if (this.shopOpen) this.closeShop();
-    this.togglePlacing(p);
+    if (isPlaceable(p)) { this.togglePlacing(p); this.hand = this.placing ? p : null; return; }
+    // anything else goes in your hand (tap again to put it away)
+    this.placing = false;
+    this.hand = this.hand === p ? null : p;
+    if (this.hand) this.bubble(this.x, this.y - 30, `${ONE_NAME[p]} in hand. D puts one in`, 'info');
+    Sound.click();
+  }
+  /** D: put one of the thing in your hand (or being placed) into whatever is at the tile in front of you (or under the mouse):
+   *  a furnace, assembler, generator, chest, turret, lab or ammo machine. A placeable thing on an empty tile gets put down; anything else lands on the ground. */
+  private dropOne() {
+    const k = this.placing ? this.placeType as Kind : this.hand;
+    if (!k) { this.bubble(this.x, this.y - 30, 'Pick something in your inventory or quickbar first', 'info'); Sound.denied(); return; }
+    if (this.bag[k] < 1) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[k]} left`, 'info'); Sound.denied(); return; }
+    const t = this.ghost(); if (!t) { Sound.denied(); return; }
+    const key = t.c + ',' + t.r, x = tileX(t.c), y = tileY(t.r), nm = ONE_NAME[k].toLowerCase();
+    const ok = (what: string) => { this.bag[k]--; this.bubble(x, y - 18, `1 ${nm} → ${what}`, 'info'); Sound.thump(); this.bldSig = ''; };
+    const no = (what: string) => { this.bubble(x, y - 18, `The ${what} won't take ${KIND_NAME[k]}`, 'info'); Sound.denied(); };
+    const b = this.blds.get(key);
+    if (b) {
+      if (b.type === 'hub' && k === 'robot') { b.robots++; this.robots.push(this.newRobot(key)); return ok('robot hub'); }
+      return b.type !== 'hub' && this.feedBld(b, k) ? ok(BNAME[b.type].toLowerCase()) : no(BNAME[b.type].toLowerCase());
+    }
+    const ch = this.chests.get(key);
+    if (ch) { if (chestN(ch) >= SURVIVAL.chestSize) { this.bubble(x, y - 18, 'The chest is full', 'info'); Sound.denied(); return; } ch[k]++; return ok('chest'); }
+    const tu = this.turrets.get(key); if (tu) return this.feedTurret(tu, k) ? ok(ONE_NAME[T_ITEM[tu.kind]].toLowerCase()) : no(ONE_NAME[T_ITEM[tu.kind]].toLowerCase());
+    const lb = this.labs.get(key); if (lb) return this.feedLab(lb, k) ? ok('lab') : no('lab');
+    const mc = this.machines.find(m => dist(x, y, m.x, m.y) < m.r + 14);
+    if (mc) { if (!this.machineTakes(mc, k)) return no('ammo machine'); mc.queue.push(k); return ok('ammo machine'); }
+    if (this.taken(t.c, t.r) || blockedTile(t.c, t.r)) { this.bubble(x, y - 18, "Can't put that there", 'info'); Sound.denied(); return; }
+    if (isPlaceable(k) && !this.belts.has(key)) { const was = this.placing, pt = this.placeType; this.placeType = k; this.placing = true; this.placeAt(t.c, t.r); this.placing = was && this.bag[k] > 0; this.placeType = pt; return; }
+    // on a belt it rides along; on the ground it waits for a grabber
+    this.items.push({ x: x + (Math.random() - .5) * 6, y: y + (Math.random() - .5) * 6, k }); this.bag[k]--; Sound.thump();
   }
   private newRobot(hk: string): Robot { const [c, r] = hk.split(',').map(Number); return { x: tileX(c), y: tileY(r), hub: hk, k: null, src: null, dst: null }; }
   /** Puts a thing in your pocket. */
@@ -1001,7 +1060,7 @@ export class Survival {
   /** A belt, grabber or robot hands a building one thing. False if it can't take it. */
   private feedBld(b: Bld, k: Kind) {
     if (b.type === 'furnace') {
-      if (!SMELT[k] || b.inp >= 10 || (b.inp > 0 && b.inpK !== k)) return false;
+      if (!SMELT[k] || b.inp >= SURVIVAL.furnaceMax || (b.inp > 0 && b.inpK !== k)) return false;
       b.inpK = k; b.inp++; return true;
     }
     if (b.type === 'gen') { if (k !== 'stone' || b.inp >= 10) return false; b.inp++; return true; }
@@ -2534,6 +2593,7 @@ export class Survival {
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
     this.renderQuick();
+    const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
     lb.hidden = !use || (use.kind === 'turret' && !this.loadable());
     const ub = use?.kind === 'bld' ? this.blds.get(use.key) : undefined;

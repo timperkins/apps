@@ -429,3 +429,13 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .pk.red { background: #e0524a; } .pk.green { background: #5fbf86; }
 .svres.locked { opacity: .5; cursor: default; }
 .svres.locked i { color: #e0c070; max-width: 110px; text-align: right; }
+#svDrop { right: 96px; bottom: 244px; }
+#svInvHand { margin-top: 8px; }
+#svInvHand .hand { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 1.25; }
+#svInvHand .hand img { width: 30px; height: 30px; flex: none; }
+#svInvHand .hand button { flex: none; }
+.invquick { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 8px; }
+.invquick .qslot { aspect-ratio: 1; }
+.svbld .slots .slot.no { opacity: .4; }
+.svbld .invh { font: 600 13px var(--font-b); margin: 10px 0 4px; text-align: left; } .svbld .invh small { color: var(--muted); font-weight: 400; }
+.svbld .slots { max-height: 30vh; overflow-y: auto; }
