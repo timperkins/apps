@@ -12,6 +12,11 @@ export const APPS: AppLink[] = [
     blurb: 'Tilt your phone to aim the flak gun and hold off the waves.',
   },
   {
+    name: 'Sky Defender 2: Your worst nightmare',
+    url: 'https://sky-defender-2.trom.dev',
+    blurb: 'The sequel to Sky Defender. Tilt your phone to aim and survive the onslaught.',
+  },
+  {
     name: 'Pong',
     url: 'https://pong.trom.dev',
     blurb: 'Two-player Pong on a big screen. Tilt your phone to move your paddle.',
@@ -37,9 +42,19 @@ export const APPS: AppLink[] = [
     blurb: 'Step-by-step paper airplane folding, animated in 3D.',
   },
   {
+    name: 'My Hotel',
+    url: 'https://my-hotel.trom.dev',
+    blurb: 'Run a 3D hotel: check guests in, clean rooms and buy land. Play alone or with a friend.',
+  },
+  {
     name: 'Tim News',
     url: 'https://news.trom.dev',
     blurb: "Today's news, written up from real reporting, with local stories and topics you care about.",
+  },
+  {
+    name: 'Bad Guys and Good Guys',
+    url: 'https://bad-guys-good-guys.trom.dev',
+    blurb: 'Brawl your way home on the last day of school, with up to four friends joining by code or QR.',
   },
   {
     name: 'Your doom',

@@ -11,7 +11,7 @@ Ask the setup questions first, then scaffold. Don't guess answers Tim hasn't giv
 
 Ask all the questions in one go. Use the AskUserQuestion tool if you have it, with a short option list for each. Otherwise ask them in a single numbered message. Skip any question Tim already answered, and offer the default shown.
 
-1. **Name and URL.** The name is the folder `apps/<name>/` and the subdomain `<name>.trom.dev`. It must be 3 to 30 lowercase letters, digits and dashes. Default: a short name from his description. A different host needs `--domain <host>`.
+1. **Name and URL.** The name is the folder `apps/<name>/` and the subdomain `<name>.trom.dev`. It must be 2 to 30 lowercase letters, digits and dashes (names under 4 characters only work for static hosting apps without Firestore). Default: a short name from his description. A different host needs `--domain <host>`.
 2. **Server code.** Does the app need a backend: API routes, secrets such as `GEMINI_API_KEY`, or server-side Firebase Admin?
    - No (default): static site on Firebase Hosting (`--type hosting`).
    - Yes: Next.js on Firebase App Hosting (`--type apphosting`), with prod and preview backends.
