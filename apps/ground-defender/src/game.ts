@@ -69,8 +69,8 @@ export const SURVIVAL = {
   boltSpeed: 520,
   guySpeed: 120,
   bearEvery: 10,        // seconds between bears
-  waveStart: 480,       // huge waves start after 8 minutes
-  waveEvery: 300,       // then one every 5 minutes (13, 18, 23 minutes...)
+  waveStart: 720,       // huge waves start after 12 minutes
+  waveEvery: 480,       // then one every 8 minutes (20, 28, 36 minutes...)
   moreGates: 480,       // after 8 minutes gates open on the other 3 sides
   allGates: 1200,       // after 20 minutes 3 more gates open and bears come from everywhere
   gateWaitLate: 40,     // ...and from then on bears take 40 seconds to get in
@@ -78,8 +78,8 @@ export const SURVIVAL = {
   spawnerMin: 4, spawnerMax: 6,
   spawnerFar: 4,
   spawnerBack: 30,      // a destroyed spawner comes back somewhere else after 30 seconds        // spawners are 4 times as far out as they first were
-  spawnEvery: 5,        // each spawner makes a bear every 5 seconds
-  spawnEarly: 50,       // ...but only one every 50 seconds for the first 15 minutes
+  spawnEvery: 12,       // each spawner makes a bear every 12 seconds
+  spawnEarly: 100,      // ...but only one every 100 seconds for the first 15 minutes
   earlyTime: 900,
   maxBears: 6,          // ...while there are fewer than 6 bears on the map (huge waves come on top)
   chaseRange: 130,      // a bear outside goes for you when you walk this close
@@ -186,8 +186,8 @@ const RECIPES: Rec[] = [
   R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
-  R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you and bears can\'t walk through it. Bears bite walls in their way. Drag to place a row.', undefined, true),
-  R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A gate in your wall: you walk through, bears can\'t.', undefined, true),
+  R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
+  R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
   R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you carry. Press S to pick rockets, then shoot: 70 damage a rocket.', 'rocket', false),
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
@@ -1545,8 +1545,7 @@ export class Survival {
     else if (type === 'chest') this.chests.set(key, emptyBag());
     else if (type === 'wall' || type === 'pgate') {
       const x = tileX(c), y = tileY(r);
-      if (dist(x, y, this.x, this.y) < GUY_R + 12 && type === 'wall') { this.bubble(x, y - 16, "You're standing there", 'info'); Sound.denied(); return; }
-      if (this.bears.some(b => b.state !== 'dead' && dist(b.x, b.y, x, y) < BEAR_R + 12)) { this.bubble(x, y - 16, 'A bear is in the way', 'info'); Sound.denied(); return; }
+            if (this.bears.some(b => b.state !== 'dead' && dist(b.x, b.y, x, y) < BEAR_R + 12)) { this.bubble(x, y - 16, 'A bear is in the way', 'info'); Sound.denied(); return; }
       this.pwalls.set(key, { hp: type === 'pgate' ? SURVIVAL.gateHp : SURVIVAL.wallHp, gate: type === 'pgate' }); this.wallRects = null;
     }
     else if (type === 'lab') { this.labs.set(key, { packs: 0, packs2: 0, t: 0 }); this.powerT = 0; }
@@ -1722,7 +1721,7 @@ export class Survival {
     if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
-    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); collide(me, GUY_R, this.myWalls().filter(w => !w[4]) as unknown as Rect[]); this.x = me.x; this.y = me.y;
+    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
     // walking over a furnace picks up what it has smelted
     { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
       if (fb && fb.type === 'furnace' && fb.out >= 1 && fb.outK) { const n = Math.floor(fb.out); this.bag[fb.outK] += n; fb.out -= n; this.bubble(this.x, this.y - 30, `+${n} ${n === 1 ? ONE_NAME[fb.outK].toLowerCase() : KIND_NAME[fb.outK]}`, 'info'); Sound.pop(); this.bldSig = ''; } }
@@ -1814,7 +1813,7 @@ export class Survival {
       sp.t = (this.t < SURVIVAL.earlyTime ? SURVIVAL.spawnEarly : SURVIVAL.spawnEvery / (this.mineOn ? SURVIVAL.mineBears : 1)) / (1 + this.smog() * .5);
       if (steady < SURVIVAL.maxBears + Math.floor(this.smog() * 2)) { this.spawnBear(sp, false); steady++; }
     }
-    // huge waves at 8, 13 and 18 minutes (then every 5 minutes), out of the spawners, on top of the steady bears
+    // huge waves at 12, 20 and 28 minutes (then every 8 minutes), out of the spawners, on top of the steady bears
     this.waveT -= dt;
     if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say('A huge wave of bears is coming!', 4); Sound.boom(false); }
     if (this.waveT <= 0) {
