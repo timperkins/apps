@@ -208,3 +208,38 @@ body {
 #c.panning:active {
   cursor: grabbing;
 }
+
+#moreBtn {
+  position: fixed;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 2px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#moreBtn[hidden] {
+  display: none;
+}
+
+#moreBtn svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+#moreBtn[aria-pressed='true'] {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #d8ffd8;
+}

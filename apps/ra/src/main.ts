@@ -10,7 +10,7 @@ const regen = document.querySelector<HTMLButtonElement>('#regen')!;
 const versionEl = document.querySelector<HTMLSelectElement>('#version')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
 const modeBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar [data-mode]')];
-const addBtn = document.querySelector<HTMLButtonElement>('#addBtn')!;
+const moreBtn = document.querySelector<HTMLButtonElement>('#moreBtn')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
 
@@ -63,15 +63,20 @@ function setMode(m: Mode): void {
   showSelection(lastNames);
 }
 for (const b of modeBtns) b.addEventListener('click', () => setMode(b.dataset.mode as Mode));
-addBtn.addEventListener('click', () => {
-  additive = !additive;
-  addBtn.setAttribute('aria-pressed', String(additive));
-});
+// "Select more" only shows while something is selected; when on, taps and
+// boxes add to the selection instead of replacing it.
+function setAdditive(on: boolean): void {
+  additive = on;
+  moreBtn.setAttribute('aria-pressed', String(on));
+}
+moreBtn.addEventListener('click', () => setAdditive(!additive));
 allBtn.addEventListener('click', () => game?.boxSelect(cam.x, cam.y, cam.x + canvas.width, cam.y + canvas.height, additive));
 clearBtn.addEventListener('click', () => game?.deselect());
 
 function showSelection(names: string[]): void {
   lastNames = names;
+  moreBtn.hidden = names.length === 0;
+  if (!names.length) setAdditive(false);
   if (!names.length) {
     selEl.textContent = mode === 'pan' ? 'Drag: pan · Tap: move' : 'Drag: select · Tap: move';
     return;
