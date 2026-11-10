@@ -8,7 +8,7 @@ A pixel-art real-time strategy graphics test at [ra.trom.dev](https://ra.trom.de
   - **Select** (default): tap a unit to select it, drag a box to select several, tap the ground to send them there.
   - **Pan**: drag to move around the world; taps still select and send units.
   - **All** selects everything on screen.
-  - While units are selected, **Select more** and **Clear** appear above the toolbar. Turn on Select more and taps and boxes add to the selection; Clear deselects.
+  - While units are selected, **More** and **Clear** appear above the toolbar. Turn on More and taps and boxes add to the selection; Clear deselects.
 - Pinch to zoom on a phone (two fingers also pan); on a computer, scroll to zoom around the cursor, or use + / - / 0.
 - On a computer: shift adds to the selection, right-click moves, middle-drag or the arrow keys pan, S and P switch modes, Esc clears.
 - **New map** generates a fresh layout.

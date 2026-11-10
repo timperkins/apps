@@ -64,7 +64,7 @@ function setMode(m: Mode): void {
   showSelection(lastNames);
 }
 for (const b of modeBtns) b.addEventListener('click', () => setMode(b.dataset.mode as Mode));
-// "Select more" and "Clear" only show while something is selected; when on, taps and
+// "More" and "Clear" only show while something is selected; when on, taps and
 // boxes add to the selection instead of replacing it.
 function setAdditive(on: boolean): void {
   additive = on;
