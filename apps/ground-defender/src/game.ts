@@ -88,7 +88,8 @@ export const SURVIVAL = {
   rapidDamage: .75, rapidReload: .05, rapidUse: .008, // 0.8% of one ammo a shot
   rocketCost: { stone: 40, iron: 20 } as Cost,    // a rocket launcher
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
-  rocketStone: 10,      // stone for one rocket in the machine
+  rocketStone: 10,
+  rgunReload: 1.5,      // seconds between shots with the handheld rocket gun      // stone for one rocket in the machine
   waveSize: 12,         // bears in the first huge wave
   waveGrow: 2,          // each wave after that has 2 more
   bearSpeed: 20,        // slow
@@ -182,6 +183,7 @@ const RECIPES: Rec[] = [
   R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
+  R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you carry. Press S to pick rockets, then shoot: 70 damage a rocket.', 'rocket', false),
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
   { id: 'expand', cat: 'combat', n: 1, time: 0, in: { stone: 40 }, unlock: 'walls', asm: false, desc: 'Moves your walls out for more room.' },
@@ -243,7 +245,7 @@ const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
-  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket',
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun',
   'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
@@ -279,14 +281,14 @@ const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
-  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns',
   belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbows', launcher: 'rocket launchers',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
-  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun',
   belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow', launcher: 'Rocket launcher',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
@@ -348,7 +350,7 @@ const isBig = (p: Placeable) => p === 'mine' || p === 'machine';
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
 interface Bolt { stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
 /** A rocket swirls round a loop, then homes in on its target. */
-interface Rocket { x: number; y: number; a: number; t: number; spin: number; target: Target; trail: { x: number; y: number }[]; }
+interface Rocket { x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info'; }
 
@@ -375,7 +377,7 @@ export class Survival {
   private gateStage = 0; private camX = CX; private camY = CY; private walls: Rect[] = [];
   /** The turret you tapped: tap a bear or spawner next to make it the turret's target. */
   private picked: string | null = null;
-  private bag: Bag = emptyBag(); private useAmmo: AmmoKind | null = null;
+  private bag: Bag = emptyBag(); private useAmmo: AmmoKind | 'rocket' | null = null;
   private recipeFor: Machine | null = null;
   private keys = new Set<string>();
   private stick: { id: number; ox: number; oy: number; dx: number; dy: number } | null = null;
@@ -638,7 +640,7 @@ export class Survival {
     if (this.reload > 0) { Sound.click(); return; }
     let target: Target | null = null;
     if (targeted) {
-      target = this.nearestTarget(this.x, this.y, SURVIVAL.targetRange);
+      target = this.nearestTarget(this.x, this.y, this.useAmmo === 'rocket' ? SURVIVAL.rocketRange : SURVIVAL.targetRange);
       if (!target) {
         if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; }
         Sound.denied();
@@ -647,6 +649,16 @@ export class Survival {
       this.face = Math.atan2(target.y - this.y, target.x - this.x);
     }
     const a = this.face, ammo = AMMO[this.load.ammo];
+    // the rocket gun: one rocket a shot, it swirls and then homes in like a launcher's
+    if (this.useAmmo === 'rocket') {
+      if (!this.bag.rgun || !this.bag.rocket) { this.useAmmo = null; this.bubble(this.x, this.y - 30, this.bag.rgun ? 'Out of rockets' : 'No rocket gun', 'info'); Sound.denied(); return; }
+      this.bag.rocket--; this.mining = false;
+      this.rockets.push({ x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+      this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
+      Sound.rocket();
+      if (!this.bag.rocket) { this.useAmmo = null; this.bubble(this.x, this.y - 30, 'Out of rockets', 'info'); }
+      return;
+    }
     // stone ammo: 1.7x normal damage; metal ammo does its own damage. Each shot uses one up.
     const use = this.useAmmo && this.bag[this.useAmmo] > 0 ? this.useAmmo : null;
     const dmg = (use === 'ammo' ? AMMO.normal.damage * SURVIVAL.stoneDamage : use ? metalOf(use).dmg : ammo.damage) * ST.boltMul;
@@ -1600,14 +1612,14 @@ export class Survival {
   /** S: switch between your loadout ammo and stone ammo. */
   /** S: go through your loadout ammo and each kind of stone or metal ammo you have. */
   private switchAmmo() {
-    const have = (['ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo'] as AmmoKind[]).filter(k => this.bag[k] > 0);
+    const have = (['ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket'] as (AmmoKind | 'rocket')[]).filter(k => k === 'rocket' ? this.bag.rgun > 0 && this.bag.rocket > 0 : this.bag[k] > 0);
     if (!have.length && !this.useAmmo) { this.bubble(this.x, this.y - 30, 'No stone or metal ammo yet', 'info'); Sound.denied(); return; }
     const i = this.useAmmo ? have.indexOf(this.useAmmo) : -1;
     this.useAmmo = i + 1 < have.length ? have[i + 1] : null;
     this.bubble(this.x, this.y - 30, `${this.ammoName()} ammo`, 'info');
     Sound.click();
   }
-  private ammoName() { return this.useAmmo ? AMMO_NAME[this.useAmmo] : AMMO[this.load.ammo].name; }
+  private ammoName() { return this.useAmmo === 'rocket' ? 'Rocket' : this.useAmmo ? AMMO_NAME[this.useAmmo] : AMMO[this.load.ammo].name; }
 
   /* ---------- rules ---------- */
   update(dt: number) {
@@ -1827,10 +1839,10 @@ export class Survival {
     // rockets: a swirl (one loop), then they home in on the bear or spawner
     for (const rk of this.rockets) {
       rk.t += dt;
-      if (!alive(rk.target)) { const nt = this.nearestTarget(rk.x, rk.y, 400); if (nt) rk.target = nt; else { rk.t = 99; continue; } }
+      if (!rk.target || !alive(rk.target)) { const nt = this.nearestTarget(rk.x, rk.y, 400); if (nt) rk.target = nt; else { rk.t = 99; continue; } }
       const swirl = .75;
       if (rk.t < swirl) rk.a += rk.spin * Math.PI * 2 / swirl * dt;
-      else rk.a = approachAngle(rk.a, Math.atan2(rk.target.y - rk.y, rk.target.x - rk.x), dt * 8);
+      else if (rk.target) rk.a = approachAngle(rk.a, Math.atan2(rk.target.y - rk.y, rk.target.x - rk.x), dt * 8);
       const sp = SURVIVAL.rocketSpeed * (rk.t < swirl ? .55 : 1 + (rk.t - swirl) * .8);
       rk.x += Math.cos(rk.a) * sp * dt; rk.y += Math.sin(rk.a) * sp * dt;
       rk.trail.push({ x: rk.x, y: rk.y }); if (rk.trail.length > 18) rk.trail.shift();
@@ -2368,7 +2380,7 @@ export class Survival {
     g.save(); g.translate(this.x, this.y);
     g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
     if (this.hurtFlash > 0) { g.fillStyle = `rgba(255,60,50,${this.hurtFlash})`; g.beginPath(); g.arc(0, 0, GUY_R + 10, 0, 7); g.fill(); }
-    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 ? 0 : 1, this.useAmmo === 'ammo' ? STONE : this.useAmmo ? metalOf(this.useAmmo).color : undefined);
+    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 ? 0 : 1, this.useAmmo === 'ammo' ? STONE : this.useAmmo === 'rocket' ? '#d64545' : this.useAmmo ? metalOf(this.useAmmo).color : undefined, this.useAmmo === 'rocket');
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
@@ -2458,7 +2470,7 @@ export class Survival {
     }
 
     // reload shown on the buttons
-    const r = this.reload / (AMMO[this.load.ammo].reload * ST.reloadMul);
+    const r = Math.min(1, this.reload / ((this.useAmmo === 'rocket' ? SURVIVAL.rgunReload : AMMO[this.load.ammo].reload) * ST.reloadMul));
     this.pad.style.setProperty('--reload', String(r));
     this.pad.classList.toggle('loading', this.reload > 0);
     const nearMine = this.mineOn && !!near(this.mines, this.x, this.y), nearMachine = this.mineOn && !!near(this.machines, this.x, this.y);
@@ -2466,7 +2478,7 @@ export class Survival {
     mb.hidden = !nearMine && !nearMachine;
     const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
-    ab.hidden = !AMMO_KINDS.some(k => this.bag[k]) && !this.useAmmo;
+    ab.hidden = !AMMO_KINDS.some(k => this.bag[k]) && !(this.bag.rgun && this.bag.rocket) && !this.useAmmo;
     const hb = this.pad.querySelector<HTMLElement>('#svHire')!;
     hb.hidden = !nearMine || this.miners.length >= SURVIVAL.maxMiners * this.mines.length;
     const hl = `H: ${this.minerCost()} stone`;
@@ -2497,7 +2509,7 @@ export class Survival {
 }
 
 /** The little guy, centred on the origin, facing angle a. */
-function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number, boltColor = AMMO[L.ammo].color) {
+function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number, boltColor = AMMO[L.ammo].color, tube = false) {
   g.rotate(a);
   // feet
   g.fillStyle = '#3a2c20'; g.beginPath(); g.arc(3 + bob, -6, 3.5, 0, 7); g.arc(3 - bob, 6, 3.5, 0, 7); g.fill();
@@ -2505,11 +2517,18 @@ function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: numbe
   g.fillStyle = L.color; g.beginPath(); g.ellipse(0, 0, GUY_R * .8, GUY_R, 0, 0, 7); g.fill();
   g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 1.5; g.stroke();
   g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(12, -5, 3, 0, 7); g.arc(12, 5, 3, 0, 7); g.fill();
+  if (tube) {
+    // the rocket gun: a green tube on the shoulder, with a rocket tip showing when loaded
+    g.fillStyle = '#4a5a4a'; g.fillRect(-6, -4.5, 30, 9); g.fillStyle = '#3a463a'; g.fillRect(4, 4, 4, 6);
+    g.fillStyle = '#2a2a2a'; g.fillRect(22, -5.5, 4, 11); g.fillRect(-8, -5.5, 3, 11);
+    if (pull) { g.fillStyle = boltColor; g.beginPath(); g.moveTo(26, -3.5); g.lineTo(31, 0); g.lineTo(26, 3.5); g.fill(); }
+  } else {
   // crossbow: stock, bow and string; a bolt sits on it when loaded
   g.strokeStyle = '#5a3d22'; g.lineWidth = 3.5; g.beginPath(); g.moveTo(4, 0); g.lineTo(26, 0); g.stroke();
   g.strokeStyle = '#3a2a1a'; g.lineWidth = 3; g.beginPath(); g.moveTo(22, -12); g.quadraticCurveTo(28, 0, 22, 12); g.stroke();
   g.strokeStyle = '#e8e0d0'; g.lineWidth = 1; g.beginPath(); g.moveTo(22, -12); g.lineTo(22 - 8 * pull, 0); g.lineTo(22, 12); g.stroke();
   if (pull) { g.strokeStyle = boltColor; g.lineWidth = 2; g.beginPath(); g.moveTo(14, 0); g.lineTo(30, 0); g.stroke(); }
+  }
   // head and hat
   g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(0, 0, 7.5, 0, 7); g.fill();
   if (L.hat === 'cap') { g.fillStyle = shade(L.color, -.25); g.beginPath(); g.arc(0, 0, 7.8, 0, 7); g.fill(); g.beginPath(); g.ellipse(7, 0, 5, 6, 0, -Math.PI / 2, Math.PI / 2); g.fill(); }
@@ -2731,6 +2750,12 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     return;
   }
   if (k === 'rocket') { paintRocket(g, x, y, 0, .8); return; }
+  if (k === 'rgun') {
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 7, y - 1, 16, 6);
+    g.fillStyle = '#4a5a4a'; g.fillRect(x - 8, y - 3, 16, 6); g.fillStyle = '#2a2a2a'; g.fillRect(x + 6, y - 4, 3, 8); g.fillRect(x - 9, y - 4, 2, 8);
+    g.fillStyle = '#3a463a'; g.fillRect(x - 2, y + 3, 3, 4); g.fillStyle = '#d64545'; g.beginPath(); g.moveTo(x + 9, y - 2); g.lineTo(x + 12, y); g.lineTo(x + 9, y + 2); g.fill();
+    return;
+  }
   if (ORES.includes(k as Ore)) {
     // a nugget of metal (a diamond is a little gem)
     g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.arc(x + 1.5, y + 2, 5, 0, 7); g.fill();
