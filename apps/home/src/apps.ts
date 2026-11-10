@@ -56,4 +56,9 @@ export const APPS: AppLink[] = [
     url: 'https://bad-guys-good-guys.trom.dev',
     blurb: 'Brawl your way home on the last day of school, with up to four friends joining by code or QR.',
   },
+  {
+    name: 'Your doom',
+    url: 'https://your-doom.trom.dev',
+    blurb: 'Chop wood in the snowy woods, sell it to the camp for eeeddd, and pick from 8 ways to play.',
+  },
 ];
