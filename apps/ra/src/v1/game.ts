@@ -553,6 +553,31 @@ export class Game {
     for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
   }
 
+  // A simplified picture for the globe: the bare ground, forests as a dark
+  // tint, and buildings and units as small blocks of their faction's colour.
+  renderMap(): void {
+    const c = this.ctx;
+    c.drawImage(this.terrain.canvas, 0, 0);
+    const trees = new Set(this.trees);
+    c.fillStyle = 'rgba(12,30,10,0.5)';
+    for (const p of this.props) if (trees.has(p.img)) c.fillRect(Math.round(p.x) - 3, Math.round(p.y) - 5, 6, 6);
+    for (const b of this.buildings) {
+      const f = FACTIONS[b.f];
+      const w = Math.round(b.art.w * 0.7);
+      const h = Math.round(b.art.h * 0.5);
+      const x = Math.round(b.x - w / 2);
+      const y = Math.round(b.y - b.art.h * 0.4 - h / 2);
+      c.fillStyle = css(f.dark);
+      c.fillRect(x - 1, y - 1, w + 2, h + 2);
+      c.fillStyle = css(f.main);
+      c.fillRect(x, y, w, h);
+    }
+    for (const u of this.units) {
+      c.fillStyle = css(FACTIONS[u.f].light);
+      c.fillRect(Math.round(u.x) - 2, Math.round(u.y) - 2, 4, 4);
+    }
+  }
+
   private drawRot(spr: RotSprite, x: number, y: number, a: number, shadow = true): void {
     const di = dirIndex(a, DIRS);
     const ox = Math.round(x - spr.size / 2);

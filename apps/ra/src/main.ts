@@ -124,9 +124,9 @@ let zoom = 1; // scale / base
 const ZOOM_MAX = 3;
 // Zooming out until the whole map is in view from top to bottom (zFlat) and
 // then further takes you up into space, where the world is a globe. Below
-// zFlat the globe shrinks until it is SPACE_MIN of its starting size.
+// zFlat the globe keeps shrinking, down to SPACE_MIN of zFlat.
 let zFlat = 0.5;
-const SPACE_MIN = 0.3;
+const SPACE_MIN = 0.45;
 let planet = false;
 
 // The map is a longitude/latitude grid twice as wide as it is tall, large
@@ -164,6 +164,7 @@ function applyScale(): void {
   if (planet !== wasPlanet) {
     lastSnap = 0; // refresh the globe straight away
     showSelection(lastNames);
+    if (built.w) whoosh = { t0: performance.now(), up: planet };
   }
   clampCen();
 }
@@ -252,8 +253,10 @@ regen.addEventListener('click', () => {
 const TAU = Math.PI * 2;
 
 function spaceView(): View {
-  const r0 = 0.5 * Math.max(canvas.width, canvas.height);
-  return { cx: canvas.width / 2, cy: canvas.height / 2, r: r0 * (zoom / zFlat), x: cen.x, y: cen.y };
+  // Sized so things on the globe carry on shrinking smoothly from the map's
+  // scale as you zoom out (a little larger, so the planet fills the view).
+  const r = (1.3 * built.w * zoom) / TAU;
+  return { cx: canvas.width / 2, cy: canvas.height / 2, r, x: cen.x, y: cen.y };
 }
 function miniView(): View {
   return { cx: mini.width / 2, cy: mini.height / 2, r: mini.width / 2 - 3, x: cen.x, y: cen.y };
@@ -268,12 +271,7 @@ function snapshot(now: number): void {
   globe.capture(built.w, built.h, (c) => {
     game.ctx = c;
     try {
-      game.renderGround();
-      // objects near the seam hang over the edge, so draw the neighbours too
-      for (const k of [-1, 0, 1]) {
-        c.setTransform(1, 0, 0, 1, k * built.w, 0);
-        game.renderObjects();
-      }
+      game.renderMap();
     } finally {
       game.ctx = ctx;
     }
@@ -586,6 +584,55 @@ function drawBox(): void {
   ctx.fillRect(x + w, y, 1, h);
 }
 
+// Crossing between the map and space: a bright haze and wisps of cloud
+// rushing past, outwards as you fall into the atmosphere, inwards as you rise.
+let whoosh: { t0: number; up: boolean } | null = null;
+const WHOOSH_MS = 700;
+function drawWhoosh(now: number): void {
+  if (!whoosh) return;
+  // (a frame's timestamp can be a moment older than the zoom that started it)
+  const t = Math.max(0, (now - whoosh.t0) / WHOOSH_MS);
+  if (t >= 1) {
+    whoosh = null;
+    return;
+  }
+  const w = canvas.width;
+  const h = canvas.height;
+  const R = Math.hypot(w, h) / 2;
+  const fade = Math.sin(Math.PI * t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = `rgba(205,228,255,${0.5 * fade})`;
+  ctx.fillRect(0, 0, w, h);
+  // soft wisps of cloud, stretched along their path
+  for (let i = 0; i < 46; i++) {
+    const a = hashf(i, 1) * TAU;
+    let p = (hashf(i, 2) + t * 1.2) % 1;
+    if (whoosh.up) p = 1 - p;
+    const d = (0.05 + p * 1.05) * R;
+    const len = (0.1 + 0.35 * p) * R;
+    const wid = (0.03 + 0.07 * hashf(i, 3)) * R * (0.5 + p);
+    const alpha = (0.3 + 0.5 * hashf(i, 4)) * fade * Math.min(1, p * 4);
+    ctx.save();
+    ctx.translate(w / 2 + Math.cos(a) * d, h / 2 + Math.sin(a) * d * 0.8);
+    ctx.rotate(a);
+    ctx.scale(len, wid);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    g.addColorStop(0.5, `rgba(235,244,255,${alpha * 0.45})`);
+    g.addColorStop(1, 'rgba(235,244,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+const hashf = (i: number, k: number) => {
+  let x = Math.imul(i + 1, 2654435761) ^ Math.imul(k + 7, 40503);
+  x = Math.imul(x ^ (x >>> 15), 2246822519);
+  return ((x ^ (x >>> 13)) >>> 0) / 4294967296;
+};
+
 let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -598,6 +645,7 @@ function frame(now: number): void {
     if (keys.has('arrowdown')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
+    globe.time = now / 1000;
     snapshot(now);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (planet) {
@@ -629,6 +677,7 @@ function frame(now: number): void {
       drawBox();
       if (globe.ready) drawMini();
     }
+    drawWhoosh(now);
   }
   requestAnimationFrame(frame);
 }

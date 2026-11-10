@@ -17,6 +17,8 @@ export interface GameLike {
   update(dt: number): void;
   renderGround(): void;
   renderObjects(): void;
+  // A simplified picture of the whole map for the globe views.
+  renderMap(): void;
   click(x: number, y: number, add: boolean): void;
   // shortest: from the globe view, go the shortest way instead of the way the
   // camera has panned.

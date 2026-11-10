@@ -7,7 +7,7 @@
 // globe turns exactly the way the map pans, in every direction, and everything
 // on it stays the right way up. Simple sunlight and a thin atmosphere; every
 // pixel is cast back onto the sphere and looked up in a snapshot of the map.
-import { hash2 } from './gfx';
+import { hash2, wrapNoise } from './gfx';
 
 const TAU = Math.PI * 2;
 // Sun from the upper left and a little in front, in view space (x right, y up, z out).
@@ -34,6 +34,12 @@ export class Globe {
   private stars: { w: number; h: number; px: Uint32Array } | null = null;
   private img: ImageData | null = null;
 
+  // Cloud cover over the whole map, 0..1, seamless both ways like the map.
+  private clouds: Float32Array | null = null;
+  private cw = 0;
+  private ch = 0;
+  time = 0; // seconds, for drifting clouds
+
   // Map size in map pixels.
   mw = 1;
   mh = 1;
@@ -58,6 +64,7 @@ export class Globe {
     c.setTransform(1, 0, 0, 1, 0, 0);
     const tw = Math.max(2, Math.round(mw / 2));
     const th = Math.max(2, Math.round(mh / 2));
+    if (!this.clouds || this.cw !== tw >> 1 || this.ch !== th >> 1) this.makeClouds(tw >> 1, th >> 1);
     if (this.small.width !== tw || this.small.height !== th) {
       this.small.width = tw;
       this.small.height = th;
@@ -69,6 +76,22 @@ export class Globe {
     this.tex = new Uint32Array(s.getImageData(0, 0, tw, th).data.buffer);
     this.tw = tw;
     this.th = th;
+  }
+
+  private makeClouds(cw: number, ch: number): void {
+    const N = wrapNoise(cw, ch);
+    const c = new Float32Array(cw * ch);
+    const seed = Math.floor(Math.random() * 1e6);
+    for (let y = 0; y < ch; y++)
+      for (let x = 0; x < cw; x++) {
+        // wispy streaks: stretched east-west, broken up by finer noise
+        const n = N(x, y, cw / 6, seed, 5, ch / 5) * 0.75 + N(x, y, cw / 24, seed + 9, 3, ch / 40) * 0.25;
+        const t = Math.min(1, Math.max(0, (n - 0.5) / 0.2));
+        c[y * cw + x] = t * t * (3 - 2 * t);
+      }
+    this.clouds = c;
+    this.cw = cw;
+    this.ch = ch;
   }
 
   // Map position of a canvas pixel, or null if it misses the globe. x comes
@@ -109,7 +132,10 @@ export class Globe {
       return;
     }
     const { tw, th } = this;
-    const halo = 1.09;
+    const halo = 1.14;
+    const clouds = this.clouds!;
+    const { cw, ch } = this;
+    const drift = this.time * 0.006 * cw; // clouds creep east
     const x0 = Math.max(0, Math.floor(v.cx - v.r * halo));
     const x1 = Math.min(W, Math.ceil(v.cx + v.r * halo));
     const y0 = Math.max(0, Math.floor(v.cy - v.r * halo));
@@ -129,13 +155,13 @@ export class Globe {
           // atmosphere glow just outside the rim
           const d = (Math.sqrt(r2) - 1) / (halo - 1);
           if (d < 1) {
-            const a = (1 - d) * (1 - d) * 0.75;
+            const a = (1 - d) * (1 - d) * 0.85;
             const bg = out[i];
             const br = bg & 255;
             const bgG = (bg >> 8) & 255;
             const bb = (bg >> 16) & 255;
-            const r = br + (90 - br) * a;
-            const g = bgG + (150 - bgG) * a;
+            const r = br + (110 - br) * a;
+            const g = bgG + (170 - bgG) * a;
             const b = bb + (255 - bb) * a;
             out[i] = (255 << 24) | (b << 16) | (g << 8) | r;
           }
@@ -148,12 +174,23 @@ export class Globe {
         let t = Math.floor(row0 - lat * latK) % th;
         if (t < 0) t += th;
         const c = tex[t * tw + u];
-        // sunlight, plus a blue haze towards the rim
         const lit = 0.3 + 0.85 * Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2]);
-        const rim = (1 - nz) * (1 - nz) * (1 - nz) * 0.7;
-        const r = Math.min(255, (c & 255) * lit * (1 - rim) + 90 * rim);
-        const g = Math.min(255, ((c >> 8) & 255) * lit * (1 - rim) + 150 * rim);
-        const b = Math.min(255, ((c >> 16) & 255) * lit * (1 - rim) + 255 * rim);
+        let r = (c & 255) * lit;
+        let g = ((c >> 8) & 255) * lit;
+        let b = ((c >> 16) & 255) * lit;
+        // clouds, lit by the same sun
+        let cu = Math.floor(u / 2 + drift) % cw;
+        if (cu < 0) cu += cw;
+        const cv = clouds[Math.min(ch - 1, t >> 1) * cw + cu] * 0.8;
+        const cl = 235 * (0.35 + 0.75 * (lit - 0.3));
+        r += (cl - r) * cv;
+        g += (cl - g) * cv;
+        b += (cl + 10 - b) * cv;
+        // haze over everything, thickening towards the rim
+        const rim = 0.16 + (1 - nz) * (1 - nz) * 0.75;
+        r = Math.min(255, r + (125 - r) * rim);
+        g = Math.min(255, g + (170 - g) * rim);
+        b = Math.min(255, b + (235 - b) * rim);
         out[i] = (255 << 24) | (b << 16) | (g << 8) | r;
       }
     }
