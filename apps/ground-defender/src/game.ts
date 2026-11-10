@@ -1723,6 +1723,9 @@ export class Survival {
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
     const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); collide(me, GUY_R, this.myWalls().filter(w => !w[4]) as unknown as Rect[]); this.x = me.x; this.y = me.y;
+    // walking over a furnace picks up what it has smelted
+    { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
+      if (fb && fb.type === 'furnace' && fb.out >= 1 && fb.outK) { const n = Math.floor(fb.out); this.bag[fb.outK] += n; fb.out -= n; this.bubble(this.x, this.y - 30, `+${n} ${n === 1 ? ONE_NAME[fb.outK].toLowerCase() : KIND_NAME[fb.outK]}`, 'info'); Sound.pop(); this.bldSig = ''; } }
 
     // healing: 1.2% of max health every second
     this.healT += dt;
