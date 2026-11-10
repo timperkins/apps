@@ -1,5 +1,5 @@
 // v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
-import { SphereField, css, dirIndex, hash2, nearestCopy, overPole, rng } from '../gfx';
+import { WorldField, css, dirIndex, hash2, nearestCopy, rng } from '../gfx';
 import { STATS, UnitKind } from '../v1/game';
 import type { GameLike } from '../types';
 import { HP, IsoTerrain, K, Rect } from './terrain';
@@ -36,9 +36,11 @@ interface Unit {
   hp: number;
   idle: number;
   trackAcc: number;
-  // Laps around the world: on screen the unit's unwrapped x is sx + lap * w.
-  // It is set to the copy the player picked, so orders go the way they panned.
+  // Laps around the world: on screen the unit's unwrapped position is
+  // (sx + lap * w, sy + lapY * h). They are set to the copy the player picked,
+  // so orders go the way they panned.
   lap: number;
+  lapY: number;
 }
 
 interface Building {
@@ -68,7 +70,6 @@ interface Particle {
   max: number;
   kind: 'smoke' | 'soot' | 'wake' | 'dust';
   size: number;
-  g?: number; // ground screen y it rose from, if not where it started
 }
 
 const BASE_A: BuildingKind[] = ['hq', 'factory', 'power', 'barracks', 'refinery', 'radar', 'power', 'helipad', 'silo', 'tower', 'tower', 'tower'];
@@ -181,7 +182,7 @@ export class IsoGame implements GameLike {
 
     // trees, bushes and rocks over the visible world
     const forestSeed = this.seed + 400;
-    const forestF = new SphereField(w, h, 50, this.seed + 500, 2);
+    const forestF = new WorldField(w, h, 50, this.seed + 500, 2);
     for (let sy = 6; sy < h + 20; sy += 5)
       for (let sx = 2; sx < w; sx += 7) {
         const jx = sx + hash2(sx, sy, forestSeed) * 6;
@@ -224,7 +225,7 @@ export class IsoGame implements GameLike {
         if (!ok || T.isHigh(x, y) || sx < 10 || sy < 30 || sx > w - 10 || sy > h - 8) continue;
         if (kind !== 'heli' && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0 });
+        this.units.push({ kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 });
         return;
       }
     };
@@ -261,12 +262,9 @@ export class IsoGame implements GameLike {
 
   // ---------- Input (screen coordinates) ----------
 
-  // mirrored: as seen past a pole, where the map is flipped north-south but
-  // objects stay upright, so heights go down the screen instead of up.
-  private screenOf(u: Unit, mirrored = false): [number, number] {
+  private screenOf(u: Unit): [number, number] {
     const alt = u.kind === 'heli' ? HELI_ALT : 0;
-    const h = u.z + alt + MID[u.kind];
-    return toScreen(u.x, u.y, mirrored ? -h : h);
+    return toScreen(u.x, u.y, u.z + alt + MID[u.kind]);
   }
 
   private groundAt(sx: number, sy: number): [number, number] {
@@ -277,15 +275,21 @@ export class IsoGame implements GameLike {
     return toWorld(sx, sy, 0);
   }
 
-  // Screen x may be on any copy of the world; each unit's nearest copy is tested.
-  click(x: number, y: number, add: boolean, mirrored = false): void {
+  // The copy of unit u nearest screen point (x, y), as laps across and down.
+  private copyNear(u: Unit, x: number, y: number): [number, number] {
+    const [sx, sy] = toScreen(u.x, u.y);
+    return [Math.round((x - sx) / this.w), Math.round((y - sy) / this.h)];
+  }
+
+  // Screen (x, y) may be on any copy of the world; each unit's nearest copy is tested.
+  click(x: number, y: number, add: boolean): void {
     let best: Unit | null = null;
-    let bestLap = 0;
+    let bestLap: [number, number] = [0, 0];
     let bd = 1e9;
     for (const u of this.units) {
-      const [sx, sy] = this.screenOf(u, mirrored);
-      const lap = Math.round((x - sx) / this.w);
-      const d = Math.hypot(sx + lap * this.w - x, sy - y);
+      const lap = this.copyNear(u, x, y);
+      const [sx, sy] = this.screenOf(u);
+      const d = Math.hypot(sx + lap[0] * this.w - x, sy + lap[1] * this.h - y);
       if (d < STATS[u.kind].r + 4 && d < bd) {
         bd = d;
         best = u;
@@ -295,36 +299,34 @@ export class IsoGame implements GameLike {
     if (best) {
       if (!add) for (const o of this.units) o.sel = false;
       best.sel = add ? !best.sel : true;
-      best.lap = bestLap;
+      [best.lap, best.lapY] = bestLap;
       this.emit();
       return;
     }
-    this.order(x, y, mirrored);
+    this.order(x, y);
   }
 
-  // Bring a ground point back onto the map: over a pole if it is past one,
-  // then round to the first lap.
-  private fold(wx: number, wy: number): [number, number] {
-    let [sx, sy] = toScreen(wx, wy);
-    [sx, sy] = overPole(sx, sy, this.w, this.h);
-    sx = ((sx % this.w) + this.w) % this.w;
-    return toWorld(sx, sy);
-  }
-
-  // Shift a world point by whole laps around the world.
-  private lapped(x: number, y: number, lap: number): [number, number] {
+  // Shift a world point by whole laps around the world, across and down.
+  private lapped(x: number, y: number, lap: number, lapY: number): [number, number] {
     const k = (lap * this.w) / 2;
-    return [x + k, y - k];
+    const j = lapY * this.h;
+    return [x + k + j, y - k + j];
+  }
+
+  // Bring a ground point back onto the first copy of the map.
+  private fold(wx: number, wy: number): [number, number] {
+    const [sx, sy] = toScreen(wx, wy);
+    return this.lapped(wx, wy, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
   }
 
   order(x: number, y: number, shortest = false): void {
     const sel = this.units.filter((u) => u.sel);
     if (!sel.length) return;
     if (shortest) {
-      // from the globe: take the shortest way, which may be over a pole
+      // from the globe: take the shortest way
       const [rx, ry] = toScreen(sel[0].x, sel[0].y);
       [x, y] = nearestCopy(rx, ry, x, y, this.w, this.h);
-      for (const u of sel) u.lap = Math.round((x - (u.x - u.y)) / this.w);
+      for (const u of sel) [u.lap, u.lapY] = this.copyNear(u, x, y);
     }
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
@@ -345,7 +347,7 @@ export class IsoGame implements GameLike {
       let bi = 0;
       let bd = 1e9;
       left.forEach((u, i) => {
-        const [ux, uy] = this.lapped(u.x, u.y, u.lap);
+        const [ux, uy] = this.lapped(u.x, u.y, u.lap, u.lapY);
         const d = Math.hypot(ux - sx, uy - sy);
         if (d < bd) {
           bd = d;
@@ -354,25 +356,25 @@ export class IsoGame implements GameLike {
       });
       const u = left.splice(bi, 1)[0];
       // the same move, in the unit's own (folded) coordinates
-      [u.tx, u.ty] = this.lapped(sx, sy, -u.lap);
+      [u.tx, u.ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
       u.moving = true;
     }
   }
 
-  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean, mirrored = false): void {
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
-    const mid = (minx + maxx) / 2;
     for (const u of this.units) {
-      const [ux, sy] = this.screenOf(u, mirrored);
-      const lap = Math.round((mid - ux) / this.w);
-      const sx = ux + lap * this.w;
+      const lap = this.copyNear(u, (minx + maxx) / 2, (miny + maxy) / 2);
+      const [ux, uy] = this.screenOf(u);
+      const sx = ux + lap[0] * this.w;
+      const sy = uy + lap[1] * this.h;
       const hit = sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3;
       if (hit) {
         u.sel = true;
-        u.lap = lap;
+        [u.lap, u.lapY] = lap;
       } else if (!add) u.sel = false;
     }
     this.emit();
@@ -453,24 +455,15 @@ export class IsoGame implements GameLike {
           }
         }
       }
-      // over a pole: come down the far side of the globe, still heading for the target
-      const gy = (u.x + u.y) / 2;
-      if (gy < 0 || gy > this.h) {
-        const pole = (wx: number, wy: number) => {
-          const [sx, sy] = overPole(wx - wy, (wx + wy) / 2, this.w, this.h);
-          return toWorld(sx, sy);
-        };
-        [u.x, u.y] = pole(u.x, u.y);
-        [u.tx, u.ty] = pole(u.tx, u.ty);
-        u.a = Math.atan2(u.ty - u.y, u.tx - u.x);
-        u.turret = u.turretGoal = u.a;
-      }
-      // wrap around the world
-      const k = Math.floor((u.x - u.y) / this.w);
-      if (k) {
-        [u.x, u.y] = this.lapped(u.x, u.y, -k);
-        [u.tx, u.ty] = this.lapped(u.tx, u.ty, -k);
-        u.lap += k;
+      // wrap around the world, both ways
+      const [usx, usy] = toScreen(u.x, u.y);
+      const kx = Math.floor(usx / this.w);
+      const ky = Math.floor(usy / this.h);
+      if (kx || ky) {
+        [u.x, u.y] = this.lapped(u.x, u.y, -kx, -ky);
+        [u.tx, u.ty] = this.lapped(u.tx, u.ty, -kx, -ky);
+        u.lap += kx;
+        u.lapY += ky;
       }
       // smoothly follow the ground height (units climb plateaus freely)
       const gz = this.groundZ(u);
@@ -497,8 +490,7 @@ export class IsoGame implements GameLike {
         if (!b.art.fx[i] || Math.random() > dt * rate) return;
         const p = b.art.fx[i];
         const [sx, sy] = toScreen(b.x + p.x, b.y + p.y, p.z);
-        const g = (b.x + b.y) / 2;
-        this.particles.push({ x: sx + (Math.random() - 0.5) * 6, y: sy, vx: 3 + Math.random() * 3, vy: -7 - Math.random() * 4, life: 0, max: 2.6 + Math.random(), kind, size: 1.5, g });
+        this.particles.push({ x: sx + (Math.random() - 0.5) * 6, y: sy, vx: 3 + Math.random() * 3, vy: -7 - Math.random() * 4, life: 0, max: 2.6 + Math.random(), kind, size: 1.5 });
       };
       if (b.kind === 'power') {
         emit(0, 'smoke', 3);
@@ -600,25 +592,15 @@ export class IsoGame implements GameLike {
 
   }
 
-  // mirror: draw the map flipped north-south about y = mirror / 2 (the far
-  // side of a pole) with every object still upright: each one is moved, whole,
-  // so its foot point lands where the flipped ground puts it.
-  renderObjects(mirror?: number): void {
+  renderObjects(): void {
     const c = this.ctx;
-    const at = (a: number, draw: () => void) => {
-      if (mirror === undefined) return draw();
-      c.save();
-      c.translate(0, Math.round(mirror - 2 * a));
-      draw();
-      c.restore();
-    };
-    type Item = { k: number; a: number; draw: () => void };
+    type Item = { k: number; draw: () => void };
     const items: Item[] = [];
-    for (const p of this.props) items.push({ k: p.x + p.y + p.z * 2, a: (p.x + p.y) / 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
-    for (const b of this.buildings) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), a: (b.x + b.y) / 2, draw: () => this.drawBuilding(b) });
-    for (const u of this.units) if (u.kind !== 'heli') items.push({ k: u.x + u.y + u.z * 2, a: (u.x + u.y) / 2, draw: () => this.drawUnit(u) });
-    items.sort(mirror === undefined ? (a, b) => a.k - b.k : (a, b) => b.k - a.k);
-    for (const it of items) at(it.a, it.draw);
+    for (const p of this.props) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
+    for (const b of this.buildings) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
+    for (const u of this.units) if (u.kind !== 'heli') items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
+    items.sort((a, b) => a.k - b.k);
+    for (const it of items) it.draw();
 
     for (const p of this.particles) {
       if (p.kind === 'wake') continue;
@@ -626,18 +608,16 @@ export class IsoGame implements GameLike {
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle =
         p.kind === 'smoke' ? `rgba(222,222,216,${0.6 * (1 - k)})` : p.kind === 'soot' ? `rgba(70,66,60,${0.55 * (1 - k)})` : `rgba(165,145,105,${0.5 * (1 - k)})`;
-      at(p.g ?? p.y - p.vy * p.life, () => {
-        c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
-        if (s > 2) {
-          c.fillStyle = p.kind === 'smoke' ? `rgba(255,255,255,${0.35 * (1 - k)})` : 'rgba(0,0,0,0)';
-          c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), Math.ceil(s / 2), 1);
-        }
-      });
+      c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+      if (s > 2) {
+        c.fillStyle = p.kind === 'smoke' ? `rgba(255,255,255,${0.35 * (1 - k)})` : 'rgba(0,0,0,0)';
+        c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), Math.ceil(s / 2), 1);
+      }
     }
 
-    for (const u of this.units) if (u.kind === 'heli') at((u.x + u.y) / 2, () => this.drawUnit(u));
+    for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
 
-    for (const u of this.units) if (u.sel) at((u.x + u.y) / 2, () => this.drawSelection(u));
+    for (const u of this.units) if (u.sel) this.drawSelection(u);
   }
 
   private drawUnit(u: Unit): void {

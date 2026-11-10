@@ -2,11 +2,11 @@
 // painted per pixel by casting a ray through a two-level height field, so
 // plateaus get real rock faces on their two visible sides.
 //
-// The screen-space map covers a whole tiny globe: screen x is longitude and
-// wraps every `w` pixels, screen y runs pole to pole (see SphereField). On the
-// ground, one lap is the world-space shift (w/2, -w/2), so lookups first fold a
-// point back into the strip 0 <= sx < w. The land is the same all over.
-import { RGB, SphereField, WrapNoise, around, fbm, hash2, hex, mix, shade, wrapNoise } from '../gfx';
+// The screen-space map wraps round both ways: every `w` pixels across and every
+// `h` pixels down. On the ground one lap across is the world-space shift
+// (w/2, -w/2) and one lap down is (h, h), so lookups first fold a point back
+// into the rectangle 0 <= sx < w, 0 <= sy < h. The land is the same all over.
+import { RGB, WorldField, WrapNoise, around, fbm, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 import { toScreen, toWorld } from './stack';
 
 export const enum K {
@@ -101,7 +101,7 @@ export class IsoTerrain {
   readonly ctx: CanvasRenderingContext2D;
   readonly foam: HTMLCanvasElement;
   readonly foam2: HTMLCanvasElement;
-  private na: WrapNoise; // noise along the wrapping axis, in rotated world units
+  private na: WrapNoise; // noise in rotated world units (along and across the screen)
   private ns: WrapNoise; // noise in screen pixels
 
   constructor(
@@ -109,8 +109,8 @@ export class IsoTerrain {
     readonly h: number,
     readonly seed: number,
   ) {
-    this.na = wrapNoise(w / Math.SQRT2);
-    this.ns = wrapNoise(w);
+    this.na = wrapNoise(w / Math.SQRT2, h * Math.SQRT2);
+    this.ns = wrapNoise(w, h);
     this.gx0 = -6;
     this.gy0 = Math.floor(-w / 2) - 6;
     this.gw = Math.ceil(w / 2 + h + HP) + 12;
@@ -137,14 +137,12 @@ export class IsoTerrain {
   }
 
   private idx(wx: number, wy: number): number {
-    let sx = wx - wy;
+    const sx = wx - wy;
     const sy = (wx + wy) / 2;
     if (sy < 0 || sy >= this.h) {
-      // past a pole: the far side of the globe, half a world round
-      const fy = sy < 0 ? -sy : 2 * this.h - sy;
-      sx += this.w / 2;
-      wx = fy + sx / 2;
-      wy = fy - sx / 2;
+      const k = Math.floor(sy / this.h) * this.h;
+      wx -= k;
+      wy -= k;
     }
     if (sx < 0 || sx >= this.w) {
       const k = Math.floor(sx / this.w) * (this.w / 2);
@@ -179,10 +177,10 @@ export class IsoTerrain {
   private classify(): void {
     const { gw, gh, seed, w, h } = this;
     const S = Math.max(w, h) * 0.65;
-    const lakeF = new SphereField(w, h, S / 4, seed, 5);
-    const highF = new SphereField(w, h, S / 5, seed + 211, 4);
-    const jitX = new SphereField(w, h, 30, seed + 7, 2);
-    const jitY = new SphereField(w, h, 30, seed + 8, 2);
+    const lakeF = new WorldField(w, h, S / 4, seed, 5);
+    const highF = new WorldField(w, h, S / 5, seed + 211, 4);
+    const jitX = new WorldField(w, h, 30, seed + 7, 2);
+    const jitY = new WorldField(w, h, 30, seed + 8, 2);
     const hv = new Float32Array(gw * gh);
     // Only cells inside the strip are ever looked up (see idx).
     const strip = new Uint8Array(gw * gh);
@@ -197,7 +195,7 @@ export class IsoTerrain {
         const fx = sx / w;
         const fy = sy / h;
         const n = lakeF.at(sx, sy);
-        this.wv[i] = n * 0.9 + around(fx, 0.88) * Math.max(0, 1 - Math.abs(fy - 0.74) * 3.5) * 0.4;
+        this.wv[i] = n * 0.9 + around(fx, 0.88) * around(fy, 0.74) ** 4 * 0.4;
         const m = highF.at(sx, sy);
         hv[i] = m - around(fx, 0.85) * 0.3;
       }

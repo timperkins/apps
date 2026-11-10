@@ -3,8 +3,8 @@
 A pixel-art real-time strategy graphics test at [ra.trom.dev](https://ra.trom.dev).
 
 - The world is a tiny planet: a procedurally generated landscape of grass, a dirt road that loops right round, rocky ridges, forests and lakes with beaches and shimmering surf, the same kind of land all over.
-- The map is a longitude/latitude grid (`src/planet.ts`, `SphereField` in `src/gfx.ts`). It wraps east to west, and the terrain is generated on the sphere so it joins up everywhere. You can pan in any direction: past a pole the map carries on upside down and half a world round, as the ground does when you walk over a pole (objects stay upright). Units can go either way round (they go the way you panned) or over a pole.
-- Zoom far out and you rise into space, where the world is a globe you can drag to spin. Tap it to fly down, or, with units selected, to send them there the shortest way (over a pole if that is quicker).
+- The world wraps round in every direction: pan any way and you come back round, with the land flowing on seamlessly and everything the same way up (terrain noise is periodic both ways: `wrapNoise` and `WorldField` in `src/gfx.ts`). Units go the way you panned, so you can attack from either side.
+- Zoom far out and you rise into space, where the world is a globe (`src/planet.ts`) that rolls exactly the way the map pans. Drag it to spin it. Tap it to fly down, or, with units selected, to send them there the shortest way.
 - At normal zoom a minimap globe sits at the top right with the view outlined. Drag it to spin the world quickly, or tap it to jump there.
 - Two factions (Cobalt and Ember) each have a base (HQ, factory, power plants, barracks, refinery, silos, radar, helipad, gun towers) and an army: tanks, scout buggies, an ore hauler, artillery, a copter, a patrol boat and infantry.
 - The toolbar at the bottom has two modes:

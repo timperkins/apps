@@ -1,10 +1,12 @@
 // Draws the map as a tiny globe, for the zoomed-out space view and the minimap.
 //
-// The map is a longitude/latitude grid: map x is longitude (0..w, wrapping) and
-// map y runs from the north pole (0) to the south pole (h). The globe is an
-// orthographic view centred on (lon0, lat0), with simple sunlight and a thin
-// atmosphere. Every pixel is cast back onto the sphere and looked up in a
-// downscaled snapshot of the map.
+// The map wraps round both ways, so it can't be a true sphere's surface; the
+// globe instead always puts the camera on its equator and rolls the map through
+// it, both across and down. Map x maps to longitude (one lap = 360 degrees) and
+// map y to latitude (one lap = 180 degrees, top to bottom of the globe), so the
+// globe turns exactly the way the map pans, in every direction, and everything
+// on it stays the right way up. Simple sunlight and a thin atmosphere; every
+// pixel is cast back onto the sphere and looked up in a snapshot of the map.
 import { hash2 } from './gfx';
 
 const TAU = Math.PI * 2;
@@ -19,8 +21,8 @@ export interface View {
   cx: number; // centre of the globe on the canvas
   cy: number;
   r: number; // radius in canvas pixels
-  lon0: number;
-  lat0: number;
+  x: number; // map point at the centre of the globe
+  y: number;
 }
 
 export class Globe {
@@ -77,28 +79,19 @@ export class Globe {
     const r2 = nx * nx + ny * ny;
     if (r2 > 1) return null;
     const nz = Math.sqrt(1 - r2);
-    const cl = Math.cos(v.lat0);
-    const sl = Math.sin(v.lat0);
-    const y2 = ny * cl + nz * sl;
-    const z2 = -ny * sl + nz * cl;
-    const lat = Math.asin(Math.max(-1, Math.min(1, y2)));
-    const dl = Math.atan2(nx, z2);
-    return { x: ((v.lon0 + dl) / TAU) * this.mw, y: (0.5 - lat / Math.PI) * this.mh };
+    const lat = Math.asin(Math.max(-1, Math.min(1, ny)));
+    const dl = Math.atan2(nx, nz);
+    return { x: v.x + (dl / TAU) * this.mw, y: v.y - (lat / Math.PI) * this.mh };
   }
 
   // Canvas position of a map point, or null if it is on the far side.
   project(v: View, x: number, y: number): [number, number] | null {
-    const lat = (0.5 - y / this.mh) * Math.PI;
-    const dl = (x / this.mw) * TAU - v.lon0;
-    const X = Math.cos(lat) * Math.sin(dl);
-    const Y = Math.sin(lat);
+    const wrap = (d: number, p: number) => d - Math.round(d / p) * p;
+    const lat = (-wrap(y - v.y, this.mh) / this.mh) * Math.PI;
+    const dl = (wrap(x - v.x, this.mw) / this.mw) * TAU;
     const Z = Math.cos(lat) * Math.cos(dl);
-    const cl = Math.cos(v.lat0);
-    const sl = Math.sin(v.lat0);
-    const ny = Y * cl - Z * sl;
-    const nz = Y * sl + Z * cl;
-    if (nz < 0) return null;
-    return [v.cx + X * v.r, v.cy - ny * v.r];
+    if (Z < 0) return null;
+    return [v.cx + Math.cos(lat) * Math.sin(dl) * v.r, v.cy - Math.sin(lat) * v.r];
   }
 
   // Render into a canvas. With `space`, the background is a star field;
@@ -116,8 +109,6 @@ export class Globe {
       return;
     }
     const { tw, th } = this;
-    const cl = Math.cos(v.lat0);
-    const sl = Math.sin(v.lat0);
     const halo = 1.09;
     const x0 = Math.max(0, Math.floor(v.cx - v.r * halo));
     const x1 = Math.min(W, Math.ceil(v.cx + v.r * halo));
@@ -126,7 +117,8 @@ export class Globe {
     const inv = 1 / v.r;
     const lonK = tw / TAU;
     const latK = th / Math.PI;
-    const lon0 = v.lon0;
+    const lon0 = (v.x / this.mw) * TAU;
+    const row0 = (v.y / this.mh) * th; // texture row at the centre
     for (let py = y0; py < y1; py++) {
       const ny = -(py + 0.5 - v.cy) * inv;
       for (let px = x0; px < x1; px++) {
@@ -150,13 +142,11 @@ export class Globe {
           continue;
         }
         const nz = Math.sqrt(1 - r2);
-        const y2 = ny * cl + nz * sl;
-        const z2 = -ny * sl + nz * cl;
-        const lat = Math.asin(y2 > 1 ? 1 : y2 < -1 ? -1 : y2);
-        let u = Math.floor((lon0 + Math.atan2(nx, z2)) * lonK) % tw;
+        const lat = Math.asin(ny > 1 ? 1 : ny < -1 ? -1 : ny);
+        let u = Math.floor((lon0 + Math.atan2(nx, nz)) * lonK) % tw;
         if (u < 0) u += tw;
-        let t = Math.floor((Math.PI / 2 - lat) * latK);
-        if (t >= th) t = th - 1;
+        let t = Math.floor(row0 - lat * latK) % th;
+        if (t < 0) t += th;
         const c = tex[t * tw + u];
         // sunlight, plus a blue haze towards the rim
         const lit = 0.3 + 0.85 * Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2]);

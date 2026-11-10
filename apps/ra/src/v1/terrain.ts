@@ -1,7 +1,8 @@
 // Procedural landscape: grass, a dirt road, rocky ridges, a lake with a
 // beach, and dirt pads under buildings. Painted once per pixel into a canvas.
-// The map covers a whole tiny globe (see SphereField), with the same kind of land everywhere.
-import { RGB, SphereField, WrapNoise, around, hash2, hex, mix, shade, wrapNoise } from '../gfx';
+// The world wraps round both ways (east-west and north-south), so every field
+// is seamless where the map joins up, and the land is the same kind all over.
+import { RGB, WorldField, WrapNoise, around, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 
 export const enum K {
   Grass = 0,
@@ -93,7 +94,7 @@ export class Terrain {
     readonly h: number,
     readonly seed: number,
   ) {
-    this.noise = wrapNoise(w);
+    this.noise = wrapNoise(w, h);
     const n = w * h;
     this.kind = new Uint8Array(n);
     this.wv = new Float32Array(n);
@@ -113,12 +114,7 @@ export class Terrain {
   k(x: number, y: number): K {
     x = Math.floor(x);
     y = Math.floor(y);
-    // past a pole: the far side of the globe, half a world round
-    if (y < 0 || y >= this.h) {
-      y = y < 0 ? -1 - y : 2 * this.h - 1 - y;
-      x += this.w / 2;
-      if (y < 0 || y >= this.h) return K.Grass;
-    }
+    if (y < 0 || y >= this.h) y = ((y % this.h) + this.h) % this.h;
     if (x < 0 || x >= this.w) x = ((x % this.w) + this.w) % this.w;
     return this.kind[y * this.w + x] as K;
   }
@@ -126,16 +122,16 @@ export class Terrain {
   private classify(): void {
     const { w, h, seed } = this;
     const scale = Math.max(w, h) * 0.6;
-    const lakeF = new SphereField(w, h, scale / 5, seed, 5);
-    const ridgeF = new SphereField(w, h, scale / 4, seed + 101, 5);
-    const jitX = new SphereField(w, h, 40, seed + 7, 2);
-    const jitY = new SphereField(w, h, 40, seed + 8, 2);
+    const lakeF = new WorldField(w, h, scale / 5, seed, 5);
+    const ridgeF = new WorldField(w, h, scale / 4, seed + 101, 5);
+    const jitX = new WorldField(w, h, 40, seed + 7, 2);
+    const jitY = new WorldField(w, h, 40, seed + 8, 2);
     // Water: lakes anywhere, with one likely just south-east of the second base.
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         const n = lakeF.at(x, y);
-        this.wv[i] = n * 0.9 + around(x / w, 0.88) * Math.max(0, 1 - Math.abs(y / h - 0.72) * 3.5) * 0.4;
+        this.wv[i] = n * 0.9 + around(x / w, 0.88) * around(y / h, 0.72) ** 4 * 0.4;
         const r = 1 - Math.abs(ridgeF.at(x, y) * 2 - 1);
         this.cv[i] = r - around(x / w, 0.85) * 0.2;
       }

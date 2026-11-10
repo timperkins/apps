@@ -1,4 +1,4 @@
-import { SphereField, nearestCopy, overPole, css, dirIndex, hash2, rng } from '../gfx';
+import { WorldField, nearestCopy, css, dirIndex, hash2, rng } from '../gfx';
 import {
   BuildingArt,
   BuildingKind,
@@ -44,9 +44,11 @@ interface Unit {
   hp: number;
   idle: number;
   trackAcc: number;
-  // Laps around the world: the unit's unwrapped x is x + lap * w. It is set to
-  // the copy the player picked, so orders travel the way the player panned.
+  // Laps around the world: the unit's unwrapped position is (x + lap * w,
+  // y + lapY * h). They are set to the copy the player picked, so orders travel
+  // the way the player panned.
   lap: number;
+  lapY: number;
 }
 
 interface Building {
@@ -75,7 +77,6 @@ interface Particle {
   max: number;
   kind: 'smoke' | 'wake' | 'dust';
   size: number;
-  g?: number; // ground y it rose from, if not where it started
 }
 
 interface Marker {
@@ -169,7 +170,7 @@ export class Game {
     place(take(BASE_B), 1, w * (portrait ? 0.5 : 0.74), h * (portrait ? 0.56 : 0.28));
 
     // Trees, rocks and bushes
-    this.forest = new SphereField(w, h, 60, this.seed + 500, 3);
+    this.forest = new WorldField(w, h, 60, this.seed + 500, 3);
     const forestSeed = this.seed + 400;
     for (let y = 4; y < h + 10; y += 5)
       for (let x = 2; x < w; x += 5) {
@@ -203,7 +204,7 @@ export class Game {
         if (!ok || x < 8 || y < 10 || x > w - 8 || y > h - 6) continue;
         if (kind !== 'heli' && this.buildings.some((b) => inside(x, y, { x: b.x - b.art.w / 2, y: b.y - b.art.h, w: b.art.w, h: b.art.h }, 2))) continue;
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0 });
+        this.units.push({ kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 });
         return;
       }
     };
@@ -233,7 +234,7 @@ export class Game {
     this.emit();
   }
 
-  private forest!: SphereField;
+  private forest!: WorldField;
   private forestValue(x: number, y: number): number {
     // clumps of forest
     return this.forest.at(x, y);
@@ -251,14 +252,18 @@ export class Game {
 
   // ---------- Input ----------
 
-  // x may be on any copy of the world; the nearest copy of each unit is tested.
-  unitAt(x: number, y: number, mirrored = false): { u: Unit; lap: number } | null {
-    let best: { u: Unit; lap: number } | null = null;
+  // (x, y) may be on any copy of the world; the nearest copy of each unit is tested.
+  private copyNear(u: Unit, x: number, y: number): [number, number] {
+    return [Math.round((x - u.x) / this.w), Math.round((y - u.y) / this.h)];
+  }
+
+  unitAt(x: number, y: number): { u: Unit; lap: [number, number] } | null {
+    let best: { u: Unit; lap: [number, number] } | null = null;
     let bd = 1e9;
     for (const u of this.units) {
-      const uy = u.kind === 'heli' ? u.y + (mirrored ? 12 : -12) : u.y;
-      const lap = Math.round((x - u.x) / this.w);
-      const d = Math.hypot(u.x + lap * this.w - x, uy - y);
+      const lap = this.copyNear(u, x, y);
+      const uy = u.y + lap[1] * this.h - (u.kind === 'heli' ? 12 : 0);
+      const d = Math.hypot(u.x + lap[0] * this.w - x, uy - y);
       if (d < STATS[u.kind].r + 3 && d < bd) {
         bd = d;
         best = { u, lap };
@@ -267,33 +272,34 @@ export class Game {
     return best;
   }
 
-  click(x: number, y: number, add: boolean, mirrored = false): void {
-    const hit = this.unitAt(x, y, mirrored);
+  click(x: number, y: number, add: boolean): void {
+    const hit = this.unitAt(x, y);
     if (hit) {
       const u = hit.u;
       if (!add) for (const o of this.units) o.sel = false;
       u.sel = add ? !u.sel : true;
-      u.lap = hit.lap;
+      [u.lap, u.lapY] = hit.lap;
       this.emit();
       return;
     }
-    this.order(x, y, mirrored);
+    this.order(x, y);
   }
 
   order(x: number, y: number, shortest = false): void {
     const sel = this.selected();
     if (!sel.length) return;
     const W = this.w;
+    const H = this.h;
     if (shortest) {
-      // from the globe: take the shortest way, which may be over a pole
+      // from the globe: take the shortest way
       const r = sel[0];
-      [x, y] = nearestCopy(r.x, r.y, x, y, W, this.h);
-      for (const u of sel) u.lap = Math.round((x - u.x) / W);
+      [x, y] = nearestCopy(r.x, r.y, x, y, W, H);
+      for (const u of sel) [u.lap, u.lapY] = this.copyNear(u, x, y);
     }
-    const [fx, fy] = overPole(x, y, W, this.h);
-    this.markers.push({ x: ((fx % W) + W) % W, y: fy, t: 0 });
+    this.markers.push({ x: ((x % W) + W) % W, y: ((y % H) + H) % H, t: 0 });
     // Work in unwrapped coordinates: each unit is where the player last saw it.
     const ux = (u: Unit) => u.x + u.lap * W;
+    const uy = (u: Unit) => u.y + u.lapY * H;
     // Simple formation: grid slots around the target, nearest unit to nearest slot.
     const cols = Math.ceil(Math.sqrt(sel.length));
     const gap = 13;
@@ -308,7 +314,7 @@ export class Game {
       let bi = 0;
       let bd = 1e9;
       left.forEach((u, i) => {
-        const d = Math.hypot(ux(u) - sx, u.y - sy);
+        const d = Math.hypot(ux(u) - sx, uy(u) - sy);
         if (d < bd) {
           bd = d;
           bi = i;
@@ -316,25 +322,24 @@ export class Game {
       });
       const u = left.splice(bi, 1)[0];
       u.tx = u.x + (sx - ux(u));
-      u.ty = u.kind === 'heli' ? sy + 12 : sy;
+      u.ty = u.y + (sy - uy(u)) + (u.kind === 'heli' ? 12 : 0);
       u.moving = true;
     }
   }
 
-  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean, mirrored = false): void {
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
-    const mid = (minx + maxx) / 2;
     for (const u of this.units) {
-      const uy = u.kind === 'heli' ? u.y + (mirrored ? 12 : -12) : u.y;
-      const lap = Math.round((mid - u.x) / this.w);
-      const x = u.x + lap * this.w;
-      const hit = x >= minx - 2 && x <= maxx + 2 && uy >= miny - 2 && uy <= maxy + 2;
+      const lap = this.copyNear(u, (minx + maxx) / 2, (miny + maxy) / 2);
+      const x = u.x + lap[0] * this.w;
+      const y = u.y + lap[1] * this.h - (u.kind === 'heli' ? 12 : 0);
+      const hit = x >= minx - 2 && x <= maxx + 2 && y >= miny - 2 && y <= maxy + 2;
       if (hit) {
         u.sel = true;
-        u.lap = lap;
+        [u.lap, u.lapY] = lap;
       } else if (!add) u.sel = false;
     }
     this.emit();
@@ -410,19 +415,18 @@ export class Game {
           }
         }
       }
-      // over a pole: come down the far side of the globe, still heading for the target
-      if (u.y < 0 || u.y > this.h) {
-        [u.x, u.y] = overPole(u.x, u.y, this.w, this.h);
-        [u.tx, u.ty] = overPole(u.tx, u.ty, this.w, this.h);
-        u.a = Math.atan2(u.ty - u.y, u.tx - u.x);
-        u.turret = u.turretGoal = u.a;
-      }
-      // wrap around the world
+      // wrap around the world, both ways
       if (u.x < 0 || u.x >= this.w) {
         const k = Math.floor(u.x / this.w);
         u.x -= k * this.w;
         u.tx -= k * this.w;
         u.lap += k;
+      }
+      if (u.y < 0 || u.y >= this.h) {
+        const k = Math.floor(u.y / this.h);
+        u.y -= k * this.h;
+        u.ty -= k * this.h;
+        u.lapY += k;
       }
       // turrets: follow the hull while moving, scan lazily when idle
       if (u.kind === 'light' || u.kind === 'heavy') {
@@ -443,7 +447,7 @@ export class Game {
       b.phase += dt;
       if (b.kind === 'power' && Math.random() < dt * 5) {
         const stack = Math.random() < 0.5 ? 13 : 33;
-        this.particles.push({ x: b.x - b.art.w / 2 + stack + (Math.random() - 0.5) * 6, y: b.y - b.art.h + 6, vx: 3 + Math.random() * 3, vy: -6 - Math.random() * 4, life: 0, max: 2.5 + Math.random(), kind: 'smoke', size: 1.5, g: b.y });
+        this.particles.push({ x: b.x - b.art.w / 2 + stack + (Math.random() - 0.5) * 6, y: b.y - b.art.h + 6, vx: 3 + Math.random() * 3, vy: -6 - Math.random() * 4, life: 0, max: 2.5 + Math.random(), kind: 'smoke', size: 1.5 });
       }
       if (b.kind === 'tower') {
         if (Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
@@ -525,26 +529,16 @@ export class Game {
 
   }
 
-  // mirror: draw the map flipped north-south about y = mirror / 2 (the far
-  // side of a pole) with every object still upright: each one is moved, whole,
-  // so its foot point lands where the flipped ground puts it.
-  renderObjects(mirror?: number): void {
+  renderObjects(): void {
     const c = this.ctx;
-    const at = (a: number, draw: () => void) => {
-      if (mirror === undefined) return draw();
-      c.save();
-      c.translate(0, Math.round(mirror - 2 * a));
-      draw();
-      c.restore();
-    };
     // depth-sorted ground objects
-    type Item = { y: number; a: number; draw: () => void };
+    type Item = { y: number; draw: () => void };
     const items: Item[] = [];
-    for (const p of this.props) items.push({ y: p.y, a: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
-    for (const b of this.buildings) items.push({ y: b.y - 4, a: b.y, draw: () => this.drawBuilding(b) });
-    for (const u of this.units) if (u.kind !== 'heli') items.push({ y: u.y, a: u.y, draw: () => this.drawUnit(u) });
-    items.sort(mirror === undefined ? (a, b) => a.y - b.y : (a, b) => b.y - a.y);
-    for (const it of items) at(it.a, it.draw);
+    for (const p of this.props) items.push({ y: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
+    for (const b of this.buildings) items.push({ y: b.y - 4, draw: () => this.drawBuilding(b) });
+    for (const u of this.units) if (u.kind !== 'heli') items.push({ y: u.y, draw: () => this.drawUnit(u) });
+    items.sort((a, b) => a.y - b.y);
+    for (const it of items) it.draw();
 
     // smoke and dust drift above the ground objects
     for (const p of this.particles) {
@@ -552,11 +546,11 @@ export class Game {
       const k = p.life / p.max;
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle = p.kind === 'smoke' ? `rgba(215,215,210,${0.55 * (1 - k)})` : `rgba(160,140,100,${0.5 * (1 - k)})`;
-      at(p.g ?? p.y - p.vy * p.life, () => c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s));
+      c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
     }
 
     // aircraft on top
-    for (const u of this.units) if (u.kind === 'heli') at(u.y, () => this.drawUnit(u));
+    for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
   }
 
   private drawRot(spr: RotSprite, x: number, y: number, a: number, shadow = true): void {

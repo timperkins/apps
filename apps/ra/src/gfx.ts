@@ -58,8 +58,9 @@ export function fbm(x: number, y: number, s: number, oct = 4): number {
   return t / norm;
 }
 
-// Value noise that repeats every `p` lattice cells in x (p a whole number).
-export function vnoiseP(x: number, y: number, s: number, p: number): number {
+// Value noise that repeats every `p` lattice cells in x and, if q > 0, every
+// `q` cells in y (whole numbers).
+export function vnoiseP(x: number, y: number, s: number, p: number, q = 0): number {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   const xf = x - xi;
@@ -68,20 +69,22 @@ export function vnoiseP(x: number, y: number, s: number, p: number): number {
   const v = yf * yf * (3 - 2 * yf);
   const x0 = ((xi % p) + p) % p;
   const x1 = (x0 + 1) % p;
-  const a = hash2(x0, yi, s);
-  const b = hash2(x1, yi, s);
-  const c = hash2(x0, yi + 1, s);
-  const d = hash2(x1, yi + 1, s);
+  const y0 = q ? ((yi % q) + q) % q : yi;
+  const y1 = q ? (y0 + 1) % q : yi + 1;
+  const a = hash2(x0, y0, s);
+  const b = hash2(x1, y0, s);
+  const c = hash2(x0, y1, s);
+  const d = hash2(x1, y1, s);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-export function fbmP(x: number, y: number, s: number, oct: number, p: number): number {
+export function fbmP(x: number, y: number, s: number, oct: number, p: number, q = 0): number {
   let t = 0;
   let amp = 0.5;
   let f = 1;
   let norm = 0;
   for (let i = 0; i < oct; i++) {
-    t += amp * vnoiseP(x * f, y * f, s + i * 17, p * f);
+    t += amp * vnoiseP(x * f, y * f, s + i * 17, p * f, q * f);
     norm += amp;
     amp *= 0.5;
     f *= 2;
@@ -89,47 +92,21 @@ export function fbmP(x: number, y: number, s: number, oct: number, p: number): n
   return t / norm;
 }
 
-// Fractal noise for a world that wraps around every `period` pixels in x,
-// like fbm(x / cell, y / cellY) but seamless where the world joins up.
+// The world wraps round both ways: every `px` pixels east-west and every `py`
+// pixels north-south. WrapNoise is like fbm(x / cell, y / cellY), but seamless
+// where the world joins up.
 export type WrapNoise = (x: number, y: number, cell: number, s: number, oct?: number, cellY?: number) => number;
-export function wrapNoise(period: number): WrapNoise {
+export function wrapNoise(px: number, py: number): WrapNoise {
   return (x, y, cell, s, oct = 4, cellY = cell) => {
-    const n = Math.max(1, Math.round(period / cell));
-    return fbmP((x * n) / period, y / cellY, s, oct, n);
+    const n = Math.max(1, Math.round(px / cell));
+    const m = Math.max(1, Math.round(py / cellY));
+    return fbmP((x * n) / px, (y * m) / py, s, oct, n, m);
   };
 }
 
-export function vnoise3(x: number, y: number, z: number, s: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const zi = Math.floor(z);
-  let u = x - xi;
-  let v = y - yi;
-  let w = z - zi;
-  u = u * u * (3 - 2 * u);
-  v = v * v * (3 - 2 * v);
-  w = w * w * (3 - 2 * w);
-  const z0 = xi + Math.imul(zi, 1013904223);
-  const z1 = xi + Math.imul(zi + 1, 1013904223);
-  const a0 = hash2(z0, yi, s);
-  const b0 = hash2(z0 + 1, yi, s);
-  const c0 = hash2(z0, yi + 1, s);
-  const d0 = hash2(z0 + 1, yi + 1, s);
-  const a1 = hash2(z1, yi, s);
-  const b1 = hash2(z1 + 1, yi, s);
-  const c1 = hash2(z1, yi + 1, s);
-  const d1 = hash2(z1 + 1, yi + 1, s);
-  const p0 = a0 + (b0 - a0) * u + (c0 - a0) * v + (a0 - b0 - c0 + d0) * u * v;
-  const p1 = a1 + (b1 - a1) * u + (c1 - a1) * v + (a1 - b1 - c1 + d1) * u * v;
-  return p0 + (p1 - p0) * w;
-}
-
-// The map covers the whole globe: x is longitude (wrapping every w pixels) and
-// y runs from the north pole (0) to the south pole (h). A SphereField is fractal
-// noise sampled on the sphere itself, so it is seamless where the map joins and
-// across the poles. `cell` is the feature size in map pixels at the equator. It
-// is computed on a coarse grid and interpolated, which keeps generation quick.
-export class SphereField {
+// Large-scale seamless noise over a w x h world (lakes, ridges, forests),
+// computed once on a coarse grid and interpolated, which keeps generation quick.
+export class WorldField {
   private nx: number;
   private ny: number;
   private ix: number;
@@ -137,89 +114,38 @@ export class SphereField {
   private v: Float32Array;
   constructor(w: number, h: number, cell: number, s: number, oct = 4, step = 3) {
     const nx = (this.nx = Math.max(8, Math.round(w / step)));
-    const ny = (this.ny = Math.max(4, Math.round(h / step)) + 1);
+    const ny = (this.ny = Math.max(8, Math.round(h / step)));
     this.ix = nx / w;
-    this.iy = (ny - 1) / h;
+    this.iy = ny / h;
     this.v = new Float32Array(nx * ny);
-    const R = w / (2 * Math.PI) / cell;
-    for (let j = 0; j < ny; j++) {
-      const lat = Math.PI / 2 - (Math.PI * j) / (ny - 1);
-      for (let i = 0; i < nx; i++) {
-        const lon = (2 * Math.PI * i) / nx;
-        const px = Math.cos(lat) * Math.cos(lon) * R;
-        const py = Math.cos(lat) * Math.sin(lon) * R;
-        const pz = Math.sin(lat) * R;
-        let t = 0;
-        let amp = 0.5;
-        let f = 1;
-        let norm = 0;
-        for (let o = 0; o < oct; o++) {
-          t += amp * vnoise3(px * f, py * f, pz * f, s + o * 17);
-          norm += amp;
-          amp *= 0.5;
-          f *= 2;
-        }
-        this.v[j * nx + i] = t / norm;
-      }
-    }
+    const N = wrapNoise(w, h);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) this.v[j * nx + i] = N(i / this.ix, j / this.iy, cell, s, oct);
   }
   at(x: number, y: number): number {
-    const nx = this.nx;
+    const { nx, ny } = this;
     let fx = x * this.ix;
     let fy = y * this.iy;
     if (fx < 0 || fx >= nx) fx -= Math.floor(fx / nx) * nx;
-    if (fy < 0) fy = 0;
-    else if (fy > this.ny - 1.001) fy = this.ny - 1.001;
+    if (fy < 0 || fy >= ny) fy -= Math.floor(fy / ny) * ny;
     const i = fx | 0;
     const j = fy | 0;
     const tx = fx - i;
     const ty = fy - j;
-    const i1 = i + 1 === nx ? 0 : i + 1;
+    const i1 = i + 1 >= nx ? 0 : i + 1;
+    const j1 = j + 1 >= ny ? 0 : j + 1;
     const v = this.v;
-    const r0 = j * nx;
-    const r1 = r0 + nx;
-    const a = v[r0 + i];
-    const b = v[r0 + i1];
-    const c = v[r1 + i];
-    const d = v[r1 + i1];
+    const a = v[j * nx + i];
+    const b = v[j * nx + i1];
+    const c = v[j1 * nx + i];
+    const d = v[j1 * nx + i1];
     return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
   }
 }
 
-// Fold a map point that has gone past a pole back onto the map: over the pole
-// you come down the far side of the globe, half a world round.
-export function overPole(x: number, y: number, w: number, h: number): [number, number, number] {
-  if (y < 0) return [x + w / 2, -y, -1];
-  if (y > h) return [x + w / 2, 2 * h - y, -1];
-  return [x, y, 1];
-}
-
-// The copy of map point (x, y) that is closest to (x0, y0) on the globe: the
-// same place one or more laps round, or the same place reached over a pole
-// (which the map shows as a point beyond its top or bottom edge).
+// The copy of (x, y) nearest to (x0, y0) in a world that wraps both ways.
 export function nearestCopy(x0: number, y0: number, x: number, y: number, w: number, h: number): [number, number] {
-  let best: [number, number] = [x, y];
-  let bd = Infinity;
-  for (const [cx, cy] of [
-    [x, y],
-    [x + w / 2, -y],
-    [x + w / 2, 2 * h - y],
-  ]) {
-    const k = Math.round((x0 - cx) / w);
-    const px = cx + k * w;
-    // east-west distances shrink towards the poles
-    const lat = (Math.PI * ((y0 + cy) / 2 - h / 2)) / h;
-    const d = Math.hypot((px - x0) * Math.max(0.15, Math.cos(lat)), cy - y0);
-    if (d < bd) {
-      bd = d;
-      best = [px, cy];
-    }
-  }
-  return best;
+  return [x + Math.round((x0 - x) / w) * w, y + Math.round((y0 - y) / h) * h];
 }
-
-// How far towards a pole a map row is: 0 on the equator, 1 at the poles.
-export const polar = (y: number, h: number) => Math.abs(y / h - 0.5) * 2;
 
 // 0..1 bump that peaks at fraction `at` around the world and is lowest opposite it.
 export const around = (fx: number, at: number) => 0.5 + 0.5 * Math.cos(2 * Math.PI * (fx - at));
