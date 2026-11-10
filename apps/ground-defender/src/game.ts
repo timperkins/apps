@@ -2285,11 +2285,18 @@ export class Survival {
     g.fillText(`Bear spawner ${Math.ceil(sp.hp)}`, sp.x, y + 18);
   }
 
-  /** A small map in the top-right corner: the fence, spawners, bears and you. */
+  /** A small map in the top-right corner: ore patches, the fence, spawners, bears and you. */
   private drawMap(g: CanvasRenderingContext2D, cw: number, top: number) {
-    const size = 86, k = size / W, x0 = cw - size - 12, y0 = top + 6;
+    const size = 104, k = size / W, x0 = cw - size - 12, y0 = top + 6;
     g.fillStyle = 'rgba(10,8,24,.6)'; roundRect(g, x0 - 3, y0 - 3, size + 6, size + 6, 6); g.fill();
     g.fillStyle = 'rgba(75,107,55,.85)'; g.fillRect(x0, y0, size, size);
+    // ore patches in their ore's colour, smaller as they run out
+    for (const p of this.patches) {
+      if (p.left <= 0) continue;
+      const L = PATCH_LOOK[p.ore], r = Math.max(2.2, p.r * k * (.55 + .45 * p.left / p.max)), px = x0 + p.x * k, py = y0 + p.y * k;
+      g.fillStyle = L.dark; g.beginPath(); g.arc(px, py, r + .8, 0, 7); g.fill();
+      g.fillStyle = L.ore; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill();
+    }
     g.strokeStyle = '#c9a77a'; g.lineWidth = 1.5; g.strokeRect(x0 + WALL.x0 * k, y0 + WALL.y0 * k, (WALL.x1 - WALL.x0) * k, (WALL.y1 - WALL.y0) * k);
     for (const sp of this.spawners) { g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
     g.fillStyle = '#e8c49a';
