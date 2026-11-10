@@ -56,4 +56,9 @@ export const APPS: AppLink[] = [
     url: 'https://bad-guys-good-guys.trom.dev',
     blurb: 'Brawl your way home on the last day of school, with up to four friends joining by code or QR.',
   },
+  {
+    name: 'Ground Defender',
+    url: 'https://ground-defender.trom.dev',
+    blurb: 'Hold off bears from spawners in the woods: dig ore, smelt it, and build a factory of belts, drills and turrets.',
+  },
 ];
