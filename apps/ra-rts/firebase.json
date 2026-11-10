@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "trom-ra-rts",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
