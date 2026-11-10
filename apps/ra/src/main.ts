@@ -253,9 +253,9 @@ regen.addEventListener('click', () => {
 const TAU = Math.PI * 2;
 
 function spaceView(): View {
-  // Sized so things on the globe carry on shrinking smoothly from the map's
-  // scale as you zoom out (a little larger, so the planet fills the view).
-  const r = (1.3 * built.w * zoom) / TAU;
+  // Sized so things in the middle of the globe come out a bit smaller than on
+  // the flat map at the same zoom, so the jump into space always shrinks them.
+  const r = (0.75 * built.w * zoom) / TAU;
   return { cx: canvas.width / 2, cy: canvas.height / 2, r, x: cen.x, y: cen.y };
 }
 function miniView(): View {
