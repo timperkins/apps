@@ -110,7 +110,7 @@ export const SURVIVAL = {
  *  needs: research that has to be done first. */
 export const RESEARCH = [
   { id: 'automation', name: 'Automation', desc: 'Unlocks the assembler, which makes any recipe by itself', cost: 10, packs: 1, needs: [] },
-  { id: 'logistics', name: 'Logistics', desc: 'Unlocks splitters and underground belts', cost: 15, packs: 1, needs: [] },
+  { id: 'logistics', name: 'Logistics', desc: 'Leads on to quick belts and green science', cost: 15, packs: 1, needs: [] },
   { id: 'bricks', name: 'Brickwork', desc: 'Unlocks the brick turret and the brick gate', cost: 15, packs: 1, needs: [] },
   { id: 'sharp', name: 'Sharper bolts', desc: 'Your crossbow does 25% more damage', cost: 20, packs: 1, needs: [] },
   { id: 'walls', name: 'Bigger base', desc: 'Lets you move your walls out for more room', cost: 20, packs: 1, needs: [] },
@@ -163,8 +163,8 @@ const RECIPES: Rec[] = [
   // logistics
   R('belt', 'logistics', { stone: 4, gear: 2 }, .5, 2, 'Carries things (and you) along. Place it, then drag to lay a line. R turns it.'),
   R('grab', 'logistics', { circuit: 1, gear: 1, ironPlate: 1 }, .5, 1, 'Moves things from the tile behind it to the tile in front: off belts, into furnaces, out of chests.'),
-  R('split', 'logistics', { circuit: 5, ironPlate: 5, belt: 4 }, 1, 1, 'Sends things left and right in turn, half each way.', 'logistics'),
-  R('tunnel', 'logistics', { ironPlate: 10, belt: 5 }, 1, 2, 'Things go in one and come out the next one ahead, up to 6 tiles, under anything.', 'logistics'),
+  R('split', 'logistics', { circuit: 5, ironPlate: 5, belt: 4 }, 1, 1, 'Sends things left and right in turn, half each way.'),
+  R('tunnel', 'logistics', { ironPlate: 10, belt: 5 }, 1, 2, 'Things go in one and come out the next one ahead, up to 6 tiles, under anything.'),
   R('chest', 'logistics', { stone: 8 }, .5, 1, 'Holds 200 things. T takes them out, or a grabber.'),
   R('pole', 'logistics', { stone: 1, wire: 2 }, .5, 2, 'Carries power from a generator. Buildings next to a pole get power; poles connect up to 7 tiles apart.'),
   R('pipe', 'logistics', { ironPlate: 1 }, .5, 1, 'Carries water from a pump to turrets.', 'cooling'),
