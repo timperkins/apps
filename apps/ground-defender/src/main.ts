@@ -139,11 +139,11 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `At ${min(SURVIVAL.moreGates)} minutes gates open on the other 3 sides of your camp.`,
     `At ${min(SURVIVAL.allGates)} minutes 3 more gates open and bears come from everywhere, but they take ${SURVIVAL.gateWaitLate} seconds to get in.`] },
   { icon: '⛏️', title: 'Mines and the machine', lines: [
-    'After 4 bears, a mine, a machine and a shop pop up. Press <kbd>M</kbd> next to the mine to dig stone, or hire miners with <kbd>H</kbd>.',
+    'After 4 bears, a mine and a machine pop up. Press <kbd>M</kbd> next to the mine to dig stone, or hire miners with <kbd>H</kbd>.',
     'Click the machine (or press <kbd>M</kbd>) to put your stone in: each stone makes 5 stone ammo. <kbd>S</kbd> switches ammo.',
-    'Buy an iron mine (100 stone), a copper mine (75 iron, 100 stone), a gold mine (125 stone, 100 iron, 50 copper) or a diamond mine. Put metal in a machine for strong ammo: 1 iron makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold 12 (11.5), 1 diamond 16 (15).'] },
+    'Craft an iron mine (100 stone), a copper mine (75 iron, 100 stone), a gold mine (125 stone, 100 iron, 50 copper) or a diamond mine. Put metal in a machine for strong ammo: 1 iron makes 6 ammo (9.5 damage), 1 copper 8 (8.55), 1 gold 12 (11.5), 1 diamond 16 (15).'] },
   { icon: '🎯', title: 'Turrets', lines: [
-    'Buy turrets in the shop (<kbd>B</kbd>), place them with <kbd>U</kbd> and load them with <kbd>T</kbd>, or feed them with belts and grabbers.',
+    'Press <kbd>Shift</kbd> (or the Inventory button) to open your inventory: what you carry on the left, crafting recipes in tabs on the right. Craft turrets there, place them with <kbd>U</kbd> and load them with <kbd>T</kbd>, or feed them with belts and grabbers.',
     'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed. Tap the turret twice to pick it up.',
     'Research (labs and science packs, <kbd>Y</kbd>) unlocks the <b>rapid crossbow</b> (10 iron, 50 stone: 0.75 damage every 0.05 s, 0.8% of an ammo a shot) and the <b>rocket launcher</b> (70 damage). Once rockets are researched, click a machine to pick its recipe: ammo, or rocket ammo for 10 stone.'] },
   { icon: '🛒', title: 'Building', lines: [

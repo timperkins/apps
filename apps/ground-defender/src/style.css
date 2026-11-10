@@ -356,3 +356,38 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .savelist li small { opacity: .7; font-size: 12px; }
 .savelist li.empty { justify-content: center; opacity: .7; }
 .savelist li button { width: auto; min-width: 0; flex: none; padding: 8px 14px; }
+
+/* Inventory screen (Shift): inventory on the left half, crafting on the right half */
+.svinvscreen { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(860px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow-y: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; background: rgba(24, 20, 40, .95); border: 1px solid var(--line); border-radius: 18px; z-index: 5; }
+.svinvscreen[hidden] { display: none; }
+.invhalf { display: flex; flex-direction: column; gap: 8px; min-width: 0; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
+.invhalf h3 { font: 700 19px var(--font-d); margin: 0; text-align: left; }
+.invhalf .fine { margin: 0; text-align: left; }
+.invclose { grid-column: 1 / -1; justify-self: center; }
+.slots { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.slot { position: relative; width: 100%; height: auto; box-shadow: none; aspect-ratio: 1; border-radius: 8px; border: 1px solid rgba(255, 245, 234, .14); background: rgba(255, 245, 234, .07); color: var(--ink); padding: 0; display: flex; align-items: center; justify-content: center; cursor: default; font: inherit; min-width: 0; }
+.slot.empty { background: rgba(255, 245, 234, .03); }
+.slot i { font-style: normal; font-size: clamp(16px, 3.2vw, 24px); line-height: 1; font-weight: 700; }
+.slot b { position: absolute; right: 3px; bottom: 1px; font: 600 11px/1 var(--font-b); font-variant-numeric: tabular-nums; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
+.slot small { position: absolute; left: 3px; top: 2px; font-size: 9px; color: var(--muted); }
+.slot span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.slot.placeable, .slot.rec { cursor: pointer; }
+.slot.placeable:hover, .slot.rec:hover { border-color: var(--accent); }
+.slot.rec.no { background: rgba(214, 69, 69, .16); }
+.slot.rec.no i { opacity: .55; }
+.slot.rec.sel { border: 2px solid var(--accent); background: rgba(255, 207, 140, .2); }
+.rectabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.rectab { border-radius: 10px 10px 4px 4px; border: 1px solid var(--line); background: rgba(255, 245, 234, .06); color: var(--muted); padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 2px; font: 500 11.5px/1 var(--font-b); cursor: pointer; }
+.rectab i { font-style: normal; font-size: 20px; }
+.rectab.on { background: rgba(255, 207, 140, .22); border-color: var(--accent); color: var(--ink); }
+.recinfo { display: flex; flex-direction: column; gap: 6px; text-align: left; background: rgba(255, 245, 234, .07); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.recinfo small { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.recinfo .chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.recinfo .chip { font-size: 12px; padding: 3px 7px; border-radius: 8px; background: rgba(255, 245, 234, .1); }
+.recinfo .chip em { font-style: normal; color: var(--muted); }
+.recinfo .chip.short { background: rgba(214, 69, 69, .3); }
+.recinfo .makes { font-size: 12px; color: var(--muted); }
+.recinfo .craftbtns { display: flex; gap: 6px; }
+.recinfo .craftbtns button { min-width: 0; padding: 9px 16px; font-size: 14px; }
+.recinfo .craftbtns button:disabled { opacity: .45; }
+.svinvscreen.narrow { grid-template-columns: 1fr; padding: 10px; gap: 8px; }
