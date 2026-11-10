@@ -203,30 +203,78 @@ const toWorld = (e: PointerEvent) => {
 
 // Every finger or mouse button currently down, for pinch zoom.
 const pointers = new Map<number, { x: number; y: number }>();
+// True from the moment a second finger lands until every finger has lifted.
+let multi = false;
 let pinch: { dist: number; zoom: number; wx: number; wy: number } | null = null;
 let down: { x: number; y: number; cx: number; cy: number; lx: number; ly: number; id: number; pan: boolean } | null = null;
 let dragging = false;
 
-const pinchState = () => {
-  const [a, b] = [...pointers.values()];
-  return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+// Pinch zoom runs on touch events, which every phone browser delivers for
+// multi-touch. Cancelling them stops iOS Safari from zooming the page itself
+// (it ignores user-scalable=no and would otherwise cancel our pointers).
+const pinchState = (t: TouchList) => {
+  const a = t[0];
+  const b = t[1];
+  return { dist: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)), mx: (a.clientX + b.clientX) / 2, my: (a.clientY + b.clientY) / 2 };
 };
+const startPinch = (t: TouchList) => {
+  const p = pinchState(t);
+  pinch = { dist: p.dist, zoom, wx: p.mx / scale + cam.x, wy: p.my / scale + cam.y };
+};
+canvas.addEventListener(
+  'touchstart',
+  (e) => {
+    e.preventDefault();
+    if (e.touches.length >= 2) {
+      multi = true;
+      down = null;
+      dragging = false;
+      if (game) game.box = null;
+      startPinch(e.touches);
+    }
+  },
+  { passive: false },
+);
+canvas.addEventListener(
+  'touchmove',
+  (e) => {
+    e.preventDefault();
+    if (!pinch || e.touches.length < 2) return;
+    // zoom with the finger spread, pan with the midpoint
+    const p = pinchState(e.touches);
+    zoom = pinch.zoom * (p.dist / pinch.dist);
+    applyScale();
+    cam.x = pinch.wx - p.mx / scale;
+    cam.y = pinch.wy - p.my / scale;
+    clampCam();
+  },
+  { passive: false },
+);
+const touchEnd = (e: TouchEvent) => {
+  if (e.touches.length >= 2) startPinch(e.touches); // one of three fingers lifted
+  else pinch = null;
+  if (e.touches.length === 0) {
+    multi = false;
+    pointers.clear();
+  }
+};
+canvas.addEventListener('touchend', touchEnd);
+canvas.addEventListener('touchcancel', touchEnd);
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   if (!game) return;
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pointers.size === 2) {
+  if (pointers.size >= 2) {
     // A second finger turns the gesture into a pinch: drop any tap or box.
+    multi = true;
     down = null;
     dragging = false;
     game.box = null;
-    const p = pinchState();
-    pinch = { dist: p.dist, zoom, wx: p.mx / scale + cam.x, wy: p.my / scale + cam.y };
     return;
   }
-  if (pointers.size > 2 || pinch || down) return;
+  if (multi || down) return;
   const p = toWorld(e);
   if (e.button === 2) {
     game.order(p.x, p.y);
@@ -237,16 +285,7 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 canvas.addEventListener('pointermove', (e) => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch && pointers.size >= 2) {
-    // zoom with the finger spread, pan with the midpoint
-    const p = pinchState();
-    zoom = pinch.zoom * (p.dist / pinch.dist);
-    applyScale();
-    cam.x = pinch.wx - p.mx / scale;
-    cam.y = pinch.wy - p.my / scale;
-    clampCam();
-    return;
-  }
+  if (multi) return;
   if (!down || e.pointerId !== down.id) return;
   if (!dragging && Math.hypot(e.clientX - down.cx, e.clientY - down.cy) > 8) dragging = true;
   if (dragging) {
@@ -264,9 +303,9 @@ canvas.addEventListener('pointermove', (e) => {
 });
 const finish = (e: PointerEvent, cancel: boolean) => {
   pointers.delete(e.pointerId);
-  if (pinch) {
+  if (multi) {
     // stay in pinch mode until every finger has lifted, so no stray tap fires
-    if (pointers.size === 0) pinch = null;
+    if (pointers.size === 0) multi = false;
     return;
   }
   if (!down || e.pointerId !== down.id) return;
@@ -294,7 +333,7 @@ canvas.addEventListener(
   { passive: false },
 );
 // Stop Safari's own page pinch from fighting ours.
-for (const ev of ['gesturestart', 'gesturechange']) document.addEventListener(ev, (e) => e.preventDefault());
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
 // ---------- Keyboard: S / P switch modes, arrow keys pan, +/- zoom, Esc clears ----------
 
