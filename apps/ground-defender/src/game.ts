@@ -574,10 +574,16 @@ export class Survival {
   private feedMachine(m: Machine) {
     const n = this.bag.stone + ORES.reduce((a, o) => a + this.bag[o], 0);
     if (!n) { this.bubble(m.x, m.y - 36, 'No stone or metal to put in', 'info'); Sound.denied(); return; }
-    this.bubble(m.x, m.y - 36, (['stone', ...ORES] as Kind[]).filter(k => this.bag[k]).map(k => `${this.bag[k]} ${KIND_NAME[k]}`).join(', ') + ' in', 'info');
-    for (const k of ['stone', ...ORES] as Kind[]) { for (let i = 0; i < this.bag[k]; i++) m.queue.push(k); this.bag[k] = 0; }
+    // a machine works on one material at a time: it only takes more of what is already in it
+    const k = (['stone', ...ORES] as Kind[]).find(x => this.bag[x] > 0 && this.machineTakes(m, x));
+    if (!k) { const inside = KIND_NAME[m.queue[0]]; this.bubble(m.x, m.y - 36, `This machine is busy with ${inside}. It only takes ${inside} until it's done`, 'info'); Sound.denied(); return; }
+    this.bubble(m.x, m.y - 36, `${this.bag[k]} ${KIND_NAME[k]} in`, 'info');
+    for (let i = 0; i < this.bag[k]; i++) m.queue.push(k);
+    this.bag[k] = 0;
     Sound.thump();
   }
+  /** A machine only takes one material at a time: anything while it's empty, then only more of the same. */
+  private machineTakes(m: Machine, k: Kind) { return (k === 'stone' || ORES.includes(k as Ore)) && (!m.queue.length || m.queue[0] === k); }
   private openRecipe(m: Machine) {
     this.recipeFor = m; this.stick = null; this.keys.clear(); this.mining = false;
     this.renderRecipe();
@@ -724,12 +730,12 @@ export class Survival {
     this.pad.querySelector('#svInvGrid')!.innerHTML = h;
     this.pad.querySelector('#svRecTabs')!.innerHTML = (Object.keys(REC_CATS) as RecCat[]).map(c => `<button class="rectab${c === this.invTab ? ' on' : ''}" data-tab="${c}" title="${REC_CATS[c][1]}"><i>${REC_CATS[c][0]}</i></button>`).join('');
     this.pad.querySelector('#svRecCat')!.textContent = REC_CATS[this.invTab][1];
-    const mine = recs.filter(r => r.cat === this.invTab);
+    const mine = recs.filter(r => r.cat === this.invTab && !r.locked);
     if (!mine.some(r => r.id === this.invSel)) this.invSel = mine[0].id;
-    this.pad.querySelector('#svRecGrid')!.innerHTML = mine.map(r => `<button class="slot rec${this.canCraft(r) ? '' : ' no'}${r.locked ? ' locked' : ''}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(r.name)}"><img src="${this.icon(r.id)}" alt="">${r.locked ? '<em>🔒</em>' : ''}<span>${esc(r.name)}</span></button>`).join('');
+    this.pad.querySelector('#svRecGrid')!.innerHTML = mine.map(r => `<button class="slot rec${this.canCraft(r) ? '' : ' no'}${r.locked ? ' locked' : ''}${r.id === this.invSel ? ' sel' : ''}" data-rec="${r.id}" title="${esc(r.name)}"><img src="${this.icon(r.id)}" alt=""><span>${esc(r.name)}</span></button>`).join('');
     const r = recs.find(x => x.id === this.invSel)!;
     const cost = (Object.entries(r.cost) as [keyof Cost, number][]).map(([k, n]) => `<span class="chip${this.bag[k] >= n ? '' : ' short'}"><img src="${this.icon('k-' + k)}" alt=""> ${n} ${KIND_NAME[k]} <em>(${Math.floor(this.bag[k])})</em></span>`).join('') || '<span class="chip">Free</span>';
-    this.pad.querySelector('#svRecInfo')!.innerHTML = `<b>${esc(r.name)}</b><small>${r.locked ? 'Research this at a lab first. ' : ''}${esc(r.desc)}</small><div class="chips">${cost}<span class="makes">→ ${esc(r.makes)}</span></div>`
+    this.pad.querySelector('#svRecInfo')!.innerHTML = `<b>${esc(r.name)}</b><small>${esc(r.desc)}</small><div class="chips">${cost}<span class="makes">→ ${esc(r.makes)}</span></div>`
       + `<div class="craftbtns"><button class="primary" data-craft="1"${this.canCraft(r) ? '' : ' disabled'}>Craft</button>${['robot', 'gate', 'expand', 'hub'].includes(r.id) ? '' : `<button class="ghost" data-craft="5"${this.canCraft(r) ? '' : ' disabled'}>Craft 5</button>`}</div>`;
   }
   private invClick(e: MouseEvent) {
@@ -870,7 +876,7 @@ export class Survival {
     const needs: { id: string; x: number; y: number; kinds: Kind[]; give: (k: Kind) => boolean }[] = [];
     for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? ['rocket'] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
     for (const [key, lb] of this.labs) if (lb.packs < 10) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'l' + key, x: tileX(c), y: tileY(r), kinds: ['pack'], give: () => { lb.packs++; return true; } }); }
-    this.machines.forEach((m, i) => { if (m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: [...ORES, 'stone'], give: k => { m.queue.push(k); return true; } }); });
+    this.machines.forEach((m, i) => { if (m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: ([...ORES, 'stone'] as Kind[]).filter(k => this.machineTakes(m, k)), give: k => { if (!this.machineTakes(m, k)) return false; m.queue.push(k); return true; } }); });
     for (const [key, b] of this.blds) if (['furnace', 'gen', 'asm'].includes(b.type) && b.inp < 3) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'b' + key, x: tileX(c), y: tileY(r), kinds: ['stone'], give: () => this.feedBld(b, 'stone') }); }
     for (const n of needs) {
       if (busy.has(n.id)) continue;
@@ -1005,7 +1011,7 @@ export class Survival {
     const x = tileX(c), y = tileY(r), key = c + ',' + r;
     // the machine only takes raw stone and metal
     const m = this.isMachine(c, r);
-    if (m) { if (k !== 'stone' && !ORES.includes(k as Ore)) return false; m.queue.push(k); this.bubble(m.x, m.y - 36, `${KIND_NAME[k][0].toUpperCase() + KIND_NAME[k].slice(1)} in`, 'info'); return true; }
+    if (m) { if (!this.machineTakes(m, k)) return false; m.queue.push(k); this.bubble(m.x, m.y - 36, `${KIND_NAME[k][0].toUpperCase() + KIND_NAME[k].slice(1)} in`, 'info'); return true; }
     const tu = this.turrets.get(key); if (tu) return this.feedTurret(tu, k);
     const lb = this.labs.get(key); if (lb) { if (k !== 'pack' || lb.packs >= SURVIVAL.labSize) return false; lb.packs++; return true; }
     const bd = this.blds.get(key); if (bd && bd.type !== 'tunnel') return this.feedBld(bd, k);
