@@ -389,6 +389,8 @@ export class Survival {
   private stick: { id: number; ox: number; oy: number; dx: number; dy: number } | null = null;
   private scale = 1; private ox = 0; private oy = 0; private cw = 0;
   private decor: { x: number; y: number; r: number; k: number }[] = [];
+  /** Trees and bushes standing on this run's ore patches aren't drawn. */
+  private decorOff: { of: Patch[]; set: Set<number> } | null = null;
   private noTargetT = 0;
   private rocks: Rock[] = [];
   private gateWait = SURVIVAL.gateWait;
@@ -691,7 +693,7 @@ export class Survival {
     } else this.bubble(this.x, this.y - 30, 'Walk to an ore patch, the mine or the ammo machine', 'info');
   }
   /** The ore patch you're standing on or next to, if it has ore left. */
-  private nearPatch() { return this.patches.find(p => p.left > 0 && dist(this.x, this.y, p.x, p.y) < p.r + 20) ?? null; }
+  private nearPatch() { return this.patches.find(p => p.left > 0 && inPatch(p, this.x, this.y, 20)) ?? null; }
   private rebuildWalls() { this.walls = wallRects(this.gates); fence = this.walls; }
   /** Keeps the list of big things (for where belts can go) up to date. */
   private updateStructs() { structs = [...this.mines, ...this.machines]; }
@@ -1460,7 +1462,7 @@ export class Survival {
     return true;
   }
   /** The ore patch under tile (c, r), if it has ore left. */
-  private patchAt(c: number, r: number) { const x = tileX(c), y = tileY(r); const i = this.patches.findIndex(p => p.left > 0 && dist(x, y, p.x, p.y) < p.r); return i; }
+  private patchAt(c: number, r: number) { const x = tileX(c), y = tileY(r); const i = this.patches.findIndex(p => p.left > 0 && inPatch(p, x, y, 0)); return i; }
   private placeAt(c: number, r: number) {
     const key = c + ',' + r, type = this.placeType;
     if (!this.count(type)) { this.placing = false; return; }
@@ -2084,7 +2086,9 @@ export class Survival {
     // the edge of the map
     g.strokeStyle = 'rgba(20,30,15,.6)'; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6);
     g.fillStyle = 'rgba(30,50,20,.25)';
-    for (const d of this.decor) if (d.k === 0 && this.seen(d.x, d.y)) { g.beginPath(); g.arc(d.x + 6, d.y + 8, d.r * 1.1, 0, 7); g.fill(); }
+    if (this.decorOff?.of !== this.patches) this.decorOff = { of: this.patches, set: new Set(this.decor.flatMap((d, i) => d.k !== 2 && this.patches.some(p => inPatch(p, d.x, d.y, d.r * .6)) ? [i] : [])) };
+    const off = this.decorOff.set;
+    for (const [i, d] of this.decor.entries()) if (d.k === 0 && !off.has(i) && this.seen(d.x, d.y)) { g.beginPath(); g.arc(d.x + 6, d.y + 8, d.r * 1.1, 0, 7); g.fill(); }
     // worn paths out from each gate
     g.fillStyle = '#6f6a45';
     for (const gt of this.gates) {
@@ -2099,8 +2103,8 @@ export class Survival {
     // a campfire and a tent so it reads as a camp
     this.drawCamp(g);
     // scenery outside
-    for (const d of this.decor) {
-      if (!this.seen(d.x, d.y)) continue;
+    for (const [i, d] of this.decor.entries()) {
+      if (off.has(i) || !this.seen(d.x, d.y)) continue;
       if (d.k !== 2 && d.x > WALL.x0 - 8 && d.x < WALL.x1 + 8 && d.y > WALL.y0 - 8 && d.y < WALL.y1 + 8) continue; // cleared when the base grew
       if (d.k === 0) { // tree
         g.fillStyle = '#2d4a22'; g.beginPath(); g.arc(d.x, d.y, d.r, 0, 7); g.fill();
@@ -2109,7 +2113,7 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
-    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r)) paintPatch(g, p);
+    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r * 1.15)) paintPatch(g, p, this.t);
     for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
     this.drawBelts(g);
     if (this.mineOn) { this.drawMineAndMachine(g); }
@@ -2893,18 +2897,85 @@ function paintNoPower(g: CanvasRenderingContext2D, x: number, y: number, t: numb
   g.fillStyle = '#ff5a4a'; g.beginPath(); g.moveTo(x + 1.5, y - 5); g.lineTo(x - 3, y + 1); g.lineTo(x, y + 1); g.lineTo(x - 1.5, y + 5); g.lineTo(x + 3, y - 1); g.lineTo(x, y - 1); g.closePath(); g.fill();
 }
 /** An ore patch: a cluster of rocks in its colour, fewer as it runs out. */
-function paintPatch(g: CanvasRenderingContext2D, p: Patch) {
-  let seed = p.seed || 1;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const color = p.ore === 'stone' ? '#a9a59c' : METAL[p.ore].color, dark = p.ore === 'stone' ? '#77736b' : shade(METAL[p.ore].color, -.4);
-  g.fillStyle = 'rgba(40,30,20,.18)'; g.beginPath(); g.arc(p.x, p.y, p.r, 0, 7); g.fill();
-  const n = Math.round(p.r * p.r / 120), show = Math.ceil(n * p.left / p.max);
-  for (let i = 0; i < n; i++) {
-    const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * (p.r - 8), x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d, rr = 3 + rnd() * 4;
-    if (i >= show) continue;
-    g.fillStyle = dark; g.beginPath(); g.arc(x + 1, y + 1.5, rr, 0, 7); g.fill();
-    g.fillStyle = color; g.beginPath(); g.arc(x, y, rr, 0, 7); g.fill();
-    g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.arc(x - rr * .3, y - rr * .3, rr * .35, 0, 7); g.fill();
+/** A patch's edge is a wobbly blob, not a circle: its radius at angle a (between about 0.72 and 1.08 of p.r). */
+function patchEdge(p: Patch, a: number) {
+  const s = p.seed || 1, f = (k: number) => ((s * (k * 7919 + 13)) % 1000) / 1000;
+  return p.r * (.9 + .09 * Math.sin(2 * a + f(1) * 6.3) + .06 * Math.sin(3 * a + f(2) * 6.3) + .04 * Math.sin(5 * a + f(3) * 6.3));
+}
+const inPatch = (p: Patch, x: number, y: number, m: number) => dist(x, y, p.x, p.y) < patchEdge(p, Math.atan2(y - p.y, x - p.x)) + m;
+/** Each patch is drawn once into its own little picture, and again only when it has visibly run down. */
+const patchArt = new WeakMap<Patch, { show: number; c: HTMLCanvasElement }>();
+const PATCH_LOOK: Record<'stone' | Ore, { ore: string; dark: string; light: string; rock: number; glint: boolean }> = {
+  stone: { ore: '#a9a59c', dark: '#6f6b63', light: '#cfcac0', rock: 0, glint: false },
+  iron: { ore: '#8c939c', dark: '#4e545c', light: '#c5ccd6', rock: .15, glint: false },
+  copper: { ore: '#c46a35', dark: '#7a3a1c', light: '#f0a070', rock: .2, glint: false },
+  gold: { ore: '#e8b830', dark: '#8a6416', light: '#fff0a0', rock: .45, glint: true },
+  diamond: { ore: '#7fe6f5', dark: '#3a8a9a', light: '#e8ffff', rock: .6, glint: true },
+};
+/** An ore patch: a dark stain of dug-up earth with jagged chunks of ore, thick in the middle and thinning out at the edge. As it runs out the chunks go from the outside in. */
+function paintPatch(g: CanvasRenderingContext2D, p: Patch, t = 0) {
+  const R = Math.ceil(p.r * 1.15) + 8, S = 2;
+  const n = Math.round(p.r * p.r / 55), show = Math.ceil(n * p.left / p.max);
+  let art = patchArt.get(p);
+  if (!art || art.show !== show) {
+    const c = art?.c ?? document.createElement('canvas'); c.width = c.height = R * 2 * S;
+    const q = c.getContext('2d')!; q.setTransform(S, 0, 0, S, R * S, R * S);
+    let seed = p.seed || 1;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const L = PATCH_LOOK[p.ore];
+    // the stain: a few soft blobby layers, darker towards the middle
+    for (const [k, al] of [[1.08, .10], [.95, .12], [.75, .12], [.5, .1]] as [number, number][]) {
+      q.fillStyle = `rgba(52,38,24,${al})`; q.beginPath();
+      for (let i = 0; i <= 48; i++) { const a = i / 48 * Math.PI * 2, rr = patchEdge(p, a) * k; i ? q.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : q.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+      q.fill();
+    }
+    // grit: tiny specks of ore colour in the dirt
+    for (let i = 0; i < n * 2; i++) {
+      const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * patchEdge(p, a) * .95;
+      q.fillStyle = rnd() < .5 ? L.dark : L.ore; q.globalAlpha = .55; q.fillRect(Math.cos(a) * d, Math.sin(a) * d, 1.4, 1.4);
+    }
+    q.globalAlpha = 1;
+    // chunks: spread with more in the middle (d is biased inwards), bigger in the middle, sorted so the outer ones go first
+    const chunks: { x: number; y: number; r: number; d: number; rock: boolean; pts: number[]; tilt: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = rnd() * Math.PI * 2, f = Math.pow(rnd(), .8), d = f * (patchEdge(p, a) - 5);
+      const r = (2.2 + rnd() * 3.2) * (1.35 - f * .6), m = 5 + Math.floor(rnd() * 3), pts: number[] = [];
+      for (let j = 0; j < m; j++) pts.push(.65 + rnd() * .45);
+      chunks.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, r, d: f, rock: rnd() < L.rock, pts, tilt: rnd() * 6.3 });
+    }
+    chunks.sort((A, B) => A.d - B.d);
+    const vis = chunks.slice(0, show).sort((A, B) => A.y - B.y);
+    const poly = (ch: typeof chunks[0], ox: number, oy: number, k: number) => {
+      q.beginPath();
+      ch.pts.forEach((v, j) => { const a = ch.tilt + j / ch.pts.length * Math.PI * 2, rr = ch.r * v * k; j ? q.lineTo(ch.x + ox + Math.cos(a) * rr, ch.y + oy + Math.sin(a) * rr * .85) : q.moveTo(ch.x + ox + Math.cos(a) * rr, ch.y + oy + Math.sin(a) * rr * .85); });
+      q.closePath();
+    };
+    for (const ch of vis) {
+      const base = ch.rock ? '#8a857c' : L.ore, dk = ch.rock ? '#55514a' : L.dark, lt = ch.rock ? '#b2ada3' : L.light;
+      // shadow, body, a lit top face and a dark lower edge, like a lump of rock lit from the top left
+      q.fillStyle = 'rgba(20,14,8,.4)'; poly(ch, 1.2, 1.8, 1); q.fill();
+      q.fillStyle = dk; poly(ch, 0, .6, 1); q.fill();
+      q.fillStyle = base; poly(ch, 0, 0, .92); q.fill();
+      q.fillStyle = lt; q.globalAlpha = .55; poly(ch, -ch.r * .22, -ch.r * .26, .45); q.fill(); q.globalAlpha = 1;
+      if (ch.rock && (p.ore === 'gold' || p.ore === 'diamond')) {
+        // ore showing through a plain rock: a vein or a crystal
+        q.fillStyle = L.ore; q.beginPath(); q.arc(ch.x + ch.r * .15, ch.y + ch.r * .1, ch.r * .32, 0, 7); q.fill();
+      }
+    }
+    art = { show, c }; patchArt.set(p, art);
+  }
+  g.drawImage(art.c, p.x - R, p.y - R, R * 2, R * 2);
+  // gold and diamonds glint now and then
+  const L = PATCH_LOOK[p.ore];
+  if (L.glint && t) {
+    let seed = (p.seed || 1) + 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 6; i++) {
+      const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * p.r * .7 * Math.min(1, p.left / p.max + .2), ph = rnd() * 10, k = Math.max(0, Math.sin(t * 1.7 + ph));
+      if (k < .85) continue;
+      const x = p.x + Math.cos(a) * d, y = p.y + Math.sin(a) * d, z = (k - .85) / .15 * 4;
+      g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x - z, y); g.lineTo(x + z, y); g.moveTo(x, y - z); g.lineTo(x, y + z); g.stroke();
+    }
   }
 }
 /** The newer buildings, each on one tile. t > 0 animates them. */
