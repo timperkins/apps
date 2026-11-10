@@ -326,6 +326,13 @@ export class Game {
     this.emit();
   }
 
+  // Where to point the camera at the start: the middle of the first army.
+  focus(): { x: number; y: number } {
+    const mine = this.units.filter((u) => u.f === 0);
+    if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
+    return { x: mine.reduce((s, u) => s + u.x, 0) / mine.length, y: mine.reduce((s, u) => s + u.y, 0) / mine.length };
+  }
+
   deselect(): void {
     for (const u of this.units) u.sel = false;
     this.emit();
@@ -440,8 +447,6 @@ export class Game {
     const c = this.ctx;
     const t = this.time;
     c.imageSmoothingEnabled = false;
-    c.fillStyle = '#263f1e';
-    c.fillRect(0, 0, c.canvas.width, c.canvas.height);
     c.drawImage(this.terrain.canvas, 0, 0);
 
     // shimmering shoreline foam

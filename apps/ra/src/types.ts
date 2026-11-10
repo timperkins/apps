@@ -1,4 +1,5 @@
-// What main.ts needs from each game version.
+// What main.ts needs from each game version. All coordinates are world pixels;
+// main.ts owns the camera and translates the canvas before render().
 export interface GameLike {
   seed: number;
   box: { x0: number; y0: number; x1: number; y1: number } | null;
@@ -12,4 +13,5 @@ export interface GameLike {
   order(x: number, y: number): void;
   boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
   deselect(): void;
+  focus(): { x: number; y: number };
 }

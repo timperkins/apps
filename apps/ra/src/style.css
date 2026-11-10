@@ -141,3 +141,70 @@ body {
   padding: 8px 14px;
   font-size: 14px;
 }
+
+#toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 5px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+  font-family: 'Silkscreen', ui-monospace, monospace;
+}
+
+#toolbar button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 52px;
+  height: 48px;
+  padding: 4px 6px 3px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#toolbar button svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+#toolbar button.on,
+#toolbar button[aria-pressed='true'] {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #d8ffd8 #3c7a3c #3c7a3c #d8ffd8;
+}
+
+#toolbar button:active {
+  transform: translateY(1px);
+}
+
+#toolbar .sep {
+  width: 2px;
+  margin: 4px 2px;
+  background: var(--edge);
+}
+
+#c.panning {
+  cursor: grab;
+}
+
+#c.panning:active {
+  cursor: grabbing;
+}

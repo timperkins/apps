@@ -337,6 +337,13 @@ export class IsoGame implements GameLike {
     this.emit();
   }
 
+  focus(): { x: number; y: number } {
+    const mine = this.units.filter((u) => u.f === 0 && u.kind !== 'boat');
+    if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
+    const pts = mine.map((u) => toScreen(u.x, u.y, u.z));
+    return { x: pts.reduce((s, p) => s + p[0], 0) / pts.length, y: pts.reduce((s, p) => s + p[1], 0) / pts.length };
+  }
+
   deselect(): void {
     for (const u of this.units) u.sel = false;
     this.emit();
@@ -477,8 +484,6 @@ export class IsoGame implements GameLike {
     const c = this.ctx;
     const t = this.time;
     c.imageSmoothingEnabled = false;
-    c.fillStyle = '#22391b';
-    c.fillRect(0, 0, c.canvas.width, c.canvas.height);
     c.drawImage(this.terrain.canvas, 0, 0);
 
     c.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.6);
