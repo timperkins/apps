@@ -209,12 +209,22 @@ body {
   cursor: grabbing;
 }
 
-#moreBtn {
+#selBar {
   position: fixed;
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   display: flex;
+  gap: 6px;
+}
+
+#selBar[hidden] {
+  display: none;
+}
+
+#selBar button {
+  display: flex;
+  white-space: nowrap;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
@@ -228,11 +238,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-#moreBtn[hidden] {
-  display: none;
-}
-
-#moreBtn svg {
+#selBar button svg {
   width: 11px;
   height: 11px;
   fill: currentColor;
