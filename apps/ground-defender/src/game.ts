@@ -89,7 +89,9 @@ export const SURVIVAL = {
   rocketCost: { stone: 40, iron: 20 } as Cost,    // a rocket launcher
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
   rocketStone: 10,
-  rgunReload: 1.5,      // seconds between shots with the handheld rocket gun      // stone for one rocket in the machine
+  rgunReload: 1.5,
+  wallHp: 150, gateHp: 200, // your own walls and gates: bears bite them
+  wallBite: 15, wallBiteEvery: 1, // damage a bear does to a wall in its way, and how often      // seconds between shots with the handheld rocket gun      // stone for one rocket in the machine
   waveSize: 12,         // bears in the first huge wave
   waveGrow: 2,          // each wave after that has 2 more
   bearSpeed: 20,        // slow
@@ -183,6 +185,8 @@ const RECIPES: Rec[] = [
   R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
+  R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you and bears can\'t walk through it. Bears bite walls in their way. Drag to place a row.', undefined, true),
+  R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A gate in your wall: you walk through, bears can\'t.', undefined, true),
   R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you carry. Press S to pick rockets, then shoot: 70 damage a rocket.', 'rocket', false),
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
@@ -246,11 +250,11 @@ type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
   'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun',
-  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher'] as const;
+  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
-type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher';
-const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher'];
+type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate';
+const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'];
 const isPlaceable = (k: string): k is Placeable => (PLACEABLES as string[]).includes(k);
 /** Each metal: its smelted form, and how much ammo one of those makes in a machine (and its damage). Diamonds are our own guess. */
 export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; plate: Kind; name: string; color: string }> = {
@@ -282,14 +286,14 @@ const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
   ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns',
-  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbows', launcher: 'rocket launchers',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbows', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
   ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun',
-  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow', launcher: 'Rocket launcher',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
@@ -336,7 +340,9 @@ let structs: Spot[] = [];
 
 /** walk: to a spot outside its gate; wait: there; enter: through the gate; chase: after you, anywhere. */
 type BearState = 'walk' | 'wait' | 'enter' | 'chase' | 'dead';
-interface Bear { tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
+/** A wall or gate you built on a tile: bears can't pass either, you can pass a gate. */
+interface PWall { hp: number; gate: boolean; }
+interface Bear { wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
 /** A bear spawner in the woods: a den that makes bears. */
 /** respawn: seconds until a destroyed spawner comes back somewhere else. */
 interface Spawner { x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
@@ -388,7 +394,7 @@ export class Survival {
   private gateWait = SURVIVAL.gateWait;
   private mineOn = false; private mining = false; private mineT = 0; private swing = 0;
   private belts = new Map<string, number>(); private items: Item[] = []; private placing = false; private placeDir = 0;
-  private placeType: Placeable = 'belt'; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private mines: Mine[] = []; private machines: Machine[] = []; private mineAt: Mine | null = null; private expansion = 0;
+  private placeType: Placeable = 'belt'; private splitters = new Map<string, Splitter>(); private chests = new Map<string, Chest>(); private pwalls = new Map<string, PWall>(); private mines: Mine[] = []; private machines: Machine[] = []; private mineAt: Mine | null = null; private expansion = 0;
   private labs = new Map<string, Lab>(); private researching: ResId | null = null; private progress: Record<string, number> = {}; private done = new Set<ResId>(); labOpen = false;
   private blds = new Map<string, Bld>(); private brickGate = false; private robots: Robot[] = []; private robotT = 0; private coolT = 0; private tap: { id: number; x: number; y: number; t: number } | null = null;
   private turrets = new Map<string, Turret>(); private grabbers = new Map<string, Grabber>();
@@ -514,7 +520,7 @@ export class Survival {
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
     this.mineOn = false; this.mining = false; this.mineT = 0; this.swing = 0; this.popT = 0; this.miners = []; this.digAt = null;
     this.belts.clear(); this.items = []; this.placing = false; this.placeDir = 0; this.hover = null; this.closeShop(); this.closeBld();
-    this.placeType = 'belt'; this.grabbers.clear(); this.turrets.clear(); this.tap = null; this.splitters.clear(); this.chests.clear();
+    this.placeType = 'belt'; this.grabbers.clear(); this.turrets.clear(); this.tap = null; this.splitters.clear(); this.chests.clear(); this.pwalls.clear();
     this.mines = [{ ...FIRST_MINE, r: MINE_R, ore: 'stone' }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: [], batchT: 0, out: [], recipe: 'ammo' }]; this.mineAt = null;
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
     // you start with a furnace and a few iron plates, like a new settler
@@ -541,7 +547,7 @@ export class Survival {
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
     o.done = [...this.done];
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
-    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers'] as const) o[k] = [...this[k]];
+    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
     o.robots = this.robots.map(r => ({ x: r.x, y: r.y, hub: r.hub, k: null, src: null, dst: null }));
     for (const r of this.robots) if (r.k) (o.bag as Bag)[r.k]++;
@@ -566,7 +572,7 @@ export class Survival {
     }));
     this.belts = new Map(d.belts as [string, number][]); this.splitters = new Map(d.splitters as [string, Splitter][]);
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
-    this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]);
+    this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
@@ -1351,6 +1357,7 @@ export class Survival {
     if (this.belts.has(key)) { this.belts.delete(key); dropStone(); got = 'belt'; }
     else if (this.grabbers.has(key)) { const gk = this.grabbers.get(key)!; if (gk.carry) this.pocket(gk.k); this.grabbers.delete(key); got = 'grab'; }
     else if (this.splitters.has(key)) { for (const a of this.splitters.get(key)!.buf) this.pocket(a); this.splitters.delete(key); got = 'split'; }
+    else if (this.pwalls.has(key)) { got = this.pwalls.get(key)!.gate ? 'pgate' : 'wall'; this.pwalls.delete(key); this.wallRects = null; }
     else if (this.chests.has(key)) { const ch = this.chests.get(key)!; extra = chestN(ch); for (const k of KINDS) this.bag[k] += ch[k]; this.chests.delete(key); got = 'chest'; }
     else if (this.blds.has(key)) {
       const b = this.blds.get(key)!;
@@ -1419,7 +1426,7 @@ export class Survival {
     for (const sp of this.spawners) { if (sp.dead) continue; const d = dist(sp.x, sp.y, x, y); if (d < SPAWNER_R + 14 && d < bd) { bd = d; best = sp; } }
     return best;
   }
-  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k); }
+  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
     if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[type]}. Craft them in your inventory (Shift)`, 'info'); Sound.denied(); return; }
@@ -1449,7 +1456,7 @@ export class Survival {
     if (x < rr || y < rr || x > W - rr || y > H - rr) return false;
     if (this.walls.some(([ax, ay, bx, by]) => x > ax - rr - 4 && x < bx + rr + 4 && y > ay - rr - 4 && y < by + rr + 4)) return false;
     if (structs.some(o => dist(x, y, o.x, o.y) < rr + o.r + 16)) return false;
-    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs, this.blds] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
+    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs, this.blds, this.pwalls] as Map<string, unknown>[]) for (const key of m.keys()) { const [cc, rr2] = key.split(',').map(Number); if (dist(x, y, tileX(cc), tileY(rr2)) < rr + 12) return false; }
     return true;
   }
   /** The ore patch under tile (c, r), if it has ore left. */
@@ -1475,6 +1482,12 @@ export class Survival {
     else if (type === 'grab') this.grabbers.set(key, { d: this.placeDir, t: 0, carry: false, k: 'stone' });
     else if (type === 'split') this.splitters.set(key, { d: this.placeDir, buf: [], side: 0, t: 0 });
     else if (type === 'chest') this.chests.set(key, emptyBag());
+    else if (type === 'wall' || type === 'pgate') {
+      const x = tileX(c), y = tileY(r);
+      if (dist(x, y, this.x, this.y) < GUY_R + 12 && type === 'wall') { this.bubble(x, y - 16, "You're standing there", 'info'); Sound.denied(); return; }
+      if (this.bears.some(b => b.state !== 'dead' && dist(b.x, b.y, x, y) < BEAR_R + 12)) { this.bubble(x, y - 16, 'A bear is in the way', 'info'); Sound.denied(); return; }
+      this.pwalls.set(key, { hp: type === 'pgate' ? SURVIVAL.gateHp : SURVIVAL.wallHp, gate: type === 'pgate' }); this.wallRects = null;
+    }
     else if (type === 'lab') { this.labs.set(key, { packs: 0, packs2: 0, t: 0 }); this.powerT = 0; }
     else if (tk) { this.turrets.set(key, { ammo: {}, cd: 0, face: -Math.PI / 2, kind: tk }); this.coolT = 0; }
     else {
@@ -1648,7 +1661,7 @@ export class Survival {
     if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
-    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
+    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); collide(me, GUY_R, this.myWalls().filter(w => !w[4]) as unknown as Rect[]); this.x = me.x; this.y = me.y;
 
     // healing: 1.2% of max health every second
     this.healT += dt;
@@ -1966,9 +1979,34 @@ export class Survival {
         b.x += dx / d * push * wb; b.y += dy / d * push * wb;
       }
     }
+    const mw = this.myWalls();
+    for (const b of live) {
+      // your walls and gates stop bears; a bear pushing on one bites it
+      b.wb = Math.max(0, (b.wb ?? 0) - dt);
+      for (const w of mw) {
+        if (b.x < w[0] - BEAR_R || b.x > w[2] + BEAR_R || b.y < w[1] - BEAR_R || b.y > w[3] + BEAR_R) continue;
+        const ox = b.x, oy = b.y; collide(b, BEAR_R, [w as unknown as Rect]);
+        if ((ox !== b.x || oy !== b.y) && b.wb <= 0) this.biteWall(b, w[5]);
+      }
+    }
     for (const b of live) { collide(b, BEAR_R, this.walls); b.x = clamp(b.x, BEAR_R, W - BEAR_R); b.y = clamp(b.y, BEAR_R, H - BEAR_R); }
   }
 
+  /** Your walls and gates as rectangles: [x0, y0, x1, y1, isGate, key]. */
+  private wallRects: [number, number, number, number, boolean, string][] | null = null;
+  private myWalls() {
+    if (!this.wallRects) this.wallRects = [...this.pwalls].map(([k, w]) => { const [c, r] = k.split(',').map(Number), x = tileX(c), y = tileY(r); return [x - TILE / 2, y - TILE / 2, x + TILE / 2, y + TILE / 2, w.gate, k]; });
+    return this.wallRects;
+  }
+  /** A bear bites the wall or gate in its way; it breaks at no health. */
+  private biteWall(b: Bear, key: string) {
+    const w = this.pwalls.get(key); if (!w) return;
+    b.wb = SURVIVAL.wallBiteEvery; b.swipe = .35;
+    w.hp -= SURVIVAL.wallBite;
+    const [c, r] = key.split(',').map(Number);
+    if (w.hp <= 0) { this.pwalls.delete(key); this.wallRects = null; this.bubble(tileX(c), tileY(r) - 16, `${w.gate ? 'Gate' : 'Wall'} broken!`, 'loss'); Sound.boom(false); }
+    else Sound.thump();
+  }
   private throwRock(b: Bear) {
     b.tc = SURVIVAL.throwCooldown; b.swipe = .25;
     const a = Math.atan2(this.y - b.y, this.x - b.x);
@@ -2205,6 +2243,11 @@ export class Survival {
       for (let r = r0; r <= r1; r++) { g.beginPath(); g.moveTo(GX0 + c0 * TILE, GY0 + r * TILE); g.lineTo(GX0 + c1 * TILE, GY0 + r * TILE); g.stroke(); }
     }
     for (const [key, d] of this.belts) { const [c, r] = key.split(',').map(Number); paintBelt(g, tileX(c), tileY(r), d, this.t); }
+    for (const [key, w] of this.pwalls) {
+      const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r), max = w.gate ? SURVIVAL.gateHp : SURVIVAL.wallHp;
+      paintWall(g, x, y, w.gate, (k: string) => this.pwalls.get(k)?.gate === false, c, r, Math.hypot(this.x - x, this.y - y) < 30);
+      if (w.hp < max) { g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(x - 10, y + 8, 20, 3); g.fillStyle = w.hp / max > .4 ? '#7fd36a' : '#ff6a5a'; g.fillRect(x - 10, y + 8, 20 * w.hp / max, 3); }
+    }
     for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number); paintGrabber(g, tileX(c), tileY(r), gr); }
     for (const [key, sp] of this.splitters) { const [c, r] = key.split(',').map(Number); paintSplitter(g, tileX(c), tileY(r), sp.d); }
     for (const [key, ch] of this.chests) {
@@ -2819,9 +2862,30 @@ function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Pl
   else if (p === 'grab') paintGrabber(g, x, y, { d, t: 0, carry: false, k: 'stone' });
   else if (p === 'split') paintSplitter(g, x, y, d);
   else if (p === 'chest') paintChest(g, x, y);
+  else if (p === 'wall' || p === 'pgate') paintWall(g, x, y, p === 'pgate', () => false, 0, 0, false);
   else if (p === 'lab') paintLab(g, x, y, 0);
   else if (ITEM_T[p]) paintTurret(g, x, y, { ammo: { ammo: 1, rocket: 1 }, cd: 0, face: -Math.PI / 4, kind: ITEM_T[p]! });
   else if ((BTYPES as string[]).includes(p)) paintBld(g, x, y, { type: p as BType, d, inp: 0, out: 0, t: 0, fuel: p === 'gen' ? 1 : 0, recipe: '', robots: 0 }, 0);
+}
+/** One of your walls (stone blocks, joined to the walls next to it) or a gate (wooden doors in a stone frame; open when you're close). */
+function paintWall(g: CanvasRenderingContext2D, x: number, y: number, gate: boolean, wallAt: (k: string) => boolean, c: number, r: number, open: boolean) {
+  const h = TILE / 2;
+  g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(x - h + 2, y - h + 3, TILE, TILE);
+  if (gate) {
+    g.fillStyle = '#8f8a80'; g.fillRect(x - h, y - h, TILE, TILE);
+    g.fillStyle = '#5a3d22'; if (open) { g.fillRect(x - h + 2, y - h + 2, 4, TILE - 4); g.fillRect(x + h - 6, y - h + 2, 4, TILE - 4); }
+    else { g.fillRect(x - h + 3, y - h + 3, TILE - 6, TILE - 6); g.strokeStyle = '#3a2a1a'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y - h + 3); g.lineTo(x, y + h - 3); g.moveTo(x - h + 3, y); g.lineTo(x + h - 3, y); g.stroke(); g.fillStyle = '#e0b43a'; g.fillRect(x - 3, y - 1.5, 2, 3); g.fillRect(x + 1, y - 1.5, 2, 3); }
+    return;
+  }
+  g.fillStyle = '#9a958b'; g.fillRect(x - h, y - h, TILE, TILE);
+  g.fillStyle = '#b4afa4'; g.fillRect(x - h + 1, y - h + 1, 10, 6); g.fillRect(x - h + 12, y - h + 1, 11, 6); g.fillRect(x - h + 1, y - h + 8, 5, 7); g.fillRect(x - h + 7, y - h + 8, 10, 7); g.fillRect(x - h + 18, y - h + 8, 5, 7); g.fillRect(x - h + 1, y - h + 16, 10, 7); g.fillRect(x - h + 12, y - h + 16, 11, 7);
+  // an edge where there is no wall next to it
+  g.strokeStyle = '#5f5b54'; g.lineWidth = 2; g.beginPath();
+  if (!wallAt(c + ',' + (r - 1))) { g.moveTo(x - h, y - h + 1); g.lineTo(x + h, y - h + 1); }
+  if (!wallAt(c + ',' + (r + 1))) { g.moveTo(x - h, y + h - 1); g.lineTo(x + h, y + h - 1); }
+  if (!wallAt((c - 1) + ',' + r)) { g.moveTo(x - h + 1, y - h); g.lineTo(x - h + 1, y + h); }
+  if (!wallAt((c + 1) + ',' + r)) { g.moveTo(x + h - 1, y - h); g.lineTo(x + h - 1, y + h); }
+  g.stroke();
 }
 /** A little blinking red lightning bolt: this needs power. */
 function paintNoPower(g: CanvasRenderingContext2D, x: number, y: number, t: number) {
