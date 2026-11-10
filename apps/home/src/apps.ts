@@ -12,6 +12,11 @@ export const APPS: AppLink[] = [
     blurb: 'Tilt your phone to aim the flak gun and hold off the waves.',
   },
   {
+    name: 'Sky Defender 2: Your worst nightmare',
+    url: 'https://sky-defender-2.trom.dev',
+    blurb: 'The sequel to Sky Defender. Tilt your phone to aim and survive the onslaught.',
+  },
+  {
     name: 'Pong',
     url: 'https://pong.trom.dev',
     blurb: 'Two-player Pong on a big screen. Tilt your phone to move your paddle.',
