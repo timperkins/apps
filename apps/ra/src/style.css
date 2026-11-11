@@ -381,6 +381,29 @@ body.sheet-open #selBar {
   border: 1px solid #f7e2a0;
 }
 
+#build .power {
+  padding: 2px 5px;
+  font-size: 11px;
+  color: #10170d;
+  background: #9dff9d;
+  border: 1px solid #d8ffd8;
+}
+
+#build .power[hidden] {
+  display: none;
+}
+
+#build .power.low,
+#credits.low {
+  color: #fff;
+  background: #c8432e;
+  border-color: #ff9a86;
+}
+
+#build .credits.full {
+  box-shadow: 0 0 0 2px #c8432e;
+}
+
 #build .close {
   display: grid;
   place-items: center;
@@ -562,7 +585,7 @@ body.sheet-open #selBar {
     top: calc(142px + env(safe-area-inset-top));
     bottom: auto;
     transform: none;
-    width: 216px;
+    width: 240px;
     max-height: calc(100vh - 170px);
   }
   #build .tabs {

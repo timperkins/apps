@@ -112,10 +112,22 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
       if (open) setOpen(false);
       return;
     }
-    creditsEl.textContent = `$${menu.credits}`;
+    const low = !!menu.power && menu.power.used > menu.power.made;
+    creditsEl.textContent = low ? `$${menu.credits} ⚡` : `$${menu.credits}`;
+    creditsEl.classList.toggle('low', low);
+    creditsEl.title = menu.power && menu.power.used > menu.power.made ? 'Low power: building at half speed' : 'Credits';
     btn.classList.toggle('alert', menu.items.some((i) => i.isNew || i.state === 'ready'));
     if (!open) return;
-    panel.querySelector('.credits')!.textContent = `$${menu.credits}`;
+    const cr = panel.querySelector<HTMLElement>('.credits')!;
+    cr.textContent = `$${menu.credits}`;
+    cr.title = menu.store ? `Credits (you can hold $${menu.store})` : 'Credits';
+    cr.classList.toggle('full', !!menu.store && menu.credits >= menu.store);
+    const pw = panel.querySelector<HTMLElement>('.power')!;
+    pw.hidden = !menu.power || (menu.power.made === 0 && menu.power.used === 0);
+    if (menu.power) {
+      pw.textContent = `⚡${menu.power.used}/${menu.power.made}`;
+      pw.classList.toggle('low', menu.power.used > menu.power.made);
+    }
 
     if (!menu.tabs.some((t) => t.id === tab)) tab = menu.tabs[0]?.id ?? '';
     const tk = menu.tabs.map((t) => t.id).join(',') + '|' + tab + '|' + menu.tabs.map((t) => (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready')) ? 1 : 0)).join('');

@@ -692,6 +692,48 @@ export function makeTrees(): StackSprite[] {
   return out;
 }
 
+// Ore: clumps of amber crystals poking out of the ground, [variant][size],
+// the size going down as the ore is mined out.
+export function makeOre(): StackSprite[][] {
+  const amber = hex('#eab443');
+  const deep = hex('#9a5f1c');
+  const tip = hex('#ffe7a0');
+  const out: StackSprite[][] = [];
+  for (let vnt = 0; vnt < 4; vnt++) {
+    const sizes: StackSprite[] = [];
+    for (let st = 0; st < 3; st++) {
+      const k = 0.45 + st * 0.28;
+      // a handful of leaning crystals round the clump's centre
+      const cr: { u: number; v: number; r: number; h: number; lu: number; lv: number }[] = [];
+      const n = 3 + ((vnt + st) % 3);
+      for (let i = 0; i < n; i++) {
+        const a = hash2(i, vnt, 71) * Math.PI * 2;
+        const d = i === 0 ? 0 : 1.5 + hash2(i, vnt, 72) * 2.5;
+        cr.push({ u: Math.cos(a) * d * k * 1.4, v: Math.sin(a) * d * k * 1.4, r: (0.9 + hash2(i, vnt, 73) * 0.7) * (0.7 + k * 0.4), h: (4.5 + hash2(i, vnt, 74) * 5) * k + (i === 0 ? 2.5 * k : 0), lu: Math.cos(a) * 0.25, lv: Math.sin(a) * 0.25 });
+      }
+      sizes.push(
+        renderStack(
+          (u, v, z) => {
+            if (z < 0.6 && u * u + v * v < (4.5 * k + 1) ** 2 && hash2(Math.floor(u * 2), Math.floor(v * 2), vnt + 80) < 0.35) return shade(deep, -0.2); // grit round the foot
+            for (const c of cr) {
+              const du = u - c.u - c.lu * z;
+              const dv = v - c.v - c.lv * z;
+              const rr = c.r * (1 - z / (c.h + 0.01));
+              if (z > c.h || Math.max(Math.abs(du), Math.abs(dv), (Math.abs(du) + Math.abs(dv)) * 0.75) > rr) continue;
+              if (z > c.h * 0.7) return tip;
+              return du > 0.2 ? deep : amber;
+            }
+            return null;
+          },
+          { r: 7, zmax: 12, bakeShadow: true, outline: [60, 34, 10], shadowAlpha: 0.25 },
+        ),
+      );
+    }
+    out.push(sizes);
+  }
+  return out;
+}
+
 export function makeRocks(): StackSprite[] {
   const out: StackSprite[] = [];
   for (let vnt = 0; vnt < 4; vnt++) {

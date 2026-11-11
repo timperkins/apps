@@ -35,6 +35,8 @@ export interface BuildItem {
 
 export interface BuildMenu {
   credits: number;
+  store?: number; // most credits you can hold
+  power?: { made: number; used: number };
   tabs: { id: string; label: string }[];
   items: BuildItem[];
 }

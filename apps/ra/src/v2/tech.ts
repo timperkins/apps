@@ -52,5 +52,25 @@ export const QUEUE_MAX = 5;
 // Seconds to build something of this cost.
 export const buildTime = (cost: number) => Math.max(3, cost / 80);
 
-// Start-up money (there is no ore to earn more yet).
+// Start-up money; after that it comes from ore.
 export const START_CREDITS = 5000;
+
+// Power each building makes (+) or uses (-). Short of power, everything
+// builds at half speed.
+export const POWER: Partial<Record<BuildingKind, number>> = {
+  power: 100,
+  barracks: -20,
+  refinery: -40,
+  silo: -10,
+  factory: -30,
+  radar: -40,
+  helipad: -10,
+  lab: -75,
+  tower: -20,
+};
+
+// Credits you can hold: a little of your own, more per refinery and silo.
+export const STORE = { base: 3000, refinery: 2000, silo: 3000 };
+
+// Ore: what one clump holds, what a hauler carries, and how fast it digs.
+export const ORE = { node: 600, load: 700, digRate: 70, unloadRate: 350, regrow: 2 };
