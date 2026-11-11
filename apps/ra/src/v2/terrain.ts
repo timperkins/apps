@@ -28,8 +28,8 @@ export const OV = 4;
 // neighbour tests, plateau shadows and props.
 const M = 12;
 // Ground features keep a fixed size however big the planet is.
-const LAKE_CELL = 234;
-const HIGH_CELL = 187;
+export const LAKE_CELL = 234;
+export const HIGH_CELL = 187;
 const ROAD_HALF = 7;
 
 const GRASS = ['#22391b', '#284320', '#2f4d24', '#365628', '#3d5f2d', '#466833'].map(hex);
@@ -78,6 +78,47 @@ export interface PaintedTile {
   region: Region;
 }
 
+// How a map shapes its land (see maps.ts).
+export interface LandShape {
+  water: number; // share of the map under water
+  high: number; // share raised into plateaus
+  mask?: (sx: number, sy: number, w: number, h: number, N: WrapNoise, s: number) => number;
+}
+
+// A map's land mask, worked out on a coarse grid and interpolated.
+class MaskField {
+  private nx: number;
+  private ny: number;
+  private v: Float32Array;
+  constructor(
+    private w: number,
+    private h: number,
+    f: (sx: number, sy: number) => number,
+    step = 32,
+  ) {
+    const nx = (this.nx = Math.max(8, Math.round(w / step)));
+    const ny = (this.ny = Math.max(8, Math.round(h / step)));
+    this.v = new Float32Array(nx * ny);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) this.v[j * nx + i] = f((i * w) / nx, (j * h) / ny);
+  }
+  at(x: number, y: number): number {
+    const { nx, ny, v } = this;
+    let fx = (x / this.w) * nx;
+    let fy = (y / this.h) * ny;
+    fx -= Math.floor(fx / nx) * nx;
+    fy -= Math.floor(fy / ny) * ny;
+    const i = Math.min(nx - 1, fx | 0);
+    const j = Math.min(ny - 1, fy | 0);
+    const tx = fx - i;
+    const ty = fy - j;
+    const i1 = i + 1 >= nx ? 0 : i + 1;
+    const j1 = j + 1 >= ny ? 0 : j + 1;
+    const a = v[j * nx + i] + (v[j * nx + i1] - v[j * nx + i]) * tx;
+    const b = v[j1 * nx + i] + (v[j1 * nx + i1] - v[j1 * nx + i]) * tx;
+    return a + (b - a) * ty;
+  }
+}
+
 export class IsoTerrain {
   private wThr: number;
   private sandThr: number;
@@ -103,7 +144,13 @@ export class IsoTerrain {
     readonly w: number,
     readonly h: number,
     readonly seed: number,
+    shape: LandShape = { water: 0.15, high: 0.14 },
   ) {
+    const mask = shape.mask;
+    if (mask) {
+      const N = wrapNoise(w, h);
+      this.mask = new MaskField(w, h, (sx, sy) => mask(sx, sy, w, h, N, seed + 300));
+    }
     this.na = wrapNoise(w / Math.SQRT2, h * Math.SQRT2);
     this.ns = wrapNoise(w, h);
     this.lakeF = new WorldField(w, h, LAKE_CELL, seed, 5);
@@ -116,17 +163,25 @@ export class IsoTerrain {
     for (let i = 0; i < 30000; i++) {
       const sx = rand() * w;
       const sy = rand() * h;
-      wv.push(this.lakeF.at(sx, sy));
+      wv.push(this.wat(sx, sy));
       hv.push(this.highF.at(sx, sy));
     }
-    this.wThr = percentile(wv, 0.85);
-    this.sandThr = percentile(wv, 0.825);
+    this.wThr = percentile(wv, 1 - shape.water);
+    this.sandThr = percentile(wv, 1 - shape.water - 0.025);
     this.wMax = percentile(wv, 0.999);
-    this.hThr = percentile(hv, 0.86);
+    this.hThr = percentile(hv, 1 - shape.high);
     this.bx0 = -64;
     this.by0 = -w / 2 - 64;
     this.bs = w / 2 + h + HP + 128;
     this.roads = new Roads(this.bx0, this.by0, this.bs, this.bs);
+  }
+
+  private mask: MaskField | null = null;
+
+  // How wet the ground is at screen point (sx, sy): water above wThr, beach
+  // just below it.
+  wat(sx: number, sy: number): number {
+    return this.mask ? this.lakeF.at(sx, sy) + this.mask.at(sx, sy) : this.lakeF.at(sx, sy);
   }
 
   // Seamless noise over the ground, like fbm(wx / cell, wy / cell).
@@ -173,7 +228,7 @@ export class IsoTerrain {
 
   // Classify a rectangle of world cells (near the folded map).
   region(x0: number, y0: number, rw: number, rh: number): Region {
-    const { w, h, lakeF, highF, jitX, jitY, roads, wThr, sandThr, hThr } = this;
+    const { w, h, highF, jitX, jitY, roads, wThr, sandThr, hThr } = this;
     const n = rw * rh;
     const r: Region = { x0, y0, w: rw, h: rh, kind: new Uint8Array(n), wv: new Float32Array(n), road: new Float32Array(n) };
     for (let j = 0; j < rh; j++)
@@ -185,7 +240,7 @@ export class IsoTerrain {
         if (sx < 0 || sx >= w) sx -= Math.floor(sx / w) * w;
         if (sy < 0 || sy >= h) sy -= Math.floor(sy / h) * h;
         const q = j * rw + i;
-        const wv = lakeF.at(sx, sy);
+        const wv = this.wat(sx, sy);
         const rd = wv > sandThr ? 99 : roads.dist(wx + (jitX.at(sx, sy) - 0.5) * 20, wy + (jitY.at(sx, sy) - 0.5) * 20);
         r.wv[q] = wv;
         r.road[q] = rd;
@@ -463,7 +518,7 @@ export class IsoTerrain {
     const th = Math.round(this.h / OV);
     const img = (this.ovImg ??= new ImageData(tw, th));
     const d = img.data;
-    const { lakeF, highF, jitX, jitY, roads, wThr, sandThr, wMax, hThr, w, h } = this;
+    const { highF, jitX, jitY, roads, wThr, sandThr, wMax, hThr, w, h } = this;
     const t0 = performance.now();
     for (; this.ovRow < th && performance.now() - t0 < ms; this.ovRow++)
       for (let i = 0, j = this.ovRow; i < tw; i++) {
@@ -473,9 +528,9 @@ export class IsoTerrain {
         // plateau tops sit HP pixels up the screen from their ground
         let tsy = sy + HP;
         if (tsy >= h) tsy -= h;
-        const lift = highF.at(sx, tsy) > hThr && lakeF.at(sx, tsy) < sandThr - 0.03;
+        const lift = highF.at(sx, tsy) > hThr && this.wat(sx, tsy) < sandThr - 0.03;
         let c: RGB;
-        const wv = lakeF.at(sx, sy);
+        const wv = this.wat(sx, sy);
         if (lift) c = HIGH[1 + Math.floor(rnd * 2)];
         else if (wv > wThr) c = mix(W_SHALLOW, W_DEEP, Math.pow(Math.min(1, ((wv - wThr) / (wMax - wThr)) * 1.6), 0.6));
         else if (wv > sandThr) c = SAND;
