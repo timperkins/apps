@@ -130,7 +130,7 @@ Scaffolding the folder itself is `scripts/new-app.mjs`, committed on a branch li
 5. **Home page** at `trom.dev` (done; apex cut over to Hosting site `trom-home`). Cut the apex over from the old Sky Defender App Hosting backend to the Home Hosting site.
    Order: run `create-app` (name `home`, `attach_domain` off) so the site exists, merge the home page so prod is
    deployed, remove `trom.dev` from the old App Hosting backend, then run `create-app` again with `attach_domain` on.
-   When an app goes live, add it to `apps/home/src/apps.ts`.
+   The home page is now a "Trom" graphic, so it no longer lists apps.
 6. **Remaining static apps**: Pong (add preview database, env-driven DB ID), You Have Been Chosen, Scorched, Paper Airplane (static export). One branch per app.
 7. **Tim News on App Hosting**
    - Repoint the existing `news` backend at `apps/news` in this repo (live branch `main`, automatic rollouts off).
