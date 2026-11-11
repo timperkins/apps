@@ -70,6 +70,8 @@ export interface GameLike {
   boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
   deselect(): void;
   focus(): { x: number; y: number };
+  // True if the game draws at ART pixels to the map pixel (see gfx.ts).
+  fine?: boolean;
   // Commands for the selection (deploy, pack up and so on), if the version has any.
   actions?(): Action[];
   act?(id: string): void;

@@ -3,6 +3,10 @@
 
 export type RGB = [number, number, number];
 
+// Art pixels per map pixel in v2: sprites and ground are drawn at this many
+// times the size of the map's own grid, so there is room for finer detail.
+export const ART = 2;
+
 export function hex(h: string): RGB {
   const n = parseInt(h.replace('#', ''), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];

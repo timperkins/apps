@@ -8,7 +8,7 @@
 // into the rectangle 0 <= sx < w, 0 <= sy < h. The land is the same all over.
 // The map is planet-sized, so nothing is stored per pixel: the ground is
 // classified and painted a tile at a time, on demand.
-import { RGB, WorldField, WrapNoise, fbm, hash2, hex, mix, rng, shade, wrapNoise } from '../gfx';
+import { ART, RGB, WorldField, WrapNoise, fbm, hash2, hex, mix, rng, shade, wrapNoise } from '../gfx';
 import { CH, Roads, canvasOf } from '../tiles';
 import { toScreen, toWorld } from './stack';
 
@@ -46,7 +46,10 @@ const ROCK = hex('#8a7e69');
 const ROCK_D = hex('#5a5043');
 const CONC = hex('#8a877d');
 const CONC_D = hex('#5f5d56');
-const FLOWER = [hex('#e8dc72'), hex('#e6e0d0'), hex('#c98ac0')];
+const FLOWER = [hex('#e8dc72'), hex('#e6e0d0'), hex('#c98ac0'), hex('#d9694a'), hex('#8fa6e0')];
+const DRY = hex('#8a8444');
+const CLOVER = hex('#2a5a3a');
+const W_BANDS = ['#5a9db0', '#4a8aa6', '#3b7498', '#2e5f86', '#244c72', '#1c3d5c'].map(hex);
 
 function percentile(s: number[], q: number): number {
   const a = s.slice().sort((x, y) => x - y);
@@ -69,6 +72,7 @@ export interface Region {
   kind: Uint8Array;
   wv: Float32Array;
   road: Float32Array;
+  hi: Float32Array; // above zero on plateaus, falling away smoothly outside them
 }
 
 export interface PaintedTile {
@@ -230,7 +234,7 @@ export class IsoTerrain {
   region(x0: number, y0: number, rw: number, rh: number): Region {
     const { w, h, highF, jitX, jitY, roads, wThr, sandThr, hThr } = this;
     const n = rw * rh;
-    const r: Region = { x0, y0, w: rw, h: rh, kind: new Uint8Array(n), wv: new Float32Array(n), road: new Float32Array(n) };
+    const r: Region = { x0, y0, w: rw, h: rh, kind: new Uint8Array(n), wv: new Float32Array(n), road: new Float32Array(n), hi: new Float32Array(n) };
     for (let j = 0; j < rh; j++)
       for (let i = 0; i < rw; i++) {
         const wx = x0 + i;
@@ -244,7 +248,8 @@ export class IsoTerrain {
         const rd = wv > sandThr ? 99 : roads.dist(wx + (jitX.at(sx, sy) - 0.5) * 20, wy + (jitY.at(sx, sy) - 0.5) * 20);
         r.wv[q] = wv;
         r.road[q] = rd;
-        r.kind[q] = wv > wThr ? K.Water : wv > sandThr ? K.Sand : rd < 1 ? K.Road : highF.at(sx, sy) > hThr && rd > 1.8 && wv < sandThr - 0.03 ? K.High : K.Grass;
+        const hi = (r.hi[q] = Math.min(highF.at(sx, sy) - hThr, (rd - 1.8) * 0.02, sandThr - 0.03 - wv));
+        r.kind[q] = wv > wThr ? K.Water : wv > sandThr ? K.Sand : rd < 1 ? K.Road : hi > 0 ? K.High : K.Grass;
       }
     // concrete pads under buildings
     for (const p of this.pads)
@@ -324,188 +329,369 @@ export class IsoTerrain {
     return this.region(x0, y0, x1 - x0, y1 - y0);
   }
 
-  // Paint screen tile (tx, ty) of the map.
+  // Paint screen tile (tx, ty) of the map, at ART pixels to the map pixel.
   paintTile(tx: number, ty: number): PaintedTile {
-    const { seed } = this;
-    const N = (wx: number, wy: number, cell: number, s: number, oct: number) => this.noise(wx, wy, cell, s, oct);
+    const g = this.paintSteps(tx, ty);
+    for (;;) {
+      const r = g.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  // The same, a few rows at a time: painting a tile is too much work for one
+  // frame, so the caller spreads the steps over several.
+  *paintSteps(tx: number, ty: number): Generator<void, PaintedTile> {
+    const { seed, wThr, sandThr } = this;
+    const S = ART;
+    const NP = CH * S;
     const R = this.tileRegion(tx, ty);
-    const kAt = (wx: number, wy: number): K => {
-      const i = Math.floor(wx) - R.x0;
-      const j = Math.floor(wy) - R.y0;
-      return i < 0 || j < 0 || i >= R.w || j >= R.h ? this.k(wx, wy) : (R.kind[j * R.w + i] as K);
-    };
-    const hiAt = (wx: number, wy: number) => kAt(wx, wy) === K.High;
+    const rw = R.w;
+    const rh = R.h;
     const SX0 = tx * CH;
     const SY0 = ty * CH;
-    const img = new ImageData(CH, CH);
+
+    // Smooth lookups into the region's fields, so shores, road edges and
+    // plateau rims follow the art's finer grid and not the map's.
+    const bl = (a: Float32Array, wx: number, wy: number): number => {
+      const fx = wx - R.x0;
+      const fy = wy - R.y0;
+      let i = Math.floor(fx);
+      let j = Math.floor(fy);
+      if (i < 0) i = 0;
+      else if (i > rw - 2) i = rw - 2;
+      if (j < 0) j = 0;
+      else if (j > rh - 2) j = rh - 2;
+      const ax = Math.max(0, Math.min(1, fx - i));
+      const ay = Math.max(0, Math.min(1, fy - j));
+      const q = j * rw + i;
+      return (a[q] * (1 - ax) + a[q + 1] * ax) * (1 - ay) + (a[q + rw] * (1 - ax) + a[q + rw + 1] * ax) * ay;
+    };
+    // cells on or next to high ground, so most rays skip the smooth lookup
+    const hiNear = new Uint8Array(rw * rh);
+    let anyHigh = false;
+    for (let j = 0; j < rh; j++)
+      for (let i = 0; i < rw; i++)
+        if (R.hi[j * rw + i] > 0) {
+          anyHigh = true;
+          for (let b = Math.max(0, j - 1); b <= Math.min(rh - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(rw - 1, i + 1); a++) hiNear[b * rw + a] = 1;
+        }
+    // cells with high ground within reach of its shadow (towards the light)
+    const hiClose = new Uint8Array(rw * rh);
+    if (anyHigh)
+      for (let j = 0; j < rh; j++)
+        for (let i = 0; i < rw; i++) {
+          if (!hiNear[j * rw + i]) continue;
+          for (let b = Math.max(0, j - 4); b <= Math.min(rh - 1, j + 2); b++) for (let a = i; a <= Math.min(rw - 1, i + 11); a++) hiClose[b * rw + a] = 1;
+        }
+    const hiAt = (wx: number, wy: number): boolean => {
+      const i = Math.floor(wx) - R.x0;
+      const j = Math.floor(wy) - R.y0;
+      if (i < 0 || j < 0 || i >= rw || j >= rh) return this.isHigh(wx, wy);
+      return hiNear[j * rw + i] === 1 && bl(R.hi, wx, wy) > 0;
+    };
+
+    // Slow-changing noise, worked out on a coarse lattice over the tile (the
+    // ground point under screen point (x, y)) and interpolated.
+    const LS = 2;
+    const ln = CH / LS + 1;
+    const lm = Math.ceil((CH + HP) / LS) + 2;
+    const lattice = (cell: number, s: number, oct: number, screenY = 0) => {
+      const a = new Float32Array(ln * lm);
+      for (let j = 0; j < lm; j++)
+        for (let i = 0; i < ln; i++) {
+          const x = SX0 + i * LS;
+          const y = SY0 + j * LS;
+          a[j * ln + i] = screenY ? this.ns(x, y, cell, s, oct, screenY) : this.noise(x / 2 + y, y - x / 2, cell, s, oct);
+        }
+      return (x: number, y: number): number => {
+        const fx = (x - SX0) / LS;
+        const fy = (y - SY0) / LS;
+        const i = Math.max(0, Math.min(ln - 2, Math.floor(fx)));
+        const j = Math.max(0, Math.min(lm - 2, Math.floor(fy)));
+        const ax = fx - i;
+        const ay = fy - j;
+        const q = j * ln + i;
+        return (a[q] * (1 - ax) + a[q + 1] * ax) * (1 - ay) + (a[q + ln] * (1 - ax) + a[q + ln + 1] * ax) * ay;
+      };
+    };
+    const nPatch = lattice(18, seed + 11, 3);
+    const nTone = lattice(6, seed + 12, 2);
+    const nDirt = lattice(24, seed + 13, 3);
+    const nBloom = lattice(34, seed + 14, 2);
+    const nFine = lattice(5, seed + 17, 2);
+    // water only: ripples and foam, stretched across the screen
+    let nRip: ((x: number, y: number) => number) | null = null;
+    let nFoam: ((x: number, y: number) => number) | null = null;
+
+    const img = new ImageData(NP, NP);
     const d = img.data;
     let fimg: ImageData | null = null;
     let f2img: ImageData | null = null;
     const put = (x: number, y: number, c: RGB) => {
-      if (x < 0 || y < 0 || x >= CH || y >= CH) return;
-      const i = (y * CH + x) * 4;
+      if (x < 0 || y < 0 || x >= NP || y >= NP) return;
+      const i = (y * NP + x) * 4;
       d[i] = c[0];
       d[i + 1] = c[1];
       d[i + 2] = c[2];
       d[i + 3] = 255;
     };
-    const near = (wx: number, wy: number, r: number, test: (k: K) => boolean) => {
-      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if ((i || j) && test(kAt(wx + i, wy + j))) return true;
-      return false;
-    };
-    const padEdge = (wx: number, wy: number) => kAt(wx + 1, wy) !== K.Pad || kAt(wx - 1, wy) !== K.Pad || kAt(wx, wy + 1) !== K.Pad || kAt(wx, wy - 1) !== K.Pad;
-    const tufts: [number, number, RGB][] = [];
+    const dots: [number, number, RGB][] = [];
+    const wRange = this.wMax - wThr;
+    const beach = wThr - sandThr;
 
-    for (let ly = 0; ly < CH; ly++)
-      for (let lx = 0; lx < CH; lx++) {
-        const sx = SX0 + lx;
-        const sy = SY0 + ly;
-        const rnd = hash2(sx, sy, seed);
-        const px = sx + 0.5;
-        const py = sy + 0.5;
+    yield;
+    for (let ly = 0; ly < NP; ly++) {
+      if (ly % 12 === 0) yield;
+      for (let lx = 0; lx < NP; lx++) {
+        const px = SX0 + (lx + 0.5) / S;
+        const py = SY0 + (ly + 0.5) / S;
+        // the art pixel's own place on the map, for grain
+        const ix = SX0 * S + lx;
+        const iy = SY0 * S + ly;
+        const rnd = hash2(ix, iy, seed);
         // ray cast against the plateau height field
         let hitZ = -1;
         let wx = 0;
         let wy = 0;
-        for (let z = HP; z >= 0; z--) {
-          const ax = px / 2 + py + z;
-          const ay = py + z - px / 2;
-          if (hiAt(ax, ay)) {
-            hitZ = z;
-            wx = ax;
-            wy = ay;
-            break;
+        if (anyHigh) {
+          // a quick pass along the ray over the coarse cells first: most rays
+          // pass nowhere near high ground
+          const bx = px / 2 + py - R.x0;
+          const by = py - px / 2 - R.y0;
+          let may = false;
+          for (let z = HP + 1; z >= 0; z--) {
+            const i = (bx + z) | 0;
+            const j = (by + z) | 0;
+            if (i >= 0 && j >= 0 && i < rw && j < rh && hiNear[j * rw + i]) {
+              may = true;
+              break;
+            }
           }
+          if (may)
+            for (let z = HP; z >= 0; z -= 0.5) {
+              const ax = px / 2 + py + z;
+              const ay = py + z - px / 2;
+              if (hiAt(ax, ay)) {
+                hitZ = z;
+                wx = ax;
+                wy = ay;
+                break;
+              }
+            }
         }
         let c: RGB;
         if (hitZ === HP) {
-          // plateau top
-          const tone = N(wx, wy, 9, seed + 40, 3);
-          c = HIGH[Math.max(0, Math.min(3, Math.floor(tone * 4 + (rnd - 0.5) * 1.6)))];
-          if (rnd > 0.975) c = shade(ROCK, (rnd - 0.975) * 8);
-          const rim = !hiAt(wx + 1.2, wy) || !hiAt(wx, wy + 1.2);
+          // plateau top: drier grass, with a lip of broken stone along the drop
+          const gy = py + HP;
+          const tone = nTone(px, gy) * 0.6 + nPatch(px, gy) * 0.4;
+          c = HIGH[Math.max(0, Math.min(3, Math.floor(tone * 4.6 - 0.3 + (rnd - 0.5) * 1.5)))];
+          const r2 = hash2(ix >> 1, iy >> 1, seed + 21);
+          if (r2 > 0.985) c = shade(ROCK, (rnd - 0.5) * 0.3);
+          else if (rnd > 0.98) c = shade(c, 0.1);
+          else if (rnd < 0.03) c = shade(c, -0.2);
+          const lip = !hiAt(wx + 0.8, wy) || !hiAt(wx, wy + 0.8);
+          const rim = lip || !hiAt(wx + 2.2, wy) || !hiAt(wx, wy + 2.2);
           const back = !hiAt(wx - 1.2, wy) || !hiAt(wx, wy - 1.2);
-          if (rim) c = shade(mix(c, ROCK_L, 0.5), 0.1);
-          else if (back) c = shade(c, -0.25);
+          if (lip) c = shade(ROCK_L, 0.1 + (r2 - 0.5) * 0.14);
+          else if (rim && r2 > 0.35) c = shade(mix(ROCK, ROCK_L, r2), rnd > 0.8 ? -0.2 : 0);
+          else if (back) c = shade(c, -0.22);
         } else if (hitZ >= 0) {
-          // rock face: +x faces are in shade, +y faces catch the light
-          const rightFace = !hiAt(wx + 1, wy);
+          // rock face in courses of blocks: +x faces are in shade, +y faces catch the light
+          const rightFace = !hiAt(wx + 0.7, wy);
           const along = rightFace ? wy : wx;
-          const band = Math.floor((hitZ + fbm(along / 6, 0, seed + 3, 2) * 4) / 3) % 2;
-          const crack = hash2(Math.floor(along * 0.7), 0, seed + 5) > 0.85;
-          c = band ? ROCK : mix(ROCK, ROCK_L, 0.4);
-          if (crack) c = ROCK_D;
-          c = shade(c, rightFace ? -0.32 : 0.02);
-          if (hitZ <= 1) c = shade(c, -0.25);
-          if (hitZ === HP - 1) c = shade(c, 0.12);
-          c = shade(c, (rnd - 0.5) * 0.16);
+          const zz = hitZ + fbm(along / 9, 0, seed + 3, 2) * 3;
+          const course = Math.floor(zz / 2.4);
+          const inC = zz - course * 2.4;
+          const bw = 3 + hash2(course, 1, seed + 4) * 3;
+          const bpos = (along + hash2(course, 2, seed + 4) * 9) / bw;
+          const block = Math.floor(bpos);
+          const inB = (bpos - block) * bw;
+          const bh = hash2(block, course, seed + 5);
+          c = mix(ROCK, ROCK_L, 0.15 + bh * 0.55);
+          if (bh > 0.86) c = mix(c, hex('#8d7a5c'), 0.5); // a browner stone now and then
+          if (inC < 0.5) c = shade(ROCK_D, -0.1); // the ledge under each course
+          else if (inB < 0.5) c = ROCK_D; // joints
+          else if (inC > 1.9) c = shade(c, 0.14); // lit top of the block
+          else if (hash2(Math.floor(along * 2), Math.floor(zz * 2), seed + 6) > 0.9) c = shade(c, -0.18); // pitting
+          c = shade(c, rightFace ? -0.34 : 0);
+          if (hitZ <= 1.5) c = shade(c, -0.22);
+          if (hitZ >= HP - 0.5) c = shade(rightFace ? c : ROCK_L, 0.14);
+          else if (hitZ > HP - 3.5 && hash2(Math.floor(along * 1.5), Math.floor(hitZ * 2), seed + 8) > 0.74 - (hitZ - HP + 3.5) * 0.12) c = mix(c, rightFace ? HIGH[0] : HIGH[2], 0.75); // grass hanging over the edge
+          c = shade(c, (rnd - 0.5) * 0.1);
         } else {
           wx = px / 2 + py;
           wy = py - px / 2;
-          const i = Math.floor(wx) - R.x0;
-          const j = Math.floor(wy) - R.y0;
-          const q = j * R.w + i;
-          const k = R.kind[q] as K;
+          const wv = bl(R.wv, wx, wy);
+          const ci = Math.max(0, Math.min(rw - 1, Math.floor(wx) - R.x0));
+          const cj = Math.max(0, Math.min(rh - 1, Math.floor(wy) - R.y0));
+          const kc = R.kind[cj * rw + ci] as K;
+          const rd = wv > sandThr ? 99 : bl(R.road, wx, wy);
+          const k: K = wv > wThr ? K.Water : wv > sandThr ? K.Sand : kc === K.Pad ? K.Pad : rd < 1 ? K.Road : K.Grass;
           switch (k) {
             case K.Water: {
-              const depth = Math.min(1, ((R.wv[q] - this.wThr) / (this.wMax - this.wThr)) * 1.6);
-              c = mix(W_SHALLOW, W_DEEP, Math.pow(depth, 0.6));
-              const rip = this.ns(sx, sy, 7, seed + 30, 2, 1.7);
-              if (rip > 0.62) c = shade(c, 0.12);
-              else if (rip < 0.33) c = shade(c, -0.08);
-              c = shade(c, (rnd - 0.5) * 0.07);
-              const land = (kk: K) => kk !== K.Water;
-              if (near(wx, wy, 1, land)) {
-                if (!fimg) fimg = new ImageData(CH, CH);
-                put4(fimg.data, ly * CH + lx, [195, 228, 232], 235);
-              } else if (near(wx, wy, 3, land) && rnd < 0.4) {
-                if (!f2img) f2img = new ImageData(CH, CH);
-                put4(f2img.data, ly * CH + lx, [150, 200, 215], 200);
+              // bands of depth, dithered where they meet, with the sandy bed showing in the shallows
+              const dep = Math.min(1, ((wv - wThr) / wRange) * 1.6);
+              const t = Math.pow(dep, 0.6) * (W_BANDS.length - 1);
+              const bi = Math.min(W_BANDS.length - 1, Math.floor(t + (rnd - 0.5) * 0.5));
+              c = W_BANDS[Math.max(0, bi)];
+              nRip ??= lattice(7, seed + 30, 2, 1.7);
+              nFoam ??= lattice(5, seed + 33, 2, 1.4);
+              const rip = nRip(px, py);
+              const rip2 = hash2(ix >> 2, iy, seed + 31) * 0.6 + rnd * 0.4; // short dashes
+              if (rip > 0.6 && rip2 > 0.5) c = shade(c, rip > 0.7 && rip2 > 0.66 ? 0.2 : 0.07);
+              else if (rip < 0.34) c = shade(c, -0.09);
+              if (dep < 0.1 && rnd > 0.9) c = mix(c, SAND, 0.35);
+              if (rnd > 0.9985 && dep > 0.15) c = [226, 244, 248]; // a glint
+              const edge = wv - wThr;
+              if (edge < beach * 0.22) {
+                if (!fimg) fimg = new ImageData(NP, NP);
+                if (edge < beach * 0.1 || rnd < 0.5) put4(fimg.data, ly * NP + lx, [205, 234, 236], 235);
+              } else if (edge < beach * 0.75 && nFoam(px, py) > 0.56 && rnd < 0.6) {
+                if (!f2img) f2img = new ImageData(NP, NP);
+                put4(f2img.data, ly * NP + lx, [160, 208, 220], 200);
               }
               // dark bank line just below the shore
-              if (land(kAt(wx - 1, wy - 1))) c = shade(c, -0.2);
+              if (bl(R.wv, wx - 1.2, wy - 1.2) <= wThr) c = shade(c, -0.22);
               break;
             }
             case K.Sand: {
-              const wet = near(wx, wy, 2, (kk) => kk === K.Water);
-              c = wet ? WET : SAND;
-              // wind ripples
-              if (Math.sin((wx + wy * 0.3) * 1.3 + N(wx, wy, 8, seed, 2) * 6) > 0.8) c = shade(c, -0.08);
-              c = shade(c, (rnd - 0.5) * 0.14);
-              if (rnd > 0.988) c = shade(c, -0.35);
+              const sh = (wThr - wv) / beach; // 0 at the water, 1 at the grass
+              c = sh < 0.2 ? WET : sh < 0.3 && rnd < 0.5 ? WET : SAND;
+              // wind ripples, tide lines, pebbles, shells and tufts creeping in from the grass
+              const rp = Math.sin((wx + wy * 0.3) * 1.3 + nPatch(px, py) * 9);
+              if (rp > 0.82) c = shade(c, -0.09);
+              else if (rp < -0.9) c = shade(c, 0.07);
+              if (Math.abs(sh - 0.38 - nFine(px, py) * 0.12) < 0.025) c = shade(c, -0.14);
+              c = shade(c, (rnd - 0.5) * 0.1);
+              const r2 = hash2(ix, iy, seed + 22);
+              if (r2 > 0.994) c = shade(ROCK, (rnd - 0.5) * 0.4);
+              else if (r2 < 0.003) c = [236, 228, 208];
+              else if (sh > 0.72 && rnd < (sh - 0.72) * 2.2) c = GRASS[2 + Math.floor(r2 * 3)];
+              else if (sh > 0.5 && r2 > 0.985) dots.push([lx, ly, shade(DRY, 0.05)]);
               break;
             }
             case K.Road: {
-              const rd = R.road[q];
-              c = ROAD;
-              if (Math.abs(rd - 0.45) < 0.1) c = RUT;
-              c = shade(c, (rnd - 0.5) * 0.18 + (N(wx, wy, 6, seed + 3, 2) - 0.5) * 0.2);
-              if (rd > 0.82 && rnd < 0.4) c = GRASS[2];
-              if (N(wx, wy, 5, seed + 17, 2) > 0.72 && rd < 0.6) c = shade(mix(c, W_SHALLOW, 0.35), -0.15); // puddles
-              if (rnd > 0.99) c = shade(ROCK, 0.1);
+              // packed dirt: two wheel ruts with a crown between, a gravel
+              // shoulder and grass breaking in at the edges
+              const fine = nFine(px, py);
+              c = shade(ROAD, (fine - 0.5) * 0.24 + (rnd - 0.5) * 0.1);
+              const rut = Math.abs(rd - 0.45);
+              if (rut < 0.07) c = shade(RUT, -0.08);
+              else if (rut < 0.15) c = RUT;
+              else if (Math.abs(rd - 0.62) < 0.04) c = shade(ROAD, 0.1);
+              const r2 = hash2(ix, iy, seed + 23);
+              if (rd < 0.2 && r2 > 0.9 && fine > 0.45) c = shade(GRASS[3], (rnd - 0.5) * 0.2); // weeds down the middle
+              if (rd > 0.8 && rnd < (rd - 0.8) * 4.5) c = GRASS[1 + Math.floor(r2 * 3)];
+              else if (r2 > 0.988) c = shade(ROCK, 0.05 + (rnd - 0.5) * 0.3);
+              else if (r2 < 0.012) c = shade(c, -0.22);
+              if (fine > 0.74 && rd < 0.62) c = fine > 0.77 ? shade(mix(RUT, W_SHALLOW, 0.5), rnd > 0.93 ? 0.3 : -0.1) : shade(RUT, -0.2); // puddles
               break;
             }
             case K.Pad: {
-              // concrete slab with seams every 8 units
-              const seam = ((wx % 8) + 8) % 8 < 0.7 || ((wy % 8) + 8) % 8 < 0.7;
-              c = seam ? CONC_D : shade(CONC, (N(wx, wy, 4, seed + 9, 2) - 0.5) * 0.25);
-              if (padEdge(wx, wy)) c = shade(CONC_D, -0.1);
-              if (!seam && rnd > 0.985) c = shade(c, -0.3); // oil stains
-              c = shade(c, (rnd - 0.5) * 0.1);
+              // concrete slabs: joints every 8 units, lit along one side, with
+              // hairline cracks, stains and a kerb
+              const mx = ((wx % 8) + 8) % 8;
+              const my = ((wy % 8) + 8) % 8;
+              const slab = hash2(Math.floor(wx / 8), Math.floor(wy / 8), seed + 9);
+              c = shade(CONC, (slab - 0.5) * 0.12 + (nFine(px, py) - 0.5) * 0.14 + (rnd - 0.5) * 0.06);
+              if (mx < 0.5 || my < 0.5) c = CONC_D;
+              else if (mx < 1 || my < 1) c = shade(c, 0.1);
+              else {
+                const cr = this.noise(wx, wy, 7, seed + 24 + Math.floor(slab * 3), 2);
+                if (slab > 0.6 && Math.abs(cr - 0.5) < 0.012) c = shade(c, -0.25);
+                const r2 = hash2(ix >> 1, iy >> 1, seed + 25);
+                if (r2 > 0.992) c = shade(c, -0.28); // oil
+                else if (slab < 0.12 && (mx - 4) ** 2 + (my - 4) ** 2 < 2.2) c = (mx - 4) ** 2 + (my - 4) ** 2 < 1.2 && (Math.floor(mx * 2) + Math.floor(my * 2)) % 2 ? shade(CONC_D, -0.3) : CONC_D; // drain
+              }
+              const pad = (x: number, y: number) => {
+                const i = Math.floor(x) - R.x0;
+                const j = Math.floor(y) - R.y0;
+                return i >= 0 && j >= 0 && i < rw && j < rh && R.kind[j * rw + i] === K.Pad;
+              };
+              if (!pad(wx + 0.6, wy) || !pad(wx, wy + 0.6)) c = shade(CONC_D, -0.2);
+              else if (!pad(wx - 0.6, wy) || !pad(wx, wy - 0.6)) c = shade(CONC, 0.2);
+              else if (!pad(wx + 1.6, wy) || !pad(wx, wy + 1.6) || !pad(wx - 1.6, wy) || !pad(wx, wy - 1.6)) c = shade(CONC, 0.06);
               break;
             }
             default: {
-              const patch = N(wx, wy, 18, seed + 11, 3);
-              const tone = N(wx, wy, 5, seed + 12, 2);
-              const tile = (hash2(Math.floor(wx / 8), Math.floor(wy / 8), seed + 2) - 0.5) * 0.6;
-              let gi = Math.floor((patch * 0.7 + tone * 0.3) * 6 + tile + (rnd - 0.5) * 2);
+              // grass: broad patches of tone, mottled finely, with blades,
+              // drifts of flowers, clover, dry and bare patches and pebbles
+              const patch = nPatch(px, py);
+              const tone = nTone(px, py);
+              const cell = (hash2(ix >> 1, iy >> 1, seed + 2) - 0.5) * 1.3;
+              let gi = Math.floor((patch * 0.7 + tone * 0.3) * 6.4 - 0.2 + cell + (rnd - 0.5) * 1.2);
               gi = Math.max(0, Math.min(GRASS.length - 1, gi));
               c = GRASS[gi];
-              const dirt = N(wx, wy, 24, seed + 13, 3);
-              if (dirt > 0.65 && rnd < (dirt - 0.65) * 6) c = mix(c, DIRT, 0.6);
-              if (rnd > 0.975) tufts.push([lx, ly, shade(GRASS[5], 0.15)]);
-              else if (rnd < 0.004) c = FLOWER[Math.floor(hash2(sx, sy, 3) * 3)];
-              else if (rnd < 0.012) c = shade(c, -0.4);
-              if (rnd < 0.3 && near(wx, wy, 2, (kk) => kk === K.High)) c = shade(mix(c, ROCK_D, 0.5), -0.05); // rubble
+              const dirt = nDirt(px, py);
+              const bloom = nBloom(px, py);
+              const r2 = hash2(ix, iy, seed + 26);
+              if (dirt > 0.7 && tone > 0.42) {
+                c = shade(DIRT, (tone - 0.5) * 0.3 + (rnd - 0.5) * 0.12); // bare earth
+                if (r2 > 0.97) c = shade(ROCK, (rnd - 0.5) * 0.3);
+                else if (r2 < 0.06) c = GRASS[2];
+              } else if (dirt > 0.6 && rnd < (dirt - 0.6) * 7) c = mix(c, DRY, 0.55);
+              else if (bloom < 0.3 && tone > 0.55 && rnd < 0.55) c = mix(c, CLOVER, 0.6);
+              else if (r2 > 0.986) dots.push([lx, ly, shade(GRASS[5], rnd * 0.1)]); // blades
+              else if (r2 < 0.035) c = shade(c, -0.26);
+              else if (bloom > 0.62 && r2 < 0.035 + (bloom - 0.62) * 0.16) c = FLOWER[Math.floor(hash2(ix >> 3, iy >> 3, seed + 27) * FLOWER.length)];
+              else if (r2 > 0.9853) c = shade(ROCK, -0.05);
+              else if (r2 < 0.0358) c = FLOWER[Math.floor(rnd * FLOWER.length)];
+              if (anyHigh && rnd < 0.4 && hiClose[cj * rw + ci] && (hiAt(wx + 2, wy) || hiAt(wx - 2, wy) || hiAt(wx, wy + 2) || hiAt(wx, wy - 2))) c = shade(mix(c, ROCK_D, 0.55), (r2 - 0.5) * 0.3); // scree
             }
           }
           // shadows cast by plateaus
-          for (let t = 1; t <= 9; t++) {
-            if (hiAt(wx - t, wy + t * 0.25)) {
-              c = shade(c, -0.38);
-              break;
+          if (anyHigh && hiClose[cj * rw + ci])
+            for (let t = 1; t <= 9; t++) {
+              if (hiAt(wx - t, wy + t * 0.25)) {
+                c = shade(c, -0.38);
+                break;
+              }
             }
-          }
         }
         put(lx, ly, c);
       }
-    for (const [x, y, c] of tufts) {
+    }
+    // blades and tufts stand a pixel or two tall, with a dark foot
+    for (const [x, y, c] of dots) {
+      const i = (y * NP + x) * 4;
+      if (d[i + 1] < d[i]) continue; // painted over by something that isn't green
       put(x, y, c);
       put(x, y - 1, shade(c, 0.1));
     }
 
-    // a couple of craters, kept clear of the tile's edges
+    // a couple of craters, kept clear of the tile's edges: a dark bowl with
+    // a lit far wall, a raised rim and a spray of thrown earth
     for (let n = 0; n < 2; n++) {
       if (hash2(tx, ty, seed + 900 + n) > 0.8) continue;
-      const cx = 8 + Math.floor(hash2(tx, ty, seed + 910 + n) * (CH - 16));
-      const cy = 6 + Math.floor(hash2(tx, ty, seed + 920 + n) * (CH - 12));
+      const cx = 10 + Math.floor(hash2(tx, ty, seed + 910 + n) * (CH - 20));
+      const cy = 8 + Math.floor(hash2(tx, ty, seed + 920 + n) * (CH - 16));
       const rr = 2.5 + hash2(tx, ty, seed + 930 + n) * 3;
       const [cwx, cwy] = toWorld(SX0 + cx, SY0 + cy, 0);
-      if (kAt(cwx, cwy) !== K.Grass || hiAt(cwx + HP, cwy + HP)) continue;
-      for (let y = -4; y <= 4; y++)
-        for (let x = -7; x <= 7; x++) {
-          const dd = Math.hypot(x / 2, y) / (rr * 0.6);
-          if (dd > 1.25) continue;
-          const i = ((cy + y) * CH + cx + x) * 4;
-          const f = dd < 0.7 ? -0.45 : dd < 1 ? (y < 0 ? -0.25 : 0.18) : -0.1;
-          d[i] *= 1 + f;
-          d[i + 1] *= 1 + f;
-          d[i + 2] *= 1 + f;
+      if (this.k(cwx, cwy) !== K.Grass || this.k(cwx + 4, cwy) !== K.Grass || this.k(cwx, cwy + 4) !== K.Grass || hiAt(cwx + HP, cwy + HP)) continue;
+      for (let y = -5 * S; y <= 5 * S; y++)
+        for (let x = -9 * S; x <= 9 * S; x++) {
+          const X = cx * S + x;
+          const Y = cy * S + y;
+          if (X < 0 || Y < 0 || X >= NP || Y >= NP) continue;
+          const dd = Math.hypot(x / S / 2, y / S) / (rr * 0.6);
+          const h = hash2(X, Y, seed + 31);
+          let f = 0;
+          let earth = 0;
+          if (dd < 0.45) (f = -0.5), (earth = 0.5);
+          else if (dd < 0.8) (f = y < 0 ? -0.42 : -0.12), (earth = 0.6);
+          else if (dd < 1.05) (f = y < 0 ? 0.2 : -0.05), (earth = 0.45);
+          else if (dd < 1.7 && h < (1.7 - dd) * 0.5) (f = -0.12), (earth = 0.5);
+          else continue;
+          const i = (Y * NP + X) * 4;
+          for (let ch = 0; ch < 3; ch++) {
+            const v = d[i + ch] + (DIRT[ch] * 0.75 - d[i + ch]) * earth;
+            d[i + ch] = f >= 0 ? v + (255 - v) * f : v * (1 + f);
+          }
         }
     }
 
-    const foam = fimg || f2img ? canvasOf(fimg ?? new ImageData(CH, CH)) : null;
-    const foam2 = foam ? canvasOf(f2img ?? new ImageData(CH, CH)) : null;
+    const foam = fimg || f2img ? canvasOf(fimg ?? new ImageData(NP, NP)) : null;
+    const foam2 = foam ? canvasOf(f2img ?? new ImageData(NP, NP)) : null;
     return { canvas: canvasOf(img), foam, foam2, region: R };
   }
 
