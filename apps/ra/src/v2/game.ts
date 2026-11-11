@@ -1,11 +1,11 @@
 // v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
-import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
+import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
 import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
-import { StackSprite, toScreen, toWorld } from './stack';
+import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { MAPS, mapDef, mapPreview } from './maps';
 import {
   BuildingKind,
@@ -143,6 +143,7 @@ const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler
 const HELI_ALT = 20;
 
 export class IsoGame implements GameLike {
+  readonly fine = true;
   terrain!: IsoTerrain;
   units: Unit[] = [];
   buildings: Building[] = [];
@@ -446,7 +447,7 @@ export class IsoGame implements GameLike {
     for (const u of this.units) u.z = this.groundZ(u);
 
     this.home = mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
-    this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty));
+    this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
     this.emit();
   }
 
@@ -521,11 +522,11 @@ export class IsoGame implements GameLike {
                 ? [art.heavyTank[di], art.heavyTurret[di]]
                 : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
         const base = layers[0];
-        const k = Math.max(1, Math.min(3, Math.floor(Math.min(W / (base.img.width * 0.55), H / (base.img.height * 0.65)))));
+        const k = Math.max(1, Math.min(3, Math.floor(Math.min(W / (base.w * 0.55), H / (base.h * 0.65)))));
         c.imageSmoothingEnabled = false;
         c.translate(W / 2, H / 2 + 4);
         c.scale(k, k);
-        for (const s of layers) c.drawImage(s.img, -s.cx, -s.cy);
+        for (const s of layers) c.drawImage(s.img, -s.cx, -s.cy, s.w, s.h);
       }
       url = cv.toDataURL();
       this.icons.set(t.id, url);
@@ -1112,9 +1113,9 @@ export class IsoGame implements GameLike {
   private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
   // Paint one tile of ground and scatter its trees, bushes and rocks.
-  private buildTile(tx: number, ty: number): Tile<Prop> {
+  private *buildTile(tx: number, ty: number): Generator<void, Tile<Prop>> {
     const T = this.terrain;
-    const p = T.paintTile(tx, ty);
+    const p = yield* T.paintSteps(tx, ty);
     const R = p.region;
     const kAt = (x: number, y: number): K => {
       const i = Math.floor(x) - R.x0;
@@ -1651,7 +1652,7 @@ export class IsoGame implements GameLike {
   private blit(spr: StackSprite, wx: number, wy: number, z: number, shadowOnly = false): void {
     const [sx, sy] = toScreen(wx, wy, z);
     const c = shadowOnly ? spr.shadow : spr.img;
-    if (c) this.ctx.drawImage(c, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
+    if (c) drawSprite(this.ctx, c, spr, sx, sy);
   }
 
   // A tread mark at screen point (x, y), if that bit of ground is painted.
@@ -1660,7 +1661,10 @@ export class IsoGame implements GameLike {
     if (!t) return;
     const c = t.canvas.getContext('2d')!;
     c.fillStyle = style;
-    c.fillRect(Math.round(x) - Math.floor(Math.round(x) / CH) * CH, Math.round(y) - Math.floor(Math.round(y) / CH) * CH, 1, 1);
+    const X = Math.round(x * ART);
+    const Y = Math.round(y * ART);
+    const n = CH * ART;
+    c.fillRect(X - Math.floor(X / n) * n, Y - Math.floor(Y / n) * n, 1, 1);
   }
 
   // The ground for screen rect (x0, y0)-(x1, y1), in unwrapped map pixels,
@@ -1745,7 +1749,7 @@ export class IsoGame implements GameLike {
       if (u.kind !== 'heli' || !seen(u.x, u.y)) continue;
       const spr = this.art[u.f].heli[dirIndex(u.a, DIRS)];
       const [sx, sy] = toScreen(u.x + 4, u.y - 2, u.z);
-      if (spr.shadow) c.drawImage(spr.shadow, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
+      if (spr.shadow) drawSprite(c, spr.shadow, spr, sx, sy);
     }
 
     type Item = { k: number; draw: () => void };
@@ -1777,7 +1781,14 @@ export class IsoGame implements GameLike {
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle =
         p.kind === 'smoke' ? `rgba(222,222,216,${0.6 * (1 - k)})` : p.kind === 'soot' ? `rgba(70,66,60,${0.55 * (1 - k)})` : `rgba(165,145,105,${0.5 * (1 - k)})`;
-      c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+      const X = Math.round(p.x - s / 2);
+      const Y = Math.round(p.y - s / 2);
+      if (s > 1) {
+        // a puff with its corners knocked off
+        c.fillRect(X + 0.5, Y, s - 1, s);
+        c.fillRect(X, Y + 0.5, 0.5, s - 1);
+        c.fillRect(X + s - 0.5, Y + 0.5, 0.5, s - 1);
+      } else c.fillRect(X, Y, s, s);
       if (s > 2) {
         c.fillStyle = p.kind === 'smoke' ? `rgba(255,255,255,${0.35 * (1 - k)})` : 'rgba(0,0,0,0)';
         c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), Math.ceil(s / 2), 1);
@@ -1902,7 +1913,7 @@ export class IsoGame implements GameLike {
       find: for (let y = 0; y < img.height; y++)
         for (let x = 0; x < img.width; x++)
           if (d[(y * img.width + x) * 4 + 3] > 200) {
-            t = y;
+            t = y / ART;
             break find;
           }
       this.tops.set(b.art, t);
@@ -2044,7 +2055,7 @@ export class IsoGame implements GameLike {
       const H = spr.img.height;
       const top = Math.round(H * (1 - b.rise));
       this.drawFoot(b.pad, '#ffe08a', 0.8);
-      if (H - top > 0) c.drawImage(spr.img, 0, top, W, H - top, x, y + top, W, H - top);
+      if (H - top > 0) c.drawImage(spr.img, 0, top, W, H - top, x, y + top / ART, spr.w, (H - top) / ART);
       return;
     }
     this.blit(b.art.spr, b.x, b.y, 0);

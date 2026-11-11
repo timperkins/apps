@@ -31,7 +31,9 @@ A pixel-art real-time strategy graphics test at [ra.trom.dev](https://ra.trom.de
   - **v2 · Isometric** (default): 2:1 isometric view with raised plateaus and rock faces, and every unit, building, tree and prop drawn as a shaded voxel shape with cast shadows (`src/v2/`).
   - **v1 · Top-down**: the original straight-down oblique view (`src/v1/`).
 
-No collision or combat yet, and cliffs don't block units yet. All art is drawn in code (`sprites.ts` and `terrain.ts` in each version's folder) at native pixel size and scaled up with nearest-neighbour filtering.
+No collision or combat yet, and cliffs don't block units yet. All art is drawn in code (`sprites.ts` and `terrain.ts` in each version's folder) and scaled up with nearest-neighbour filtering.
+
+**How v2's art is drawn**: every unit, building and prop is a little model, a function from a point in space to a colour (`src/v2/sprites.ts`), which `src/v2/stack.ts` turns into a sprite by casting a ray per pixel. It lights each surface by which way it faces (so round things shade in bands), lets parts cast shadows on each other and the ground, darkens corners, and draws a lit rim and a dark line where one part stands in front of another. The art is drawn at twice the map's own grid (`ART` in `src/gfx.ts`): things are the same size on screen as before with pixels half as big, which is what leaves room for hatches, road wheels, window frames, roof clutter, courses of stone in the cliffs and blades of grass. The ground is painted to match (`paintSteps` in `src/v2/terrain.ts`), a few rows per frame so that painting a tile never holds up a frame. v1 is still drawn one for one.
 
 ```sh
 npm install

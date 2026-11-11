@@ -5,7 +5,7 @@
 // A shape is a function of local coordinates (u forward, v right, z up) that
 // returns a colour or null. Each sprite pixel casts a ray down through the
 // volume; the first solid sample is shaded as a top, left or right face.
-import { Pix, RGB, shade } from '../gfx';
+import { ART, Pix, RGB, shade } from '../gfx';
 
 export type Shape = (u: number, v: number, z: number) => RGB | null;
 
@@ -35,8 +35,15 @@ export interface StackOpts {
 export interface StackSprite {
   img: HTMLCanvasElement;
   shadow: HTMLCanvasElement | null;
-  cx: number; // canvas position of the ground origin
+  cx: number; // where the ground origin is in the picture, in map pixels
   cy: number;
+  w: number; // size in map pixels (the picture itself is ART times that)
+  h: number;
+}
+
+// Draw a sprite with its ground origin at (x, y), in map pixels.
+export function drawSprite(c: CanvasRenderingContext2D, img: HTMLCanvasElement, spr: StackSprite, x: number, y: number): void {
+  c.drawImage(img, Math.round((x - spr.cx) * ART) / ART, Math.round((y - spr.cy) * ART) / ART, spr.w, spr.h);
 }
 
 export function renderStack(shape: Shape, o: StackOpts): StackSprite {
@@ -45,10 +52,13 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
   const zmax = o.zmax;
   const step = o.step ?? 0.5;
   const shadowReach = Math.ceil(zmax * 0.9);
-  const W = Math.ceil(rx + ry) * 2 + 4 + shadowReach;
-  const H = Math.ceil((rx + ry) / 2) * 2 + zmax + 4 + Math.ceil(shadowReach / 2);
-  const cx = Math.ceil(rx + ry) + 2;
-  const cy = zmax + 2 + Math.ceil((rx + ry) / 2);
+  const D = ART;
+  const lw = Math.ceil(rx + ry) * 2 + 4 + shadowReach;
+  const lh = Math.ceil((rx + ry) / 2) * 2 + zmax + 4 + Math.ceil(shadowReach / 2);
+  const W = lw * D;
+  const H = lh * D;
+  const cx = (Math.ceil(rx + ry) + 2) * D;
+  const cy = (zmax + 2 + Math.ceil((rx + ry) / 2)) * D;
   const a = o.angle ?? 0;
   const ca = Math.cos(a);
   const sa = Math.sin(a);
@@ -65,10 +75,25 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
   const top = o.top ?? 0.06;
   const left = o.left ?? -0.1;
   const right = o.right ?? -0.32;
+  const len = Math.hypot(...LIGHT);
+  const L = LIGHT.map((v) => v / len);
+  const solid = (wx: number, wy: number, z: number) => (z < 0 ? 1 : z <= hAt(wx, wy) + 0.6 && local(wx, wy, z) ? 1 : 0);
+  // Is the light blocked on its way to this point of the shape (or the ground)?
+  const shadowed = (wx: number, wy: number, z: number) => {
+    for (let t = 0.9; z + L[2] * t <= zmax + 0.5; t += 0.7) {
+      const x = wx + L[0] * t;
+      const y = wy + L[1] * t;
+      const zz = z + L[2] * t;
+      if (hAt(x, y) + 0.3 >= zz && local(x, y, zz)) return true;
+    }
+    return false;
+  };
+  // How far up the view ray each pixel's surface is, for the edge lines.
+  const depth = new Float32Array(W * H).fill(-99);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const dx = x + 0.5 - cx;
-      const dy = y + 0.5 - cy;
+      const dx = (x + 0.5 - cx) / D;
+      const dy = (y + 0.5 - cy) / D;
       for (let z = zmax; z >= 0; z -= step) {
         const wx = dx / 2 + dy + z;
         const wy = dy + z - dx / 2;
@@ -76,31 +101,81 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
         if (!inFoot(wx, wy)) continue;
         const c = local(wx, wy, z);
         if (!c) continue;
+        depth[y * W + x] = z;
+        if (o.flat) {
+          p.set(x, y, shade(c, top));
+          break;
+        }
+        // The surface normal, from which of the neighbouring cells are solid:
+        // flat faces come out as one of three tones, round ones in bands.
+        let nx = solid(wx - 0.7, wy, z) - solid(wx + 0.7, wy, z);
+        let ny = solid(wx, wy - 0.7, z) - solid(wx, wy + 0.7, z);
+        let nz = solid(wx, wy, z - 0.7) - solid(wx, wy, z + 0.7);
         let f: number;
-        if (!local(wx, wy, z + step)) f = top;
-        else if (!local(wx + 0.9, wy, z)) f = right;
-        else f = left;
+        if (!nx && !ny && !nz) {
+          // too thin to tell (masts, barrels, rails)
+          if (!local(wx, wy, z + step)) f = top;
+          else if (!local(wx + 0.9, wy, z)) f = right;
+          else f = left;
+        } else {
+          if (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) > 1) {
+            nx += (solid(wx - 1.5, wy, z) - solid(wx + 1.5, wy, z)) * 0.6;
+            ny += (solid(wx, wy - 1.5, z) - solid(wx, wy + 1.5, z)) * 0.6;
+            nz += (solid(wx, wy, z - 1.5) - solid(wx, wy, z + 1.5)) * 0.6;
+          }
+          const nl = Math.hypot(nx, ny, nz) || 1;
+          const d = (nx * L[0] + ny * L[1] + nz * L[2]) / nl;
+          // -0.66 is a face turned from the light, 0.16 one side on, 0.72 a top
+          if (d < 0.16) f = right + ((Math.max(d, -0.66) + 0.66) / 0.82) * (left - right);
+          else if (d < 0.72) f = left + ((d - 0.16) / 0.56) * (top - left);
+          else f = top + ((d - 0.72) / 0.28) * 0.12;
+          f = Math.round(f * 20) / 20;
+          if (d > 0.1 && shadowed(wx + (nx / nl) * 0.8, wy + (ny / nl) * 0.8, z + (nz / nl) * 0.8)) f -= 0.17;
+        }
+        // tucked in against something taller: a little darker
+        let ao = 0;
+        const az = z + 1.6;
+        if (solid(wx - 1.6, wy, az)) ao++;
+        if (solid(wx + 1.6, wy, az)) ao++;
+        if (solid(wx, wy - 1.6, az)) ao++;
+        if (solid(wx, wy + 1.6, az)) ao++;
+        f -= ao * 0.045;
+        if (z < 1 && nz <= 0) f -= 0.08; // where it meets the ground
         p.set(x, y, shade(c, f));
         break;
       }
     }
+  // Edge lines inside the sprite: a part standing in front of another gets a
+  // lit rim along its top and the part behind a dark line under it.
+  if (!o.flat) {
+    const src = p.data.slice();
+    const E = 1.2 + 1 / D;
+    for (let y = 1; y < H - 1; y++)
+      for (let x = 1; x < W - 1; x++) {
+        const q = y * W + x;
+        const z = depth[q];
+        if (z < -50) continue;
+        const up = depth[q - W];
+        const lf = depth[q - 1];
+        const rt = depth[q + 1];
+        const dn = depth[q + W];
+        let f = 0;
+        if ((up > z + E && up > -50) || (lf > z + E && lf > -50) || (rt > z + E && rt > -50) || dn > z + E + 1) f = -0.2;
+        else if (up > -50 && up < z - E - 1) f = 0.1;
+        if (f) {
+          const i = q * 4;
+          p.set(x, y, shade([src[i], src[i + 1], src[i + 2]], f));
+        }
+      }
+  }
 
   // Ground shadow: march from each ground point towards the light.
   const sh = new Pix(W, H);
-  const len = Math.hypot(...LIGHT);
-  const L = LIGHT.map((v) => v / len);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const gx = (x + 0.5 - cx) / 2 + (y + 0.5 - cy);
-      const gy = y + 0.5 - cy - (x + 0.5 - cx) / 2;
-      let hit = false;
-      for (let t = 0.6; t * L[2] <= zmax; t += 0.7) {
-        if (hAt(gx + L[0] * t, gy + L[1] * t) >= L[2] * t) {
-          hit = true;
-          break;
-        }
-      }
-      if (hit) sh.set(x, y, [0, 0, 0], Math.round(255 * (o.shadowAlpha ?? 0.34)));
+      const gx = (x + 0.5 - cx) / D / 2 + (y + 0.5 - cy) / D;
+      const gy = (y + 0.5 - cy) / D - (x + 0.5 - cx) / D / 2;
+      if (shadowed(gx, gy, 0)) sh.set(x, y, [0, 0, 0], Math.round(255 * (o.shadowAlpha ?? 0.34)));
     }
 
   if (!o.flat) p.finish(o.outline ?? [18, 20, 16], 0.12, -0.18);
@@ -111,7 +186,7 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
     out.getContext('2d')!.drawImage(p.canvas(), 0, 0);
     img = out;
   } else img = p.canvas();
-  return { img, shadow: o.bakeShadow ? null : sh.canvas(), cx, cy };
+  return { img, shadow: o.bakeShadow ? null : sh.canvas(), cx: cx / D, cy: cy / D, w: lw, h: lh };
 }
 
 // Headings are rendered lazily, the first time each one is drawn, so the game

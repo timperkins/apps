@@ -2,6 +2,7 @@ import './style.css';
 import type { GameLike } from './types';
 import { Globe, View } from './planet';
 import { CH } from './tiles';
+import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
@@ -148,7 +149,7 @@ function refreshActions(): void {
 function selectView(add: boolean): void {
   if (!game) return;
   if (planet) game.boxSelect(cen.x - built.w / 4, cen.y - built.h / 4, cen.x + built.w / 4, cen.y + built.h / 4, add);
-  else game.boxSelect(camX(), camY(), camX() + canvas.width, camY() + canvas.height, add);
+  else game.boxSelect(camX(), camY(), camX() + view.w, camY() + view.h, add);
 }
 
 function showSelection(names: string[]): void {
@@ -197,8 +198,11 @@ const TAU = Math.PI * 2;
 // at the same zoom, so the jump into space always shrinks them.
 const GLOBE_K = 0.75;
 
-const camX = () => cen.x - canvas.width / 2;
-const camY = () => cen.y - canvas.height / 2;
+// The view's size in map pixels, and how many canvas pixels each one gets.
+const view = { w: 1, h: 1 };
+let dens = 1;
+const camX = () => cen.x - view.w / 2;
+const camY = () => cen.y - view.h / 2;
 
 // The camera can go anywhere; just keep its numbers from growing without end.
 function clampCen(): void {
@@ -218,8 +222,13 @@ function applyScale(): void {
   scale = planet ? base : base * zoom;
   const w = Math.ceil(vw / scale);
   const h = Math.ceil(vh / scale);
-  if (canvas.width !== w) canvas.width = w;
-  if (canvas.height !== h) canvas.height = h;
+  view.w = w;
+  view.h = h;
+  // On the map the canvas holds ART pixels for each map pixel, so the art can
+  // be finer than the map's grid; in space the globe is drawn one for one.
+  dens = planet || !game?.fine ? 1 : ART;
+  if (canvas.width !== w * dens) canvas.width = w * dens;
+  if (canvas.height !== h * dens) canvas.height = h * dens;
   canvas.style.width = `${w * scale}px`;
   canvas.style.height = `${h * scale}px`;
   mini.hidden = planet;
@@ -239,8 +248,8 @@ function zoomTo(z: number, cx: number, cy: number): void {
   zoom = z;
   applyScale();
   if (!planet && !before) {
-    cen.x = m.x - (cx / scale - canvas.width / 2);
-    cen.y = m.y - (cy / scale - canvas.height / 2);
+    cen.x = m.x - (cx / scale - view.w / 2);
+    cen.y = m.y - (cy / scale - view.h / 2);
   }
   clampCen();
 }
@@ -373,7 +382,7 @@ regen.addEventListener('click', () => {
 
 function spaceView(): View {
   const r = (GLOBE_K * built.w * zoom) / TAU;
-  return { cx: canvas.width / 2, cy: canvas.height / 2, r, x: cen.x, y: cen.y };
+  return { cx: view.w / 2, cy: view.h / 2, r, x: cen.x, y: cen.y };
 }
 function miniView(): View {
   return { cx: mini.width / 2, cy: mini.height / 2, r: mini.width / 2 - 3, x: cen.x, y: cen.y };
@@ -409,8 +418,8 @@ function drawMini(): void {
   // the part of the world on screen, traced round the edge of the view
   const x0 = camX();
   const y0 = camY();
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = view.w;
+  const h = view.h;
   mctx.fillStyle = '#ffffff';
   const n = 48;
   for (let i = 0; i < n * 4; i++) {
@@ -560,8 +569,8 @@ canvas.addEventListener(
       pinch.mx = p.mx;
       pinch.my = p.my;
     } else {
-      cen.x = pinch.wx - (p.mx / scale - canvas.width / 2);
-      cen.y = pinch.wy - (p.my / scale - canvas.height / 2);
+      cen.x = pinch.wx - (p.mx / scale - view.w / 2);
+      cen.y = pinch.wy - (p.my / scale - view.h / 2);
     }
     clampCen();
   },
@@ -790,11 +799,11 @@ function drawWhoosh(now: number): void {
     whoosh = null;
     return;
   }
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = view.w;
+  const h = view.h;
   const R = Math.hypot(w, h) / 2;
   const fade = Math.sin(Math.PI * t);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.setTransform(dens, 0, 0, dens, 0, 0);
   ctx.fillStyle = `rgba(205,228,255,${0.5 * fade})`;
   ctx.fillRect(0, 0, w, h);
   // soft wisps of cloud, stretched along their path
@@ -876,9 +885,10 @@ function draw(now: number, first: boolean): void {
   } else {
     const x0 = Math.round(camX());
     const y0 = Math.round(camY());
-    const x1 = x0 + canvas.width;
-    const y1 = y0 + canvas.height;
-    ctx.setTransform(1, 0, 0, 1, -x0, -y0);
+    const x1 = x0 + view.w;
+    const y1 = y0 + view.h;
+    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(dens, 0, 0, dens, -x0 * dens, -y0 * dens);
     game.renderGround(x0, y0, x1, y1, first ? 1e5 : 10);
     // Objects for every copy of the map in view (sprites hang over the edges).
     const W = built.w;
@@ -886,10 +896,10 @@ function draw(now: number, first: boolean): void {
     const pad = 80;
     for (let j = Math.floor((y0 - pad) / H); j <= Math.floor((y1 + pad) / H); j++)
       for (let k = Math.floor((x0 - pad) / W); k <= Math.floor((x1 + pad) / W); k++) {
-        ctx.setTransform(1, 0, 0, 1, k * W - x0, j * H - y0);
+        ctx.setTransform(dens, 0, 0, dens, (k * W - x0) * dens, (j * H - y0) * dens);
         game.renderObjects(x0 - k * W, y0 - j * H, x1 - k * W, y1 - j * H);
       }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(dens, 0, 0, dens, 0, 0);
     drawBox();
     if (globe.ready) drawMini();
   }

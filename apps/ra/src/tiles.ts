@@ -23,7 +23,9 @@ export class Tiles<P> {
   constructor(
     w: number,
     h: number,
-    private build: (tx: number, ty: number) => Tile<P>,
+    // Builds a tile, either in one go or as steps that end with the tile, to
+    // be spread over several frames.
+    private build: (tx: number, ty: number) => Tile<P> | Generator<void, Tile<P>>,
     private max = 360,
   ) {
     this.nx = Math.round(w / CH);
@@ -72,33 +74,52 @@ export class Tiles<P> {
     for (let ty = Math.floor(y0 / CH); ty <= Math.floor(y1 / CH); ty++)
       for (let tx = Math.floor(x0 / CH); tx <= Math.floor(x1 / CH); tx++) {
         const k = this.key(tx, ty);
+        if (this.job?.k === k) this.job = null; // half painted from what was there before
         if (this.map.has(k)) this.stale.add(k);
       }
   }
   private stale = new Set<number>();
 
-  // Paint queued tiles for up to `ms` milliseconds (always at least one).
+  // The tile being painted, if it is taking more than one frame.
+  private job: { k: number; steps: Generator<void, Tile<P>> } | null = null;
+
+  // Paint queued tiles for up to `ms` milliseconds (always at least a step).
   pump(ms: number): void {
     const t0 = performance.now();
-    for (const k of [...this.stale]) {
-      this.stale.delete(k);
-      const old = this.map.get(k);
-      if (!old) continue;
-      if (old.used !== this.frame) {
-        this.map.delete(k);
-        continue;
+    for (;;) {
+      if (!this.job) {
+        let k = -1;
+        for (const s of this.stale) {
+          this.stale.delete(s);
+          const old = this.map.get(s);
+          if (!old) continue;
+          if (old.used !== this.frame) {
+            this.map.delete(s);
+            continue;
+          }
+          k = s;
+          break;
+        }
+        while (k < 0 && this.want.length) {
+          const w = this.want.shift()!;
+          if (!this.map.has(w)) k = w;
+        }
+        if (k < 0) break;
+        const r = this.build(k % this.nx, Math.floor(k / this.nx));
+        if ('canvas' in r) {
+          r.used = this.frame;
+          this.map.set(k, r);
+        } else this.job = { k, steps: r };
       }
-      const t = this.build(k % this.nx, Math.floor(k / this.nx));
-      t.used = this.frame;
-      this.map.set(k, t);
-      if (performance.now() - t0 > ms) return;
-    }
-    while (this.want.length) {
-      const k = this.want.shift()!;
-      if (this.map.has(k)) continue;
-      const t = this.build(k % this.nx, Math.floor(k / this.nx));
-      t.used = this.frame;
-      this.map.set(k, t);
+      while (this.job) {
+        const r = this.job.steps.next();
+        if (r.done) {
+          r.value.used = this.frame;
+          this.map.set(this.job.k, r.value);
+          this.job = null;
+        }
+        if (performance.now() - t0 > ms) break;
+      }
       if (performance.now() - t0 > ms) break;
     }
     if (this.map.size > this.max) {
@@ -150,12 +171,12 @@ export function drawTiles<P>(
         c.drawImage(overview!, u, v, s, s, x, y, CH, CH);
         continue;
       }
-      c.drawImage(t.canvas, x, y);
+      c.drawImage(t.canvas, x, y, CH, CH);
       if (t.foam) {
         c.globalAlpha = foamA;
-        c.drawImage(t.foam, x, y);
+        c.drawImage(t.foam, x, y, CH, CH);
         c.globalAlpha = foamB;
-        c.drawImage(t.foam2!, x, y);
+        c.drawImage(t.foam2!, x, y, CH, CH);
         c.globalAlpha = 1;
       }
     }
