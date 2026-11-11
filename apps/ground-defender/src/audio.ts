@@ -68,6 +68,19 @@ export const Sound = {
   hitPlane(pan = 0) { this.noise(.18, 'bandpass', 2200, 2, .25, pan); this.tone('square', 420, 180, .08, .05, pan); },
   intercept(pan = 0) { this.noise(.4, 'bandpass', 1500, 1, .32, pan); this.tone('sine', 660, 990, .12, .06, pan); },
   minigun(pan = 0) { for (let i = 0; i < 6; i++) this.noise(.05, 'highpass', 1800, .7, .14, pan, i * .07); },
+  /** Ground Defender: a rattling burst for the rapid crossbow. */
+  rattle() { this.noise(.05, 'bandpass', 1700, 1.1, .2); this.tone('square', 160, 80, .04, .05); },
+  /** A high "dink" of a pick on rock. */
+  dink() { this.tone('triangle', 2500, 2300, .14, .13); this.tone('sine', 3800, 3700, .09, .05); },
+  /** One soft footstep. */
+  step() { this.noise(.05, 'lowpass', 420, .8, .08); },
+  /** A bear growling nearby. */
+  growl(pan = 0) { this.tone('sawtooth', 95, 70, .8, .05, pan); this.noise(.7, 'lowpass', 260, 2, .14, pan); },
+  /** A turret's shot: a clack and a crack. */
+  turret() { this.noise(.06, 'bandpass', 2400, 1.4, .13); this.tone('square', 650, 260, .06, .045); },
+  /** An acid fish spitting, and acid sizzling. */
+  spit() { this.noise(.22, 'bandpass', 800, 2, .16); this.tone('sine', 520, 180, .2, .07); },
+  sizzle() { this.noise(.35, 'highpass', 2800, .7, .07); },
   pop() { this.tone('sine', 520, 880, .18, .2); this.tone('sine', 780, 1320, .22, .12, 0, .08); },
   ui() { this.tone('sine', 700, 900, .07, .12); },
   denied() { this.tone('square', 220, 150, .2, .08); },

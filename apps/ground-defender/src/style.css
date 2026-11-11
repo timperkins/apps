@@ -449,3 +449,8 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .aslot img { width: 84%; height: 84%; pointer-events: none; }
 .aslot b { position: absolute; right: 3px; bottom: 4px; font: 600 10.5px/1 var(--font-b); text-shadow: 0 1px 2px #000, 0 0 2px #000; pointer-events: none; }
 .aslot .pts { position: absolute; left: 0; bottom: 0; height: 3px; background: #ffe14a; pointer-events: none; }
+
+.seg.mrecs { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 4px; border-radius: 14px; }
+.seg.mrecs button { display: flex; align-items: center; gap: 6px; padding: 8px 10px; font-size: 13px; border-radius: 10px; text-align: left; }
+.seg.mrecs button img, .seg.mrecs button canvas { width: 22px; height: 22px; flex: none; }
+.seg.mrecs button small { margin-left: auto; opacity: .7; font-size: 11px; }
