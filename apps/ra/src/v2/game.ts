@@ -1,5 +1,5 @@
 // v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
-import { css, dirIndex, hash2, rng } from '../gfx';
+import { WorldField, css, dirIndex, hash2, nearestCopy, rng } from '../gfx';
 import { STATS, UnitKind } from '../v1/game';
 import type { GameLike } from '../types';
 import { HP, IsoTerrain, K, Rect } from './terrain';
@@ -36,6 +36,11 @@ interface Unit {
   hp: number;
   idle: number;
   trackAcc: number;
+  // Laps around the world: on screen the unit's unwrapped position is
+  // (sx + lap * w, sy + lapY * h). They are set to the copy the player picked,
+  // so orders go the way they panned.
+  lap: number;
+  lapY: number;
 }
 
 interface Building {
@@ -90,11 +95,10 @@ export class IsoGame implements GameLike {
   clutter = makeClutter();
   dish = makeDish();
   time = 0;
-  box: { x0: number; y0: number; x1: number; y1: number } | null = null;
-  onSelect: (names: string[]) => void = () => {};
+    onSelect: (names: string[]) => void = () => {};
 
   constructor(
-    readonly ctx: CanvasRenderingContext2D,
+    public ctx: CanvasRenderingContext2D,
     public seed: number,
   ) {
     this.art = FACTIONS.map(makeFactionArt);
@@ -178,6 +182,7 @@ export class IsoGame implements GameLike {
 
     // trees, bushes and rocks over the visible world
     const forestSeed = this.seed + 400;
+    const forestF = new WorldField(w, h, 50, this.seed + 500, 2);
     for (let sy = 6; sy < h + 20; sy += 5)
       for (let sx = 2; sx < w; sx += 7) {
         const jx = sx + hash2(sx, sy, forestSeed) * 6;
@@ -193,7 +198,7 @@ export class IsoGame implements GameLike {
         const k = T.k(wx, wy);
         if (k !== K.Grass && k !== K.High) continue;
         if (pads.some((p) => inside(wx, wy, p, 5))) continue;
-        const forest = (smooth(wx / 50, wy / 50, this.seed + 500) - 0.6) * 2.4;
+        const forest = (forestF.at(jx, jy) - 0.6) * 2.4;
         const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
         let spr: StackSprite | null = null;
         if (roll < forest) spr = this.trees[Math.floor(hash2(sx, sy, 3) * 5)];
@@ -208,7 +213,7 @@ export class IsoGame implements GameLike {
     // armies
     const spawn = (kind: UnitKind, f: number, fx: number, fy: number, spread: number) => {
       for (let t = 0; t < 300; t++) {
-        const sx = (fx + (rand() - 0.5) * spread * 2) * w;
+        const sx = (fx + (rand() - 0.5) * spread * 1.4) * w;
         const sy = (fy + (rand() - 0.5) * spread * 1.6) * h;
         const [x, y] = toWorld(sx, sy, 0);
         const k = T.k(x, y);
@@ -220,7 +225,7 @@ export class IsoGame implements GameLike {
         if (!ok || T.isHigh(x, y) || sx < 10 || sy < 30 || sx > w - 10 || sy > h - 8) continue;
         if (kind !== 'heli' && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0 });
+        this.units.push({ kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 });
         return;
       }
     };
@@ -242,7 +247,7 @@ export class IsoGame implements GameLike {
         ]
       : [
           [0.3, 0.64],
-          [0.6, 0.48],
+          [0.8, 0.5],
         ];
     for (let f = 0; f < 2; f++) for (const [kind, c] of army) for (let i = 0; i < n(c); i++) spawn(kind, f, centres[f][0], centres[f][1], 0.16);
     for (let f = 0; f < 2; f++) for (let i = 0; i < n(1); i++) spawn('boat', f, 0.84, 0.84, 0.16);
@@ -270,31 +275,63 @@ export class IsoGame implements GameLike {
     return toWorld(sx, sy, 0);
   }
 
+  // The copy of unit u nearest screen point (x, y), as laps across and down.
+  private copyNear(u: Unit, x: number, y: number): [number, number] {
+    const [sx, sy] = toScreen(u.x, u.y);
+    return [Math.round((x - sx) / this.w), Math.round((y - sy) / this.h)];
+  }
+
+  // Screen (x, y) may be on any copy of the world; each unit's nearest copy is tested.
   click(x: number, y: number, add: boolean): void {
     let best: Unit | null = null;
+    let bestLap: [number, number] = [0, 0];
     let bd = 1e9;
     for (const u of this.units) {
+      const lap = this.copyNear(u, x, y);
       const [sx, sy] = this.screenOf(u);
-      const d = Math.hypot(sx - x, sy - y);
+      const d = Math.hypot(sx + lap[0] * this.w - x, sy + lap[1] * this.h - y);
       if (d < STATS[u.kind].r + 4 && d < bd) {
         bd = d;
         best = u;
+        bestLap = lap;
       }
     }
     if (best) {
       if (!add) for (const o of this.units) o.sel = false;
       best.sel = add ? !best.sel : true;
+      [best.lap, best.lapY] = bestLap;
       this.emit();
       return;
     }
     this.order(x, y);
   }
 
-  order(x: number, y: number): void {
+  // Shift a world point by whole laps around the world, across and down.
+  private lapped(x: number, y: number, lap: number, lapY: number): [number, number] {
+    const k = (lap * this.w) / 2;
+    const j = lapY * this.h;
+    return [x + k + j, y - k + j];
+  }
+
+  // Bring a ground point back onto the first copy of the map.
+  private fold(wx: number, wy: number): [number, number] {
+    const [sx, sy] = toScreen(wx, wy);
+    return this.lapped(wx, wy, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
+  }
+
+  order(x: number, y: number, shortest = false): void {
     const sel = this.units.filter((u) => u.sel);
     if (!sel.length) return;
+    if (shortest) {
+      // from the globe: take the shortest way
+      const [rx, ry] = toScreen(sel[0].x, sel[0].y);
+      [x, y] = nearestCopy(rx, ry, x, y, this.w, this.h);
+      for (const u of sel) [u.lap, u.lapY] = this.copyNear(u, x, y);
+    }
+    // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
-    this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
+    const [mx, my] = this.fold(wx, wy);
+    this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
     const cols = Math.ceil(Math.sqrt(sel.length));
     const rows = Math.ceil(sel.length / cols);
     const gap = 14;
@@ -310,15 +347,16 @@ export class IsoGame implements GameLike {
       let bi = 0;
       let bd = 1e9;
       left.forEach((u, i) => {
-        const d = Math.hypot(u.x - sx, u.y - sy);
+        const [ux, uy] = this.lapped(u.x, u.y, u.lap, u.lapY);
+        const d = Math.hypot(ux - sx, uy - sy);
         if (d < bd) {
           bd = d;
           bi = i;
         }
       });
       const u = left.splice(bi, 1)[0];
-      u.tx = sx;
-      u.ty = sy;
+      // the same move, in the unit's own (folded) coordinates
+      [u.tx, u.ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
       u.moving = true;
     }
   }
@@ -329,12 +367,28 @@ export class IsoGame implements GameLike {
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
     for (const u of this.units) {
-      const [sx, sy] = this.screenOf(u);
+      const lap = this.copyNear(u, (minx + maxx) / 2, (miny + maxy) / 2);
+      const [ux, uy] = this.screenOf(u);
+      const sx = ux + lap[0] * this.w;
+      const sy = uy + lap[1] * this.h;
       const hit = sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3;
-      if (hit) u.sel = true;
-      else if (!add) u.sel = false;
+      if (hit) {
+        u.sel = true;
+        [u.lap, u.lapY] = lap;
+      } else if (!add) u.sel = false;
     }
     this.emit();
+  }
+
+  focus(): { x: number; y: number } {
+    const mine = this.units.filter((u) => u.f === 0 && u.kind !== 'boat');
+    if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
+    const pts = mine.map((u) => toScreen(u.x, u.y, u.z));
+    return { x: pts.reduce((s, p) => s + p[0], 0) / pts.length, y: pts.reduce((s, p) => s + p[1], 0) / pts.length };
+  }
+
+  selectedPoints(): [number, number][] {
+    return this.selected().map((u) => toScreen(u.x, u.y));
   }
 
   deselect(): void {
@@ -400,6 +454,16 @@ export class IsoGame implements GameLike {
             void sy;
           }
         }
+      }
+      // wrap around the world, both ways
+      const [usx, usy] = toScreen(u.x, u.y);
+      const kx = Math.floor(usx / this.w);
+      const ky = Math.floor(usy / this.h);
+      if (kx || ky) {
+        [u.x, u.y] = this.lapped(u.x, u.y, -kx, -ky);
+        [u.tx, u.ty] = this.lapped(u.tx, u.ty, -kx, -ky);
+        u.lap += kx;
+        u.lapY += ky;
       }
       // smoothly follow the ground height (units climb plateaus freely)
       const gz = this.groundZ(u);
@@ -473,12 +537,12 @@ export class IsoGame implements GameLike {
     if (c) this.ctx.drawImage(c, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
   }
 
-  render(): void {
+  // The ground layer and the objects on it are drawn separately so main.ts can
+  // lay down the ground for every visible copy of the wrapped world first.
+  renderGround(): void {
     const c = this.ctx;
     const t = this.time;
     c.imageSmoothingEnabled = false;
-    c.fillStyle = '#22391b';
-    c.fillRect(0, 0, c.canvas.width, c.canvas.height);
     c.drawImage(this.terrain.canvas, 0, 0);
 
     c.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.6);
@@ -526,6 +590,10 @@ export class IsoGame implements GameLike {
       if (spr.shadow) this.ctx.drawImage(spr.shadow, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
     }
 
+  }
+
+  renderObjects(): void {
+    const c = this.ctx;
     type Item = { k: number; draw: () => void };
     const items: Item[] = [];
     for (const p of this.props) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
@@ -550,20 +618,26 @@ export class IsoGame implements GameLike {
     for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
 
     for (const u of this.units) if (u.sel) this.drawSelection(u);
+  }
 
-    if (this.box) {
-      const { x0, y0, x1, y1 } = this.box;
-      const x = Math.round(Math.min(x0, x1));
-      const y = Math.round(Math.min(y0, y1));
-      const w = Math.round(Math.abs(x1 - x0));
-      const h = Math.round(Math.abs(y1 - y0));
-      c.fillStyle = 'rgba(140,255,140,0.12)';
-      c.fillRect(x, y, w, h);
-      c.fillStyle = '#9dff9d';
-      c.fillRect(x, y, w, 1);
-      c.fillRect(x, y + h, w + 1, 1);
-      c.fillRect(x, y, 1, h);
-      c.fillRect(x + w, y, 1, h);
+  // A simplified picture for the globe: the bare ground, forests as a dark
+  // tint, the buildings themselves, and units as small dots of their colour.
+  renderMap(): void {
+    const c = this.ctx;
+    c.drawImage(this.terrain.canvas, 0, 0);
+    const trees = new Set(this.trees);
+    c.fillStyle = 'rgba(12,30,10,0.5)';
+    for (const p of this.props) {
+      if (!trees.has(p.spr)) continue;
+      const [sx, sy] = toScreen(p.x, p.y, p.z);
+      c.fillRect(Math.round(sx) - 4, Math.round(sy) - 5, 8, 6);
+    }
+    // the real building art: from orbit it shrinks to a speck of its own colours
+    for (const b of [...this.buildings].sort((a, b2) => a.x + a.y - b2.x - b2.y)) this.blit(b.art.spr, b.x, b.y, 0);
+    for (const u of this.units) {
+      const [sx, sy] = toScreen(u.x, u.y);
+      c.fillStyle = css(FACTIONS[u.f].light);
+      c.fillRect(Math.round(sx) - 2, Math.round(sy) - 2, 4, 4);
     }
   }
 
@@ -685,20 +759,6 @@ export class IsoGame implements GameLike {
       }
     }
   }
-}
-
-function smooth(x: number, y: number, s: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const xf = x - xi;
-  const yf = y - yi;
-  const u = xf * xf * (3 - 2 * xf);
-  const v = yf * yf * (3 - 2 * yf);
-  const a = hash2(xi, yi, s);
-  const b = hash2(xi + 1, yi, s);
-  const c = hash2(xi, yi + 1, s);
-  const d = hash2(xi + 1, yi + 1, s);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
 function angDiff(a: number, b: number): number {

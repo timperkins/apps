@@ -1,7 +1,12 @@
 // Isometric landscape for v2. Fields live on a world-space grid; the screen is
 // painted per pixel by casting a ray through a two-level height field, so
 // plateaus get real rock faces on their two visible sides.
-import { RGB, fbm, hash2, hex, mix, shade } from '../gfx';
+//
+// The screen-space map wraps round both ways: every `w` pixels across and every
+// `h` pixels down. On the ground one lap across is the world-space shift
+// (w/2, -w/2) and one lap down is (h, h), so lookups first fold a point back
+// into the rectangle 0 <= sx < w, 0 <= sy < h. The land is the same all over.
+import { RGB, WorldField, WrapNoise, around, fbm, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 import { toScreen, toWorld } from './stack';
 
 export const enum K {
@@ -46,6 +51,34 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
   return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
 }
 
+// Road segments (and their copies one lap either way) with padded bounding
+// boxes, so each point only measures the few segments it could be near.
+type Seg = { ax: number; ay: number; bx: number; by: number; x0: number; x1: number; y0: number; y1: number; k: number };
+function roadSegs(lines: [number, number][][], widths: number[], half: number, shifts: number[][], jitter: number): Seg[] {
+  const segs: Seg[] = [];
+  const m = half * 3 + jitter;
+  lines.forEach((line, li) => {
+    for (const [dx, dy] of shifts)
+      for (let s = 0; s < line.length - 1; s++) {
+        const ax = line[s][0] + dx;
+        const ay = line[s][1] + dy;
+        const bx = line[s + 1][0] + dx;
+        const by = line[s + 1][1] + dy;
+        segs.push({ ax, ay, bx, by, x0: Math.min(ax, bx) - m, x1: Math.max(ax, bx) + m, y0: Math.min(ay, by) - m, y1: Math.max(ay, by) + m, k: 1 / (half * widths[li]) });
+      }
+  });
+  return segs;
+}
+// Distance to the nearest road in road half-widths (large when far away).
+function roadDist(segs: Seg[], x: number, y: number): number {
+  let d = 1e9;
+  for (const g of segs) {
+    if (x < g.x0 || x > g.x1 || y < g.y0 || y > g.y1) continue;
+    d = Math.min(d, segDist(x, y, g.ax, g.ay, g.bx, g.by) * g.k);
+  }
+  return d === 1e9 ? 99 : d;
+}
+
 export interface Rect {
   x: number;
   y: number;
@@ -68,12 +101,16 @@ export class IsoTerrain {
   readonly ctx: CanvasRenderingContext2D;
   readonly foam: HTMLCanvasElement;
   readonly foam2: HTMLCanvasElement;
+  private na: WrapNoise; // noise in rotated world units (along and across the screen)
+  private ns: WrapNoise; // noise in screen pixels
 
   constructor(
     readonly w: number,
     readonly h: number,
     readonly seed: number,
   ) {
+    this.na = wrapNoise(w / Math.SQRT2, h * Math.SQRT2);
+    this.ns = wrapNoise(w, h);
     this.gx0 = -6;
     this.gy0 = Math.floor(-w / 2) - 6;
     this.gw = Math.ceil(w / 2 + h + HP) + 12;
@@ -94,7 +131,24 @@ export class IsoTerrain {
     this.classify();
   }
 
+  // Seamless noise over the ground, like fbm(wx / cell, wy / cell).
+  noise(wx: number, wy: number, cell: number, s: number, oct = 4): number {
+    return this.na((wx - wy) / Math.SQRT2, (wx + wy) / Math.SQRT2, cell, s, oct);
+  }
+
   private idx(wx: number, wy: number): number {
+    const sx = wx - wy;
+    const sy = (wx + wy) / 2;
+    if (sy < 0 || sy >= this.h) {
+      const k = Math.floor(sy / this.h) * this.h;
+      wx -= k;
+      wy -= k;
+    }
+    if (sx < 0 || sx >= this.w) {
+      const k = Math.floor(sx / this.w) * (this.w / 2);
+      wx -= k;
+      wy += k;
+    }
     const x = Math.floor(wx) - this.gx0;
     const y = Math.floor(wy) - this.gy0;
     if (x < 0 || y < 0 || x >= this.gw || y >= this.gh) return -1;
@@ -122,42 +176,52 @@ export class IsoTerrain {
 
   private classify(): void {
     const { gw, gh, seed, w, h } = this;
-    const S = Math.max(w, h);
+    const S = Math.max(w, h) * 0.65;
+    const lakeF = new WorldField(w, h, S / 4, seed, 5);
+    const highF = new WorldField(w, h, S / 5, seed + 211, 4);
+    const jitX = new WorldField(w, h, 30, seed + 7, 2);
+    const jitY = new WorldField(w, h, 30, seed + 8, 2);
     const hv = new Float32Array(gw * gh);
+    // Only cells inside the strip are ever looked up (see idx).
+    const strip = new Uint8Array(gw * gh);
     for (let y = 0; y < gh; y++)
       for (let x = 0; x < gw; x++) {
         const i = y * gw + x;
         const wx = x + this.gx0;
         const wy = y + this.gy0;
         const [sx, sy] = toScreen(wx, wy);
+        if (sx < -2 || sx > w + 2) continue;
+        strip[i] = 1;
         const fx = sx / w;
         const fy = sy / h;
-        const n = fbm((wx / S) * 4, (wy / S) * 4, seed, 5);
-        this.wv[i] = n * 0.9 + fx * 0.45 + fy * 0.7;
-        const m = fbm((wx / S) * 5, (wy / S) * 5, seed + 211, 4);
-        hv[i] = m - fx * 0.35 - fy * 0.15;
+        const n = lakeF.at(sx, sy);
+        this.wv[i] = n * 0.9 + around(fx, 0.88) * around(fy, 0.74) ** 4 * 0.4;
+        const m = highF.at(sx, sy);
+        hv[i] = m - around(fx, 0.85) * 0.3;
       }
-    this.wThr = percentile(this.wv, 0.84);
-    const sandThr = percentile(this.wv, 0.815);
-    this.wMax = percentile(this.wv, 0.999);
-    const hThr = percentile(hv, 0.86);
+    const inStrip = (i: number) => strip[i] === 1;
+    this.wThr = percentile(this.wv, 0.84, inStrip);
+    const sandThr = percentile(this.wv, 0.815, inStrip);
+    this.wMax = percentile(this.wv, 0.999, inStrip);
+    const hThr = percentile(hv, 0.86, inStrip);
 
+    // a road that loops right around the world, and a spur to the north
     const P = (fx: number, fy: number) => this.at(fx, fy);
-    const main = [P(-0.08, 0.9), P(0.2, 0.68), P(0.45, 0.56), P(0.6, 0.36), P(0.8, 0.2), P(1.1, 0.04)];
-    const spur = [P(0.45, 0.56), P(0.33, 0.3), P(0.28, -0.08)];
+    const main = [P(0, 0.74), P(0.1, 0.8), P(0.2, 0.68), P(0.45, 0.56), P(0.6, 0.36), P(0.8, 0.2), P(0.9, 0.44), P(1, 0.74)];
+    const spur = [P(0.45, 0.56), P(0.33, 0.3), P(0.28, 0.16)];
     const half = Math.max(4, Math.min(7, S / 120));
+    // one lap round the world is the ground shift (w/2, -w/2)
+    const segs = roadSegs([main, spur], [1, 0.75], half, [0, -w / 2, w / 2].map((k) => [k, -k]), 20);
     for (let y = 0; y < gh; y++)
       for (let x = 0; x < gw; x++) {
         const i = y * gw + x;
+        if (!strip[i]) continue;
         const wx = x + this.gx0;
         const wy = y + this.gy0;
-        const jx = wx + (fbm(wx / 30, wy / 30, seed + 7, 2) - 0.5) * 20;
-        const jy = wy + (fbm(wx / 30, wy / 30, seed + 8, 2) - 0.5) * 20;
-        let d = 1e9;
-        for (let s = 0; s < main.length - 1; s++) d = Math.min(d, segDist(jx, jy, main[s][0], main[s][1], main[s + 1][0], main[s + 1][1]));
-        let d2 = 1e9;
-        for (let s = 0; s < spur.length - 1; s++) d2 = Math.min(d2, segDist(jx, jy, spur[s][0], spur[s][1], spur[s + 1][0], spur[s + 1][1]));
-        this.road[i] = Math.min(d / half, d2 / (half * 0.75));
+        const [sx, sy] = toScreen(wx, wy);
+        const jx = wx + (jitX.at(sx, sy) - 0.5) * 20;
+        const jy = wy + (jitY.at(sx, sy) - 0.5) * 20;
+        this.road[i] = roadDist(segs, jx, jy);
         let k = K.Grass;
         if (this.wv[i] > this.wThr) k = K.Water;
         else if (this.wv[i] > sandThr) k = K.Sand;
@@ -194,6 +258,7 @@ export class IsoTerrain {
 
   paint(): void {
     const { w, h, seed } = this;
+    const N = (wx: number, wy: number, cell: number, s: number, oct: number) => this.noise(wx, wy, cell, s, oct);
     const img = this.ctx.createImageData(w, h);
     const d = img.data;
     const fimg = new ImageData(w, h);
@@ -233,7 +298,7 @@ export class IsoTerrain {
         let c: RGB;
         if (hitZ === HP) {
           // plateau top
-          const tone = fbm(wx / 9, wy / 9, seed + 40, 3);
+          const tone = N(wx, wy, 9, seed + 40, 3);
           c = HIGH[Math.max(0, Math.min(3, Math.floor(tone * 4 + (rnd - 0.5) * 1.6)))];
           if (rnd > 0.975) c = shade(ROCK, (rnd - 0.975) * 8);
           const rim = !this.isHigh(wx + 1.2, wy) || !this.isHigh(wx, wy + 1.2);
@@ -260,7 +325,7 @@ export class IsoTerrain {
             case K.Water: {
               const depth = Math.min(1, ((this.wv[i] - this.wThr) / (this.wMax - this.wThr)) * 1.6);
               c = mix(W_SHALLOW, W_DEEP, Math.pow(depth, 0.6));
-              const rip = fbm(sx / 7, sy / 1.7, seed + 30, 2);
+              const rip = this.ns(sx, sy, 7, seed + 30, 2, 1.7);
               if (rip > 0.62) c = shade(c, 0.12);
               else if (rip < 0.33) c = shade(c, -0.08);
               c = shade(c, (rnd - 0.5) * 0.07);
@@ -275,7 +340,7 @@ export class IsoTerrain {
               const wet = near(wx, wy, 2, (kk) => kk === K.Water);
               c = wet ? WET : SAND;
               // wind ripples
-              if (Math.sin((wx + wy * 0.3) * 1.3 + fbm(wx / 8, wy / 8, seed, 2) * 6) > 0.8) c = shade(c, -0.08);
+              if (Math.sin((wx + wy * 0.3) * 1.3 + N(wx, wy, 8, seed, 2) * 6) > 0.8) c = shade(c, -0.08);
               c = shade(c, (rnd - 0.5) * 0.14);
               if (rnd > 0.988) c = shade(c, -0.35);
               break;
@@ -284,29 +349,29 @@ export class IsoTerrain {
               const rd = this.road[i];
               c = ROAD;
               if (Math.abs(rd - 0.45) < 0.1) c = RUT;
-              c = shade(c, (rnd - 0.5) * 0.18 + (fbm(wx / 6, wy / 6, seed + 3, 2) - 0.5) * 0.2);
+              c = shade(c, (rnd - 0.5) * 0.18 + (N(wx, wy, 6, seed + 3, 2) - 0.5) * 0.2);
               if (rd > 0.82 && rnd < 0.4) c = GRASS[2];
-              if (fbm(wx / 5, wy / 5, seed + 17, 2) > 0.72 && rd < 0.6) c = shade(mix(c, W_SHALLOW, 0.35), -0.15); // puddles
+              if (N(wx, wy, 5, seed + 17, 2) > 0.72 && rd < 0.6) c = shade(mix(c, W_SHALLOW, 0.35), -0.15); // puddles
               if (rnd > 0.99) c = shade(ROCK, 0.1);
               break;
             }
             case K.Pad: {
               // concrete slab with seams every 8 units
               const seam = ((wx % 8) + 8) % 8 < 0.7 || ((wy % 8) + 8) % 8 < 0.7;
-              c = seam ? CONC_D : shade(CONC, (fbm(wx / 4, wy / 4, seed + 9, 2) - 0.5) * 0.25);
+              c = seam ? CONC_D : shade(CONC, (N(wx, wy, 4, seed + 9, 2) - 0.5) * 0.25);
               if (this.padEdge(wx, wy)) c = shade(CONC_D, -0.1);
               if (!seam && rnd > 0.985) c = shade(c, -0.3); // oil stains
               c = shade(c, (rnd - 0.5) * 0.1);
               break;
             }
             default: {
-              const patch = fbm(wx / 18, wy / 18, seed + 11, 3);
-              const tone = fbm(wx / 5, wy / 5, seed + 12, 2);
+              const patch = N(wx, wy, 18, seed + 11, 3);
+              const tone = N(wx, wy, 5, seed + 12, 2);
               const tile = (hash2(Math.floor(wx / 8), Math.floor(wy / 8), seed + 2) - 0.5) * 0.6;
               let gi = Math.floor((patch * 0.7 + tone * 0.3) * 6 + tile + (rnd - 0.5) * 2);
               gi = Math.max(0, Math.min(GRASS.length - 1, gi));
               c = GRASS[gi];
-              const dirt = fbm(wx / 24, wy / 24, seed + 13, 3);
+              const dirt = N(wx, wy, 24, seed + 13, 3);
               if (dirt > 0.65 && rnd < (dirt - 0.65) * 6) c = mix(c, DIRT, 0.6);
               if (rnd > 0.975) tufts.push([sx, sy, shade(GRASS[5], 0.15)]);
               else if (rnd < 0.004) c = FLOWER[Math.floor(hash2(sx, sy, 3) * 3)];

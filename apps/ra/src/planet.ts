@@ -1,0 +1,226 @@
+// Draws the map as a tiny globe, for the zoomed-out space view and the minimap.
+//
+// The map wraps round both ways, so it can't be a true sphere's surface.
+// Instead the globe wraps the map round itself from the point under the
+// camera: each point on the globe is looked up by its distance and direction
+// from the centre of the disc (an azimuthal equidistant projection), with one
+// lap of the map equal to one lap of the globe. Every part of the map gets the
+// same treatment wherever it is, so panning just slides the map round the
+// globe without the stretching and pinching a latitude/longitude grid gives
+// near its poles, and everything stays the right way up. Simple sunlight and a
+// thin atmosphere; every pixel is cast back onto the sphere and looked up in a
+// snapshot of the map.
+import { hash2, wrapNoise } from './gfx';
+
+const TAU = Math.PI * 2;
+// Sun from the upper left and a little in front, in view space (x right, y up, z out).
+const SUN = (() => {
+  const v = [-0.5, 0.55, 0.68];
+  const l = Math.hypot(...v);
+  return v.map((x) => x / l);
+})();
+
+export interface View {
+  cx: number; // centre of the globe on the canvas
+  cy: number;
+  r: number; // radius in canvas pixels
+  x: number; // map point at the centre of the globe
+  y: number;
+}
+
+export class Globe {
+  private tex: Uint32Array | null = null;
+  private tw = 0;
+  private th = 0;
+  private snap: HTMLCanvasElement = document.createElement('canvas');
+  private small: HTMLCanvasElement = document.createElement('canvas');
+  private stars: { w: number; h: number; px: Uint32Array } | null = null;
+  private img: ImageData | null = null;
+
+  // Cloud cover over the whole map, 0..1, seamless both ways like the map.
+  private clouds: Float32Array | null = null;
+  private cw = 0;
+  private ch = 0;
+  time = 0; // seconds, for drifting clouds
+
+  // Map size in map pixels.
+  mw = 1;
+  mh = 1;
+
+  get ready(): boolean {
+    return this.tex !== null;
+  }
+
+  // Draw the whole map with `draw(ctx)` and keep a half-size copy as the texture.
+  capture(mw: number, mh: number, draw: (ctx: CanvasRenderingContext2D) => void): void {
+    this.mw = mw;
+    this.mh = mh;
+    if (this.snap.width !== mw || this.snap.height !== mh) {
+      this.snap.width = mw;
+      this.snap.height = mh;
+    }
+    const c = this.snap.getContext('2d')!;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = '#22391b';
+    c.fillRect(0, 0, mw, mh);
+    draw(c);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    const tw = Math.max(2, Math.round(mw / 2));
+    const th = Math.max(2, Math.round(mh / 2));
+    if (!this.clouds || this.cw !== tw >> 1 || this.ch !== th >> 1) this.makeClouds(tw >> 1, th >> 1);
+    if (this.small.width !== tw || this.small.height !== th) {
+      this.small.width = tw;
+      this.small.height = th;
+    }
+    const s = this.small.getContext('2d', { willReadFrequently: true })!;
+    s.imageSmoothingEnabled = true;
+    s.imageSmoothingQuality = 'high';
+    s.drawImage(this.snap, 0, 0, tw, th);
+    this.tex = new Uint32Array(s.getImageData(0, 0, tw, th).data.buffer);
+    this.tw = tw;
+    this.th = th;
+  }
+
+  private makeClouds(cw: number, ch: number): void {
+    const N = wrapNoise(cw, ch);
+    const c = new Float32Array(cw * ch);
+    const seed = Math.floor(Math.random() * 1e6);
+    for (let y = 0; y < ch; y++)
+      for (let x = 0; x < cw; x++) {
+        // wispy streaks: stretched east-west, broken up by finer noise
+        const n = N(x, y, cw / 6, seed, 5, ch / 5) * 0.75 + N(x, y, cw / 24, seed + 9, 3, ch / 40) * 0.25;
+        const t = Math.min(1, Math.max(0, (n - 0.5) / 0.2));
+        c[y * cw + x] = t * t * (3 - 2 * t);
+      }
+    this.clouds = c;
+    this.cw = cw;
+    this.ch = ch;
+  }
+
+  // Map position of a canvas pixel, or null if it misses the globe. x comes
+  // back unwrapped, within half a world of the view's centre longitude.
+  pick(v: View, px: number, py: number): { x: number; y: number } | null {
+    const nx = (px - v.cx) / v.r;
+    const ny = (py - v.cy) / v.r; // down
+    const s = Math.hypot(nx, ny);
+    if (s > 1) return null;
+    if (s < 1e-9) return { x: v.x, y: v.y };
+    const k = Math.asin(s) / s; // angle from the centre, per unit of disc radius
+    return { x: v.x + nx * k * (this.mw / TAU), y: v.y + ny * k * (this.mh / Math.PI) };
+  }
+
+  // Canvas position of a map point, or null if it is on the far side.
+  project(v: View, x: number, y: number): [number, number] | null {
+    const wrap = (d: number, p: number) => d - Math.round(d / p) * p;
+    const ax = (wrap(x - v.x, this.mw) / this.mw) * TAU;
+    const ay = (wrap(y - v.y, this.mh) / this.mh) * Math.PI;
+    const a = Math.hypot(ax, ay);
+    if (a > Math.PI / 2) return null;
+    const k = a < 1e-9 ? 1 : Math.sin(a) / a;
+    return [v.cx + ax * k * v.r, v.cy + ay * k * v.r];
+  }
+
+  // Render into a canvas. With `space`, the background is a star field;
+  // otherwise it is left transparent.
+  draw(ctx: CanvasRenderingContext2D, v: View, space: boolean): void {
+    const W = ctx.canvas.width;
+    const H = ctx.canvas.height;
+    if (!this.img || this.img.width !== W || this.img.height !== H) this.img = ctx.createImageData(W, H);
+    const out = new Uint32Array(this.img.data.buffer);
+    if (space) out.set(this.starField(W, H));
+    else out.fill(0);
+    const tex = this.tex;
+    if (!tex) {
+      ctx.putImageData(this.img, 0, 0);
+      return;
+    }
+    const { tw, th } = this;
+    const halo = 1.14;
+    const clouds = this.clouds!;
+    const { cw, ch } = this;
+    const drift = this.time * 0.006 * cw; // clouds creep east
+    const x0 = Math.max(0, Math.floor(v.cx - v.r * halo));
+    const x1 = Math.min(W, Math.ceil(v.cx + v.r * halo));
+    const y0 = Math.max(0, Math.floor(v.cy - v.r * halo));
+    const y1 = Math.min(H, Math.ceil(v.cy + v.r * halo));
+    const inv = 1 / v.r;
+    // texels per radian of arc, and the texel under the centre
+    const uK = tw / TAU;
+    const vK = th / Math.PI;
+    const u0 = (v.x / this.mw) * tw;
+    const t0 = (v.y / this.mh) * th;
+    for (let py = y0; py < y1; py++) {
+      const ny = -(py + 0.5 - v.cy) * inv;
+      for (let px = x0; px < x1; px++) {
+        const nx = (px + 0.5 - v.cx) * inv;
+        const r2 = nx * nx + ny * ny;
+        const i = py * W + px;
+        if (r2 > 1) {
+          // atmosphere glow just outside the rim
+          const d = (Math.sqrt(r2) - 1) / (halo - 1);
+          if (d < 1) {
+            const a = (1 - d) * (1 - d) * 0.85;
+            const bg = out[i];
+            const br = bg & 255;
+            const bgG = (bg >> 8) & 255;
+            const bb = (bg >> 16) & 255;
+            const r = br + (110 - br) * a;
+            const g = bgG + (170 - bgG) * a;
+            const b = bb + (255 - bb) * a;
+            out[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+          }
+          continue;
+        }
+        const nz = Math.sqrt(1 - r2);
+        // arc from the centre, along the pixel's direction from the centre
+        const sr = Math.sqrt(r2);
+        const k = sr < 1e-9 ? 1 : Math.asin(sr > 1 ? 1 : sr) / sr;
+        let u = Math.floor(u0 + nx * k * uK) % tw;
+        if (u < 0) u += tw;
+        let t = Math.floor(t0 - ny * k * vK) % th;
+        if (t < 0) t += th;
+        const c = tex[t * tw + u];
+        const lit = 0.3 + 0.85 * Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2]);
+        let r = (c & 255) * lit;
+        let g = ((c >> 8) & 255) * lit;
+        let b = ((c >> 16) & 255) * lit;
+        // clouds, lit by the same sun
+        let cu = Math.floor(u / 2 + drift) % cw;
+        if (cu < 0) cu += cw;
+        const cv = clouds[Math.min(ch - 1, t >> 1) * cw + cu] * 0.8;
+        const cl = 235 * (0.35 + 0.75 * (lit - 0.3));
+        r += (cl - r) * cv;
+        g += (cl - g) * cv;
+        b += (cl + 10 - b) * cv;
+        // haze over everything, thickening towards the rim
+        const rim = 0.16 + (1 - nz) * (1 - nz) * 0.75;
+        r = Math.min(255, r + (125 - r) * rim);
+        g = Math.min(255, g + (170 - g) * rim);
+        b = Math.min(255, b + (235 - b) * rim);
+        out[i] = (255 << 24) | (b << 16) | (g << 8) | r;
+      }
+    }
+    ctx.putImageData(this.img, 0, 0);
+  }
+
+  private starField(W: number, H: number): Uint32Array {
+    if (this.stars && this.stars.w === W && this.stars.h === H) return this.stars.px;
+    const px = new Uint32Array(W * H);
+    const bg = (255 << 24) | (0x0d << 16) | (0x07 << 8) | 0x05;
+    px.fill(bg);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const h = hash2(x, y, 911);
+        if (h > 0.9965) {
+          const b = 120 + Math.floor(hash2(x, y, 912) * 135);
+          const warm = hash2(x, y, 913) > 0.7;
+          const r = warm ? b : Math.floor(b * 0.85);
+          const g = Math.floor(b * 0.9);
+          const bl = warm ? Math.floor(b * 0.8) : b;
+          px[y * W + x] = (255 << 24) | (bl << 16) | (g << 8) | r;
+        }
+      }
+    this.stars = { w: W, h: H, px };
+    return px;
+  }
+}

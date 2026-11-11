@@ -1,6 +1,8 @@
 // Procedural landscape: grass, a dirt road, rocky ridges, a lake with a
 // beach, and dirt pads under buildings. Painted once per pixel into a canvas.
-import { RGB, fbm, hash2, hex, mix, shade } from '../gfx';
+// The world wraps round both ways (east-west and north-south), so every field
+// is seamless where the map joins up, and the land is the same kind all over.
+import { RGB, WorldField, WrapNoise, around, hash2, hex, mix, shade, wrapNoise } from '../gfx';
 
 export const enum K {
   Grass = 0,
@@ -9,6 +11,34 @@ export const enum K {
   Cliff = 3,
   Road = 4,
   Pad = 5,
+}
+
+// Road segments (and their copies one lap either way) with padded bounding
+// boxes, so each point only measures the few segments it could be near.
+type Seg = { ax: number; ay: number; bx: number; by: number; x0: number; x1: number; y0: number; y1: number; k: number };
+function roadSegs(lines: [number, number][][], widths: number[], half: number, shifts: number[][], jitter: number): Seg[] {
+  const segs: Seg[] = [];
+  const m = half * 3 + jitter;
+  lines.forEach((line, li) => {
+    for (const [dx, dy] of shifts)
+      for (let s = 0; s < line.length - 1; s++) {
+        const ax = line[s][0] + dx;
+        const ay = line[s][1] + dy;
+        const bx = line[s + 1][0] + dx;
+        const by = line[s + 1][1] + dy;
+        segs.push({ ax, ay, bx, by, x0: Math.min(ax, bx) - m, x1: Math.max(ax, bx) + m, y0: Math.min(ay, by) - m, y1: Math.max(ay, by) + m, k: 1 / (half * widths[li]) });
+      }
+  });
+  return segs;
+}
+// Distance to the nearest road in road half-widths (large when far away).
+function roadDist(segs: Seg[], x: number, y: number): number {
+  let d = 1e9;
+  for (const g of segs) {
+    if (x < g.x0 || x > g.x1 || y < g.y0 || y > g.y1) continue;
+    d = Math.min(d, segDist(x, y, g.ax, g.ay, g.bx, g.by) * g.k);
+  }
+  return d === 1e9 ? 99 : d;
 }
 
 export interface Rect {
@@ -57,12 +87,14 @@ export class Terrain {
   private road: Float32Array;
   private wThr = 0;
   private wMax = 1;
+  readonly noise: WrapNoise;
 
   constructor(
     readonly w: number,
     readonly h: number,
     readonly seed: number,
   ) {
+    this.noise = wrapNoise(w, h);
     const n = w * h;
     this.kind = new Uint8Array(n);
     this.wv = new Float32Array(n);
@@ -80,44 +112,46 @@ export class Terrain {
   }
 
   k(x: number, y: number): K {
-    x |= 0;
-    y |= 0;
-    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return K.Grass;
+    x = Math.floor(x);
+    y = Math.floor(y);
+    if (y < 0 || y >= this.h) y = ((y % this.h) + this.h) % this.h;
+    if (x < 0 || x >= this.w) x = ((x % this.w) + this.w) % this.w;
     return this.kind[y * this.w + x] as K;
   }
 
   private classify(): void {
     const { w, h, seed } = this;
-    const scale = Math.max(w, h);
-    // Lake: biased towards the bottom-right corner of the map.
+    const scale = Math.max(w, h) * 0.6;
+    const lakeF = new WorldField(w, h, scale / 5, seed, 5);
+    const ridgeF = new WorldField(w, h, scale / 4, seed + 101, 5);
+    const jitX = new WorldField(w, h, 40, seed + 7, 2);
+    const jitY = new WorldField(w, h, 40, seed + 8, 2);
+    // Water: lakes anywhere, with one likely just south-east of the second base.
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
-        const n = fbm((x / scale) * 5, (y / scale) * 5, seed, 5);
-        this.wv[i] = n * 0.9 + (x / w) * 0.45 + (y / h) * 0.65;
-        const r = 1 - Math.abs(fbm((x / scale) * 4, (y / scale) * 4, seed + 101, 5) * 2 - 1);
-        this.cv[i] = r - (x / w) * 0.25 - (y / h) * 0.05;
+        const n = lakeF.at(x, y);
+        this.wv[i] = n * 0.9 + around(x / w, 0.88) * around(y / h, 0.72) ** 4 * 0.4;
+        const r = 1 - Math.abs(ridgeF.at(x, y) * 2 - 1);
+        this.cv[i] = r - around(x / w, 0.85) * 0.2;
       }
     this.wThr = percentile(this.wv, 0.84);
     const sandThr = percentile(this.wv, 0.81);
     this.wMax = percentile(this.wv, 0.999);
     const cThr = percentile(this.cv, 0.945);
 
-    // Road: a winding polyline from the bottom-left to the top-right, plus a spur.
+    // Road: a winding loop right around the world, plus a spur to the north.
     const P = (fx: number, fy: number): [number, number] => [fx * w, fy * h];
-    const main = [P(-0.05, 0.86), P(0.22, 0.66), P(0.46, 0.55), P(0.62, 0.36), P(0.8, 0.18), P(1.05, 0.06)];
-    const spur = [P(0.46, 0.55), P(0.34, 0.3), P(0.3, -0.05)];
+    const main = [P(0, 0.72), P(0.12, 0.78), P(0.22, 0.66), P(0.46, 0.55), P(0.62, 0.36), P(0.8, 0.2), P(0.9, 0.42), P(1, 0.72)];
+    const spur = [P(0.46, 0.55), P(0.34, 0.3), P(0.3, 0.16)];
     const half = Math.max(5, Math.min(8, scale / 110));
+    const segs = roadSegs([main, spur], [1, 0.7], half, [0, -w, w].map((k) => [k, 0]), 30);
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
-        const jx = x + (fbm(x / 40, y / 40, seed + 7, 2) - 0.5) * 30;
-        const jy = y + (fbm(x / 40, y / 40, seed + 8, 2) - 0.5) * 30;
-        let d = 1e9;
-        for (let s = 0; s < main.length - 1; s++) d = Math.min(d, segDist(jx, jy, main[s][0], main[s][1], main[s + 1][0], main[s + 1][1]));
-        let d2 = 1e9;
-        for (let s = 0; s < spur.length - 1; s++) d2 = Math.min(d2, segDist(jx, jy, spur[s][0], spur[s][1], spur[s + 1][0], spur[s + 1][1]));
-        this.road[i] = Math.min(d / half, d2 / (half * 0.7));
+        const jx = x + (jitX.at(x, y) - 0.5) * 30;
+        const jy = y + (jitY.at(x, y) - 0.5) * 30;
+        this.road[i] = roadDist(segs, jx, jy);
 
         let k = K.Grass;
         if (this.wv[i] > this.wThr) k = K.Water;
@@ -153,6 +187,7 @@ export class Terrain {
 
   paint(): void {
     const { w, h, seed } = this;
+    const N = this.noise;
     const img = this.ctx.createImageData(w, h);
     const d = img.data;
     const fimg = new ImageData(w, h);
@@ -180,7 +215,7 @@ export class Terrain {
             const depth = Math.min(1, (this.wv[i] - this.wThr) / (this.wMax - this.wThr) * 1.6);
             c = mix(WATER_SHALLOW, WATER_DEEP, Math.pow(depth, 0.6));
             // horizontal ripples
-            const rip = fbm(x / 6, y / 1.6, seed + 30, 2);
+            const rip = N(x, y, 6, seed + 30, 2, 1.6);
             if (rip > 0.62) c = shade(c, 0.12);
             else if (rip < 0.32) c = shade(c, -0.08);
             c = shade(c, (rnd - 0.5) * 0.08);
@@ -201,7 +236,7 @@ export class Terrain {
             const rd = this.road[i];
             c = ROAD;
             if (Math.abs(rd - 0.45) < 0.12 || Math.abs(rd - 0.0) < 0.06) c = TRACK;
-            c = shade(c, (rnd - 0.5) * 0.2 + (fbm(x / 8, y / 8, seed + 3, 2) - 0.5) * 0.18);
+            c = shade(c, (rnd - 0.5) * 0.2 + (N(x, y, 8, seed + 3, 2) - 0.5) * 0.18);
             if (rd > 0.8 && rnd < 0.35) c = GRASS[2];
             if (rnd > 0.99) c = shade(ROCK, 0.1);
             break;
@@ -210,7 +245,7 @@ export class Terrain {
             const cv = this.cv;
             const gx = cv[Math.min(i + 1, cv.length - 1)] - cv[Math.max(i - 1, 0)];
             const gy = cv[Math.min(i + w, cv.length - 1)] - cv[Math.max(i - w, 0)];
-            const fine = fbm(x / 4, y / 4, seed + 50, 3) - 0.5;
+            const fine = N(x, y, 4, seed + 50, 3) - 0.5;
             const l = (gx + gy) * 14 + fine * 1.1;
             c = l > 0.3 ? ROCK_L : l > -0.25 ? ROCK : ROCK_D;
             // raised look: lit rim on top, dark rock face along the bottom edge
@@ -222,17 +257,17 @@ export class Terrain {
             break;
           }
           case K.Pad: {
-            c = shade(PAD, (rnd - 0.5) * 0.25 + (fbm(x / 5, y / 5, seed + 9, 2) - 0.5) * 0.2);
+            c = shade(PAD, (rnd - 0.5) * 0.25 + (N(x, y, 5, seed + 9, 2) - 0.5) * 0.2);
             if (rnd > 0.97) c = shade(c, 0.25);
             break;
           }
           default: {
-            const patch = fbm(x / 22, y / 22, seed + 11, 3);
-            const tone = fbm(x / 7, y / 7, seed + 12, 2);
+            const patch = N(x, y, 22, seed + 11, 3);
+            const tone = N(x, y, 7, seed + 12, 2);
             let gi = Math.floor((patch * 0.7 + tone * 0.3) * 6 + (rnd - 0.5) * 2.2);
             gi = Math.max(0, Math.min(GRASS.length - 1, gi));
             c = GRASS[gi];
-            const dirt = fbm(x / 30, y / 30, seed + 13, 3);
+            const dirt = N(x, y, 30, seed + 13, 3);
             if (dirt > 0.66 && rnd < (dirt - 0.66) * 6) c = mix(c, DIRT, 0.6);
             if (rnd > 0.992) c = shade(c, 0.35);
             else if (rnd < 0.012) c = shade(c, -0.45);

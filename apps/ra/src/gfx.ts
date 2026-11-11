@@ -58,6 +58,98 @@ export function fbm(x: number, y: number, s: number, oct = 4): number {
   return t / norm;
 }
 
+// Value noise that repeats every `p` lattice cells in x and, if q > 0, every
+// `q` cells in y (whole numbers).
+export function vnoiseP(x: number, y: number, s: number, p: number, q = 0): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const x0 = ((xi % p) + p) % p;
+  const x1 = (x0 + 1) % p;
+  const y0 = q ? ((yi % q) + q) % q : yi;
+  const y1 = q ? (y0 + 1) % q : yi + 1;
+  const a = hash2(x0, y0, s);
+  const b = hash2(x1, y0, s);
+  const c = hash2(x0, y1, s);
+  const d = hash2(x1, y1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+export function fbmP(x: number, y: number, s: number, oct: number, p: number, q = 0): number {
+  let t = 0;
+  let amp = 0.5;
+  let f = 1;
+  let norm = 0;
+  for (let i = 0; i < oct; i++) {
+    t += amp * vnoiseP(x * f, y * f, s + i * 17, p * f, q * f);
+    norm += amp;
+    amp *= 0.5;
+    f *= 2;
+  }
+  return t / norm;
+}
+
+// The world wraps round both ways: every `px` pixels east-west and every `py`
+// pixels north-south. WrapNoise is like fbm(x / cell, y / cellY), but seamless
+// where the world joins up.
+export type WrapNoise = (x: number, y: number, cell: number, s: number, oct?: number, cellY?: number) => number;
+export function wrapNoise(px: number, py: number): WrapNoise {
+  return (x, y, cell, s, oct = 4, cellY = cell) => {
+    const n = Math.max(1, Math.round(px / cell));
+    const m = Math.max(1, Math.round(py / cellY));
+    return fbmP((x * n) / px, (y * m) / py, s, oct, n, m);
+  };
+}
+
+// Large-scale seamless noise over a w x h world (lakes, ridges, forests),
+// computed once on a coarse grid and interpolated, which keeps generation quick.
+export class WorldField {
+  private nx: number;
+  private ny: number;
+  private ix: number;
+  private iy: number;
+  private v: Float32Array;
+  constructor(w: number, h: number, cell: number, s: number, oct = 4, step = 3) {
+    const nx = (this.nx = Math.max(8, Math.round(w / step)));
+    const ny = (this.ny = Math.max(8, Math.round(h / step)));
+    this.ix = nx / w;
+    this.iy = ny / h;
+    this.v = new Float32Array(nx * ny);
+    const N = wrapNoise(w, h);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) this.v[j * nx + i] = N(i / this.ix, j / this.iy, cell, s, oct);
+  }
+  at(x: number, y: number): number {
+    const { nx, ny } = this;
+    let fx = x * this.ix;
+    let fy = y * this.iy;
+    if (fx < 0 || fx >= nx) fx -= Math.floor(fx / nx) * nx;
+    if (fy < 0 || fy >= ny) fy -= Math.floor(fy / ny) * ny;
+    const i = fx | 0;
+    const j = fy | 0;
+    const tx = fx - i;
+    const ty = fy - j;
+    const i1 = i + 1 >= nx ? 0 : i + 1;
+    const j1 = j + 1 >= ny ? 0 : j + 1;
+    const v = this.v;
+    const a = v[j * nx + i];
+    const b = v[j * nx + i1];
+    const c = v[j1 * nx + i];
+    const d = v[j1 * nx + i1];
+    return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+  }
+}
+
+// The copy of (x, y) nearest to (x0, y0) in a world that wraps both ways.
+export function nearestCopy(x0: number, y0: number, x: number, y: number, w: number, h: number): [number, number] {
+  return [x + Math.round((x0 - x) / w) * w, y + Math.round((y0 - y) / h) * h];
+}
+
+// 0..1 bump that peaks at fraction `at` around the world and is lowest opposite it.
+export const around = (fx: number, at: number) => 0.5 + 0.5 * Math.cos(2 * Math.PI * (fx - at));
+
 export function rng(seed: number): () => number {
   let s = seed >>> 0 || 1;
   return () => {
