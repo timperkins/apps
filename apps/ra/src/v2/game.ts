@@ -3,7 +3,7 @@ import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '..
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
-import { QUEUE_MAX, START_CREDITS, TABS, TECH, Tab, Tech, buildTime } from './tech';
+import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
 import {
@@ -16,6 +16,7 @@ import {
   makeBushes,
   makeClutter,
   makeDish,
+  makeOre,
   makeFactionArt,
   makeRocks,
   makeTrees,
@@ -44,6 +45,8 @@ const BNAME: Record<BuildingKind, string> = {
 const ME = 0;
 // Deploying: the Foundry vehicle turns to line up, then the yard rises.
 const RISE_S = 1.8;
+// Where a hauler unloads at a refinery (its striped pad), from its centre.
+const DOCK: [number, number] = [12, 11];
 // Buildings that make units, and so have rally points.
 const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
 // How far (world units) a new building may stand from the rest of your base.
@@ -73,6 +76,17 @@ interface Unit {
   lap: number;
   lapY: number;
   deploy?: boolean; // a Foundry on its way to deploying
+  // an ore hauler at work: looking for ore, driving to it, digging, taking
+  // it home, unloading, or waiting for something to change
+  job?: { st: 'seek' | 'go' | 'dig' | 'home' | 'ret' | 'unload' | 'wait'; node?: OreNode; ref?: Building; t: number };
+  load?: number;
+}
+
+interface OreNode {
+  x: number;
+  y: number;
+  amt: number;
+  v: number; // art variant
 }
 
 interface Building {
@@ -90,6 +104,7 @@ interface Building {
   rise: number; // 0..1, how far it has gone up (1 when standing)
   packing?: boolean;
   rally?: [number, number]; // where new units head (world, first copy)
+  gift?: boolean; // a refinery's free hauler has been handed over
   primary?: boolean; // the one of its kind that makes the units
 }
 
@@ -133,6 +148,9 @@ export class IsoGame implements GameLike {
   bushes = makeBushes();
   clutter = makeClutter();
   dish = makeDish();
+  oreArt = makeOre();
+  ore: OreNode[] = [];
+  private oreGrid = new Map<number, OreNode[]>();
   time = 0;
     onSelect: (names: string[]) => void = () => {};
 
@@ -189,6 +207,9 @@ export class IsoGame implements GameLike {
     this.credits = START_CREDITS;
     this.jobs = new Map();
     this.queue = new Map();
+    this.ore = [];
+    this.oreGrid = new Map();
+    this.lowPower = false;
     this.known = new Set();
     this.fresh = new Set();
     this.ghost = null;
@@ -329,6 +350,40 @@ export class IsoGame implements GameLike {
           break found;
         }
       }
+    // ore fields: two near where you start, one by every other base, and
+    // more scattered round the planet
+    const startSite = this.siteOf(...toWorld(ms[0], ms[1], 0));
+    const field = (sx: number, sy: number, n: number) => {
+      for (let i = 0, t = 0; i < n && t < n * 30; t++) {
+        const a = rand() * Math.PI * 2;
+        const d = Math.sqrt(rand()) * (30 + n * 3);
+        const [x, y] = toWorld(sx + Math.cos(a) * d * 1.6, sy + Math.sin(a) * d * 0.8, 0);
+        if (T.k(x, y) !== K.Grass || T.k(x + 6, y + 6) !== K.Grass || T.k(x - 6, y - 6) !== K.Grass) continue;
+        if (inside(x, y, startSite, 10)) continue;
+        if (this.oreNear(x, y, 7).length) continue;
+        const [fx, fy] = T.fold(x, y);
+        this.addOre({ x: fx, y: fy, amt: ORE.node * (0.6 + rand() * 0.4), v: Math.floor(rand() * 4) });
+        i++;
+      }
+    };
+    const nearField = (cx: number, cy: number, r0: number, n: number) => {
+      for (let t = 0; t < 60; t++) {
+        const a = rand() * Math.PI * 2;
+        const r = r0 + rand() * 60;
+        const sx = cx + Math.cos(a) * r;
+        const sy = cy + Math.sin(a) * r * 0.5;
+        const [x, y] = toWorld(sx, sy, 0);
+        if (T.k(x, y) === K.Grass && !inside(x, y, startSite, 40)) {
+          field(sx, sy, n);
+          return;
+        }
+      }
+    };
+    nearField(ms[0], ms[1], 170, 22);
+    nearField(ms[0], ms[1], 420, 26);
+    for (const st of sites) if (st !== sites[0]) nearField(st.sx, st.sy, 200, 14 + Math.floor(rand() * 8));
+    for (let i = 0; i < want; i++) nearField(rand() * w, rand() * h, 0, 12 + Math.floor(rand() * 14));
+
     const mine: [number, number][] = [];
     for (const st of sites)
       for (const [kind, c] of st.home && st.f === ME ? start : army)
@@ -473,7 +528,7 @@ export class IsoGame implements GameLike {
       });
     }
     const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id));
-    return { credits: Math.floor(this.credits), tabs, items };
+    return { credits: Math.floor(this.credits), store: this.store(), power: this.power(), tabs, items };
   }
 
   seen(id: string): void {
@@ -553,6 +608,11 @@ export class IsoGame implements GameLike {
     const y = air ? b.y : b.y + b.art.ry - 2;
     const [fx, fy] = this.fold(x, y);
     const u = this.newUnit(kind, ME, fx, fy, Math.PI / 2);
+    if (kind === 'hauler') {
+      u.job = { st: 'seek', t: 0 };
+      u.load = 0;
+      return true;
+    }
     const [rx, ry] = b.rally ?? [b.x + (Math.random() - 0.5) * 30, b.y + b.art.ry + 22 + Math.random() * 14];
     u.tx = rx + (b.rally ? (Math.random() - 0.5) * 16 : 0);
     u.ty = ry + (b.rally ? (Math.random() - 0.5) * 16 : 0);
@@ -582,11 +642,15 @@ export class IsoGame implements GameLike {
         opened = true;
       }
     if (opened) this.notice('New construction options');
+    const pw = this.power();
+    const low = pw.used > pw.made;
+    if (low && !this.lowPower) this.notice('Low power: build a generator');
+    this.lowPower = low;
     for (const j of this.jobs.values()) {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
       if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
-      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt;
+      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt * (this.lowPower ? 0.5 : 1);
       const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
       this.credits -= pay;
       j.spent += pay;
@@ -699,7 +763,200 @@ export class IsoGame implements GameLike {
 
   // Open, level grass, away from other buildings.
   private siteOk(r: Rect): boolean {
-    return this.terrain.clear(r, 1);
+    if (!this.terrain.clear(r, 1)) return false;
+    // not on ore either
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    return !this.oreNear(cx, cy, Math.hypot(r.w, r.h) / 2 + 4).some((n) => n.amt > 1 && inside(...this.nearPoint(cx, cy, n.x, n.y), r, 3));
+  }
+
+  // ---------- Ore ----------
+
+  private oreKey(x: number, y: number): [number, number] {
+    const [sx, sy] = toScreen(x, y);
+    const nx = Math.ceil(this.terrain.w / 64);
+    const ny = Math.ceil(this.terrain.h / 64);
+    const i = (((Math.floor(sx / 64) % nx) + nx) % nx);
+    const j = (((Math.floor(sy / 64) % ny) + ny) % ny);
+    return [i, j];
+  }
+
+  private addOre(n: OreNode): void {
+    this.ore.push(n);
+    const [i, j] = this.oreKey(n.x, n.y);
+    const k = j * 100000 + i;
+    let cell = this.oreGrid.get(k);
+    if (!cell) this.oreGrid.set(k, (cell = []));
+    cell.push(n);
+  }
+
+  // Ore clumps within r (world units) of (x, y), on any copy of the map.
+  private oreNear(x: number, y: number, r: number): OreNode[] {
+    const [i0, j0] = this.oreKey(x, y);
+    const nx = Math.ceil(this.terrain.w / 64);
+    const ny = Math.ceil(this.terrain.h / 64);
+    const reach = Math.ceil((r * 2) / 64) + 1;
+    const out: OreNode[] = [];
+    for (let dj = -reach; dj <= reach; dj++)
+      for (let di = -reach; di <= reach; di++) {
+        const cell = this.oreGrid.get(((((j0 + dj) % ny) + ny) % ny) * 100000 + ((((i0 + di) % nx) + nx) % nx));
+        if (!cell) continue;
+        for (const n of cell) {
+          const [px, py] = this.nearPoint(x, y, n.x, n.y);
+          if (Math.hypot(px - x, py - y) <= r) out.push(n);
+        }
+      }
+    return out;
+  }
+
+  // Ore clumps on this copy of the map within screen rect (x0, y0)-(x1, y1).
+  private oreInView(x0: number, y0: number, x1: number, y1: number): OreNode[] {
+    const out: OreNode[] = [];
+    const nx = Math.ceil(this.terrain.w / 64);
+    const ny = Math.ceil(this.terrain.h / 64);
+    for (let j = Math.max(0, Math.floor(y0 / 64)); j <= Math.min(ny - 1, Math.floor(y1 / 64)); j++)
+      for (let i = Math.max(0, Math.floor(x0 / 64)); i <= Math.min(nx - 1, Math.floor(x1 / 64)); i++)
+        for (const n of this.oreGrid.get(j * 100000 + i) ?? []) {
+          const [sx, sy] = toScreen(n.x, n.y);
+          if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) out.push(n);
+        }
+    return out;
+  }
+
+  // Power made and used by your buildings.
+  private power(): { made: number; used: number } {
+    let made = 0;
+    let used = 0;
+    for (const b of this.buildings) {
+      if (!b.own || b.rise < 1) continue;
+      const p = POWER[b.kind] ?? 0;
+      if (p > 0) made += p;
+      else used -= p;
+    }
+    return { made, used };
+  }
+  private lowPower = false;
+
+  private store(): number {
+    let s = STORE.base;
+    for (const b of this.buildings) if (b.own && b.rise >= 1) s += b.kind === 'refinery' ? STORE.refinery : b.kind === 'silo' ? STORE.silo : 0;
+    return s;
+  }
+
+  // The nearest refinery of yours to (x, y).
+  private refineryNear(x: number, y: number): Building | null {
+    let best: Building | null = null;
+    let bd = 1e9;
+    for (const b of this.buildings) {
+      if (!b.own || b.kind !== 'refinery' || b.rise < 1 || b.packing) continue;
+      const [bx, by] = this.nearPoint(x, y, b.x, b.y);
+      const d = Math.hypot(bx - x, by - y);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  // Ore haulers dig ore, carry it home to a refinery and unload it for credits.
+  private haul(u: Unit, dt: number): void {
+    const j = u.job!;
+    u.load ??= 0;
+    j.t -= dt;
+    const goTo = (x: number, y: number) => {
+      [u.tx, u.ty] = this.nearPoint(u.x, u.y, x, y);
+      u.moving = true;
+    };
+    switch (j.st) {
+      case 'wait':
+        if (j.t <= 0) j.st = u.load >= ORE.load * 0.95 ? 'home' : 'seek';
+        break;
+      case 'seek': {
+        // the nearest clump with ore left, looking further out step by step
+        let node: OreNode | undefined = j.node && j.node.amt > 20 ? j.node : undefined;
+        for (let r = 60; r <= 1500 && !node; r *= 2) {
+          let bd = 1e9;
+          for (const n of this.oreNear(u.x, u.y, r)) {
+            if (n.amt <= 20) continue;
+            const [px, py] = this.nearPoint(u.x, u.y, n.x, n.y);
+            const d = Math.hypot(px - u.x, py - u.y);
+            if (d < bd) {
+              bd = d;
+              node = n;
+            }
+          }
+        }
+        if (!node) {
+          if (u.load > 0) j.st = 'home';
+          else {
+            this.notice('No ore in reach of your hauler');
+            j.st = 'wait';
+            j.t = 5;
+          }
+          break;
+        }
+        j.node = node;
+        goTo(node.x - 4, node.y - 2);
+        j.st = 'go';
+        break;
+      }
+      case 'go':
+        if (!u.moving) {
+          j.st = 'dig';
+          u.turretGoal = 0;
+        }
+        break;
+      case 'dig': {
+        const n = j.node;
+        if (!n || n.amt <= 1) {
+          j.node = undefined;
+          j.st = u.load >= ORE.load * 0.8 ? 'home' : 'seek';
+          break;
+        }
+        const take = Math.min(ORE.digRate * dt, n.amt, ORE.load - u.load);
+        n.amt -= take;
+        u.load += take;
+        if (Math.random() < dt * 6) {
+          const [sx, sy] = toScreen(n.x, n.y, 2);
+          this.particles.push({ x: sx + (Math.random() - 0.5) * 6, y: sy, vx: (Math.random() - 0.5) * 6, vy: -4, life: 0, max: 0.8, kind: 'dust', size: 1 });
+        }
+        if (u.load >= ORE.load - 0.5) j.st = 'home';
+        break;
+      }
+      case 'home': {
+        const ref = this.refineryNear(u.x, u.y);
+        if (!ref) {
+          this.notice('Your hauler needs a refinery');
+          j.st = 'wait';
+          j.t = 5;
+          break;
+        }
+        j.ref = ref;
+        goTo(ref.x + DOCK[0], ref.y + DOCK[1]);
+        j.st = 'ret';
+        break;
+      }
+      case 'ret':
+        if (!j.ref || !this.buildings.includes(j.ref)) j.st = 'home';
+        else if (!u.moving) j.st = 'unload';
+        break;
+      case 'unload': {
+        const room = this.store() - this.credits;
+        if (room <= 0) {
+          this.notice('Credits full: build an ore silo');
+          break;
+        }
+        const give = Math.min(ORE.unloadRate * dt, u.load, room);
+        u.load -= give;
+        this.credits += give;
+        if (u.load <= 0.5) {
+          u.load = 0;
+          j.st = 'seek';
+        }
+        break;
+      }
+    }
   }
 
   private deployable(u: Unit): boolean {
@@ -726,8 +983,10 @@ export class IsoGame implements GameLike {
       }
       return [];
     }
+    const haulers = this.selected().filter((u) => u.kind === 'hauler' && u.f === ME);
+    const idle = haulers.filter((u) => !u.job);
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
-    if (!mcvs.length) return [];
+    if (!mcvs.length) return idle.length ? [{ id: 'harvest', label: 'Harvest', icon: 'ore', title: 'Go back to gathering ore' }] : [];
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
     return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (D)' : 'Needs open, level ground: move somewhere clear' }];
   }
@@ -736,6 +995,12 @@ export class IsoGame implements GameLike {
     const sb = this.selB();
     if (id === 'primary' && sb) for (const o of this.buildings) o.primary = o.own && o.kind === sb.kind ? o === sb : o.primary;
     if (id === 'unrally' && sb) sb.rally = undefined;
+    if (id === 'harvest')
+      for (const u of this.selected())
+        if (u.kind === 'hauler' && u.f === ME && !u.job) {
+          u.job = { st: 'seek', t: 0 };
+          u.load ??= 0;
+        }
     if (id === 'place') this.placeNow();
     else if (id === 'unplace') this.ghost = null;
     else if (id === 'deploy') {
@@ -838,6 +1103,7 @@ export class IsoGame implements GameLike {
         if (k !== K.Grass && k !== K.High) continue;
         // keep clear of building pads, more so in front of them where a tree would hide them
         if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 9, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 9) === K.Pad || kAt(wx - 8, wy - 8) === K.Pad || kAt(wx - 4, wy + 4) === K.Pad || kAt(wx + 4, wy - 4) === K.Pad) continue;
+        if (this.oreNear(wx, wy, 8).length) continue;
         const forest = (this.forestF.at(jx, jy) - 0.6) * 2.4;
         const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
         let spr: StackSprite | null = null;
@@ -958,6 +1224,23 @@ export class IsoGame implements GameLike {
   order(x: number, y: number, shortest = false): void {
     const sel = this.units.filter((u) => u.sel && !u.deploy);
     if (!sel.length) return;
+    // haulers sent onto ore dig there; sent anywhere else they stop work
+    {
+      const [gx, gy] = this.fold(...this.groundAt(x, y));
+      const near = this.oreNear(gx, gy, 16).filter((n) => n.amt > 20);
+      for (const u of sel)
+        if (u.kind === 'hauler' && u.f === ME) {
+          if (near.length) {
+            u.job = { st: 'seek', node: near[0], t: 0 };
+            u.load ??= 0;
+          } else u.job = undefined;
+        }
+      if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
+        const [mx, my] = this.fold(...this.groundAt(x, y));
+        this.markers.push({ x: mx, y: my, z: 0, t: 0 });
+        return;
+      }
+    }
     if (shortest) {
       // from the globe: take the shortest way
       const [rx, ry] = toScreen(sel[0].x, sel[0].y);
@@ -1041,6 +1324,9 @@ export class IsoGame implements GameLike {
   update(dt: number): void {
     this.time += dt;
     this.updateBuild(dt);
+    for (const u of this.units) if (u.job) this.haul(u, dt);
+    // ore creeps back slowly, as long as a clump isn't dug out completely
+    for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
@@ -1141,7 +1427,17 @@ export class IsoGame implements GameLike {
       if (b.rise < 1) {
         b.rise = Math.min(1, b.rise + dt / (b.kind === 'yard' ? RISE_S : 1 + (b.art.rx + b.art.ry) / 30));
         if (Math.random() < dt * 14) this.puff(b, 1);
-        if (b.rise === 1) this.mapVersion++;
+        if (b.rise === 1) {
+          this.mapVersion++;
+          if (b.own && b.kind === 'refinery' && !b.gift) {
+            // a refinery comes with a hauler, which gets straight to work
+            b.gift = true;
+            const [fx, fy] = this.fold(b.x + DOCK[0], b.y + DOCK[1] + 6);
+            const u = this.newUnit('hauler', ME, fx, fy, Math.PI / 2);
+            u.job = { st: 'seek', t: 0 };
+            u.load = 0;
+          }
+        }
         continue;
       }
       if (b.kind === 'yard') {
@@ -1313,6 +1609,11 @@ export class IsoGame implements GameLike {
       }
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
+    for (const n of this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5)) {
+      if (n.amt < 10) continue;
+      const spr = this.oreArt[n.v][n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0];
+      items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
+    }
     for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
