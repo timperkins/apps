@@ -9,6 +9,15 @@ import type { RGB } from './gfx';
 // camera keeps going round), and games test the nearest copy of each unit.
 // Games keep their own state on the first copy. main.ts draws the ground once
 // for the whole view, then the objects of every copy of the map in view.
+// A command for what is selected, shown as a button above the toolbar.
+export interface Action {
+  id: string;
+  label: string;
+  icon: string; // a key into main.ts's icons
+  disabled?: boolean;
+  title?: string;
+}
+
 export interface GameLike {
   seed: number;
   ctx: CanvasRenderingContext2D;
@@ -38,4 +47,9 @@ export interface GameLike {
   boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
   deselect(): void;
   focus(): { x: number; y: number };
+  // Commands for the selection (deploy, pack up and so on), if the version has any.
+  actions?(): Action[];
+  act?(id: string): void;
+  // Goes up whenever the bases change, so the globe's picture is redrawn.
+  mapVersion?: number;
 }

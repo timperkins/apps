@@ -20,6 +20,7 @@ const moreBtn = document.querySelector<HTMLButtonElement>('#moreBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
+const actsEl = document.querySelector<HTMLSpanElement>('#acts')!;
 
 const VERSIONS: Record<string, (seed: number) => GameLike> = {
   '1': (seed) => new Game(ctx, seed),
@@ -94,6 +95,36 @@ function setAdditive(on: boolean): void {
 moreBtn.addEventListener('click', () => setAdditive(!additive));
 allBtn.addEventListener('click', () => selectView(additive));
 clearBtn.addEventListener('click', () => game?.deselect());
+
+// Commands for the selection (Deploy, Pack up...), drawn as buttons before
+// More and Clear. They are refreshed every frame, but the buttons are only
+// rebuilt when something about them changes.
+const ICONS: Record<string, string> = {
+  // arrows pushing out from a box
+  deploy: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="1" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="9" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="1" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="9" y="4" width="1" height="3"/>',
+  // arrows folding in
+  pack: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="2" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="8" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="2" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="8" y="4" width="1" height="3"/>',
+};
+let actsKey = '';
+function refreshActions(): void {
+  const acts = (!planet && game?.actions?.()) || [];
+  const key = JSON.stringify(acts);
+  if (key === actsKey) return;
+  actsKey = key;
+  actsEl.replaceChildren(
+    ...acts.map((a) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'act';
+      b.disabled = !!a.disabled;
+      if (a.title) b.title = a.title;
+      b.innerHTML = `<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">${ICONS[a.icon] ?? ''}</svg>`;
+      b.append(a.label);
+      b.addEventListener('click', () => game.act?.(a.id));
+      return b;
+    }),
+  );
+}
 
 // Everything on screen; from space, everything on the near side of the world.
 function selectView(add: boolean): void {
@@ -551,6 +582,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 's' && !e.ctrlKey && !e.metaKey) setMode('select');
   if (e.key === 'p') setMode('pan');
+  if (e.key === 'd') game.act?.('deploy');
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '-' || e.key === '_') zoomTo(zoom / 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '0') zoomTo(1, window.innerWidth / 2, window.innerHeight / 2);
@@ -629,6 +661,8 @@ const hashf = (i: number, k: number) => {
 };
 
 let last = performance.now();
+let mapVersion = 0;
+let lastMap = -Infinity;
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -650,7 +684,18 @@ function draw(now: number, first: boolean): void {
   globe.time = now / 1000;
   // the globe's picture of the map is built in the background, or at once if
   // it is needed now
-  if (!globe.ready && game.mapStep(planet ? 1e9 : first ? 0 : 12)) globe.setMap(built.w, built.h, game.mapImage());
+  if (!globe.ready && game.mapStep(planet ? 1e9 : first ? 0 : 12)) {
+    globe.setMap(built.w, built.h, game.mapImage());
+    mapVersion = game.mapVersion ?? 0;
+  }
+  // a base changed: redraw the globe's picture of the map
+  if (globe.ready && (game.mapVersion ?? 0) !== mapVersion && now - lastMap > 500) {
+    lastMap = now;
+    mapVersion = game.mapVersion ?? 0;
+    globe.setMap(built.w, built.h, game.mapImage());
+    lastSnap = -Infinity;
+  }
+  refreshActions();
   if (first) lastSnap = -Infinity;
   snapshot(now);
   ctx.setTransform(1, 0, 0, 1, 0, 0);

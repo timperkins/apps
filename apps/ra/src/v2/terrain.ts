@@ -240,6 +240,17 @@ export class IsoTerrain {
 
   markPad(r: Rect): void {
     this.pads.push(r);
+    this.forget(r);
+  }
+
+  unmarkPad(r: Rect): void {
+    const i = this.pads.indexOf(r);
+    if (i >= 0) this.pads.splice(i, 1);
+    this.forget(r);
+  }
+
+  // Drop the cached ground classes around a rect that changed.
+  private forget(r: Rect): void {
     for (let y = Math.floor(r.y) - 64; y < r.y + r.h + 64; y += 32)
       for (let x = Math.floor(r.x) - 64; x < r.x + r.w + 64; x += 32) {
         const [fx, fy] = this.fold(x, y);

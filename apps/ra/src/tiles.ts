@@ -65,9 +65,34 @@ export class Tiles<P> {
     return this.map.get(this.key(Math.floor(x / CH), Math.floor(y / CH)));
   }
 
+  // Repaint the tiles over map rect (x0, y0)-(x1, y1), when something on the
+  // ground there changed. Tiles in view are repainted while the old picture
+  // stays up; the others are just dropped and repainted when next seen.
+  redo(x0: number, y0: number, x1: number, y1: number): void {
+    for (let ty = Math.floor(y0 / CH); ty <= Math.floor(y1 / CH); ty++)
+      for (let tx = Math.floor(x0 / CH); tx <= Math.floor(x1 / CH); tx++) {
+        const k = this.key(tx, ty);
+        if (this.map.has(k)) this.stale.add(k);
+      }
+  }
+  private stale = new Set<number>();
+
   // Paint queued tiles for up to `ms` milliseconds (always at least one).
   pump(ms: number): void {
     const t0 = performance.now();
+    for (const k of [...this.stale]) {
+      this.stale.delete(k);
+      const old = this.map.get(k);
+      if (!old) continue;
+      if (old.used !== this.frame) {
+        this.map.delete(k);
+        continue;
+      }
+      const t = this.build(k % this.nx, Math.floor(k / this.nx));
+      t.used = this.frame;
+      this.map.set(k, t);
+      if (performance.now() - t0 > ms) return;
+    }
     while (this.want.length) {
       const k = this.want.shift()!;
       if (this.map.has(k)) continue;

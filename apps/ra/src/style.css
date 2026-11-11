@@ -274,6 +274,24 @@ body {
   fill: currentColor;
 }
 
+#acts {
+  display: contents;
+}
+
+#selBar button.act {
+  color: #10170d;
+  background: #e0b83c;
+  border-color: #f7e2a0 #8a6a16 #8a6a16 #f7e2a0;
+}
+
+#selBar button.act:disabled {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--edge);
+  opacity: 0.6;
+  cursor: default;
+}
+
 #moreBtn[aria-pressed='true'] {
   color: #10170d;
   background: #9dff9d;
