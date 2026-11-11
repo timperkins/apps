@@ -307,7 +307,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
 
 // ---------- Buildings ----------
 
-export type BuildingKind = 'yard' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
+export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -379,6 +379,41 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
         return null;
       };
       return { shape, rx: 24, ry: 22, zmax: 32, fx: [{ x: 23, y: -13, z: 31 }, { x: 21, y: -13, z: 17 }] };
+    }
+    case 'lab': {
+      // The Tech lab: a domed research block with a ring of antennas and a
+      // glowing test cell beside it.
+      const shape: Shape = (u, v, z) => {
+        // dome
+        const d = Math.hypot(u + 4, v + 3);
+        if (d < 11 && z >= 10 && z <= 10 + Math.sqrt(Math.max(0, 121 - d * d)) * 0.8) {
+          if (Math.abs(v + 3) < 1.2 && z > 13) return GLASS_D; // slot
+          return g(z > 17 ? shade(METAL, 0.12) : METAL, u, v, z, 0.06);
+        }
+        // block under the dome
+        if (inBox(u, v, z, -17, 9, -16, 10, 0, 10)) {
+          const w = windows(u, v, z, 9, 10, 0, 10, 31);
+          if (w) return w;
+          if (z > 9.4) return g(CONC_L, u, v, z, 0.06);
+          if (z > 6 && z < 7.5) return g(f.main, u, v, z);
+          if (z < 1) return CONC_D;
+          return g(CONC, u, v, z, 0.08);
+        }
+        // antenna masts
+        for (const [au, av] of [
+          [12, -12],
+          [12, 2],
+        ])
+          if (Math.abs(u - au) < 0.5 && Math.abs(v - av) < 0.5 && z < 24) return z > 23 ? hex('#ff5a3c') : GUN_D;
+        // test cell: a glass cylinder with something glowing in it
+        if (cyl(u, v, 14, 10, 4) && z < 9) {
+          if (z < 1.5 || z > 8) return g(f.dark, u, v, z);
+          return cyl(u, v, 14, 10, 1.8) ? hex('#9ff0ff') : GLASS;
+        }
+        if (inBox(u, v, z, -20, 20, -16, 16, 0, 0.6)) return g(CONC_D, u, v, z, 0.1);
+        return null;
+      };
+      return { shape, rx: 20, ry: 16, zmax: 25, fx: [{ x: 14, y: 10, z: 5 }] };
     }
     case 'hq': {
       const shape: Shape = (u, v, z) => {

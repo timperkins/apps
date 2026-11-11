@@ -18,6 +18,27 @@ export interface Action {
   title?: string;
 }
 
+// One thing on the build menu.
+export interface BuildItem {
+  id: string;
+  name: string;
+  tab: string;
+  cost: number;
+  icon: string; // image URL
+  blurb: string;
+  state: 'idle' | 'building' | 'paused' | 'ready';
+  progress: number; // 0..1
+  count: number; // how many queued (units)
+  isNew: boolean;
+  blocked?: string; // why it can't be started right now
+}
+
+export interface BuildMenu {
+  credits: number;
+  tabs: { id: string; label: string }[];
+  items: BuildItem[];
+}
+
 export interface GameLike {
   seed: number;
   ctx: CanvasRenderingContext2D;
@@ -52,4 +73,16 @@ export interface GameLike {
   act?(id: string): void;
   // Goes up whenever the bases change, so the globe's picture is redrawn.
   mapVersion?: number;
+  // Building: the build menu (null until there is anything to build), tapping
+  // an item (start, pause, resume, or place it when ready), cancelling it,
+  // and short messages for the player.
+  buildMenu?(): BuildMenu | null;
+  buildTap?(id: string): void;
+  buildCancel?(id: string): void;
+  seen?(id: string): void;
+  onNotice?: (msg: string) => void;
+  // Placing a finished building: true while its ghost is out, which follows
+  // placeAt (map coordinates); act('place') puts it down.
+  placing?(): boolean;
+  placeAt?(x: number, y: number): void;
 }

@@ -21,6 +21,7 @@
     <canvas id="c"></canvas>
     <div id="hud">
       <button type="button" id="menuBtn" aria-label="Menu" aria-expanded="false" aria-controls="menu" title="Menu"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="2" width="9" height="2"/><rect x="1" y="5" width="9" height="2"/><rect x="1" y="8" width="9" height="2"/></svg></button>
+      <span id="credits" hidden></span>
       <div id="sel">Drag: select · Tap: move</div>
     </div>
     <div id="menu" hidden>
@@ -44,7 +45,16 @@
       <button type="button" data-mode="pan" aria-pressed="false" title="Pan (P)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="11"/><rect x="0" y="5" width="11" height="1"/><rect x="4" y="1" width="3" height="1"/><rect x="4" y="9" width="3" height="1"/><rect x="1" y="4" width="1" height="3"/><rect x="9" y="4" width="1" height="3"/></svg><span>Pan</span></button>
       <i class="sep"></i>
       <button type="button" id="allBtn" title="Select everything on screen"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="0" width="1" height="3"/><rect x="8" y="0" width="3" height="1"/><rect x="10" y="0" width="1" height="3"/><rect x="0" y="10" width="3" height="1"/><rect x="0" y="8" width="1" height="3"/><rect x="8" y="10" width="3" height="1"/><rect x="10" y="8" width="1" height="3"/><rect x="3" y="3" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="6" y="6" width="2" height="2"/></svg><span>All</span></button>
+      <i class="sep" id="buildSep" hidden></i>
+      <button type="button" id="buildBtn" aria-pressed="false" title="Build (B)" hidden><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="1" width="6" height="3"/><rect x="0" y="2" width="1" height="2"/><rect x="7" y="2" width="2" height="1"/><rect x="4" y="4" width="2" height="7"/></svg><span>Build</span></button>
     </nav>
+    <div id="build" hidden>
+      <div class="head"><span class="title">Build</span><span class="credits"></span><button type="button" class="close" aria-label="Close" title="Close (B)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/></svg></button></div>
+      <div class="tabs"></div>
+      <div class="grid"></div>
+      <div class="hint">Tap to build · tap again to hold · hold to cancel</div>
+    </div>
+    <div id="toast" hidden></div>
     <div id="loading" hidden>Drawing…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
