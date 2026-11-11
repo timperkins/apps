@@ -2,7 +2,7 @@
 import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import type { GameLike } from '../types';
+import type { Action, GameLike } from '../types';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
 import {
@@ -20,8 +20,32 @@ import {
   makeTrees,
 } from './sprites';
 
+// v2 adds the Mobile Foundry to v1's units.
+type Kind = UnitKind | 'mcv';
+const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number; hp: number }> = {
+  ...STATS,
+  mcv: { name: 'Mobile Foundry', speed: 10, turn: 1.3, r: 15, hp: 1 },
+};
+const BNAME: Record<BuildingKind, string> = {
+  yard: 'Foundry',
+  hq: 'Command post',
+  power: 'Generator',
+  barracks: 'Barracks',
+  refinery: 'Ore refinery',
+  radar: 'Radar mast',
+  factory: 'Vehicle works',
+  tower: 'Gun tower',
+  silo: 'Ore silo',
+  helipad: 'Helipad',
+};
+// The faction you play.
+const ME = 0;
+// Deploying: the Foundry vehicle turns to line up, then the yard rises.
+const RISE_S = 1.8;
+const PACK_S = 1.2;
+
 interface Unit {
-  kind: UnitKind;
+  kind: Kind;
   f: number;
   x: number;
   y: number;
@@ -42,6 +66,7 @@ interface Unit {
   // so orders go the way they panned.
   lap: number;
   lapY: number;
+  deploy?: boolean; // a Foundry on its way to deploying
 }
 
 interface Building {
@@ -53,6 +78,11 @@ interface Building {
   phase: number;
   gun: number;
   gunGoal: number;
+  pad: Rect;
+  own: boolean; // built (or deployed) by the player
+  sel: boolean;
+  rise: number; // 0..1, how far it has gone up (1 when standing)
+  packing?: boolean;
 }
 
 interface Prop {
@@ -73,11 +103,10 @@ interface Particle {
   size: number;
 }
 
-const BASE_A: BuildingKind[] = ['hq', 'factory', 'power', 'barracks', 'refinery', 'radar', 'power', 'helipad', 'silo', 'tower', 'tower', 'tower'];
 const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
 
 // Height of each unit's visual centre above the ground (for picking and brackets).
-const MID: Record<UnitKind, number> = { light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
 const HELI_ALT = 20;
 
 export class IsoGame implements GameLike {
@@ -88,6 +117,7 @@ export class IsoGame implements GameLike {
   particles: Particle[] = [];
   markers: { x: number; y: number; z: number; t: number }[] = [];
   sparkles: { x: number; y: number; life: number }[] = [];
+  sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
   art: V2FactionArt[];
   bArt = new Map<string, V2BuildingArt>();
   trees = makeTrees();
@@ -112,8 +142,15 @@ export class IsoGame implements GameLike {
     return this.terrain.h;
   }
 
+  mapVersion = 0;
+
   private emit(): void {
-    this.onSelect(this.selected().map((u) => STATS[u.kind].name));
+    const b = this.selB();
+    this.onSelect(b ? [BNAME[b.kind]] : this.selected().map((u) => UNIT[u.kind].name));
+  }
+
+  private selB(): Building | undefined {
+    return this.buildings.find((b) => b.sel);
   }
 
   private buildingArt(kind: BuildingKind, f: number): V2BuildingArt {
@@ -138,6 +175,9 @@ export class IsoGame implements GameLike {
     this.particles = [];
     this.markers = [];
     this.sparkles = [];
+    this.sparks = [];
+    this.lastTap = null;
+    this.mapVersion++;
     this.forestF = new WorldField(w, h, 50, this.seed + 500, 2, 10);
     this.ov = null;
 
@@ -201,14 +241,15 @@ export class IsoGame implements GameLike {
             if (pads.some((p) => overlap(p, pad, 4))) continue;
             pads.push(pad);
             T.markPad(pad);
-            this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2 });
+            this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2, pad, own: false, sel: false, rise: 1 });
             ok = true;
           }
         }
       }
     };
     const OUTPOST: BuildingKind[] = ['hq', 'power', 'barracks', 'refinery', 'silo', 'tower', 'tower', 'radar', 'factory', 'helipad'];
-    for (const st of sites) place(st.home ? (st.f ? BASE_B : BASE_A) : OUTPOST.slice(0, 5 + Math.floor(rand() * 5)), st.f, st.sx, st.sy);
+    // your home base is still to be built: you start with a Foundry vehicle
+    for (const st of sites) if (!(st.home && st.f === ME)) place(st.home ? BASE_B : OUTPOST.slice(0, 5 + Math.floor(rand() * 5)), st.f, st.sx, st.sy);
 
     // a little clutter beside some buildings
     for (const b of this.buildings) {
@@ -220,7 +261,7 @@ export class IsoGame implements GameLike {
     }
 
     // armies
-    const spawn = (kind: UnitKind, f: number, csx: number, csy: number, spread: number): Unit | null => {
+    const spawn = (kind: Kind, f: number, csx: number, csy: number, spread: number): Unit | null => {
       for (let t = 0; t < 300; t++) {
         const sx = csx + (rand() - 0.5) * spread * 2;
         const sy = csy + (rand() - 0.5) * spread;
@@ -235,13 +276,15 @@ export class IsoGame implements GameLike {
         if (kind !== 'heli' && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
         [x, y] = T.fold(x, y);
         const a = rand() * Math.PI * 2;
-        const u: Unit = { kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 };
-        this.units.push(u);
+        if (kind === 'mcv' && !this.siteOk(this.siteOf(x, y))) continue;
+        const u = this.newUnit(kind, f, x, y, a);
+        u.anim = rand() * 10;
+        u.idle = rand() * 4;
         return u;
       }
       return null;
     };
-    const army: [UnitKind, number][] = [
+    const army: [Kind, number][] = [
       ['light', 4],
       ['heavy', 2],
       ['buggy', 2],
@@ -251,12 +294,34 @@ export class IsoGame implements GameLike {
       ['inf', 6],
       ['rocket', 3],
     ];
+    // you start with a handful: the Foundry vehicle and a small escort
+    const start: [Kind, number][] = [
+      ['mcv', 1],
+      ['light', 2],
+      ['buggy', 1],
+      ['inf', 3],
+    ];
+    // the Foundry vehicle starts on the nearest open ground to your home site
+    const hs = sites[0];
+    let ms: [number, number] = [hs.sx, hs.sy];
+    found: for (let r = 0; r < 1200; r += 12)
+      for (let t = 0; t < Math.max(1, r / 6); t++) {
+        const a = rand() * Math.PI * 2;
+        const sx = hs.sx + Math.cos(a) * r;
+        const sy = hs.sy + Math.sin(a) * r * 0.5;
+        const [x, y] = toWorld(sx, sy, 0);
+        if (this.siteOk(this.siteOf(x, y))) {
+          ms = [sx, sy];
+          break found;
+        }
+      }
     const mine: [number, number][] = [];
     for (const st of sites)
-      for (const [kind, c] of army)
-        for (let i = 0; i < Math.max(1, Math.round(c * (st.home ? 1.4 : 0.6))); i++) {
-          const u = spawn(kind, st.f, st.sx + (st.home ? 60 : 0), st.sy + (st.home ? 140 : 70), st.home ? 220 : 150);
-          if (u && st.home && st.f === 0) mine.push(toScreen(u.x, u.y));
+      for (const [kind, c] of st.home && st.f === ME ? start : army)
+        for (let i = 0; i < (st.home && st.f === ME ? c : Math.max(1, Math.round(c * (st.home ? 1.4 : 0.6)))); i++) {
+          const own = st.home && st.f === ME;
+          const u = own ? (kind === 'mcv' ? spawn(kind, st.f, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0) : spawn(kind, st.f, ms[0], ms[1] + 45, 70)) : spawn(kind, st.f, st.sx + (st.home ? 60 : 0), st.sy + (st.home ? 140 : 70), st.home ? 220 : 150);
+          if (u && own) mine.push(toScreen(u.x, u.y));
         }
     // boats on the nearest lake to home
     const hx = (sites[0].sx + sites[1].sx) / 2;
@@ -279,6 +344,125 @@ export class IsoGame implements GameLike {
   }
 
   private home = { x: 0, y: 0 };
+  private lastTap: { u: Unit; t: number } | null = null;
+
+  private newUnit(kind: Kind, f: number, x: number, y: number, a: number): Unit {
+    const u: Unit = { kind, f, x, y, z: this.terrain.elev(x, y), a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: 0, hp: UNIT[kind].hp, idle: 2, trackAcc: 0, lap: 0, lapY: 0 };
+    this.units.push(u);
+    return u;
+  }
+
+  // ---------- Foundry: deploy and pack up ----------
+
+  // The pad a Foundry standing at (x, y) would deploy onto.
+  private siteOf(x: number, y: number): Rect {
+    const a = this.buildingArt('yard', ME);
+    const cx = Math.round(x);
+    const cy = Math.round(y);
+    return { x: cx - a.rx - 3, y: cy - a.ry - 3, w: a.rx * 2 + 6, h: a.ry * 2 + 6 };
+  }
+
+  // Open, level grass, away from other buildings.
+  private siteOk(r: Rect): boolean {
+    return this.terrain.clear(r, 1);
+  }
+
+  private deployable(u: Unit): boolean {
+    return u.kind === 'mcv' && u.f === ME && this.siteOk(this.siteOf(u.x, u.y));
+  }
+
+  actions(): Action[] {
+    const b = this.selB();
+    if (b) {
+      if (b.own && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
+      return [];
+    }
+    const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
+    if (!mcvs.length) return [];
+    const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
+    return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (D)' : 'Needs open, level ground: move somewhere clear' }];
+  }
+
+  act(id: string): void {
+    if (id === 'deploy') {
+      for (const u of this.selected()) if (!u.deploy && this.deployable(u)) this.startDeploy(u);
+    } else if (id === 'pack') {
+      const b = this.selB();
+      if (b && b.own && b.kind === 'yard' && b.rise >= 1) b.packing = true;
+    }
+  }
+
+  private startDeploy(u: Unit): void {
+    u.deploy = true;
+    u.moving = false;
+    u.tx = u.x;
+    u.ty = u.y;
+    // clear the way: everyone else standing on the site drives off it
+    const r = this.siteOf(u.x, u.y);
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    for (const o of this.units) {
+      if (o === u || o.kind === 'heli' || o.kind === 'boat') continue;
+      if (!inside(o.x, o.y, r, 6) && !(o.moving && inside(o.tx, o.ty, r, 6))) continue;
+      let dx = o.x - cx;
+      let dy = o.y - cy;
+      if (Math.hypot(dx, dy) < 1) dx = 1;
+      const k = Math.max(Math.abs(dx) / (r.w / 2), Math.abs(dy) / (r.h / 2));
+      o.tx = cx + dx / k + Math.sign(dx) * 10;
+      o.ty = cy + dy / k + Math.sign(dy) * 10;
+      o.moving = true;
+    }
+  }
+
+  // The Foundry vehicle has lined up: it unfolds into the yard.
+  private deployNow(u: Unit): void {
+    const pad = this.siteOf(u.x, u.y);
+    if (!this.siteOk(pad)) {
+      u.deploy = false;
+      return;
+    }
+    this.units.splice(this.units.indexOf(u), 1);
+    const art = this.buildingArt('yard', u.f);
+    const b: Building = { kind: 'yard', f: u.f, x: pad.x + pad.w / 2, y: pad.y + pad.h / 2, art, phase: 0, gun: 0, gunGoal: 0, pad, own: true, sel: u.sel, rise: 0 };
+    this.buildings.push(b);
+    if (u.sel) for (const o of this.units) o.sel = false;
+    this.setPad(pad, true);
+    this.puff(b, 14);
+    this.emit();
+  }
+
+  private packNow(b: Building): void {
+    this.buildings.splice(this.buildings.indexOf(b), 1);
+    this.setPad(b.pad, false);
+    const u = this.newUnit('mcv', b.f, b.x, b.y, 0);
+    u.sel = b.sel;
+    this.puff(b, 8);
+    this.emit();
+  }
+
+  // Lay or lift a building's concrete, and repaint the ground under it.
+  private setPad(pad: Rect, on: boolean): void {
+    if (on) this.terrain.markPad(pad);
+    else this.terrain.unmarkPad(pad);
+    const pts = [toScreen(pad.x, pad.y), toScreen(pad.x + pad.w, pad.y), toScreen(pad.x, pad.y + pad.h), toScreen(pad.x + pad.w, pad.y + pad.h)];
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    this.tiles.redo(Math.min(...xs) - 24, Math.min(...ys) - 24, Math.max(...xs) + 24, Math.max(...ys) + 24);
+    this.mapVersion++;
+  }
+
+  // A burst of dust round a building's footprint.
+  private puff(b: Building, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const t = Math.random() * 4;
+      const s = (t % 1) * 2 - 1;
+      const side = Math.floor(t);
+      const lx = side < 2 ? (side ? 1 : -1) * b.art.rx : s * b.art.rx;
+      const ly = side < 2 ? s * b.art.ry : (side === 3 ? 1 : -1) * b.art.ry;
+      const [sx, sy] = toScreen(b.x + lx, b.y + ly, 1);
+      this.particles.push({ x: sx, y: sy, vx: (Math.random() - 0.5) * 8, vy: -3 - Math.random() * 3, life: 0, max: 1 + Math.random() * 0.8, kind: 'dust', size: 1.5 });
+    }
+  }
   private forestF!: WorldField;
   tiles!: Tiles<Prop>;
   private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -311,7 +495,8 @@ export class IsoGame implements GameLike {
         }
         const k = kAt(wx, wy);
         if (k !== K.Grass && k !== K.High) continue;
-        if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 5, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 5) === K.Pad) continue;
+        // keep clear of building pads, more so in front of them where a tree would hide them
+        if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 9, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 9) === K.Pad || kAt(wx - 8, wy - 8) === K.Pad || kAt(wx - 4, wy + 4) === K.Pad || kAt(wx + 4, wy - 4) === K.Pad) continue;
         const forest = (this.forestF.at(jx, jy) - 0.6) * 2.4;
         const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
         let spr: StackSprite | null = null;
@@ -359,20 +544,52 @@ export class IsoGame implements GameLike {
       const lap = this.copyNear(u, x, y);
       const [sx, sy] = this.screenOf(u);
       const d = Math.hypot(sx + lap[0] * this.w - x, sy + lap[1] * this.h - y);
-      if (d < STATS[u.kind].r + 4 && d < bd) {
+      if (d < UNIT[u.kind].r + 4 && d < bd) {
         bd = d;
         best = u;
         bestLap = lap;
       }
     }
     if (best) {
+      // a second tap on a lone Foundry vehicle deploys it
+      const now = performance.now();
+      const again = this.lastTap && this.lastTap.u === best && now - this.lastTap.t < 400 && best.sel && !add;
+      this.lastTap = { u: best, t: now };
+      for (const b of this.buildings) b.sel = false;
       if (!add) for (const o of this.units) o.sel = false;
       best.sel = add ? !best.sel : true;
       [best.lap, best.lapY] = bestLap;
+      if (again && this.deployable(best) && !best.deploy) this.startDeploy(best);
       this.emit();
       return;
     }
+    this.lastTap = null;
+    const hit = this.buildingAt(x, y);
+    // with units selected, a tap on a building is still a move order
+    if (hit && hit.own && !this.selected().length) {
+      for (const b of this.buildings) b.sel = b === hit;
+      this.emit();
+      return;
+    }
+    if (this.selB()) {
+      this.deselect();
+      return;
+    }
     this.order(x, y);
+  }
+
+  // The building under screen point (x, y), on any copy of the map.
+  private buildingAt(x: number, y: number): Building | null {
+    for (const b of this.buildings) {
+      const [bsx, bsy] = toScreen(b.x, b.y);
+      const lx = Math.round((x - bsx) / this.w) * this.w;
+      const ly = Math.round((y - bsy) / this.h) * this.h;
+      for (let z = 0; z <= 24; z += 3) {
+        const [wx, wy] = toWorld(x - lx, y - ly, z);
+        if (Math.abs(wx - b.x) <= b.art.rx && Math.abs(wy - b.y) <= b.art.ry) return b;
+      }
+    }
+    return null;
   }
 
   // Shift a world point by whole laps around the world, across and down.
@@ -389,7 +606,7 @@ export class IsoGame implements GameLike {
   }
 
   order(x: number, y: number, shortest = false): void {
-    const sel = this.units.filter((u) => u.sel);
+    const sel = this.units.filter((u) => u.sel && !u.deploy);
     if (!sel.length) return;
     if (shortest) {
       // from the globe: take the shortest way
@@ -446,6 +663,7 @@ export class IsoGame implements GameLike {
         [u.lap, u.lapY] = lap;
       } else if (!add) u.sel = false;
     }
+    if (this.units.some((u) => u.sel)) for (const b of this.buildings) b.sel = false;
     this.emit();
   }
 
@@ -454,11 +672,13 @@ export class IsoGame implements GameLike {
   }
 
   selectedPoints(): [number, number][] {
-    return this.selected().map((u) => toScreen(u.x, u.y));
+    const b = this.selB();
+    return b ? [toScreen(b.x, b.y)] : this.selected().map((u) => toScreen(u.x, u.y));
   }
 
   deselect(): void {
     for (const u of this.units) u.sel = false;
+    for (const b of this.buildings) b.sel = false;
     this.emit();
   }
 
@@ -470,11 +690,21 @@ export class IsoGame implements GameLike {
 
   update(dt: number): void {
     this.time += dt;
-    for (const u of this.units) {
-      const st = STATS[u.kind];
+    for (const u of [...this.units]) {
+      const st = UNIT[u.kind];
       u.anim += dt;
+      if (u.deploy) {
+        // line up square with the map, then unfold
+        const diff = angDiff(0, u.a);
+        const stepA = st.turn * 2.5 * dt;
+        u.a = Math.abs(diff) <= stepA ? 0 : u.a + Math.sign(diff) * stepA;
+        if (u.a === 0) {
+          this.deployNow(u);
+          continue;
+        }
+      }
       const foot = u.kind === 'inf' || u.kind === 'rocket';
-      if (u.moving) {
+      if (u.moving && !u.deploy) {
         const dx = u.tx - u.x;
         const dy = u.ty - u.y;
         const dist = Math.hypot(dx, dy);
@@ -502,7 +732,7 @@ export class IsoGame implements GameLike {
               const [bx, by] = toScreen(u.x - Math.cos(u.a) * 13, u.y - Math.sin(u.a) * 13, 0);
               this.particles.push({ x: bx, y: by, vx: 0, vy: 0, life: 0, max: 1.6, kind: 'wake', size: 1 });
             } else if (!foot && u.kind !== 'heli' && k !== K.Water && u.z === 0) {
-              const hw = u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 4 : 5;
+              const hw = u.kind === 'mcv' ? 7.5 : u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 4 : 5;
               const px = -Math.sin(u.a) * hw;
               const py = Math.cos(u.a) * hw;
               const style = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.2)' : k === K.Pad ? 'rgba(30,30,30,0.08)' : 'rgba(25,22,12,0.16)';
@@ -549,8 +779,28 @@ export class IsoGame implements GameLike {
       }
     }
 
-    for (const b of this.buildings) {
+    for (const b of [...this.buildings]) {
       b.phase += dt;
+      if (b.packing) {
+        b.rise = Math.max(0, b.rise - dt / PACK_S);
+        if (Math.random() < dt * 12) this.puff(b, 1);
+        if (b.rise === 0) this.packNow(b);
+        continue;
+      }
+      if (b.rise < 1) {
+        b.rise = Math.min(1, b.rise + dt / RISE_S);
+        if (Math.random() < dt * 14) this.puff(b, 1);
+        if (b.rise === 1) this.mapVersion++;
+        continue;
+      }
+      if (b.kind === 'yard') {
+        // a welding spark under the crane hook now and then
+        if (Math.random() < dt * 1.5) {
+          const p = b.art.fx[1];
+          const [sx, sy] = toScreen(b.x + p.x, b.y + p.y, p.z - 1);
+          for (let i = 0; i < 3; i++) this.sparks.push({ x: sx, y: sy, vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, life: 0 });
+        }
+      }
       const emit = (i: number, kind: 'smoke' | 'soot', rate: number) => {
         if (!b.art.fx[i] || Math.random() > dt * rate) return;
         const p = b.art.fx[i];
@@ -580,6 +830,13 @@ export class IsoGame implements GameLike {
       if (p.kind === 'smoke' || p.kind === 'soot') p.size += dt * 1.8;
     }
     this.particles = this.particles.filter((p) => p.life < p.max);
+    for (const s of this.sparks) {
+      s.life += dt;
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vy += 60 * dt;
+    }
+    this.sparks = this.sparks.filter((s) => s.life < 0.5);
     for (const m of this.markers) m.t += dt;
     this.markers = this.markers.filter((m) => m.t < 0.7);
 
@@ -676,6 +933,14 @@ export class IsoGame implements GameLike {
       }
     }
 
+    const feet: [Rect, string][] = [];
+    for (const u of this.units) {
+      if (!u.sel || u.kind !== 'mcv' || u.f !== ME || u.deploy || !seen(u.x, u.y)) continue;
+      const r = this.siteOf(u.x, u.y);
+      feet.push([r, this.siteOk(r) ? '#9dff9d' : '#ff6a5a']);
+      this.drawFoot(r, feet[feet.length - 1][1], 1, true, false);
+    }
+
     // aircraft shadows on the ground
     for (const u of this.units) {
       if (u.kind !== 'heli' || !seen(u.x, u.y)) continue;
@@ -716,7 +981,73 @@ export class IsoGame implements GameLike {
 
     for (const u of this.units) if (u.kind === 'heli' && seen(u.x, u.y, u.z)) this.drawUnit(u);
 
+    for (const s of this.sparks) {
+      if (!inView(s.x, s.y)) continue;
+      c.fillStyle = s.life < 0.2 ? '#fff6c8' : '#ffb347';
+      c.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
+    }
+
+    // where a selected Foundry vehicle would deploy: its outline over the
+    // trees (they get cleared)
+    for (const [r, col] of feet) this.drawFoot(r, col, 0.75 + 0.25 * Math.sin(this.time * 6), false, true);
+
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
+    for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
+  }
+
+  // A footprint outline on the ground, dashed round its edge.
+  private drawFoot(r: Rect, color: string, alpha: number, fill = true, line = true): void {
+    const c = this.ctx;
+    const pts: [number, number][] = [
+      [r.x, r.y],
+      [r.x + r.w, r.y],
+      [r.x + r.w, r.y + r.h],
+      [r.x, r.y + r.h],
+    ];
+    c.fillStyle = color;
+    if (fill) {
+      c.globalAlpha = alpha * 0.2;
+      c.beginPath();
+      pts.forEach(([x, y], i) => {
+        const [sx, sy] = toScreen(x, y);
+        if (i) c.lineTo(sx, sy);
+        else c.moveTo(sx, sy);
+      });
+      c.fill();
+    }
+    c.globalAlpha = alpha;
+    for (let i = 0; i < 4 && line; i++) {
+      const [ax, ay] = pts[i];
+      const [bx, by] = pts[(i + 1) % 4];
+      const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 2);
+      for (let k = 0; k <= n; k++) {
+        if (k % 4 === 3) continue;
+        const [sx, sy] = toScreen(ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n);
+        c.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  // Brackets round the corners of a selected building's footprint.
+  private drawBuildingSel(b: Building): void {
+    const c = this.ctx;
+    const { rx, ry } = b.art;
+    c.fillStyle = '#ffffff';
+    const L = 7;
+    for (const [cx, cy, dx, dy] of [
+      [-rx, -ry, 1, 1],
+      [rx, -ry, -1, 1],
+      [rx, ry, -1, -1],
+      [-rx, ry, 1, -1],
+    ]) {
+      for (let k = 0; k <= L; k++) {
+        const [ax, ay] = toScreen(b.x + cx + dx * k, b.y + cy);
+        c.fillRect(Math.round(ax), Math.round(ay), 1, 1);
+        const [bx, by] = toScreen(b.x + cx, b.y + cy + dy * k);
+        c.fillRect(Math.round(bx), Math.round(by), 1, 1);
+      }
+    }
   }
 
   // The whole map for the globe, one pixel per OV screen pixels: the overview
@@ -734,7 +1065,7 @@ export class IsoGame implements GameLike {
     const ctx = this.ctx;
     this.ctx = c;
     try {
-      for (const b of [...this.buildings].sort((p, q) => p.x + p.y - q.x - q.y)) {
+      for (const b of this.buildings.filter((b) => b.rise >= 1).sort((p, q) => p.x + p.y - q.x - q.y)) {
         // on the copy of the map that holds the building's foot
         const [sx, sy] = toScreen(b.x, b.y);
         const [fx, fy] = this.lapped(b.x, b.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
@@ -758,6 +1089,9 @@ export class IsoGame implements GameLike {
     const art = this.art[u.f];
     const di = dirIndex(u.a, DIRS);
     switch (u.kind) {
+      case 'mcv':
+        this.blit(art.mcv[di], u.x, u.y, u.z);
+        break;
       case 'inf':
       case 'rocket': {
         const frames = u.kind === 'inf' ? art.infantry : art.rocket;
@@ -812,7 +1146,7 @@ export class IsoGame implements GameLike {
 
   private drawSelection(u: Unit): void {
     const c = this.ctx;
-    const st = STATS[u.kind];
+    const st = UNIT[u.kind];
     const [sx, sy] = this.screenOf(u);
     const foot = u.kind === 'inf' || u.kind === 'rocket';
     const rx = foot ? 5 : st.r + 4;
@@ -832,6 +1166,20 @@ export class IsoGame implements GameLike {
 
   private drawBuilding(b: Building): void {
     const c = this.ctx;
+    if (b.rise < 1) {
+      // going up (or coming down): revealed from the ground up, inside the
+      // site's outline
+      const spr = b.art.spr;
+      const [sx, sy] = toScreen(b.x, b.y, 0);
+      const x = Math.round(sx - spr.cx);
+      const y = Math.round(sy - spr.cy);
+      const W = spr.img.width;
+      const H = spr.img.height;
+      const top = Math.round(H * (1 - b.rise));
+      this.drawFoot(b.pad, '#ffe08a', 0.8);
+      if (H - top > 0) c.drawImage(spr.img, 0, top, W, H - top, x, y + top, W, H - top);
+      return;
+    }
     this.blit(b.art.spr, b.x, b.y, 0);
     const f = FACTIONS[b.f];
     const fx = (i: number) => {
@@ -839,6 +1187,16 @@ export class IsoGame implements GameLike {
       return toScreen(b.x + p.x, b.y + p.y, p.z).map(Math.round) as [number, number];
     };
     switch (b.kind) {
+      case 'yard': {
+        if (Math.floor(b.phase * 1.2) % 2 === 0) {
+          const [x, y] = fx(0);
+          c.fillStyle = 'rgba(255,90,60,0.35)';
+          c.fillRect(x - 1, y - 1, 3, 3);
+          c.fillStyle = '#ff7a5c';
+          c.fillRect(x, y, 1, 1);
+        }
+        break;
+      }
       case 'hq': {
         if (Math.floor(b.phase * 1.5) % 2 === 0) {
           const [x, y] = fx(0);

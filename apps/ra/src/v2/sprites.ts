@@ -237,7 +237,41 @@ function soldier(f: Faction, rocket: boolean, frame: number): Shape {
   };
 }
 
+// The Mobile Foundry: a long tracked carrier with a cab, a boxy works module
+// and a crane folded flat along the top. It deploys into the Foundry.
+function foundryVehicle(f: Faction): Shape {
+  return (u, v, z) => {
+    const t = tracks(u, v, z, 15, 9, 3, 3.5);
+    if (t) return t;
+    const av = Math.abs(v);
+    if (av <= 9 && av > 6 && z > 3.5 && z <= 4.2 && Math.abs(u) < 14.5) return g(shade(f.main, -0.25), u, v, z);
+    if (av > 6.2 || z < 1.5 || Math.abs(u) > 15) return null;
+    // folded crane: boom along the top, its slewing ring at the back
+    if (Math.abs(v - 3) < 1 && u > -12 && u < 11 && z > 12 && z <= 13.6) return (Math.floor(u + 40) % 3 === 0 ? GUN_D : HAZ);
+    if (cyl(u, v, -9, 3, 2.2) && z > 11.5 && z <= 14.5) return g(z > 14 ? METAL : GUN, u, v, z);
+    // exhaust stack
+    if (cyl(u, v, -1, -4.2, 0.9) && z <= 16) return z > 15.3 ? BLACK : GUN_D;
+    // cab
+    if (u > 8) {
+      if (u > 14 || av > 5 || z > 11) return u <= 14.5 && z <= 6 && av <= 6 ? g(f.dark, u, v, z) : null;
+      if (z > 7 && z < 10 && (u > 13.4 || av > 4.4)) return u > 13.4 ? GLASS : GLASS_D;
+      if (u > 13.4 && z < 5 && av > 3 && av < 4.4) return LAMP;
+      return g(z > 10.4 ? f.light : f.main, u, v, z);
+    }
+    // the works module
+    if (u > -14 && av <= 5.6 && z <= 12) {
+      if (z > 11.4) return g(Math.abs(v + 2.5) < 1.6 && Math.abs(u + 3) < 3 ? GUN_D : f.light, u, v, z);
+      if (z > 8 && z < 9.4) return Math.floor((u + v) / 1.5 + 40) % 2 ? HAZ : BLACK;
+      if (av > 5 && Math.abs(u + 3) < 4 && z > 3 && z < 7.5) return Math.floor(z) % 2 ? shade(METAL, -0.2) : METAL; // shutter
+      return g(z < 4 ? f.dark : f.main, u, v, z);
+    }
+    if (z <= 6) return g(f.dark, u, v, z);
+    return null;
+  };
+}
+
 export interface V2FactionArt {
+  mcv: StackSprite[];
   lightTank: StackSprite[];
   lightTurret: StackSprite[];
   heavyTank: StackSprite[];
@@ -255,6 +289,7 @@ export interface V2FactionArt {
 export function makeFactionArt(f: Faction): V2FactionArt {
   const inf = (rocket: boolean) => [0, 1, 2].map((fr) => renderDirs(soldier(f, rocket, fr), 16, { r: 4, zmax: 9, step: 0.5, bakeShadow: true }));
   return {
+    mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }),
     lightTank: renderDirs(tankHull(f, 16, 12, false), DIRS, { r: 10.5, zmax: 6, bakeShadow: true }),
     lightTurret: renderDirs(turretShape(f, 3.6, 5, 1, 11), DIRS, { r: 11.5, zmax: 14 }),
     heavyTank: renderDirs(tankHull(f, 20, 15, true), DIRS, { r: 13, zmax: 7, bakeShadow: true }),
@@ -272,7 +307,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
 
 // ---------- Buildings ----------
 
-export type BuildingKind = 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
+export type BuildingKind = 'yard' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -301,6 +336,50 @@ function cyl(u: number, v: number, cu: number, cv: number, r: number) {
 
 function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
   switch (kind) {
+    case 'yard': {
+      // The Foundry: a works hall with a big door, a tower crane over the
+      // apron and stacks of parts waiting to be put together.
+      const shape: Shape = (u, v, z) => {
+        // tower crane: lattice mast, cab, boom, counterweight, cable and hook
+        if (Math.abs(u - 13) < 1.6 && Math.abs(v + 13) < 1.6 && z < 29) {
+          const edge = Math.abs(u - 13) > 1 || Math.abs(v + 13) > 1;
+          if (edge && (Math.abs(Math.abs(u - 13) - Math.abs(v + 13)) < 0.5 || Math.floor(z) % 3 === 0)) return HAZ;
+          return null;
+        }
+        if (inBox(u, v, z, 11, 15.5, -15, -11, 26, 29.5)) return z > 29 ? f.light : u > 15 ? GLASS : g(f.main, u, v, z);
+        if (Math.abs(v + 13) < 0.8 && u > 4 && u < 24 && z > 29.5 && z < 31) return Math.floor(u + 40) % 2 ? HAZ : GUN_D;
+        if (inBox(u, v, z, 4, 7, -14.5, -11.5, 27, 30)) return g(CONC_D, u, v, z);
+        if (Math.abs(u - 21) < 0.4 && Math.abs(v + 13) < 0.4 && z > 17 && z < 30) return GUN_D;
+        if (inBox(u, v, z, 20, 22, -14, -12, 15, 17)) return HAZ;
+        // works hall
+        if (inBox(u, v, z, -21, 6, -19, 4, 0, 15)) {
+          if (v > 3.4 && Math.abs(u + 7) < 7 && z < 10) {
+            if (Math.abs(u + 7) > 6.2 || z > 9.2) return (Math.floor(u + z) & 2) ? HAZ : BLACK;
+            return Math.floor(z) % 2 ? shade(METAL, -0.25) : METAL;
+          }
+          const w = windows(u, v, z, 6, 4, 0, 15, 21);
+          if (w && z > 9) return w;
+          if (z > 14.4) {
+            if (Math.abs(u + 7) < 9 && Math.abs(v + 7.5) < 5) return ((Math.floor(u / 2) & 1) ? GLASS_D : shade(GLASS_D, 0.2)); // skylight
+            return g(Math.abs(u + 7) < 2 ? f.main : CONC_L, u, v, z, 0.08);
+          }
+          if (z > 11 && z < 12.6) return g(f.main, u, v, z);
+          if (z < 1) return CONC_D;
+          return g(CONC, u, v, z, 0.08);
+        }
+        // a stack of parts on the apron
+        if (inBox(u, v, z, 10, 16, 7, 13, 0, 4)) return g(z > 3.4 ? shade(f.main, 0.1) : f.dark, u, v, z);
+        if (inBox(u, v, z, 11, 15, 8, 12, 4, 7)) return g(z > 6.4 ? METAL : GUN, u, v, z);
+        if (inBox(u, v, z, 17, 22, 9, 13, 0, 3)) return g(z > 2.4 ? WOOD : shade(WOOD, -0.2), u, v, z);
+        // the apron: concrete with a hazard edge
+        if (Math.abs(u) <= 24 && Math.abs(v) <= 22 && z < 1) {
+          if (Math.abs(u) > 23 || Math.abs(v) > 21) return Math.floor((u + v) / 2 + 40) % 2 ? HAZ : BLACK;
+          return g(CONC, u, v, z, 0.12);
+        }
+        return null;
+      };
+      return { shape, rx: 24, ry: 22, zmax: 32, fx: [{ x: 23, y: -13, z: 31 }, { x: 21, y: -13, z: 17 }] };
+    }
     case 'hq': {
       const shape: Shape = (u, v, z) => {
         // antenna mast and dish
