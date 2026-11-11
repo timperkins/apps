@@ -26,6 +26,7 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
     </button>
     <p id="svHelp">Drag anywhere to walk</p>
+    <div id="svArms" class="arms"></div>
     <div id="svQuick" class="quickbar"></div>
     <div id="svQueue" class="craftq"></div>
     <button id="svLoad" class="svbtn small" hidden><span>Use</span><small>T</small></button>
@@ -57,11 +58,8 @@
     </div>
     <div id="svRecipe" class="svshop svrecipe" hidden>
       <h3>Ammo machine</h3>
-      <p class="fine" id="svRecInfoM">Stone makes stone ammo. Iron and copper plates, gold bars and cut diamonds make their own ammo.</p>
-      <div class="seg" role="radiogroup" aria-label="Recipe" id="svRecSeg">
-        <button role="radio" id="svRecAmmo" aria-checked="true">Ammo<small>1 stone: 5 stone ammo</small></button>
-        <button role="radio" id="svRecRocket" aria-checked="false">Rocket ammo<small>10 stone: 1 rocket</small></button>
-      </div>
+      <p class="fine" id="svRecInfoM"></p>
+      <div class="seg mrecs" role="radiogroup" aria-label="Recipe" id="svRecSeg"></div>
       <button class="primary" id="svRecPut">Put your stone or plates in</button>
       <div class="craftbtns"><button class="ghost small" id="svRecPick">Pick up</button><button class="ghost small" id="svRecClose">Close</button></div>
     </div>

@@ -128,19 +128,25 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🏹', title: 'Walk and shoot', lines: [
     'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone. The map is big: the small map in the corner shows where everything is.',
     '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear (or bear spawner) in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
+    'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>D</kbd> to put in one ammo. <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
+    'The rapid crossbow keeps firing with no ammo, but does no damage ("No Ammo").',
     'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
-    'A bear swipes for 8% of your health and throws rocks for 9%.'] },
+    'A bear swipes for 8% of your health and throws rocks for 9%. Bears growl when they are close.'] },
+  { icon: '🐟', title: 'Acid fish', lines: [
+    `About 1 in 10 things a spawner makes (${(SURVIVAL.fishChance * 100).toFixed(2)}%) is a green <b>acid fish</b> instead of a bear. It keeps away from you and spits green acid slime from up to 10 tiles away.`,
+    `A hit does ${SURVIVAL.acidHit.toLocaleString()} damage and burns you for ${SURVIVAL.acidBurn.toLocaleString()} a second for ${SURVIVAL.acidBurnTime} seconds (you glow green).`,
+    `Slime leaves a puddle for ${SURVIVAL.puddleTime} seconds. Standing in one does ${SURVIVAL.puddleBurn.toLocaleString()} a second (more puddles, more damage) and burns you at half strength. Keep moving!`] },
   { icon: '🌊', title: 'Huge waves', lines: [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
     'You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates.'] },
   { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
-    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> to dig by hand.',
+    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> (or the Mine button) to dig by hand.',
     'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. ',
-    'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. The ammo machine turns stone into stone ammo, and plates, bars and cut diamonds into strong metal ammo: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). <kbd>S</kbd> switches ammo.'] },
+    'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. Tap the ammo machine and pick a recipe first, then put in stone, plates, bars or cut diamonds: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). You can also craft ammo by hand in the Combat tab, but you get 1 less. Put ammo in your ammo slots to shoot it.'] },
   { icon: '⚙️', title: 'Crafting', lines: [
     'Press <kbd>Shift</kbd> (or the Inventory button) for your inventory on the left and crafting on the right, in tabs: Logistics, Production, Parts and Combat.',
     'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
@@ -148,12 +154,13 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🏭', title: 'Your factory', lines: [
     'Drills go on ore patches and dig by themselves, dropping ore in front onto a belt. Grabbers move things off belts into furnaces, assemblers, chests and turrets, and back out.',
     'Drills, assemblers and labs need power: a generator burning stone, and power poles (each one powers what is next to it and joins other poles up to 7 tiles away). A red lightning bolt means no power.',
-    'Tap an assembler to pick what it makes. Then grabbers feed it and it makes that thing by itself, from gears to science packs to turrets.',
+    'Tap a <b>crafting machine</b> to set a recipe (like gears) and put in what it needs. It crafts 4 times slower than you, but keeps going until you change the recipe. Grabbers can feed it too.',
     'Your factory makes pollution (top right). The more pollution, the more often bears come, and the tougher they get.'] },
   { icon: '🎯', title: 'Turrets and research', lines: [
     'Turrets shoot bears and spawners. Load them with <kbd>T</kbd>, or feed them ammo with belts and grabbers.',
     'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed. Tap the turret twice to pick it up.',
-    'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.'] },
+    'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.',
+    '<b>Crafting speed</b> and <b>Furnace speed</b> can be researched again and again: each level makes it 1.25 times faster. The first level costs 30 packs and each one after costs 20 more, up to 980.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
 function showIntro(then: (() => void) | null) { introPage = 0; introThen = then; renderIntro(); show('survIntro'); }
@@ -175,6 +182,19 @@ $('svIntroBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(
 $('svIntroSkip').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); endIntro(); });
 $('svHow').addEventListener('click', e => { e.stopPropagation(); Sound.init(); Sound.ui(); showIntro(null); });
 
+/** Full screen on any device that allows it: asked for on a tap or key press (browsers only allow it then), and again
+ *  after leaving it. iPhones don't let web pages go full screen; there the app added to the home screen fills the screen. */
+function goFull() {
+  const d = document as Document & { webkitFullscreenElement?: Element; webkitFullscreenEnabled?: boolean };
+  if (d.fullscreenElement || d.webkitFullscreenElement) return;
+  const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+  try {
+    if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    else el.webkitRequestFullscreen?.();
+  } catch { /* not allowed here */ }
+}
+addEventListener('pointerup', goFull, { capture: true });
+addEventListener('keyup', e => { if (e.key !== 'Escape') goFull(); }, { capture: true });
 function start() {
   Sound.init(); Sound.ui();
   (document.activeElement as HTMLElement | null)?.blur?.();
