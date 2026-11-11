@@ -1,8 +1,10 @@
-// Procedural landscape: grass, a dirt road, rocky ridges, a lake with a
-// beach, and dirt pads under buildings. Painted once per pixel into a canvas.
-// The world wraps round both ways (east-west and north-south), so every field
-// is seamless where the map joins up, and the land is the same kind all over.
-import { RGB, WorldField, WrapNoise, around, hash2, hex, mix, shade, wrapNoise } from '../gfx';
+// Procedural landscape: grass, dirt roads, rocky ridges, lakes with beaches,
+// and dirt pads under buildings. The world wraps round both ways (east-west and
+// north-south), so every field is seamless where the map joins up, and the land
+// is the same kind all over. The map is planet-sized, so nothing is stored per
+// pixel: the ground is classified and painted a tile at a time, on demand.
+import { RGB, WorldField, WrapNoise, hash2, hex, mix, rng, shade, wrapNoise } from '../gfx';
+import { CH, Roads, canvasOf } from '../tiles';
 
 export const enum K {
   Grass = 0,
@@ -13,39 +15,40 @@ export const enum K {
   Pad = 5,
 }
 
-// Road segments (and their copies one lap either way) with padded bounding
-// boxes, so each point only measures the few segments it could be near.
-type Seg = { ax: number; ay: number; bx: number; by: number; x0: number; x1: number; y0: number; y1: number; k: number };
-function roadSegs(lines: [number, number][][], widths: number[], half: number, shifts: number[][], jitter: number): Seg[] {
-  const segs: Seg[] = [];
-  const m = half * 3 + jitter;
-  lines.forEach((line, li) => {
-    for (const [dx, dy] of shifts)
-      for (let s = 0; s < line.length - 1; s++) {
-        const ax = line[s][0] + dx;
-        const ay = line[s][1] + dy;
-        const bx = line[s + 1][0] + dx;
-        const by = line[s + 1][1] + dy;
-        segs.push({ ax, ay, bx, by, x0: Math.min(ax, bx) - m, x1: Math.max(ax, bx) + m, y0: Math.min(ay, by) - m, y1: Math.max(ay, by) + m, k: 1 / (half * widths[li]) });
-      }
-  });
-  return segs;
-}
-// Distance to the nearest road in road half-widths (large when far away).
-function roadDist(segs: Seg[], x: number, y: number): number {
-  let d = 1e9;
-  for (const g of segs) {
-    if (x < g.x0 || x > g.x1 || y < g.y0 || y > g.y1) continue;
-    d = Math.min(d, segDist(x, y, g.ax, g.ay, g.bx, g.by) * g.k);
-  }
-  return d === 1e9 ? 99 : d;
-}
+// Map pixels per pixel of the overview used for the globe and unpainted tiles.
+export const OV = 4;
+// Margin of ground classified round a tile, for the painter's neighbour tests
+// and for props whose jittered spot pokes over the edge.
+export const M = 8;
+// Ground features keep a fixed size however big the planet is.
+const LAKE_CELL = 170;
+const RIDGE_CELL = 215;
+const ROAD_HALF = 8;
 
 export interface Rect {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+// Classified ground over a rectangle of map pixels (unwrapped coordinates).
+export interface Region {
+  x0: number;
+  y0: number;
+  w: number;
+  h: number;
+  kind: Uint8Array;
+  wv: Float32Array;
+  cv: Float32Array;
+  road: Float32Array;
+}
+
+export interface PaintedTile {
+  canvas: HTMLCanvasElement;
+  foam: HTMLCanvasElement | null;
+  foam2: HTMLCanvasElement | null;
+  region: Region;
 }
 
 const GRASS = ['#22381b', '#28421f', '#2f4c23', '#355427', '#3c5d2c', '#456632'].map(hex);
@@ -61,33 +64,27 @@ const ROCK = hex('#857a66');
 const ROCK_D = hex('#4b4337');
 const PAD = hex('#6e6452');
 
-function percentile(arr: Float32Array, q: number): number {
-  const step = Math.max(1, Math.floor(arr.length / 20000));
-  const s: number[] = [];
-  for (let i = 0; i < arr.length; i += step) s.push(arr[i]);
-  s.sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(s.length * q))];
-}
-
-function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+function percentile(s: number[], q: number): number {
+  const a = s.slice().sort((x, y) => x - y);
+  return a[Math.min(a.length - 1, Math.floor(a.length * q))];
 }
 
 export class Terrain {
-  readonly kind: Uint8Array;
-  readonly canvas: HTMLCanvasElement;
-  readonly ctx: CanvasRenderingContext2D;
-  readonly foam: HTMLCanvasElement;
-  readonly foam2: HTMLCanvasElement;
-  private wv: Float32Array;
-  private cv: Float32Array;
-  private road: Float32Array;
-  private wThr = 0;
-  private wMax = 1;
   readonly noise: WrapNoise;
+  private lakeF: WorldField;
+  private ridgeF: WorldField;
+  private jitX: WorldField;
+  private jitY: WorldField;
+  private wThr: number;
+  private sandThr: number;
+  private wMax: number;
+  private cThr: number;
+  private roads: Roads;
+  readonly pads: Rect[] = [];
+  // Ground kinds for game logic, in 64 x 64 blocks, filled in as asked for.
+  private cache = new Map<number, Uint8Array>();
+  private ovImg: ImageData | null = null;
+  private ovRow = 0;
 
   constructor(
     readonly w: number,
@@ -95,124 +92,146 @@ export class Terrain {
     readonly seed: number,
   ) {
     this.noise = wrapNoise(w, h);
-    const n = w * h;
-    this.kind = new Uint8Array(n);
-    this.wv = new Float32Array(n);
-    this.cv = new Float32Array(n);
-    this.road = new Float32Array(n);
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = w;
-    this.canvas.height = h;
-    this.ctx = this.canvas.getContext('2d')!;
-    this.foam = document.createElement('canvas');
-    this.foam2 = document.createElement('canvas');
-    this.foam.width = this.foam2.width = w;
-    this.foam.height = this.foam2.height = h;
-    this.classify();
+    this.lakeF = new WorldField(w, h, LAKE_CELL, seed, 5);
+    this.ridgeF = new WorldField(w, h, RIDGE_CELL, seed + 101, 5);
+    this.jitX = new WorldField(w, h, 40, seed + 7, 2, 10);
+    this.jitY = new WorldField(w, h, 40, seed + 8, 2, 10);
+    // thresholds from a sample of the whole world
+    const rand = rng(seed * 31 + 5);
+    const wv: number[] = [];
+    const cv: number[] = [];
+    for (let i = 0; i < 30000; i++) {
+      const x = rand() * w;
+      const y = rand() * h;
+      wv.push(this.lakeF.at(x, y));
+      cv.push(1 - Math.abs(this.ridgeF.at(x, y) * 2 - 1));
+    }
+    this.wThr = percentile(wv, 0.85);
+    this.sandThr = percentile(wv, 0.82);
+    this.wMax = percentile(wv, 0.999);
+    this.cThr = percentile(cv, 0.945);
+    this.roads = new Roads(-64, -64, w + 128, h + 128);
+  }
+
+  // Roads as polylines in map pixels (they may run off the map; copies one lap
+  // round each way are added).
+  setRoads(lines: [number, number][][]): void {
+    this.roads = new Roads(-64, -64, this.w + 128, this.h + 128);
+    for (const line of lines)
+      for (let s = 0; s < line.length - 1; s++)
+        for (const dy of [-this.h, 0, this.h])
+          for (const dx of [-this.w, 0, this.w])
+            this.roads.add(line[s][0] + dx, line[s][1] + dy, line[s + 1][0] + dx, line[s + 1][1] + dy, ROAD_HALF, ROAD_HALF * 3 + 20);
+    this.cache.clear();
+  }
+
+  private wrapX(x: number): number {
+    return x < 0 || x >= this.w ? x - Math.floor(x / this.w) * this.w : x;
+  }
+  private wrapY(y: number): number {
+    return y < 0 || y >= this.h ? y - Math.floor(y / this.h) * this.h : y;
+  }
+
+  // Classify the ground over a rectangle (any copy of the map).
+  region(x0: number, y0: number, rw: number, rh: number): Region {
+    const n = rw * rh;
+    const r: Region = { x0, y0, w: rw, h: rh, kind: new Uint8Array(n), wv: new Float32Array(n), cv: new Float32Array(n), road: new Float32Array(n) };
+    const { lakeF, ridgeF, jitX, jitY, roads, wThr, sandThr, cThr } = this;
+    for (let j = 0; j < rh; j++) {
+      const y = this.wrapY(y0 + j);
+      for (let i = 0; i < rw; i++) {
+        const x = this.wrapX(x0 + i);
+        const q = j * rw + i;
+        const wv = lakeF.at(x, y);
+        const cv = 1 - Math.abs(ridgeF.at(x, y) * 2 - 1);
+        const rd = wv > sandThr ? 99 : roads.dist(x + (jitX.at(x, y) - 0.5) * 30, y + (jitY.at(x, y) - 0.5) * 30);
+        r.wv[q] = wv;
+        r.cv[q] = cv;
+        r.road[q] = rd;
+        r.kind[q] = wv > wThr ? K.Water : wv > sandThr ? K.Sand : rd < 1 ? K.Road : cv > cThr ? K.Cliff : K.Grass;
+      }
+    }
+    // dirt pads under buildings, with rough, noisy edges
+    for (const p of this.pads)
+      for (const dy of [-this.h, 0, this.h])
+        for (const dx of [-this.w, 0, this.w]) {
+          const px0 = Math.max(Math.floor(p.x + dx), x0);
+          const py0 = Math.max(Math.floor(p.y + dy), y0);
+          const px1 = Math.min(Math.ceil(p.x + p.w + dx), x0 + rw);
+          const py1 = Math.min(Math.ceil(p.y + p.h + dy), y0 + rh);
+          for (let y = py0; y < py1; y++)
+            for (let x = px0; x < px1; x++) {
+              const ex = Math.min(x - dx - p.x, p.x + p.w - (x - dx));
+              const ey = Math.min(y - dy - p.y, p.y + p.h - (y - dy));
+              if (Math.min(ex, ey) < hash2(x - dx, y - dy, 77) * 3) continue;
+              const q = (y - y0) * rw + (x - x0);
+              if (r.kind[q] === K.Grass) r.kind[q] = K.Pad;
+            }
+        }
+    return r;
   }
 
   k(x: number, y: number): K {
-    x = Math.floor(x);
-    y = Math.floor(y);
-    if (y < 0 || y >= this.h) y = ((y % this.h) + this.h) % this.h;
-    if (x < 0 || x >= this.w) x = ((x % this.w) + this.w) % this.w;
-    return this.kind[y * this.w + x] as K;
-  }
-
-  private classify(): void {
-    const { w, h, seed } = this;
-    const scale = Math.max(w, h) * 0.6;
-    const lakeF = new WorldField(w, h, scale / 5, seed, 5);
-    const ridgeF = new WorldField(w, h, scale / 4, seed + 101, 5);
-    const jitX = new WorldField(w, h, 40, seed + 7, 2);
-    const jitY = new WorldField(w, h, 40, seed + 8, 2);
-    // Water: lakes anywhere, with one likely just south-east of the second base.
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const n = lakeF.at(x, y);
-        this.wv[i] = n * 0.9 + around(x / w, 0.88) * around(y / h, 0.72) ** 4 * 0.4;
-        const r = 1 - Math.abs(ridgeF.at(x, y) * 2 - 1);
-        this.cv[i] = r - around(x / w, 0.85) * 0.2;
-      }
-    this.wThr = percentile(this.wv, 0.84);
-    const sandThr = percentile(this.wv, 0.81);
-    this.wMax = percentile(this.wv, 0.999);
-    const cThr = percentile(this.cv, 0.945);
-
-    // Road: a winding loop right around the world, plus a spur to the north.
-    const P = (fx: number, fy: number): [number, number] => [fx * w, fy * h];
-    const main = [P(0, 0.72), P(0.12, 0.78), P(0.22, 0.66), P(0.46, 0.55), P(0.62, 0.36), P(0.8, 0.2), P(0.9, 0.42), P(1, 0.72)];
-    const spur = [P(0.46, 0.55), P(0.34, 0.3), P(0.3, 0.16)];
-    const half = Math.max(5, Math.min(8, scale / 110));
-    const segs = roadSegs([main, spur], [1, 0.7], half, [0, -w, w].map((k) => [k, 0]), 30);
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const jx = x + (jitX.at(x, y) - 0.5) * 30;
-        const jy = y + (jitY.at(x, y) - 0.5) * 30;
-        this.road[i] = roadDist(segs, jx, jy);
-
-        let k = K.Grass;
-        if (this.wv[i] > this.wThr) k = K.Water;
-        else if (this.wv[i] > sandThr) k = K.Sand;
-        else if (this.road[i] < 1) k = K.Road;
-        else if (this.cv[i] > cThr) k = K.Cliff;
-        this.kind[i] = k;
-      }
+    const X = Math.floor(this.wrapX(Math.floor(x)));
+    const Y = Math.floor(this.wrapY(Math.floor(y)));
+    const key = (Y >> 6) * 4096 + (X >> 6);
+    let b = this.cache.get(key);
+    if (!b) {
+      b = this.region((X >> 6) << 6, (Y >> 6) << 6, 64, 64).kind;
+      this.cache.set(key, b);
+    }
+    return b[(Y & 63) * 64 + (X & 63)] as K;
   }
 
   // Free of water, sand, cliffs, roads and existing pads?
   clear(r: Rect, margin = 0): boolean {
     for (let y = Math.floor(r.y - margin); y < r.y + r.h + margin; y += 2)
-      for (let x = Math.floor(r.x - margin); x < r.x + r.w + margin; x += 2) {
-        if (x < 0 || y < 0 || x >= this.w || y >= this.h) return false;
-        if (this.kind[y * this.w + x] !== K.Grass) return false;
-      }
+      for (let x = Math.floor(r.x - margin); x < r.x + r.w + margin; x += 2) if (this.k(x, y) !== K.Grass) return false;
     return true;
   }
 
   markPad(r: Rect): void {
-    for (let y = Math.floor(r.y); y < r.y + r.h; y++)
-      for (let x = Math.floor(r.x); x < r.x + r.w; x++) {
-        if (x < 0 || y < 0 || x >= this.w || y >= this.h) continue;
-        // Rough, noisy edge
-        const ex = Math.min(x - r.x, r.x + r.w - x);
-        const ey = Math.min(y - r.y, r.y + r.h - y);
-        if (Math.min(ex, ey) < hash2(x, y, 77) * 3) continue;
-        const i = y * this.w + x;
-        if (this.kind[i] === K.Grass) this.kind[i] = K.Pad;
+    this.pads.push(r);
+    // forget cached blocks the pad touches
+    for (let y = Math.floor(r.y) - 64; y < r.y + r.h + 64; y += 32)
+      for (let x = Math.floor(r.x) - 64; x < r.x + r.w + 64; x += 32) {
+        const X = this.wrapX(x);
+        const Y = this.wrapY(y);
+        this.cache.delete((Y >> 6) * 4096 + (X >> 6));
       }
   }
 
-  paint(): void {
-    const { w, h, seed } = this;
+  // Paint tile (tx, ty) of the map.
+  paintTile(tx: number, ty: number): PaintedTile {
+    const { seed } = this;
     const N = this.noise;
-    const img = this.ctx.createImageData(w, h);
+    const X0 = tx * CH;
+    const Y0 = ty * CH;
+    const R = this.region(X0 - M, Y0 - M, CH + M * 2, CH + M * 2);
+    const RW = R.w;
+    const kind = R.kind;
+    const img = new ImageData(CH, CH);
     const d = img.data;
-    const fimg = new ImageData(w, h);
-    const f2img = new ImageData(w, h);
-    const put = (i: number, c: RGB) => {
-      d[i * 4] = c[0];
-      d[i * 4 + 1] = c[1];
-      d[i * 4 + 2] = c[2];
-      d[i * 4 + 3] = 255;
-    };
+    let fimg: ImageData | null = null;
+    let f2img: ImageData | null = null;
+    const kk = (x: number, y: number) => kind[(y - Y0 + M) * RW + (x - X0 + M)] as K;
     const near = (x: number, y: number, r: number, test: (k: K) => boolean) => {
-      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if ((i || j) && test(this.k(x + i, y + j))) return true;
+      for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) if ((i || j) && test(kk(x + i, y + j))) return true;
       return false;
     };
     const land = (k: K) => k !== K.Water;
 
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const k = this.kind[i] as K;
+    for (let ly = 0; ly < CH; ly++)
+      for (let lx = 0; lx < CH; lx++) {
+        const x = X0 + lx;
+        const y = Y0 + ly;
+        const q = (ly + M) * RW + lx + M;
+        const k = kind[q] as K;
         const rnd = hash2(x, y, seed);
         let c: RGB;
         switch (k) {
           case K.Water: {
-            const depth = Math.min(1, (this.wv[i] - this.wThr) / (this.wMax - this.wThr) * 1.6);
+            const depth = Math.min(1, ((R.wv[q] - this.wThr) / (this.wMax - this.wThr)) * 1.6);
             c = mix(WATER_SHALLOW, WATER_DEEP, Math.pow(depth, 0.6));
             // horizontal ripples
             const rip = N(x, y, 6, seed + 30, 2, 1.6);
@@ -220,20 +239,22 @@ export class Terrain {
             else if (rip < 0.32) c = shade(c, -0.08);
             c = shade(c, (rnd - 0.5) * 0.08);
             if (near(x, y, 1, land)) {
-              put4(fimg.data, i, [190, 225, 230], 230);
+              if (!fimg) fimg = new ImageData(CH, CH);
+              put4(fimg.data, ly * CH + lx, [190, 225, 230], 230);
             } else if (near(x, y, 3, land) && rnd < 0.45) {
-              put4(f2img.data, i, [150, 200, 215], 200);
+              if (!f2img) f2img = new ImageData(CH, CH);
+              put4(f2img.data, ly * CH + lx, [150, 200, 215], 200);
             }
             break;
           }
           case K.Sand: {
-            const wet = near(x, y, 2, (kk) => kk === K.Water);
+            const wet = near(x, y, 2, (o) => o === K.Water);
             c = shade(wet ? WET_SAND : SAND, (rnd - 0.5) * 0.18);
             if (rnd > 0.985) c = shade(c, -0.3);
             break;
           }
           case K.Road: {
-            const rd = this.road[i];
+            const rd = R.road[q];
             c = ROAD;
             if (Math.abs(rd - 0.45) < 0.12 || Math.abs(rd - 0.0) < 0.06) c = TRACK;
             c = shade(c, (rnd - 0.5) * 0.2 + (N(x, y, 8, seed + 3, 2) - 0.5) * 0.18);
@@ -242,17 +263,17 @@ export class Terrain {
             break;
           }
           case K.Cliff: {
-            const cv = this.cv;
-            const gx = cv[Math.min(i + 1, cv.length - 1)] - cv[Math.max(i - 1, 0)];
-            const gy = cv[Math.min(i + w, cv.length - 1)] - cv[Math.max(i - w, 0)];
+            const cv = R.cv;
+            const gx = cv[q + 1] - cv[q - 1];
+            const gy = cv[q + RW] - cv[q - RW];
             const fine = N(x, y, 4, seed + 50, 3) - 0.5;
             const l = (gx + gy) * 14 + fine * 1.1;
             c = l > 0.3 ? ROCK_L : l > -0.25 ? ROCK : ROCK_D;
             // raised look: lit rim on top, dark rock face along the bottom edge
-            if (this.k(x, y - 1) !== K.Cliff) c = ROCK_L;
-            else if (this.k(x, y + 1) !== K.Cliff) c = shade(ROCK_D, -0.35);
-            else if (this.k(x, y + 2) !== K.Cliff) c = shade(ROCK_D, -0.15);
-            else if (this.k(x, y + 3) !== K.Cliff) c = ROCK_D;
+            if (kk(x, y - 1) !== K.Cliff) c = ROCK_L;
+            else if (kk(x, y + 1) !== K.Cliff) c = shade(ROCK_D, -0.35);
+            else if (kk(x, y + 2) !== K.Cliff) c = shade(ROCK_D, -0.15);
+            else if (kk(x, y + 3) !== K.Cliff) c = ROCK_D;
             c = shade(c, (rnd - 0.5) * 0.16);
             break;
           }
@@ -272,38 +293,81 @@ export class Terrain {
             if (rnd > 0.992) c = shade(c, 0.35);
             else if (rnd < 0.012) c = shade(c, -0.45);
             // rubble and shade around cliffs
-            if (near(x, y, 2, (kk) => kk === K.Cliff) && rnd < 0.4) c = shade(mix(c, ROCK_D, 0.5), -0.1);
+            if (rnd < 0.4 && near(x, y, 2, (o) => o === K.Cliff)) c = shade(mix(c, ROCK_D, 0.5), -0.1);
           }
         }
         // drop shadow cast by cliffs to the bottom-right
-        if (k !== K.Cliff && (this.k(x - 2, y - 3) === K.Cliff || this.k(x - 1, y - 2) === K.Cliff)) c = shade(c, -0.4);
-        put(i, c);
+        if (k !== K.Cliff && (kk(x - 2, y - 3) === K.Cliff || kk(x - 1, y - 2) === K.Cliff)) c = shade(c, -0.4);
+        const o = (ly * CH + lx) * 4;
+        d[o] = c[0];
+        d[o + 1] = c[1];
+        d[o + 2] = c[2];
+        d[o + 3] = 255;
       }
 
-    // craters
-    let r = seed;
-    const rand = () => ((r = (Math.imul(r, 1103515245) + 12345) >>> 0) / 4294967296);
-    const craters = Math.floor((w * h) / 9000);
-    for (let n = 0; n < craters; n++) {
-      const cx = Math.floor(rand() * w);
-      const cy = Math.floor(rand() * h);
-      const rr = 2 + rand() * 3;
-      if (this.k(cx, cy) !== K.Grass) continue;
+    // a couple of craters, kept clear of the tile's edges
+    for (let n = 0; n < 2; n++) {
+      if (hash2(tx, ty, seed + 900 + n) > 0.9) continue;
+      const cx = 8 + Math.floor(hash2(tx, ty, seed + 910 + n) * (CH - 16));
+      const cy = 8 + Math.floor(hash2(tx, ty, seed + 920 + n) * (CH - 16));
+      const rr = 2 + hash2(tx, ty, seed + 930 + n) * 3;
+      if (kk(X0 + cx, Y0 + cy) !== K.Grass) continue;
       for (let y = -4; y <= 4; y++)
         for (let x = -6; x <= 6; x++) {
           const dd = Math.hypot(x / 1.3, y) / rr;
-          const i = (cy + y) * w + cx + x;
-          if (cx + x < 0 || cy + y < 0 || cx + x >= w || cy + y >= h || dd > 1.2) continue;
+          if (dd > 1.2) continue;
+          const i = ((cy + y) * CH + cx + x) * 4;
           const f = dd < 0.7 ? -0.45 : dd < 1 ? (y < 0 ? -0.25 : 0.15) : -0.1;
-          d[i * 4] *= 1 + f;
-          d[i * 4 + 1] *= 1 + f;
-          d[i * 4 + 2] *= 1 + f;
+          d[i] *= 1 + f;
+          d[i + 1] *= 1 + f;
+          d[i + 2] *= 1 + f;
         }
     }
 
-    this.ctx.putImageData(img, 0, 0);
-    this.foam.getContext('2d')!.putImageData(fimg, 0, 0);
-    this.foam2.getContext('2d')!.putImageData(f2img, 0, 0);
+    const foam = fimg || f2img ? canvasOf(fimg ?? new ImageData(CH, CH)) : null;
+    const foam2 = foam ? canvasOf(f2img ?? new ImageData(CH, CH)) : null;
+    return { canvas: canvasOf(img), foam, foam2, region: R };
+  }
+
+  // A coarse picture of the whole map, one pixel per OV map pixels: water,
+  // beaches, roads, rock and grass, with `tint` to darken forests and so on.
+  // Built a few rows at a time (for up to `ms` milliseconds per call); null
+  // until it is finished.
+  overview(tint: (x: number, y: number, c: RGB) => RGB, ms: number): HTMLCanvasElement | null {
+    const tw = Math.round(this.w / OV);
+    const th = Math.round(this.h / OV);
+    const img = (this.ovImg ??= new ImageData(tw, th));
+    const d = img.data;
+    const { lakeF, ridgeF, jitX, jitY, roads, wThr, sandThr, cThr, wMax } = this;
+    const t0 = performance.now();
+    for (; this.ovRow < th && performance.now() - t0 < ms; this.ovRow++)
+      for (let i = 0, j = this.ovRow; i < tw; i++) {
+        const x = i * OV + OV / 2;
+        const y = j * OV + OV / 2;
+        const wv = lakeF.at(x, y);
+        const rnd = hash2(i, j, this.seed + 3);
+        let c: RGB;
+        if (wv > wThr) c = mix(WATER_SHALLOW, WATER_DEEP, Math.pow(Math.min(1, ((wv - wThr) / (wMax - wThr)) * 1.6), 0.6));
+        else if (wv > sandThr) c = SAND;
+        else {
+          const jx = jitX.at(x, y);
+          const rd = roads.dist(x + (jx - 0.5) * 30, y + (jitY.at(x, y) - 0.5) * 30);
+          if (rd < 1) c = ROAD;
+          else if (1 - Math.abs(ridgeF.at(x, y) * 2 - 1) > cThr) c = rnd < 0.5 ? ROCK : ROCK_L;
+          else c = tint(x, y, shade(mix(GRASS[2], GRASS[4], jx), (rnd - 0.5) * 0.12));
+        }
+        const o = (j * tw + i) * 4;
+        d[o] = c[0];
+        d[o + 1] = c[1];
+        d[o + 2] = c[2];
+        d[o + 3] = 255;
+      }
+    if (this.ovRow < th) return null;
+    const cv = canvasOf(img);
+    const c = cv.getContext('2d')!;
+    c.fillStyle = `rgb(${PAD.join(',')})`;
+    for (const p of this.pads) c.fillRect(p.x / OV, p.y / OV, p.w / OV, p.h / OV);
+    return cv;
   }
 }
 

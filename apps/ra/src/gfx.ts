@@ -105,14 +105,15 @@ export function wrapNoise(px: number, py: number): WrapNoise {
 }
 
 // Large-scale seamless noise over a w x h world (lakes, ridges, forests),
-// computed once on a coarse grid and interpolated, which keeps generation quick.
+// computed once on a coarse grid (a fraction of the noise cell) and
+// interpolated, which keeps generation quick even on a planet-sized map.
 export class WorldField {
   private nx: number;
   private ny: number;
   private ix: number;
   private iy: number;
   private v: Float32Array;
-  constructor(w: number, h: number, cell: number, s: number, oct = 4, step = 3) {
+  constructor(w: number, h: number, cell: number, s: number, oct = 4, step = Math.max(3, Math.round(cell / 8))) {
     const nx = (this.nx = Math.max(8, Math.round(w / step)));
     const ny = (this.ny = Math.max(8, Math.round(h / step)));
     this.ix = nx / w;
