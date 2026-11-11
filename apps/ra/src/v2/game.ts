@@ -1,8 +1,9 @@
 // v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
-import { WorldField, css, dirIndex, hash2, nearestCopy, rng } from '../gfx';
+import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
+import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
 import type { GameLike } from '../types';
-import { HP, IsoTerrain, K, Rect } from './terrain';
+import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
 import {
   BuildingKind,
@@ -125,6 +126,9 @@ export class IsoGame implements GameLike {
     return a;
   }
 
+  // The planet is big, so there are several bases round it: the two home
+  // bases near each other where the camera starts, and outposts further out.
+  // Sites are chosen on the screen-space map and placed on the ground below.
   generate(w: number, h: number): void {
     const rand = rng(this.seed * 7919 + 29);
     const T = (this.terrain = new IsoTerrain(w, h, this.seed));
@@ -134,42 +138,77 @@ export class IsoGame implements GameLike {
     this.particles = [];
     this.markers = [];
     this.sparkles = [];
+    this.forestF = new WorldField(w, h, 50, this.seed + 500, 2, 10);
+    this.ov = null;
 
-    const portrait = h > w * 1.1;
-    const area = (w * h) / (640 * 360);
-    const take = (list: BuildingKind[]) => list.slice(0, Math.max(5, Math.round(list.length * Math.min(1, area * 1.1))));
-    const pads: Rect[] = [];
-    const onScreen = (spr: StackSprite, x: number, y: number) => {
-      const [sx, sy] = toScreen(x, y);
-      const left = sx - spr.cx;
-      const top = sy - spr.cy;
-      return left > 0 && top > 26 && left + spr.img.width - 10 < w && sy + 8 < h;
+    const wrapD = (ax: number, ay: number, bx: number, by: number) => {
+      const [x, y] = nearestCopy(ax, ay, bx, by, w, h);
+      return Math.hypot(x - ax, (y - ay) * 2);
     };
-    const place = (kinds: BuildingKind[], f: number, fx: number, fy: number) => {
-      const [cx, cy] = T.at(fx, fy);
+    type Site = { sx: number; sy: number; f: number; home: boolean };
+    const sites: Site[] = [
+      { sx: 1440 * 0.24, sy: 720 * 0.44, f: 0, home: true },
+      { sx: 1440 * 0.74, sy: 720 * 0.3, f: 1, home: true },
+    ];
+    const want = Math.max(2, Math.round((w * h) / 9e6));
+    const gap = Math.sqrt((w * h) / want) * 0.6;
+    const flat = (sx: number, sy: number) => {
+      const [x, y] = T.at(sx, sy);
+      return T.k(x, y) === K.Grass && T.k(x + 40, y + 40) === K.Grass && T.k(x - 40, y - 40) === K.Grass;
+    };
+    for (let i = 0; i < 3000 && sites.length < want + 2; i++) {
+      const sx = rand() * w;
+      const sy = rand() * h;
+      if (sites.some((o) => wrapD(o.sx, o.sy, sx, sy) < gap)) continue;
+      if (!flat(sx, sy)) continue;
+      sites.push({ sx, sy, f: sites.length % 2, home: false });
+    }
+    // roads from each base to its two nearest neighbours
+    const lines: [number, number][][] = [];
+    const done = new Set<string>();
+    sites.forEach((a, i) => {
+      const near = sites
+        .map((b, j) => ({ j, d: wrapD(a.sx, a.sy, b.sx, b.sy) }))
+        .filter((o) => o.j !== i)
+        .sort((p, q) => p.d - q.d)
+        .slice(0, 2);
+      for (const { j } of near) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (done.has(key)) continue;
+        done.add(key);
+        const [bsx, bsy] = nearestCopy(a.sx, a.sy, sites[j].sx, sites[j].sy, w, h);
+        const [ax, ay] = T.at(a.sx, a.sy);
+        const [bx, by] = T.at(bsx, bsy);
+        lines.push(windingRoad(ax, ay, bx, by, rand));
+      }
+    });
+    T.setRoads(lines);
+
+    const pads: Rect[] = [];
+    const place = (kinds: BuildingKind[], f: number, sx: number, sy: number) => {
+      const [cx, cy] = T.at(sx, sy);
       for (const kind of kinds) {
         const art = this.buildingArt(kind, f);
-        let done = false;
-        for (let ring = 0; ring < 70 && !done; ring++) {
+        let ok = false;
+        for (let ring = 0; ring < 70 && !ok; ring++) {
           const tries = ring === 0 ? 1 : 10 + ring * 2;
-          for (let t = 0; t < tries && !done; t++) {
+          for (let t = 0; t < tries && !ok; t++) {
             const ang = rand() * Math.PI * 2;
             const x = Math.round(cx + Math.cos(ang) * ring * 4);
             const y = Math.round(cy + Math.sin(ang) * ring * 4);
             const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-            if (!onScreen(art.spr, x, y)) continue;
             if (!T.clear(pad, 1)) continue;
             if (pads.some((p) => overlap(p, pad, 4))) continue;
             pads.push(pad);
             T.markPad(pad);
             this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2 });
-            done = true;
+            ok = true;
           }
         }
       }
     };
-    place(take(BASE_A), 0, portrait ? 0.32 : 0.24, portrait ? 0.22 : 0.44);
-    place(take(BASE_B), 1, portrait ? 0.55 : 0.74, portrait ? 0.56 : 0.3);
+    const OUTPOST: BuildingKind[] = ['hq', 'power', 'barracks', 'refinery', 'silo', 'tower', 'tower', 'radar', 'factory', 'helipad'];
+    for (const st of sites) place(st.home ? (st.f ? BASE_B : BASE_A) : OUTPOST.slice(0, 5 + Math.floor(rand() * 5)), st.f, st.sx, st.sy);
 
     // a little clutter beside some buildings
     for (const b of this.buildings) {
@@ -180,56 +219,28 @@ export class IsoGame implements GameLike {
       if (T.k(x, y) === K.Pad || T.k(x, y) === K.Grass) this.props.push({ spr: this.clutter[ci], x, y, z: 0 });
     }
 
-    // trees, bushes and rocks over the visible world
-    const forestSeed = this.seed + 400;
-    const forestF = new WorldField(w, h, 50, this.seed + 500, 2);
-    for (let sy = 6; sy < h + 20; sy += 5)
-      for (let sx = 2; sx < w; sx += 7) {
-        const jx = sx + hash2(sx, sy, forestSeed) * 6;
-        const jy = sy + hash2(sy, sx, forestSeed) * 4;
-        // a prop may sit on a plateau: test the high ground first
-        let [wx, wy] = toWorld(jx, jy, HP);
-        let z = HP;
-        if (!T.isHigh(wx, wy)) {
-          [wx, wy] = toWorld(jx, jy, 0);
-          z = 0;
-          if (T.isHigh(wx, wy)) continue; // that spot is a cliff face
-        }
-        const k = T.k(wx, wy);
-        if (k !== K.Grass && k !== K.High) continue;
-        if (pads.some((p) => inside(wx, wy, p, 5))) continue;
-        const forest = (forestF.at(jx, jy) - 0.6) * 2.4;
-        const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
-        let spr: StackSprite | null = null;
-        if (roll < forest) spr = this.trees[Math.floor(hash2(sx, sy, 3) * 5)];
-        else if (roll < 0.014) spr = this.trees[5 + Math.floor(hash2(sx, sy, 4) * 3)];
-        else if (roll < 0.035) spr = this.bushes[Math.floor(hash2(sx, sy, 5) * 3)];
-        else if (roll < 0.045 || (z === HP && roll < 0.09)) spr = this.rocks[Math.floor(hash2(sx, sy, 6) * 4)];
-        if (spr) this.props.push({ spr, x: wx, y: wy, z });
-      }
-
-    T.paint();
-
     // armies
-    const spawn = (kind: UnitKind, f: number, fx: number, fy: number, spread: number) => {
+    const spawn = (kind: UnitKind, f: number, csx: number, csy: number, spread: number): Unit | null => {
       for (let t = 0; t < 300; t++) {
-        const sx = (fx + (rand() - 0.5) * spread * 1.4) * w;
-        const sy = (fy + (rand() - 0.5) * spread * 1.6) * h;
-        const [x, y] = toWorld(sx, sy, 0);
+        const sx = csx + (rand() - 0.5) * spread * 2;
+        const sy = csy + (rand() - 0.5) * spread;
+        let [x, y] = toWorld(sx, sy, 0);
         const k = T.k(x, y);
         const water = (dx: number, dy: number) => T.k(x + dx, y + dy) === K.Water;
         const ok =
           kind === 'boat'
             ? water(0, 0) && water(12, 0) && water(-12, 0) && water(0, 12) && water(0, -12)
             : kind === 'heli' || k === K.Grass || k === K.Road || k === K.Pad;
-        if (!ok || T.isHigh(x, y) || sx < 10 || sy < 30 || sx > w - 10 || sy > h - 8) continue;
+        if (!ok || T.isHigh(x, y)) continue;
         if (kind !== 'heli' && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
+        [x, y] = T.fold(x, y);
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 });
-        return;
+        const u: Unit = { kind, f, x, y, z: 0, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 };
+        this.units.push(u);
+        return u;
       }
+      return null;
     };
-    const n = (k: number) => Math.max(1, Math.round(k * Math.min(1.4, Math.max(0.5, area))));
     const army: [UnitKind, number][] = [
       ['light', 4],
       ['heavy', 2],
@@ -240,19 +251,77 @@ export class IsoGame implements GameLike {
       ['inf', 6],
       ['rocket', 3],
     ];
-    const centres: [number, number][] = portrait
-      ? [
-          [0.42, 0.38],
-          [0.42, 0.74],
-        ]
-      : [
-          [0.3, 0.64],
-          [0.8, 0.5],
-        ];
-    for (let f = 0; f < 2; f++) for (const [kind, c] of army) for (let i = 0; i < n(c); i++) spawn(kind, f, centres[f][0], centres[f][1], 0.16);
-    for (let f = 0; f < 2; f++) for (let i = 0; i < n(1); i++) spawn('boat', f, 0.84, 0.84, 0.16);
+    const mine: [number, number][] = [];
+    for (const st of sites)
+      for (const [kind, c] of army)
+        for (let i = 0; i < Math.max(1, Math.round(c * (st.home ? 1.4 : 0.6))); i++) {
+          const u = spawn(kind, st.f, st.sx + (st.home ? 60 : 0), st.sy + (st.home ? 140 : 70), st.home ? 220 : 150);
+          if (u && st.home && st.f === 0) mine.push(toScreen(u.x, u.y));
+        }
+    // boats on the nearest lake to home
+    const hx = (sites[0].sx + sites[1].sx) / 2;
+    const hy = (sites[0].sy + sites[1].sy) / 2;
+    let lake: [number, number] | null = null;
+    for (let r = 100; r < 3000 && !lake; r += 100)
+      for (let t = 0; t < 40 && !lake; t++) {
+        const a = rand() * Math.PI * 2;
+        const sx = hx + Math.cos(a) * r;
+        const sy = hy + Math.sin(a) * r * 0.5;
+        const [x, y] = toWorld(sx, sy, 0);
+        if (T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water && T.k(x, y + 30) === K.Water && T.k(x, y - 30) === K.Water) lake = [sx, sy];
+      }
+    if (lake) for (let f = 0; f < 2; f++) for (let i = 0; i < 2; i++) spawn('boat', f, lake[0], lake[1], 40);
     for (const u of this.units) u.z = this.groundZ(u);
+
+    this.home = mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: sites[0].sx, y: sites[0].sy };
+    this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty));
     this.emit();
+  }
+
+  private home = { x: 0, y: 0 };
+  private forestF!: WorldField;
+  tiles!: Tiles<Prop>;
+  private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+  // Paint one tile of ground and scatter its trees, bushes and rocks.
+  private buildTile(tx: number, ty: number): Tile<Prop> {
+    const T = this.terrain;
+    const p = T.paintTile(tx, ty);
+    const R = p.region;
+    const kAt = (x: number, y: number): K => {
+      const i = Math.floor(x) - R.x0;
+      const j = Math.floor(y) - R.y0;
+      return i < 0 || j < 0 || i >= R.w || j >= R.h ? T.k(x, y) : (R.kind[j * R.w + i] as K);
+    };
+    const props: Prop[] = [];
+    const forestSeed = this.seed + 400;
+    const SX0 = tx * CH;
+    const SY0 = ty * CH;
+    for (let sy = SY0 + ((((6 - SY0) % 5) + 5) % 5); sy < SY0 + CH; sy += 5)
+      for (let sx = SX0 + ((((2 - SX0) % 7) + 7) % 7); sx < SX0 + CH; sx += 7) {
+        const jx = sx + hash2(sx, sy, forestSeed) * 6;
+        const jy = sy + hash2(sy, sx, forestSeed) * 4;
+        // a prop may sit on a plateau: test the high ground first
+        let [wx, wy] = toWorld(jx, jy, HP);
+        let z = HP;
+        if (kAt(wx, wy) !== K.High) {
+          [wx, wy] = toWorld(jx, jy, 0);
+          z = 0;
+          if (kAt(wx, wy) === K.High) continue; // that spot is a cliff face
+        }
+        const k = kAt(wx, wy);
+        if (k !== K.Grass && k !== K.High) continue;
+        if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 5, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 5) === K.Pad) continue;
+        const forest = (this.forestF.at(jx, jy) - 0.6) * 2.4;
+        const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
+        let spr: StackSprite | null = null;
+        if (roll < forest) spr = this.trees[Math.floor(hash2(sx, sy, 3) * 5)];
+        else if (roll < 0.014) spr = this.trees[5 + Math.floor(hash2(sx, sy, 4) * 3)];
+        else if (roll < 0.035) spr = this.bushes[Math.floor(hash2(sx, sy, 5) * 3)];
+        else if (roll < 0.045 || (z === HP && roll < 0.09)) spr = this.rocks[Math.floor(hash2(sx, sy, 6) * 4)];
+        if (spr) props.push({ spr, x: wx, y: wy, z });
+      }
+    return { canvas: p.canvas, foam: p.foam, foam2: p.foam2, props, used: 0 };
   }
 
   private groundZ(u: Unit): number {
@@ -381,10 +450,7 @@ export class IsoGame implements GameLike {
   }
 
   focus(): { x: number; y: number } {
-    const mine = this.units.filter((u) => u.f === 0 && u.kind !== 'boat');
-    if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
-    const pts = mine.map((u) => toScreen(u.x, u.y, u.z));
-    return { x: pts.reduce((s, p) => s + p[0], 0) / pts.length, y: pts.reduce((s, p) => s + p[1], 0) / pts.length };
+    return this.home;
   }
 
   selectedPoints(): [number, number][] {
@@ -404,7 +470,6 @@ export class IsoGame implements GameLike {
 
   update(dt: number): void {
     this.time += dt;
-    const tctx = this.terrain.ctx;
     for (const u of this.units) {
       const st = STATS[u.kind];
       u.anim += dt;
@@ -440,11 +505,11 @@ export class IsoGame implements GameLike {
               const hw = u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 4 : 5;
               const px = -Math.sin(u.a) * hw;
               const py = Math.cos(u.a) * hw;
-              tctx.fillStyle = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.2)' : k === K.Pad ? 'rgba(30,30,30,0.08)' : 'rgba(25,22,12,0.16)';
+              const style = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.2)' : k === K.Pad ? 'rgba(30,30,30,0.08)' : 'rgba(25,22,12,0.16)';
               const [ax, ay] = toScreen(u.x + px, u.y + py);
               const [bx, by] = toScreen(u.x - px, u.y - py);
-              tctx.fillRect(Math.round(ax), Math.round(ay), 1, 1);
-              tctx.fillRect(Math.round(bx), Math.round(by), 1, 1);
+              this.stamp(ax, ay, style);
+              this.stamp(bx, by, style);
               if ((k === K.Road || k === K.Sand) && Math.random() < 0.4) {
                 const [rx, ry] = toScreen(u.x - Math.cos(u.a) * 8, u.y - Math.sin(u.a) * 8, 1);
                 this.particles.push({ x: rx, y: ry, vx: (Math.random() - 0.5) * 5, vy: -4, life: 0, max: 0.9, kind: 'dust', size: 1 });
@@ -518,10 +583,12 @@ export class IsoGame implements GameLike {
     for (const m of this.markers) m.t += dt;
     this.markers = this.markers.filter((m) => m.t < 0.7);
 
-    const want = Math.floor((this.w * this.h) / 2500);
+    // water sparkles, where you are looking
+    const v = this.view;
+    const want = Math.floor(((v.x1 - v.x0) * (v.y1 - v.y0)) / 2500);
     for (let i = 0; i < 4 && this.sparkles.length < want; i++) {
-      const x = Math.floor(Math.random() * this.w);
-      const y = Math.floor(Math.random() * this.h);
+      const x = ((Math.floor(v.x0 + Math.random() * (v.x1 - v.x0)) % this.w) + this.w) % this.w;
+      const y = ((Math.floor(v.y0 + Math.random() * (v.y1 - v.y0)) % this.h) + this.h) % this.h;
       const [wx, wy] = toWorld(x, y, 0);
       if (this.terrain.k(wx, wy) === K.Water && this.terrain.k(wx - 3, wy - 3) === K.Water && !this.terrain.isHigh(wx, wy)) this.sparkles.push({ x, y, life: 0 });
     }
@@ -537,19 +604,46 @@ export class IsoGame implements GameLike {
     if (c) this.ctx.drawImage(c, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
   }
 
-  // The ground layer and the objects on it are drawn separately so main.ts can
-  // lay down the ground for every visible copy of the wrapped world first.
-  renderGround(): void {
-    const c = this.ctx;
-    const t = this.time;
-    c.imageSmoothingEnabled = false;
-    c.drawImage(this.terrain.canvas, 0, 0);
+  // A tread mark at screen point (x, y), if that bit of ground is painted.
+  private stamp(x: number, y: number, style: string): void {
+    const t = this.tiles.at(x, y);
+    if (!t) return;
+    const c = t.canvas.getContext('2d')!;
+    c.fillStyle = style;
+    c.fillRect(Math.round(x) - Math.floor(Math.round(x) / CH) * CH, Math.round(y) - Math.floor(Math.round(y) / CH) * CH, 1, 1);
+  }
 
-    c.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.6);
-    c.drawImage(this.terrain.foam, 0, 0);
-    c.globalAlpha = 0.35 + 0.3 * Math.sin(t * 1.6 + 2.2);
-    c.drawImage(this.terrain.foam2, 0, 0);
-    c.globalAlpha = 1;
+  // The ground for screen rect (x0, y0)-(x1, y1), in unwrapped map pixels,
+  // painted a few tiles at a time (`budget` milliseconds each frame).
+  renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void {
+    this.view = { x0, y0, x1, y1 };
+    this.tiles.begin();
+    drawTiles(this.ctx, this.tiles, this.ov, OV, x0, y0, x1, y1, this.time);
+    this.tiles.pump(budget);
+  }
+
+  private ov: HTMLCanvasElement | null = null;
+  // Build the overview a little at a time; true once it is ready.
+  mapStep(ms: number): boolean {
+    if (!this.ov) this.ov = this.terrain.overview((x, y, c) => this.forestTint(x, y, c), ms);
+    return this.ov !== null;
+  }
+  private forestTint(sx: number, sy: number, c: RGB): RGB {
+    const f = (this.forestF.at(sx, sy) - 0.6) * 2.4;
+    return f > 0 ? mix(c, [18, 40, 16], Math.min(0.75, 0.25 + f * 0.6)) : c;
+  }
+
+  // Everything standing on this copy of the map within screen rect
+  // (x0, y0)-(x1, y1), in this copy's coordinates.
+  renderObjects(x0: number, y0: number, x1: number, y1: number): void {
+    const c = this.ctx;
+    const pad = 56;
+    const inView = (sx: number, sy: number) => sx > x0 - pad && sx < x1 + pad && sy > y0 - pad && sy < y1 + pad * 1.5;
+    const seen = (wx: number, wy: number, z = 0) => {
+      const [sx, sy] = toScreen(wx, wy, z);
+      return inView(sx, sy);
+    };
+
     for (const s of this.sparkles) {
       const a = Math.sin((s.life / 1.2) * Math.PI);
       c.fillStyle = `rgba(225,242,250,${a * 0.85})`;
@@ -584,26 +678,31 @@ export class IsoGame implements GameLike {
 
     // aircraft shadows on the ground
     for (const u of this.units) {
-      if (u.kind !== 'heli') continue;
+      if (u.kind !== 'heli' || !seen(u.x, u.y)) continue;
       const spr = this.art[u.f].heli[dirIndex(u.a, DIRS)];
       const [sx, sy] = toScreen(u.x + 4, u.y - 2, u.z);
-      if (spr.shadow) this.ctx.drawImage(spr.shadow, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
+      if (spr.shadow) c.drawImage(spr.shadow, Math.round(sx - spr.cx), Math.round(sy - spr.cy));
     }
 
-  }
-
-  renderObjects(): void {
-    const c = this.ctx;
     type Item = { k: number; draw: () => void };
     const items: Item[] = [];
-    for (const p of this.props) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
-    for (const b of this.buildings) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
-    for (const u of this.units) if (u.kind !== 'heli') items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
+    const tx0 = Math.max(0, Math.floor((x0 - pad) / CH));
+    const tx1 = Math.min(this.tiles.nx - 1, Math.floor((x1 + pad) / CH));
+    const ty0 = Math.max(0, Math.floor((y0 - pad) / CH));
+    const ty1 = Math.min(this.tiles.ny - 1, Math.floor((y1 + pad * 1.5) / CH));
+    for (let ty = ty0; ty <= ty1; ty++)
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const t = this.tiles.at(tx * CH, ty * CH);
+        if (t) for (const p of t.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
+      }
+    for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
+    for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
+    for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
 
     for (const p of this.particles) {
-      if (p.kind === 'wake') continue;
+      if (p.kind === 'wake' || !inView(p.x, p.y)) continue;
       const k = p.life / p.max;
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle =
@@ -615,30 +714,44 @@ export class IsoGame implements GameLike {
       }
     }
 
-    for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
+    for (const u of this.units) if (u.kind === 'heli' && seen(u.x, u.y, u.z)) this.drawUnit(u);
 
-    for (const u of this.units) if (u.sel) this.drawSelection(u);
+    for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
   }
 
-  // A simplified picture for the globe: the bare ground, forests as a dark
-  // tint, the buildings themselves, and units as small dots of their colour.
-  renderMap(): void {
-    const c = this.ctx;
-    c.drawImage(this.terrain.canvas, 0, 0);
-    const trees = new Set(this.trees);
-    c.fillStyle = 'rgba(12,30,10,0.5)';
-    for (const p of this.props) {
-      if (!trees.has(p.spr)) continue;
-      const [sx, sy] = toScreen(p.x, p.y, p.z);
-      c.fillRect(Math.round(sx) - 4, Math.round(sy) - 5, 8, 6);
+  // The whole map for the globe, one pixel per OV screen pixels: the overview
+  // with forests darkened, and the bases on it.
+  mapImage(): HTMLCanvasElement {
+    this.mapStep(1e9);
+    const src = this.ov!;
+    const cv = document.createElement('canvas');
+    cv.width = src.width;
+    cv.height = src.height;
+    const c = cv.getContext('2d')!;
+    c.drawImage(src, 0, 0);
+    c.scale(1 / OV, 1 / OV);
+    c.imageSmoothingEnabled = true;
+    const ctx = this.ctx;
+    this.ctx = c;
+    try {
+      for (const b of [...this.buildings].sort((p, q) => p.x + p.y - q.x - q.y)) {
+        // on the copy of the map that holds the building's foot
+        const [sx, sy] = toScreen(b.x, b.y);
+        const [fx, fy] = this.lapped(b.x, b.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
+        this.blit(b.art.spr, fx, fy, 0);
+      }
+    } finally {
+      this.ctx = ctx;
     }
-    // the real building art: from orbit it shrinks to a speck of its own colours
-    for (const b of [...this.buildings].sort((a, b2) => a.x + a.y - b2.x - b2.y)) this.blit(b.art.spr, b.x, b.y, 0);
-    for (const u of this.units) {
+    return cv;
+  }
+
+  // Units as dots of their faction's colour, for the globe (screen positions).
+  mapDots(): [number, number, RGB][] {
+    return this.units.map((u) => {
       const [sx, sy] = toScreen(u.x, u.y);
-      c.fillStyle = css(FACTIONS[u.f].light);
-      c.fillRect(Math.round(sx) - 2, Math.round(sy) - 2, 4, 4);
-    }
+      return [sx, sy, FACTIONS[u.f].light];
+    });
   }
 
   private drawUnit(u: Unit): void {

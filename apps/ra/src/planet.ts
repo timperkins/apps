@@ -10,7 +10,7 @@
 // near its poles, and everything stays the right way up. Simple sunlight and a
 // thin atmosphere; every pixel is cast back onto the sphere and looked up in a
 // snapshot of the map.
-import { hash2, wrapNoise } from './gfx';
+import { RGB, hash2, wrapNoise } from './gfx';
 
 const TAU = Math.PI * 2;
 // Sun from the upper left and a little in front, in view space (x right, y up, z out).
@@ -29,11 +29,10 @@ export interface View {
 }
 
 export class Globe {
+  private base: Uint32Array | null = null;
   private tex: Uint32Array | null = null;
   private tw = 0;
   private th = 0;
-  private snap: HTMLCanvasElement = document.createElement('canvas');
-  private small: HTMLCanvasElement = document.createElement('canvas');
   private stars: { w: number; h: number; px: Uint32Array } | null = null;
   private img: ImageData | null = null;
 
@@ -51,34 +50,44 @@ export class Globe {
     return this.tex !== null;
   }
 
-  // Draw the whole map with `draw(ctx)` and keep a half-size copy as the texture.
-  capture(mw: number, mh: number, draw: (ctx: CanvasRenderingContext2D) => void): void {
+  // Forget the map (a new one is on its way).
+  clear(): void {
+    this.base = null;
+    this.tex = null;
+  }
+
+  // The picture of the whole map (any size; it is stretched over the map).
+  setMap(mw: number, mh: number, img: HTMLCanvasElement): void {
     this.mw = mw;
     this.mh = mh;
-    if (this.snap.width !== mw || this.snap.height !== mh) {
-      this.snap.width = mw;
-      this.snap.height = mh;
-    }
-    const c = this.snap.getContext('2d')!;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = '#22391b';
-    c.fillRect(0, 0, mw, mh);
-    draw(c);
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    const tw = Math.max(2, Math.round(mw / 2));
-    const th = Math.max(2, Math.round(mh / 2));
-    if (!this.clouds || this.cw !== tw >> 1 || this.ch !== th >> 1) this.makeClouds(tw >> 1, th >> 1);
-    if (this.small.width !== tw || this.small.height !== th) {
-      this.small.width = tw;
-      this.small.height = th;
-    }
-    const s = this.small.getContext('2d', { willReadFrequently: true })!;
-    s.imageSmoothingEnabled = true;
-    s.imageSmoothingQuality = 'high';
-    s.drawImage(this.snap, 0, 0, tw, th);
-    this.tex = new Uint32Array(s.getImageData(0, 0, tw, th).data.buffer);
+    const tw = img.width;
+    const th = img.height;
+    const c = img.getContext('2d', { willReadFrequently: true })!;
+    this.base = new Uint32Array(c.getImageData(0, 0, tw, th).data.buffer);
+    this.tex = this.base.slice();
     this.tw = tw;
     this.th = th;
+    const cw = Math.max(8, tw >> 2);
+    const ch = Math.max(8, th >> 2);
+    if (!this.clouds || this.cw !== cw || this.ch !== ch) this.makeClouds(cw, ch);
+  }
+
+  // Units as 2 x 2 dots on top of the map picture.
+  setDots(dots: [number, number, RGB][]): void {
+    const { base, tex, tw, th, mw, mh } = this;
+    if (!base || !tex) return;
+    tex.set(base);
+    for (const [x, y, c] of dots) {
+      const u = Math.floor((x / mw) * tw);
+      const v = Math.floor((y / mh) * th);
+      const px = (255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
+      for (let j = 0; j < 2; j++)
+        for (let i = 0; i < 2; i++) {
+          const uu = (u + i) % tw;
+          const vv = (v + j) % th;
+          if (uu >= 0 && vv >= 0) tex[vv * tw + uu] = px;
+        }
+    }
   }
 
   private makeClouds(cw: number, ch: number): void {
@@ -88,7 +97,7 @@ export class Globe {
     for (let y = 0; y < ch; y++)
       for (let x = 0; x < cw; x++) {
         // wispy streaks: stretched east-west, broken up by finer noise
-        const n = N(x, y, cw / 6, seed, 5, ch / 5) * 0.75 + N(x, y, cw / 24, seed + 9, 3, ch / 40) * 0.25;
+        const n = N(x, y, cw / 10, seed, 5, ch / 8) * 0.75 + N(x, y, cw / 40, seed + 9, 3, ch / 60) * 0.25;
         const t = Math.min(1, Math.max(0, (n - 0.5) / 0.2));
         c[y * cw + x] = t * t * (3 - 2 * t);
       }
@@ -139,6 +148,8 @@ export class Globe {
     const clouds = this.clouds!;
     const { cw, ch } = this;
     const drift = this.time * 0.006 * cw; // clouds creep east
+    const cku = cw / tw;
+    const ckv = ch / th;
     const x0 = Math.max(0, Math.floor(v.cx - v.r * halo));
     const x1 = Math.min(W, Math.ceil(v.cx + v.r * halo));
     const y0 = Math.max(0, Math.floor(v.cy - v.r * halo));
@@ -175,19 +186,32 @@ export class Globe {
         // arc from the centre, along the pixel's direction from the centre
         const sr = Math.sqrt(r2);
         const k = sr < 1e-9 ? 1 : Math.asin(sr > 1 ? 1 : sr) / sr;
-        let u = Math.floor(u0 + nx * k * uK) % tw;
-        if (u < 0) u += tw;
-        let t = Math.floor(t0 - ny * k * vK) % th;
-        if (t < 0) t += th;
+        let uf = (u0 + nx * k * uK) % tw;
+        if (uf < 0) uf += tw;
+        let tf = (t0 - ny * k * vK) % th;
+        if (tf < 0) tf += th;
+        const u = Math.min(tw - 1, uf | 0);
+        const t = Math.min(th - 1, tf | 0);
         const c = tex[t * tw + u];
         const lit = 0.3 + 0.85 * Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2]);
         let r = (c & 255) * lit;
         let g = ((c >> 8) & 255) * lit;
         let b = ((c >> 16) & 255) * lit;
         // clouds, lit by the same sun
-        let cu = Math.floor(u / 2 + drift) % cw;
-        if (cu < 0) cu += cw;
-        const cv = clouds[Math.min(ch - 1, t >> 1) * cw + cu] * 0.8;
+        // clouds, smoothly interpolated (they are coarser than the ground)
+        let fu = (uf * cku + drift) % cw;
+        if (fu < 0) fu += cw;
+        let fv = tf * ckv - 0.5;
+        if (fv < 0) fv = 0;
+        const cu = fu | 0;
+        const cv0 = Math.min(ch - 1, fv | 0);
+        const cu1 = cu + 1 >= cw ? 0 : cu + 1;
+        const cv1 = cv0 + 1 >= ch ? cv0 : cv0 + 1;
+        const ax = fu - cu;
+        const ay = fv - cv0;
+        const c0 = clouds[cv0 * cw + cu] + (clouds[cv0 * cw + cu1] - clouds[cv0 * cw + cu]) * ax;
+        const c1 = clouds[cv1 * cw + cu] + (clouds[cv1 * cw + cu1] - clouds[cv1 * cw + cu]) * ax;
+        const cv = (c0 + (c1 - c0) * ay) * 0.8;
         const cl = 235 * (0.35 + 0.75 * (lit - 0.3));
         r += (cl - r) * cv;
         g += (cl - g) * cv;

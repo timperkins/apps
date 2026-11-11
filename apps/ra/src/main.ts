@@ -1,6 +1,7 @@
 import './style.css';
 import type { GameLike } from './types';
 import { Globe, View } from './planet';
+import { CH } from './tiles';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 
@@ -122,19 +123,22 @@ let base = 2;
 let scale = 2;
 let zoom = 1; // scale / base
 const ZOOM_MAX = 3;
-// Zooming out until the whole map is in view from top to bottom (zFlat) and
-// then further takes you up into space, where the world is a globe. Below
-// zFlat the globe keeps shrinking, down to SPACE_MIN of zFlat.
-let zFlat = 0.5;
-const SPACE_MIN = 0.45;
+// Zooming out past Z_SPACE takes you up into space, where the world is a
+// globe. It starts out far bigger than the screen and keeps shrinking as you
+// zoom out, down to zMin, where it fits the screen with room to spare.
+const Z_SPACE = 0.5;
+let zMin = 0.03;
 let planet = false;
 
-// The map is a longitude/latitude grid twice as wide as it is tall, large
-// enough that there is plenty of world beyond the screen.
-const worldFor = (w: number, h: number) => {
-  const H = Math.ceil(Math.max(h * 1.5, w, 720) / 2) * 2;
-  return { w: H * 2, h: H };
-};
+// The map is twice as wide as it is tall (it wraps round both ways), and
+// planet-sized: about twenty screens across. Its sides are whole numbers of
+// ground tiles.
+const WORLD = { w: CH * 112, h: CH * 56 };
+
+const TAU = Math.PI * 2;
+// Things in the middle of the globe come out a bit smaller than on the flat map
+// at the same zoom, so the jump into space always shrinks them.
+const GLOBE_K = 0.75;
 
 const camX = () => cen.x - canvas.width / 2;
 const camY = () => cen.y - canvas.height / 2;
@@ -149,10 +153,11 @@ function clampCen(): void {
 function applyScale(): void {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  zFlat = built.h ? Math.min(1, vh / built.h / base) : 0.5;
-  zoom = Math.max(zFlat * SPACE_MIN, Math.min(ZOOM_MAX, zoom));
+  // smallest globe: about 0.55 of the shorter side of the screen across
+  if (built.w) zMin = Math.min(Z_SPACE * 0.9, (0.275 * Math.min(vw, vh) * TAU) / base / (GLOBE_K * built.w));
+  zoom = Math.max(zMin, Math.min(ZOOM_MAX, zoom));
   const wasPlanet = planet;
-  planet = zoom < zFlat - 1e-6;
+  planet = zoom < Z_SPACE - 1e-6;
   scale = planet ? base : base * zoom;
   const w = Math.ceil(vw / scale);
   const h = Math.ceil(vh / scale);
@@ -162,7 +167,7 @@ function applyScale(): void {
   canvas.style.height = `${h * scale}px`;
   mini.hidden = planet;
   if (planet !== wasPlanet) {
-    lastSnap = 0; // refresh the globe straight away
+    lastSnap = -Infinity; // refresh the globe straight away
     showSelection(lastNames);
     if (built.w) whoosh = { t0: performance.now(), up: planet };
   }
@@ -187,18 +192,17 @@ function fit(force = false): void {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   base = Math.max(2, Math.round(Math.min(vw, vh * 1.6) / 680));
-  const want = worldFor(Math.ceil(vw / base), Math.ceil(vh / base));
-  // Only rebuild the world when the screen outgrows it (or on request).
-  if (force || want.w > built.w || want.h > built.h) {
-    game.generate(want.w, want.h);
-    built = want;
+  if (force || !built.w) {
+    game.generate(WORLD.w, WORLD.h);
+    built = { ...WORLD };
+    globe.clear();
     zoom = 1;
     planet = false;
     applyScale();
     const f = game.focus();
     cen.x = f.x;
     cen.y = f.y;
-    lastSnap = 0;
+    lastSnap = -Infinity;
   }
   applyScale();
 }
@@ -212,6 +216,7 @@ function start(v: string): void {
       game.onSelect = showSelection;
       built = { w: 0, h: 0 };
       fit(true);
+      draw(performance.now(), true); // paint the first view while the note is up
       loading.hidden = true;
     }, 0),
   );
@@ -243,6 +248,7 @@ regen.addEventListener('click', () => {
   requestAnimationFrame(() =>
     setTimeout(() => {
       fit(true);
+      draw(performance.now(), true);
       loading.hidden = true;
     }, 0),
   );
@@ -250,12 +256,8 @@ regen.addEventListener('click', () => {
 
 // ---------- The globe (space view and minimap) ----------
 
-const TAU = Math.PI * 2;
-
 function spaceView(): View {
-  // Sized so things in the middle of the globe come out a bit smaller than on
-  // the flat map at the same zoom, so the jump into space always shrinks them.
-  const r = (0.75 * built.w * zoom) / TAU;
+  const r = (GLOBE_K * built.w * zoom) / TAU;
   return { cx: canvas.width / 2, cy: canvas.height / 2, r, x: cen.x, y: cen.y };
 }
 function miniView(): View {
@@ -264,18 +266,11 @@ function miniView(): View {
 
 // Refresh the globe's picture of the map now and then: often enough to see
 // armies move, rarely enough to stay cheap.
-let lastSnap = 0;
+let lastSnap = -Infinity;
 function snapshot(now: number): void {
   if (now - lastSnap < (planet ? 300 : 700)) return;
   lastSnap = now;
-  globe.capture(built.w, built.h, (c) => {
-    game.ctx = c;
-    try {
-      game.renderMap();
-    } finally {
-      game.ctx = ctx;
-    }
-  });
+  globe.setDots(game.mapDots());
 }
 
 // Selected units as green specks, so you can see what you are about to order.
@@ -638,48 +633,52 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (game && built.w) {
-    const sp = planet ? built.w * 0.25 * dt : (320 * dt) / zoom;
+    const sp = (320 * dt) / zoom;
     if (keys.has('arrowleft')) cen.x -= sp;
     if (keys.has('arrowright')) cen.x += sp;
     if (keys.has('arrowup')) cen.y -= sp / 2;
     if (keys.has('arrowdown')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
-    globe.time = now / 1000;
-    snapshot(now);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (planet) {
-      const v = spaceView();
-      globe.draw(ctx, v, true);
-      drawSelected(ctx, v, 2);
-    } else {
-      // One copy of the map for every lap of the world in view, across and
-      // down. Ground first, then objects, since sprites hang over the edges.
-      const W = built.w;
-      const H = built.h;
-      const ox = -Math.round(camX());
-      const oy = -Math.round(camY());
-      ctx.fillStyle = '#22391b';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      for (const pad of [0, 80]) {
-        const k0 = Math.floor((camX() - pad) / W);
-        const k1 = Math.floor((camX() + canvas.width + pad) / W);
-        const j0 = Math.floor((camY() - pad) / H);
-        const j1 = Math.floor((camY() + canvas.height + pad) / H);
-        for (let j = j0; j <= j1; j++)
-          for (let k = k0; k <= k1; k++) {
-            ctx.setTransform(1, 0, 0, 1, ox + k * W, oy + j * H);
-            if (pad) game.renderObjects();
-            else game.renderGround();
-          }
-      }
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      drawBox();
-      if (globe.ready) drawMini();
-    }
-    drawWhoosh(now);
+    draw(now, false);
   }
   requestAnimationFrame(frame);
+}
+
+// Draw a frame. `first` paints every ground tile in view straight away.
+function draw(now: number, first: boolean): void {
+  globe.time = now / 1000;
+  // the globe's picture of the map is built in the background, or at once if
+  // it is needed now
+  if (!globe.ready && game.mapStep(planet ? 1e9 : first ? 0 : 12)) globe.setMap(built.w, built.h, game.mapImage());
+  if (first) lastSnap = -Infinity;
+  snapshot(now);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (planet) {
+    const v = spaceView();
+    globe.draw(ctx, v, true);
+    drawSelected(ctx, v, 2);
+  } else {
+    const x0 = Math.round(camX());
+    const y0 = Math.round(camY());
+    const x1 = x0 + canvas.width;
+    const y1 = y0 + canvas.height;
+    ctx.setTransform(1, 0, 0, 1, -x0, -y0);
+    game.renderGround(x0, y0, x1, y1, first ? 1e5 : 10);
+    // Objects for every copy of the map in view (sprites hang over the edges).
+    const W = built.w;
+    const H = built.h;
+    const pad = 80;
+    for (let j = Math.floor((y0 - pad) / H); j <= Math.floor((y1 + pad) / H); j++)
+      for (let k = Math.floor((x0 - pad) / W); k <= Math.floor((x1 + pad) / W); k++) {
+        ctx.setTransform(1, 0, 0, 1, k * W - x0, j * H - y0);
+        game.renderObjects(x0 - k * W, y0 - j * H, x1 - k * W, y1 - j * H);
+      }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawBox();
+    if (globe.ready) drawMini();
+  }
+  drawWhoosh(now);
 }
 requestAnimationFrame(frame);
 

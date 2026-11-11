@@ -1,4 +1,5 @@
-import { WorldField, nearestCopy, css, dirIndex, hash2, rng } from '../gfx';
+import { RGB, WorldField, nearestCopy, css, dirIndex, hash2, mix, rng } from '../gfx';
+import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import {
   BuildingArt,
   BuildingKind,
@@ -12,7 +13,7 @@ import {
   makeRocks,
   makeTrees,
 } from './sprites';
-import { K, Rect, Terrain } from './terrain';
+import { K, OV, Rect, Terrain } from './terrain';
 
 export type UnitKind = 'light' | 'heavy' | 'buggy' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket';
 
@@ -124,18 +125,57 @@ export class Game {
     return this.terrain.h;
   }
 
+  // The planet is big, so there are several bases round it: the two home
+  // bases near each other where the camera starts, and outposts further out.
   generate(w: number, h: number): void {
     const rand = rng(this.seed * 7919 + 13);
-    this.terrain = new Terrain(w, h, this.seed);
+    const T = (this.terrain = new Terrain(w, h, this.seed));
     this.units = [];
     this.buildings = [];
     this.props = [];
     this.particles = [];
     this.markers = [];
     this.sparkles = [];
+    this.ov = null;
+    this.forest = new WorldField(w, h, 60, this.seed + 500, 3, 12);
 
-    // Bases: Cobalt in the upper-left half, Ember towards the right.
-    const padRects: Rect[] = [];
+    const wrapD = (ax: number, ay: number, bx: number, by: number) => {
+      const [x, y] = nearestCopy(ax, ay, bx, by, w, h);
+      return Math.hypot(x - ax, y - ay);
+    };
+    type Site = { x: number; y: number; f: number; home: boolean };
+    const sites: Site[] = [
+      { x: 1440 * 0.24, y: 720 * 0.42, f: 0, home: true },
+      { x: 1440 * 0.74, y: 720 * 0.28, f: 1, home: true },
+    ];
+    const want = Math.max(2, Math.round((w * h) / 9e6));
+    const gap = Math.sqrt((w * h) / want) * 0.6;
+    for (let i = 0; i < 3000 && sites.length < want + 2; i++) {
+      const x = rand() * w;
+      const y = rand() * h;
+      if (sites.some((s) => wrapD(s.x, s.y, x, y) < gap)) continue;
+      if (T.k(x, y) !== K.Grass || T.k(x + 60, y) !== K.Grass || T.k(x - 60, y) !== K.Grass) continue;
+      sites.push({ x, y, f: sites.length % 2, home: false });
+    }
+    // roads from each base to its two nearest neighbours
+    const lines: [number, number][][] = [];
+    const done = new Set<string>();
+    sites.forEach((a, i) => {
+      const near = sites
+        .map((b, j) => ({ j, d: wrapD(a.x, a.y, b.x, b.y) }))
+        .filter((o) => o.j !== i)
+        .sort((p, q) => p.d - q.d)
+        .slice(0, 2);
+      for (const { j } of near) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (done.has(key)) continue;
+        done.add(key);
+        const [bx, by] = nearestCopy(a.x, a.y, sites[j].x, sites[j].y, w, h);
+        lines.push(windingRoad(a.x, a.y, bx, by, rand));
+      }
+    });
+    T.setRoads(lines);
+
     const bodies: Rect[] = [];
     const place = (kinds: BuildingKind[], f: number, cx: number, cy: number) => {
       for (const kind of kinds) {
@@ -150,65 +190,37 @@ export class Game {
             const y = Math.round(cy + Math.sin(ang) * dist);
             const pad = { x: x + art.pad.x, y: y + art.pad.y, w: art.pad.w, h: art.pad.h };
             const body = { x: x - art.w / 2, y: y - art.h, w: art.w, h: art.h };
-            // building art must fit on-screen too
-            if (y - art.h < 2 || x - art.w / 2 < 2 || x + art.w / 2 > w - 2 || y + 6 > h) continue;
-            if (!this.terrain.clear(pad, 2)) continue;
+            if (!T.clear(pad, 2)) continue;
             if (bodies.some((p) => overlap(p, body, 4))) continue;
             bodies.push(body);
-            padRects.push(pad);
-            this.terrain.markPad(pad);
+            T.markPad(pad);
             this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2 });
             placed = true;
           }
         }
       }
     };
-    const portrait = h > w * 1.1;
-    const area = (w * h) / (640 * 360);
-    const take = (list: BuildingKind[]) => list.slice(0, Math.max(5, Math.round(list.length * Math.min(1, area * 1.1))));
-    place(take(BASE_A), 0, w * (portrait ? 0.32 : 0.24), h * (portrait ? 0.2 : 0.42));
-    place(take(BASE_B), 1, w * (portrait ? 0.5 : 0.74), h * (portrait ? 0.56 : 0.28));
+    const OUTPOST: BuildingKind[] = ['hq', 'power', 'barracks', 'refinery', 'silo', 'tower', 'tower', 'radar', 'factory', 'helipad'];
+    for (const s of sites) place(s.home ? (s.f ? BASE_B : BASE_A) : OUTPOST.slice(0, 5 + Math.floor(rand() * 5)), s.f, s.x, s.y);
 
-    // Trees, rocks and bushes
-    this.forest = new WorldField(w, h, 60, this.seed + 500, 3);
-    const forestSeed = this.seed + 400;
-    for (let y = 4; y < h + 10; y += 5)
-      for (let x = 2; x < w; x += 5) {
-        const jx = x + Math.floor(hash2(x, y, forestSeed) * 5);
-        const jy = y + Math.floor(hash2(y, x, forestSeed) * 5);
-        const k = this.terrain.k(jx, jy);
-        if (k !== K.Grass || jy >= h + 4) continue;
-        if (padRects.some((p) => inside(jx, jy, p, 6))) continue;
-        const forest = (this.forestValue(jx, jy) - 0.55) * 3;
-        const roll = hash2(jx, jy, forestSeed + 1);
-        if (roll < forest) {
-          this.props.push({ img: this.trees[Math.floor(hash2(jx, jy, 3) * 4.99)], x: jx, y: jy });
-        } else if (roll < 0.012) {
-          this.props.push({ img: this.trees[4 + Math.floor(hash2(jx, jy, 4) * 1.99)], x: jx, y: jy });
-        } else if (roll < 0.03) {
-          this.props.push({ img: this.bushes[Math.floor(hash2(jx, jy, 5) * 2.99)], x: jx, y: jy });
-        } else if (roll < 0.033 || (this.terrain.k(jx - 3, jy) === K.Cliff && roll < 0.2)) {
-          this.props.push({ img: this.rocks[Math.floor(hash2(jx, jy, 6) * 3.99)], x: jx, y: jy });
-        }
-      }
-
-    this.terrain.paint();
-
-    // Units near each base
-    const spawn = (kind: UnitKind, f: number, cx: number, cy: number, spread: number) => {
+    // Units round each base
+    const spawn = (kind: UnitKind, f: number, cx: number, cy: number, spread: number): Unit | null => {
       for (let t = 0; t < 200; t++) {
-        const x = cx + (rand() - 0.5) * spread * 2;
-        const y = cy + (rand() - 0.5) * spread * 1.4;
-        const k = this.terrain.k(x, y);
-        const ok = kind === 'boat' ? k === K.Water && this.terrain.k(x + 10, y) === K.Water && this.terrain.k(x - 10, y) === K.Water : kind === 'heli' ? true : k === K.Grass || k === K.Road || k === K.Pad;
-        if (!ok || x < 8 || y < 10 || x > w - 8 || y > h - 6) continue;
+        let x = cx + (rand() - 0.5) * spread * 2;
+        let y = cy + (rand() - 0.5) * spread * 1.4;
+        const k = T.k(x, y);
+        const ok = kind === 'boat' ? k === K.Water && T.k(x + 10, y) === K.Water && T.k(x - 10, y) === K.Water : kind === 'heli' ? true : k === K.Grass || k === K.Road || k === K.Pad;
+        if (!ok) continue;
         if (kind !== 'heli' && this.buildings.some((b) => inside(x, y, { x: b.x - b.art.w / 2, y: b.y - b.art.h, w: b.art.w, h: b.art.h }, 2))) continue;
+        x = ((x % w) + w) % w;
+        y = ((y % h) + h) % h;
         const a = rand() * Math.PI * 2;
-        this.units.push({ kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 });
-        return;
+        const u: Unit = { kind, f, x, y, a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: rand() * 10, hp: STATS[kind].hp, idle: rand() * 4, trackAcc: 0, lap: 0, lapY: 0 };
+        this.units.push(u);
+        return u;
       }
+      return null;
     };
-    const n = (k: number) => Math.max(1, Math.round(k * Math.min(1.4, Math.max(0.5, area))));
     const army: [UnitKind, number][] = [
       ['light', 4],
       ['heavy', 2],
@@ -219,19 +231,73 @@ export class Game {
       ['inf', 6],
       ['rocket', 3],
     ];
-    const spreadR = Math.min(w, h) * 0.22;
-    const centres: [number, number][] = portrait
-      ? [
-          [w * 0.4, h * 0.36],
-          [w * 0.4, h * 0.72],
-        ]
-      : [
-          [w * 0.3, h * 0.6],
-          [w * 0.8, h * 0.5],
-        ];
-    for (let f = 0; f < 2; f++) for (const [kind, c] of army) for (let i = 0; i < n(c); i++) spawn(kind, f, centres[f][0], centres[f][1], spreadR);
-    for (let f = 0; f < 2; f++) for (let i = 0; i < n(1); i++) spawn('boat', f, w * 0.85, h * 0.85, Math.min(w, h) * 0.3);
+    const mine: Unit[] = [];
+    for (const s of sites)
+      for (const [kind, c] of army)
+        for (let i = 0; i < Math.max(1, Math.round(c * (s.home ? 1.4 : 0.6))); i++) {
+          const u = spawn(kind, s.f, s.x + (s.home ? 60 : 0), s.y + (s.home ? 120 : 60), s.home ? 160 : 110);
+          if (u && s.home && s.f === 0) mine.push(u);
+        }
+    // boats on the nearest lake to home
+    const hx = (sites[0].x + sites[1].x) / 2;
+    const hy = (sites[0].y + sites[1].y) / 2;
+    let lake: [number, number] | null = null;
+    for (let r = 100; r < 3000 && !lake; r += 100)
+      for (let t = 0; t < 40 && !lake; t++) {
+        const a = rand() * Math.PI * 2;
+        const x = hx + Math.cos(a) * r;
+        const y = hy + Math.sin(a) * r;
+        if (T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water) lake = [x, y];
+      }
+    if (lake) for (let f = 0; f < 2; f++) for (let i = 0; i < 2; i++) spawn('boat', f, lake[0], lake[1], 60);
+
+    this.home = mine.length
+      ? { x: mine.reduce((s, u) => s + u.x, 0) / mine.length, y: mine.reduce((s, u) => s + u.y, 0) / mine.length }
+      : { x: sites[0].x, y: sites[0].y };
+    this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty));
     this.emit();
+  }
+
+  private home = { x: 0, y: 0 };
+  tiles!: Tiles<Prop>;
+  // the map rect last drawn, so sparkles appear where you are looking
+  private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+  // Paint one tile of ground and scatter its trees, rocks and bushes.
+  private buildTile(tx: number, ty: number): Tile<Prop> {
+    const T = this.terrain;
+    const p = T.paintTile(tx, ty);
+    const R = p.region;
+    const kAt = (x: number, y: number): K => {
+      const i = Math.floor(x) - R.x0;
+      const j = Math.floor(y) - R.y0;
+      return i < 0 || j < 0 || i >= R.w || j >= R.h ? T.k(x, y) : (R.kind[j * R.w + i] as K);
+    };
+    const props: Prop[] = [];
+    const forestSeed = this.seed + 400;
+    const X0 = tx * CH;
+    const Y0 = ty * CH;
+    const pads = T.pads.filter((q) => q.x < X0 + CH + 12 && q.x + q.w > X0 - 12 && q.y < Y0 + CH + 12 && q.y + q.h > Y0 - 12);
+    for (let y = Y0 + ((((4 - Y0) % 5) + 5) % 5); y < Y0 + CH; y += 5)
+      for (let x = X0 + ((((2 - X0) % 5) + 5) % 5); x < X0 + CH; x += 5) {
+        const jx = x + Math.floor(hash2(x, y, forestSeed) * 5);
+        const jy = y + Math.floor(hash2(y, x, forestSeed) * 5);
+        const k = kAt(jx, jy);
+        if (k !== K.Grass) continue;
+        if (pads.some((q) => inside(jx, jy, q, 6))) continue;
+        const forest = (this.forest.at(jx, jy) - 0.55) * 3;
+        const roll = hash2(jx, jy, forestSeed + 1);
+        if (roll < forest) {
+          props.push({ img: this.trees[Math.floor(hash2(jx, jy, 3) * 4.99)], x: jx, y: jy });
+        } else if (roll < 0.012) {
+          props.push({ img: this.trees[4 + Math.floor(hash2(jx, jy, 4) * 1.99)], x: jx, y: jy });
+        } else if (roll < 0.03) {
+          props.push({ img: this.bushes[Math.floor(hash2(jx, jy, 5) * 2.99)], x: jx, y: jy });
+        } else if (roll < 0.033 || (kAt(jx - 3, jy) === K.Cliff && roll < 0.2)) {
+          props.push({ img: this.rocks[Math.floor(hash2(jx, jy, 6) * 3.99)], x: jx, y: jy });
+        }
+      }
+    return { canvas: p.canvas, foam: p.foam, foam2: p.foam2, props, used: 0 };
   }
 
   private forest!: WorldField;
@@ -347,9 +413,7 @@ export class Game {
 
   // Where to point the camera at the start: the middle of the first army.
   focus(): { x: number; y: number } {
-    const mine = this.units.filter((u) => u.f === 0);
-    if (!mine.length) return { x: this.w / 2, y: this.h / 2 };
-    return { x: mine.reduce((s, u) => s + u.x, 0) / mine.length, y: mine.reduce((s, u) => s + u.y, 0) / mine.length };
+    return this.home;
   }
 
   selectedPoints(): [number, number][] {
@@ -369,7 +433,6 @@ export class Game {
 
   update(dt: number): void {
     this.time += dt;
-    const tctx = this.terrain.ctx;
     for (const u of this.units) {
       const st = STATS[u.kind];
       u.anim += dt;
@@ -406,9 +469,9 @@ export class Game {
               const hw = u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 3.5 : 4.5;
               const px = -Math.sin(u.a) * hw;
               const py = Math.cos(u.a) * hw;
-              tctx.fillStyle = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.18)' : 'rgba(30,25,15,0.14)';
-              tctx.fillRect(Math.round(u.x + px), Math.round(u.y + py), 1, 1);
-              tctx.fillRect(Math.round(u.x - px), Math.round(u.y - py), 1, 1);
+              const style = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.18)' : 'rgba(30,25,15,0.14)';
+              this.stamp(u.x + px, u.y + py, style);
+              this.stamp(u.x - px, u.y - py, style);
               if ((k === K.Road || k === K.Sand) && Math.random() < 0.35)
                 this.particles.push({ x: u.x - Math.cos(u.a) * 7, y: u.y - Math.sin(u.a) * 7, vx: (Math.random() - 0.5) * 4, vy: -3, life: 0, max: 0.8, kind: 'dust', size: 1 });
             }
@@ -466,11 +529,12 @@ export class Game {
     for (const m of this.markers) m.t += dt;
     this.markers = this.markers.filter((m) => m.t < 0.7);
 
-    // water sparkles
-    const want = Math.floor((this.w * this.h) / 2500);
+    // water sparkles, where you are looking
+    const v = this.view;
+    const want = Math.floor(((v.x1 - v.x0) * (v.y1 - v.y0)) / 2500);
     for (let i = 0; i < 4 && this.sparkles.length < want; i++) {
-      const x = Math.floor(Math.random() * this.w);
-      const y = Math.floor(Math.random() * this.h);
+      const x = (((Math.floor(v.x0 + Math.random() * (v.x1 - v.x0)) % this.w) + this.w) % this.w);
+      const y = (((Math.floor(v.y0 + Math.random() * (v.y1 - v.y0)) % this.h) + this.h) % this.h);
       if (this.terrain.k(x, y) === K.Water && this.terrain.k(x, y - 3) === K.Water) this.sparkles.push({ x, y, life: 0 });
     }
     for (const s of this.sparkles) s.life += dt;
@@ -479,26 +543,47 @@ export class Game {
 
   // ---------- Rendering ----------
 
-  // The ground layer and the objects on it are drawn separately so main.ts can
-  // lay down the ground for every visible copy of the wrapped world first.
-  renderGround(): void {
-    const c = this.ctx;
-    const t = this.time;
-    c.imageSmoothingEnabled = false;
-    c.drawImage(this.terrain.canvas, 0, 0);
+  // A tread mark on the ground, if that bit of ground is painted.
+  private stamp(x: number, y: number, style: string): void {
+    const t = this.tiles.at(x, y);
+    if (!t) return;
+    const c = t.canvas.getContext('2d')!;
+    c.fillStyle = style;
+    c.fillRect(Math.floor(x) - Math.floor(x / CH) * CH, Math.floor(y) - Math.floor(y / CH) * CH, 1, 1);
+  }
 
-    // shimmering shoreline foam
-    c.globalAlpha = 0.45 + 0.35 * Math.sin(t * 1.6);
-    c.drawImage(this.terrain.foam, 0, 0);
-    c.globalAlpha = 0.35 + 0.3 * Math.sin(t * 1.6 + 2.2);
-    c.drawImage(this.terrain.foam2, 0, 0);
-    c.globalAlpha = 1;
+  // The ground for map rect (x0, y0)-(x1, y1), in unwrapped map pixels, painted
+  // a few tiles at a time (`budget` milliseconds each frame).
+  renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void {
+    this.view = { x0, y0, x1, y1 };
+    this.tiles.begin();
+    drawTiles(this.ctx, this.tiles, this.ov, OV, x0, y0, x1, y1, this.time);
+    this.tiles.pump(budget);
+  }
+
+  private ov: HTMLCanvasElement | null = null;
+  // Build the overview a little at a time; true once it is ready.
+  mapStep(ms: number): boolean {
+    if (!this.ov) this.ov = this.terrain.overview((x, y, c) => this.forestTint(x, y, c), ms);
+    return this.ov !== null;
+  }
+  private forestTint(x: number, y: number, c: RGB): RGB {
+    const f = (this.forest.at(x, y) - 0.55) * 3;
+    return f > 0 ? mix(c, [18, 40, 16], Math.min(0.75, 0.25 + f * 0.6)) : c;
+  }
+
+  // Everything standing on this copy of the map within rect (x0, y0)-(x1, y1),
+  // in this copy's coordinates.
+  renderObjects(x0: number, y0: number, x1: number, y1: number): void {
+    const c = this.ctx;
+    const pad = 48;
+    const inView = (x: number, y: number) => x > x0 - pad && x < x1 + pad && y > y0 - pad && y < y1 + pad * 1.5;
+
     for (const s of this.sparkles) {
       const a = Math.sin((s.life / 1.2) * Math.PI);
       c.fillStyle = `rgba(220,240,250,${a * 0.85})`;
       c.fillRect(s.x, s.y, 2, 1);
     }
-
     // wakes sit on the water surface
     for (const p of this.particles) {
       if (p.kind !== 'wake') continue;
@@ -510,7 +595,6 @@ export class Game {
       c.fillRect(Math.round(p.x), Math.round(p.y - r * 0.6), 1, 1);
       c.fillRect(Math.round(p.x), Math.round(p.y + r * 0.6), 1, 1);
     }
-
     // move markers
     for (const m of this.markers) {
       const k = m.t / 0.7;
@@ -518,31 +602,34 @@ export class Game {
       c.fillStyle = `rgba(120,255,120,${1 - k * 0.6})`;
       corners(c, Math.round(m.x), Math.round(m.y), r, r, 2);
     }
-
     // ground shadows of aircraft
     for (const u of this.units) {
-      if (u.kind !== 'heli') continue;
+      if (u.kind !== 'heli' || !inView(u.x, u.y)) continue;
       const spr = this.art[u.f].heli.body;
       const di = dirIndex(u.a, DIRS);
       c.drawImage(spr.shadow[di], Math.round(u.x - spr.size / 2 + 4), Math.round(u.y - spr.size / 2 + 2));
     }
 
-  }
-
-  renderObjects(): void {
-    const c = this.ctx;
     // depth-sorted ground objects
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
-    for (const p of this.props) items.push({ y: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
-    for (const b of this.buildings) items.push({ y: b.y - 4, draw: () => this.drawBuilding(b) });
-    for (const u of this.units) if (u.kind !== 'heli') items.push({ y: u.y, draw: () => this.drawUnit(u) });
+    const tx0 = Math.max(0, Math.floor((x0 - pad) / CH));
+    const tx1 = Math.min(this.tiles.nx - 1, Math.floor((x1 + pad) / CH));
+    const ty0 = Math.max(0, Math.floor((y0 - pad) / CH));
+    const ty1 = Math.min(this.tiles.ny - 1, Math.floor((y1 + pad * 1.5) / CH));
+    for (let ty = ty0; ty <= ty1; ty++)
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const t = this.tiles.at(tx * CH, ty * CH);
+        if (t) for (const p of t.props) if (inView(p.x, p.y)) items.push({ y: p.y, draw: () => c.drawImage(p.img, Math.round(p.x - p.img.width / 2), Math.round(p.y - p.img.height + 2)) });
+      }
+    for (const b of this.buildings) if (inView(b.x, b.y - b.art.h / 2)) items.push({ y: b.y - 4, draw: () => this.drawBuilding(b) });
+    for (const u of this.units) if (u.kind !== 'heli' && inView(u.x, u.y)) items.push({ y: u.y, draw: () => this.drawUnit(u) });
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.draw();
 
     // smoke and dust drift above the ground objects
     for (const p of this.particles) {
-      if (p.kind === 'wake') continue;
+      if (p.kind === 'wake' || !inView(p.x, p.y)) continue;
       const k = p.life / p.max;
       const s = Math.max(1, Math.round(p.size));
       c.fillStyle = p.kind === 'smoke' ? `rgba(215,215,210,${0.55 * (1 - k)})` : `rgba(160,140,100,${0.5 * (1 - k)})`;
@@ -550,29 +637,32 @@ export class Game {
     }
 
     // aircraft on top
-    for (const u of this.units) if (u.kind === 'heli') this.drawUnit(u);
+    for (const u of this.units) if (u.kind === 'heli' && inView(u.x, u.y)) this.drawUnit(u);
   }
 
-  // A simplified picture for the globe: the bare ground, forests as a dark
-  // tint, the buildings themselves, and units as small dots of their colour.
-  renderMap(): void {
-    const c = this.ctx;
-    c.drawImage(this.terrain.canvas, 0, 0);
-    const trees = new Set(this.trees);
-    c.fillStyle = 'rgba(12,30,10,0.5)';
-    for (const p of this.props) if (trees.has(p.img)) c.fillRect(Math.round(p.x) - 3, Math.round(p.y) - 5, 6, 6);
-    // the real building art: from orbit it shrinks to a speck of its own colours
-    for (const b of [...this.buildings].sort((a, b2) => a.y - b2.y)) {
-      const ox = Math.round(b.x - b.art.w / 2);
-      const oy = Math.round(b.y - b.art.h);
-      c.fillStyle = 'rgba(0,0,0,0.28)';
-      c.fillRect(ox + 4, oy + Math.round(b.art.h * 0.3), b.art.w - 2, Math.round(b.art.h * 0.7));
-      c.drawImage(b.art.img, ox, oy);
+  // The whole map for the globe, one pixel per OV map pixels: the overview
+  // with forests darkened, and the bases on it.
+  mapImage(): HTMLCanvasElement {
+    this.mapStep(1e9);
+    const src = this.ov!;
+    const cv = document.createElement('canvas');
+    cv.width = src.width;
+    cv.height = src.height;
+    const c = cv.getContext('2d')!;
+    c.drawImage(src, 0, 0);
+    c.scale(1 / OV, 1 / OV);
+    c.imageSmoothingEnabled = true;
+    for (const b of [...this.buildings].sort((p, q) => p.y - q.y)) {
+      const x = b.x - Math.floor(b.x / this.w) * this.w;
+      const y = b.y - Math.floor(b.y / this.h) * this.h;
+      c.drawImage(b.art.img, Math.round(x - b.art.w / 2), Math.round(y - b.art.h));
     }
-    for (const u of this.units) {
-      c.fillStyle = css(FACTIONS[u.f].light);
-      c.fillRect(Math.round(u.x) - 2, Math.round(u.y) - 2, 4, 4);
-    }
+    return cv;
+  }
+
+  // Units as dots of their faction's colour, for the globe.
+  mapDots(): [number, number, RGB][] {
+    return this.units.map((u) => [u.x, u.y, FACTIONS[u.f].light]);
   }
 
   private drawRot(spr: RotSprite, x: number, y: number, a: number, shadow = true): void {

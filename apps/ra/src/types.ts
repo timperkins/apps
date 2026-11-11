@@ -1,3 +1,5 @@
+import type { RGB } from './gfx';
+
 // What main.ts needs from each game version. All coordinates are map pixels
 // (the flat, top-down or isometric screen-space map); main.ts owns the camera
 // and translates the canvas before drawing.
@@ -5,8 +7,8 @@
 // The map wraps round both ways, every `w` pixels across and every `h` pixels
 // down, like a tiny planet. Points passed in may be on any copy of the map (the
 // camera keeps going round), and games test the nearest copy of each unit.
-// Games keep their own state on the first copy, and main.ts draws a copy of the
-// map at every multiple of (w, h) in view.
+// Games keep their own state on the first copy. main.ts draws the ground once
+// for the whole view, then the objects of every copy of the map in view.
 export interface GameLike {
   seed: number;
   ctx: CanvasRenderingContext2D;
@@ -15,10 +17,18 @@ export interface GameLike {
   readonly h: number;
   generate(w: number, h: number): void;
   update(dt: number): void;
-  renderGround(): void;
-  renderObjects(): void;
-  // A simplified picture of the whole map for the globe views.
-  renderMap(): void;
+  // Ground for a map rect in unwrapped map pixels; tiles not yet painted are
+  // painted for up to `budget` milliseconds.
+  renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void;
+  // Objects of the copy of the map at the origin, within a rect in its coordinates.
+  renderObjects(x0: number, y0: number, x1: number, y1: number): void;
+  // A coarse picture of the whole map for the globe views (the bases included),
+  // and the units as coloured dots.
+  // The coarse picture is built a little at a time: mapStep(ms) works on it
+  // for up to ms milliseconds and says whether it is ready.
+  mapStep(ms: number): boolean;
+  mapImage(): HTMLCanvasElement;
+  mapDots(): [number, number, RGB][];
   click(x: number, y: number, add: boolean): void;
   // shortest: from the globe view, go the shortest way instead of the way the
   // camera has panned.
