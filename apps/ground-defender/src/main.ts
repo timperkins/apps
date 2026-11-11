@@ -128,6 +128,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🏹', title: 'Walk and shoot', lines: [
     'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone. The map is big: the small map in the corner shows where everything is.',
     '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear (or bear spawner) in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
+    'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>D</kbd> to put in one ammo. <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
     'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
@@ -140,7 +141,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
     'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> to dig by hand.',
     'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. ',
-    'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. The ammo machine turns stone into stone ammo, and plates, bars and cut diamonds into strong metal ammo: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). <kbd>S</kbd> switches ammo.'] },
+    'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. The ammo machine turns stone into stone ammo, and plates, bars and cut diamonds into strong metal ammo: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). Put ammo in your ammo slots to shoot it.'] },
   { icon: '⚙️', title: 'Crafting', lines: [
     'Press <kbd>Shift</kbd> (or the Inventory button) for your inventory on the left and crafting on the right, in tabs: Logistics, Production, Parts and Combat.',
     'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
@@ -175,6 +176,19 @@ $('svIntroBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(
 $('svIntroSkip').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); endIntro(); });
 $('svHow').addEventListener('click', e => { e.stopPropagation(); Sound.init(); Sound.ui(); showIntro(null); });
 
+/** Full screen on any device that allows it: asked for on a tap or key press (browsers only allow it then), and again
+ *  after leaving it. iPhones don't let web pages go full screen; there the app added to the home screen fills the screen. */
+function goFull() {
+  const d = document as Document & { webkitFullscreenElement?: Element; webkitFullscreenEnabled?: boolean };
+  if (d.fullscreenElement || d.webkitFullscreenElement) return;
+  const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+  try {
+    if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    else el.webkitRequestFullscreen?.();
+  } catch { /* not allowed here */ }
+}
+addEventListener('pointerup', goFull, { capture: true });
+addEventListener('keyup', e => { if (e.key !== 'Escape') goFull(); }, { capture: true });
 function start() {
   Sound.init(); Sound.ui();
   (document.activeElement as HTMLElement | null)?.blur?.();

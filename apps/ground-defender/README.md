@@ -17,6 +17,11 @@ Walk with the arrow keys on a computer, or drag anywhere on a phone. Space shoot
 
 ## What's new compared with Sky Defender 2 Survival
 
+- **Bears attack in groups.** Steady bears gather by their spawners until there are 6 to 10 of them (`groupMin`, `groupMax`), then they all come for you at once. The top right shows how many are gathering. Huge waves still come straight at you, and a gathering bear still goes for you if you walk close.
+- **Weapon and ammo slots.** Bottom left, above the quickbar: 3 weapon slots on top, 3 ammo slots underneath. Tap a slot to use it, and tap it again to take it out. Hold something from your inventory, then tap a slot to put it in, or press D to put in one ammo. Tab switches weapon, S switches ammo. You start with a crossbow and 100 stone ammo. Each ammo has 100 usage points: a crossbow shot or a rocket uses one whole ammo; with no ammo the crossbow fires your loadout bolts.
+- **Rapid crossbow.** A weapon you hold, craftable without research for 100 stone and 10 iron plates. While you hold Space (or the Shoot bear button) it streams a yellow line at the nearest bear in range: 0.3 damage every 0.1 seconds, using 4.62 usage points a second. Holding Space with any weapon keeps firing.
+- **Full screen.** The game asks for full screen on a tap or key press on any device that allows it. iPhones don't allow it for web pages; there, add it to the home screen.
+
 - **No camp.** There is no fence and no gates (`NO_BASE` in `game.ts`; set it to false for the old walled camp). Bears come straight for you from the spawners, and have 5 health. You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates. Belts cost 2 stone and 1 gear (for 2).
 
 - **Bigger map.** The map is 6600 × 6600 world units and the camera follows the guy; the camp stays the same size in the middle. A small map in the top-right corner shows the ore patches (in their colours), the fence, spawners, bears and you. You can walk out of the camp through any gate, and bears outside come for you when you get close (`chaseRange`).

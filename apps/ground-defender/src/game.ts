@@ -81,7 +81,8 @@ export const SURVIVAL = {
   spawnEvery: 12,       // each spawner makes a bear every 12 seconds
   spawnEarly: 100,      // ...but only one every 100 seconds for the first 15 minutes
   earlyTime: 900,
-  maxBears: 6,          // ...while there are fewer than 6 bears on the map (huge waves come on top)
+  maxBears: 14,         // ...while there are fewer than 14 bears on the map (huge waves come on top)
+  groupMin: 6, groupMax: 10, // bears gather by their spawners until there are 6 to 10 of them, then all attack together
   chaseRange: 130,      // a bear outside goes for you when you walk this close
   oreMineCost: { iron: { stone: 100 }, copper: { stone: 100, iron: 75 }, gold: { stone: 125, iron: 100, copper: 50 }, diamond: { stone: 150, iron: 100, copper: 75, gold: 50 } } as Record<Ore, Cost>,
   rapidCost: { stone: 50, iron: 10 } as Cost, // a rapid crossbow
@@ -90,6 +91,8 @@ export const SURVIVAL = {
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
   rocketStone: 10,
   rgunReload: 1.5,
+  ammoPoints: 100,      // each ammo (or rocket) has 100 usage points; a crossbow shot or a rocket uses all of them
+  rxDamage: .3, rxEvery: .1, rxUse: 4.62, // rapid crossbow: 0.3 damage every 0.1 s, 4.62 usage points a second of firing
   furnaceMax: 50,       // ore a furnace holds
   wallHp: 150, gateHp: 200, // your own walls and gates: bears bite them
   wallBite: 15, wallBiteEvery: 1, // damage a bear does to a wall in its way, and how often      // seconds between shots with the handheld rocket gun      // stone for one rocket in the machine
@@ -190,7 +193,9 @@ const RECIPES: Rec[] = [
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
-  R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you carry. Press S to pick rockets, then shoot: 70 damage a rocket.', 'rocket', false),
+  R('rxbow', 'combat', { stone: 200, ironPlate: 20 }, 6, 1, 'A crossbow you hold that fires very fast while you hold Space: 0.3 damage every 0.1 s. It uses ammo slowly (4.62 of an ammo\'s 100 usage points a second). Put it in a weapon slot.', undefined, false),
+  R('xbow', 'combat', { stone: 20 }, 2, 1, 'A plain crossbow you hold. One ammo a shot; with no ammo it fires your loadout bolts.', undefined, false),
+  R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you hold: 70 damage a rocket. Put it in a weapon slot and rockets in an ammo slot.', 'rocket', false),
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
   { id: 'expand', cat: 'combat', n: 1, time: 0, in: { stone: 40 }, unlock: 'walls', asm: false, desc: 'Moves your walls out for more room.' },
@@ -254,7 +259,7 @@ const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
-  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun',
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun', 'xbow', 'rxbow',
   'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
@@ -278,6 +283,15 @@ const AMMO_KINDS: AmmoKind[] = ['diamondAmmo', 'goldAmmo', 'ironAmmo', 'copperAm
 const AMMO_NAME: Record<AmmoKind, string> = { ammo: 'Stone', ironAmmo: 'Iron', copperAmmo: 'Copper', goldAmmo: 'Gold', diamondAmmo: 'Diamond' };
 const metalOf = (a: AmmoKind) => METAL[ORES.find(o => METAL[o].ammo === a)!];
 const isAmmoKind = (k: Kind): k is AmmoKind => (AMMO_KINDS as Kind[]).includes(k);
+/** Weapons you hold, and what they shoot. */
+type Weapon = 'xbow' | 'rxbow' | 'rgun';
+const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'rgun'];
+const isWeapon = (k: Kind | null): k is Weapon => !!k && (WEAPONS as Kind[]).includes(k);
+type Shot = AmmoKind | 'rocket';
+const isShot = (k: Kind | null): k is Shot => !!k && (k === 'rocket' || isAmmoKind(k));
+const fits = (w: Weapon, k: Shot) => (w === 'rgun') === (k === 'rocket');
+/** An ammo slot: one kind of ammo, as usage points (100 for each ammo in it). */
+interface AmmoSlot { k: Shot; pts: number; }
 type Cost = Partial<Record<Kind, number>>;
 export const costText = (c: Cost) => (Object.entries(c) as [Kind, number][]).map(([k, n]) => `${n} ${KIND_NAME[k]}`).join(' + ');
 interface Item { x: number; y: number; gone?: boolean; k: Kind; skip?: string; }
@@ -290,15 +304,15 @@ const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
-  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns',
-  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbows', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'assemblers', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
-  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun',
-  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Assembler', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
@@ -388,7 +402,14 @@ export class Survival {
   private gateStage = 0; private camX = CX; private camY = CY; private walls: Rect[] = [];
   /** The turret you tapped: tap a bear or spawner next to make it the turret's target. */
   private picked: string | null = null;
-  private bag: Bag = emptyBag(); private useAmmo: AmmoKind | 'rocket' | null = null;
+  private bag: Bag = emptyBag();
+  /** The weapon and ammo slots at the bottom left: 3 weapons on top, 3 kinds of ammo under them; the picked one of each is used. */
+  private weapons: (Weapon | null)[] = ['xbow', null, null]; private wSel = 0;
+  private ammoSlots: (AmmoSlot | null)[] = [null, null, null]; private aSel = 0;
+  /** Space (or the Shoot bear button) held down: keep firing. */
+  private fireHeld = false; private rxT = 0; private firingAt: Target | null = null; private noAmmoT = 0;
+  /** How many bears gather before they all attack. */
+  private groupSize = 8;
   private recipeFor: Machine | null = null;
   private keys = new Set<string>();
   private stick: { id: number; ox: number; oy: number; dx: number; dy: number } | null = null;
@@ -452,7 +473,10 @@ export class Survival {
     canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
     canvas.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     const btn = (id: string, f: () => void) => pad.querySelector<HTMLElement>(id)!.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (this.running && !this.paused) f(); });
-    btn('#svTarget', () => this.shoot(true));
+    btn('#svTarget', () => { this.fireHeld = true; this.shoot(true); });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave'] as const) pad.querySelector('#svTarget')!.addEventListener(ev, () => { this.fireHeld = false; });
+    pad.querySelector('#svArms')!.addEventListener('click', e => this.armsClick(e));
+    pad.querySelector('#svArms')!.addEventListener('pointerdown', e => e.stopPropagation());
     btn('#svFree', () => this.shoot(false));
     btn('#svPause', () => this.hooks.pause());
     btn('#svMine', () => this.action());
@@ -501,7 +525,8 @@ export class Survival {
       if (k === 'r') { if (!e.repeat) this.rotate(); return; }
       if (this.placing && k === 'Enter') { const t = this.ghost(); if (t) this.placeAt(t.c, t.r); return; }
       if (this.placing && k === 'Escape') { this.placing = false; return; }
-      if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) this.shoot(true); return; }
+      if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) { this.fireHeld = true; this.shoot(true); } return; }
+      if (k === 'Tab') { e.preventDefault(); if (!e.repeat) this.switchWeapon(); return; }
       if (k === 'z') { if (!e.repeat) this.shoot(false); return; }
       if (k === 'p' || k === 'Escape') { this.hooks.pause(); return; }
       if (k === 'm') { if (!e.repeat) this.action(); return; }
@@ -509,8 +534,8 @@ export class Survival {
       if (k === 'h') { if (!e.repeat) this.hire(); return; }
       if (k.startsWith('Arrow')) { e.preventDefault(); this.keys.add(k); }
     });
-    addEventListener('keyup', e => this.keys.delete(e.key));
-    addEventListener('blur', () => this.keys.clear());
+    addEventListener('keyup', e => { this.keys.delete(e.key); if (e.code === 'Space') this.fireHeld = false; });
+    addEventListener('blur', () => { this.keys.clear(); this.fireHeld = false; });
   }
 
   start(load: Loadout) {
@@ -536,7 +561,9 @@ export class Survival {
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
     // you start with a furnace and a few iron plates, like a new settler
     this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
-    Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, ammo: 100, turret: 2, gen: 1 }); this.useAmmo = null; this.closeRecipe();
+    Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); this.closeRecipe();
+    this.weapons = ['xbow', null, null]; this.wSel = 0; this.ammoSlots = [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null]; this.aSel = 0;
+    this.fireHeld = false; this.firingAt = null; this.groupSize = this.newGroup(); this.armsSig = '';
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.done.clear(); this.closeLab(); resetStats();
@@ -548,7 +575,7 @@ export class Survival {
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
   private static SAVED = ['hp', 'x', 'y', 'face', 'reload', 't', 'healT', 'waveT', 'waveN', 'waveLeft', 'waveGap', 'waveWarned', 'nextId', 'kills', 'shots', 'hits', 'damage',
-    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'useAmmo', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
+    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'groupSize', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
     'machines', 'expansion', 'researching', 'progress', 'brickGate', 'robotT', 'miners', 'popT', 'load', 'patches', 'queue', 'jobN', 'quick', 'pollution'] as const;
   /** Everything needed to carry on this run later, as plain JSON. */
   save(): SaveData {
@@ -653,39 +680,139 @@ export class Survival {
     for (const sp of this.spawners) { if (sp.dead) continue; const d = dist(sp.x, sp.y, x, y) - SPAWNER_R; if (d < best) { best = d; target = sp; } }
     return target;
   }
-  /** Space shoots at the nearest bear (or spawner) in range; Z shoots straight ahead with no target. */
+  /** The weapon in hand (the picked weapon slot). */
+  private weapon(): Weapon | null { return this.weapons[this.wSel] ?? null; }
+  /** The ammo slot this weapon shoots from: the picked one if it fits, else the first that does. */
+  private ammoSlot(w: Weapon) {
+    const ok = (i: number) => { const a = this.ammoSlots[i]; return !!a && a.pts > 0 && fits(w, a.k); };
+    if (ok(this.aSel)) return this.aSel;
+    return [0, 1, 2].find(ok) ?? -1;
+  }
+  private useUp(i: number, pts: number) {
+    const a = this.ammoSlots[i]; if (!a) return;
+    a.pts -= pts;
+    if (a.pts <= 1e-6) { this.ammoSlots[i] = null; this.bubble(this.x, this.y - 30, `Out of ${a.k === 'rocket' ? 'rockets' : AMMO_NAME[a.k].toLowerCase() + ' ammo'}`, 'info'); }
+  }
+  /** Space shoots at the nearest bear (or spawner) in range; Z shoots straight ahead with no target. Holding Space keeps firing. */
   private shoot(targeted: boolean) {
-    if (this.reload > 0) { Sound.click(); return; }
+    const w = this.weapon();
+    if (!w) { this.bubble(this.x, this.y - 30, 'No weapon: put one in a weapon slot', 'info'); Sound.denied(); return; }
+    if (w === 'rxbow') return; // fires while Space is held (see update)
+    if (this.reload > 0) { if (!this.fireHeld) Sound.click(); return; }
     let target: Target | null = null;
     if (targeted) {
-      target = this.nearestTarget(this.x, this.y, this.useAmmo === 'rocket' ? SURVIVAL.rocketRange : SURVIVAL.targetRange);
+      target = this.nearestTarget(this.x, this.y, w === 'rgun' ? SURVIVAL.rocketRange : SURVIVAL.targetRange);
       if (!target) {
-        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; }
-        Sound.denied();
+        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; if (!this.fireHeld) Sound.denied(); }
         return;
       }
       this.face = Math.atan2(target.y - this.y, target.x - this.x);
     }
-    const a = this.face, ammo = AMMO[this.load.ammo];
+    const a = this.face, ammo = AMMO[this.load.ammo], i = this.ammoSlot(w);
     // the rocket gun: one rocket a shot, it swirls and then homes in like a launcher's
-    if (this.useAmmo === 'rocket') {
-      if (!this.bag.rgun || !this.bag.rocket) { this.useAmmo = null; this.bubble(this.x, this.y - 30, this.bag.rgun ? 'Out of rockets' : 'No rocket gun', 'info'); Sound.denied(); return; }
-      this.bag.rocket--; this.mining = false;
+    if (w === 'rgun') {
+      if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'Put rockets in an ammo slot', 'info'); this.noAmmoT = 1.5; } Sound.denied(); return; }
+      this.useUp(i, SURVIVAL.ammoPoints); this.mining = false;
       this.rockets.push({ x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
-      if (!this.bag.rocket) { this.useAmmo = null; this.bubble(this.x, this.y - 30, 'Out of rockets', 'info'); }
       return;
     }
-    // stone ammo: 1.7x normal damage; metal ammo does its own damage. Each shot uses one up.
-    const use = this.useAmmo && this.bag[this.useAmmo] > 0 ? this.useAmmo : null;
+    // the crossbow: stone ammo does 1.7x normal damage, metal ammo its own; one ammo a shot. With no ammo it fires loadout bolts.
+    const use = i >= 0 ? this.ammoSlots[i]!.k as AmmoKind : null;
     const dmg = (use === 'ammo' ? AMMO.normal.damage * SURVIVAL.stoneDamage : use ? metalOf(use).dmg : ammo.damage) * ST.boltMul;
-    if (use) { this.bag[use]--; if (!this.bag[use]) { this.useAmmo = null; this.bubble(this.x, this.y - 30, `Out of ${AMMO_NAME[use].toLowerCase()} ammo`, 'info'); } }
+    if (use) this.useUp(i, SURVIVAL.ammoPoints);
     this.mining = false;
     this.bolts.push({ x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone: !!use, color: use && use !== 'ammo' ? metalOf(use).color : undefined });
     this.reload = ammo.reload * ST.reloadMul;
     this.shots++;
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
+  }
+  /** Holding fire: the rapid crossbow streams at the nearest bear in range, other weapons fire each time they're ready. */
+  private holdFire(dt: number) {
+    this.firingAt = null; this.noAmmoT -= dt;
+    if (!this.fireHeld) { this.rxT = 0; return; }
+    const w = this.weapon();
+    if (w !== 'rxbow') { if (this.reload <= 0) this.shoot(true); return; }
+    const target = this.nearestTarget(this.x, this.y, SURVIVAL.targetRange), i = this.ammoSlot('rxbow');
+    if (!target) { if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; } this.rxT = 0; return; }
+    if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'No ammo: put ammo in an ammo slot', 'info'); this.noAmmoT = 1.5; Sound.denied(); } return; }
+    this.mining = false; this.digAt = null;
+    this.face = Math.atan2(target.y - this.y, target.x - this.x);
+    this.firingAt = target;
+    this.useUp(i, SURVIVAL.rxUse * dt);
+    this.rxT += dt;
+    while (this.rxT >= SURVIVAL.rxEvery) {
+      this.rxT -= SURVIVAL.rxEvery; this.shots++;
+      if (alive(target)) this.damageTarget(target, SURVIVAL.rxDamage * ST.boltMul);
+      Sound.tone('square', 1500, 1100, .03, .04);
+    }
+  }
+  /** Tab: the next weapon slot with a weapon in it. */
+  private switchWeapon() {
+    const has = [0, 1, 2].filter(i => this.weapons[i]);
+    if (!has.length) { Sound.denied(); return; }
+    this.wSel = has[(has.indexOf(this.wSel) + 1) % has.length]; this.armsSig = '';
+    this.bubble(this.x, this.y - 30, ONE_NAME[this.weapons[this.wSel]!], 'info'); Sound.click();
+  }
+  /** A tap on a weapon or ammo slot: put in what you hold (if it fits there), pick it, or (tapped again) take it out. */
+  private armsClick(e: Event) {
+    e.stopPropagation();
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-w],[data-a]');
+    if (!el || !this.running || this.paused) return;
+    const h = this.hand && this.bag[this.hand] >= 1 ? this.hand : null;
+    if (el.dataset.w) {
+      const i = Number(el.dataset.w), cur = this.weapons[i];
+      if (isWeapon(h)) { if (cur) this.bag[cur]++; this.weapons[i] = h; this.bag[h]--; this.wSel = i; if (!this.bag[h]) this.hand = null; Sound.thump(); }
+      else if (cur && i === this.wSel) { this.bag[cur]++; this.weapons[i] = null; this.bubble(this.x, this.y - 30, `${ONE_NAME[cur]} back in your inventory`, 'info'); Sound.click(); }
+      else { this.wSel = i; Sound.click(); }
+    } else {
+      const i = Number(el.dataset.a), cur = this.ammoSlots[i];
+      if (isShot(h)) {
+        if (cur && cur.k !== h) this.bag[cur.k] += Math.floor(cur.pts / SURVIVAL.ammoPoints);
+        const n = Math.floor(this.bag[h]);
+        this.ammoSlots[i] = { k: h, pts: (cur && cur.k === h ? cur.pts : 0) + n * SURVIVAL.ammoPoints }; this.bag[h] -= n; this.hand = null; this.aSel = i;
+        this.bubble(this.x, this.y - 30, `${n} ${KIND_NAME[h]} in`, 'info'); Sound.thump();
+      } else if (cur && i === this.aSel) {
+        const n = Math.floor(cur.pts / SURVIVAL.ammoPoints); this.bag[cur.k] += n; this.ammoSlots[i] = null;
+        this.bubble(this.x, this.y - 30, `${n} ${KIND_NAME[cur.k]} back in your inventory`, 'info'); Sound.click();
+      } else { this.aSel = i; Sound.click(); }
+    }
+    this.armsSig = ''; this.invSig = ''; this.quickSig = '';
+  }
+  /** D with ammo or a weapon in hand: one ammo goes into its ammo slot (or the first empty one); a weapon into the first empty weapon slot. */
+  private armsPut(k: Kind) {
+    if (isShot(k)) {
+      let i = this.ammoSlots.findIndex(a => a?.k === k); if (i < 0) i = this.ammoSlots.indexOf(null);
+      if (i < 0) { this.bubble(this.x, this.y - 30, 'The ammo slots are full of other ammo', 'info'); Sound.denied(); return true; }
+      const a = this.ammoSlots[i] ?? (this.ammoSlots[i] = { k, pts: 0 }); a.pts += SURVIVAL.ammoPoints; this.bag[k]--;
+      this.bubble(this.x, this.y - 30, `1 ${ONE_NAME[k].toLowerCase()} in (${Math.ceil(a.pts / SURVIVAL.ammoPoints)})`, 'info'); Sound.click(); this.armsSig = '';
+      return true;
+    }
+    if (isWeapon(k)) {
+      const i = this.weapons.indexOf(null);
+      if (i < 0) { this.bubble(this.x, this.y - 30, 'The weapon slots are full', 'info'); Sound.denied(); return true; }
+      this.weapons[i] = k; this.bag[k]--; this.wSel = i; this.bubble(this.x, this.y - 30, `${ONE_NAME[k]} in a weapon slot`, 'info'); Sound.thump(); this.armsSig = '';
+      return true;
+    }
+    return false;
+  }
+  private armsSig = '';
+  private newGroup() { return SURVIVAL.groupMin + Math.floor(Math.random() * (SURVIVAL.groupMax - SURVIVAL.groupMin + 1)); }
+  /** The colour of the bolt on the crossbow: the ammo it will shoot. */
+  private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && k !== 'rocket' ? metalOf(k).color : undefined; }
+  /** Draws the weapon and ammo slots (only when they change). */
+  private renderArms() {
+    const sig = JSON.stringify([this.weapons, this.wSel, this.ammoSlots.map(a => a && [a.k, Math.ceil(a.pts / 5)]), this.aSel]);
+    if (sig === this.armsSig) return;
+    this.armsSig = sig;
+    const w = this.weapons.map((k, i) => `<button class="aslot w${i === this.wSel && k ? ' on' : ''}${k ? '' : ' empty'}" data-w="${i}" title="${k ? ONE_NAME[k] + (i === this.wSel ? ' (tap again to take it out)' : '') : 'Weapon slot'}">${k ? `<img src="${this.icon(k)}" alt="">` : '<i>⚔</i>'}</button>`).join('');
+    const am = this.ammoSlots.map((a, i) => {
+      if (!a) return `<button class="aslot empty" data-a="${i}" title="Ammo slot"><i>•</i></button>`;
+      const n = Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9), top = a.pts - (n - 1) * SURVIVAL.ammoPoints;
+      return `<button class="aslot${i === this.aSel ? ' on' : ''}" data-a="${i}" title="${ONE_NAME[a.k]}: ${n} (${Math.round(top)} usage points left in this one)"><img src="${this.icon(a.k)}" alt=""><b>${n}</b><span class="pts" style="width:${Math.max(0, Math.min(100, top / SURVIVAL.ammoPoints * 100))}%"></span></button>`;
+    }).join('');
+    this.pad.querySelector('#svArms')!.innerHTML = w + am;
   }
 
   /** M: start or stop digging at the mine or an ore patch, or use the ammo machine when next to it. */
@@ -1039,6 +1166,7 @@ export class Survival {
     const k = this.placing ? this.placeType as Kind : this.hand;
     if (!k) { this.bubble(this.x, this.y - 30, 'Pick something in your inventory or quickbar first', 'info'); Sound.denied(); return; }
     if (this.bag[k] < 1) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[k]} left`, 'info'); Sound.denied(); return; }
+    if (!this.placing && this.armsPut(k)) return;
     const t = this.ghost(); if (!t) { Sound.denied(); return; }
     const key = t.c + ',' + t.r, x = tileX(t.c), y = tileY(t.r), nm = ONE_NAME[k].toLowerCase();
     const ok = (what: string) => { this.bag[k]--; this.bubble(x, y - 18, `1 ${nm} → ${what}`, 'info'); Sound.thump(); this.bldSig = ''; };
@@ -1367,7 +1495,6 @@ export class Survival {
     const kinds: Kind[] = best.kind === 'rocket' ? ['rocket'] : AMMO_KINDS;
     let n = 0;
     for (const k of kinds) { while (this.bag[k] > 0 && this.feedTurret(best, k)) { this.bag[k]--; n++; } }
-    if (this.useAmmo && !this.bag[this.useAmmo]) this.useAmmo = null;
     this.bubble(this.x, this.y - 30, `Loaded ${n} ${best.kind === 'rocket' ? 'rocket' : 'ammo'}${best.kind === 'rocket' && n > 1 ? 's' : ''}`, 'info');
     Sound.thump();
   }
@@ -1687,23 +1814,21 @@ export class Survival {
     this.bag.stone -= cost; this.miners.push(Math.random() * ST.minerEvery * .5);
     this.say(this.miners.length > 1 ? `You hired miner ${this.miners.length}!` : 'You hired a miner!'); Sound.pop();
   }
-  /** S: switch between your loadout ammo and stone ammo. */
-  /** S: go through your loadout ammo and each kind of stone or metal ammo you have. */
+  /** S: the next ammo slot with ammo in it. */
   private switchAmmo() {
-    const have = (['ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket'] as (AmmoKind | 'rocket')[]).filter(k => k === 'rocket' ? this.bag.rgun > 0 && this.bag.rocket > 0 : this.bag[k] > 0);
-    if (!have.length && !this.useAmmo) { this.bubble(this.x, this.y - 30, 'No stone or metal ammo yet', 'info'); Sound.denied(); return; }
-    const i = this.useAmmo ? have.indexOf(this.useAmmo) : -1;
-    this.useAmmo = i + 1 < have.length ? have[i + 1] : null;
-    this.bubble(this.x, this.y - 30, `${this.ammoName()} ammo`, 'info');
-    Sound.click();
+    const has = [0, 1, 2].filter(i => this.ammoSlots[i]);
+    if (!has.length) { this.bubble(this.x, this.y - 30, 'No ammo in your ammo slots', 'info'); Sound.denied(); return; }
+    this.aSel = has[(has.indexOf(this.aSel) + 1) % has.length]; this.armsSig = '';
+    this.bubble(this.x, this.y - 30, ONE_NAME[this.ammoSlots[this.aSel]!.k], 'info'); Sound.click();
   }
-  private ammoName() { return this.useAmmo === 'rocket' ? 'Rocket' : this.useAmmo ? AMMO_NAME[this.useAmmo] : AMMO[this.load.ammo].name; }
+  private ammoName() { const w = this.weapon(), i = w ? this.ammoSlot(w) : -1, a = i >= 0 ? this.ammoSlots[i]! : null; return a ? `${a.k === 'rocket' ? 'Rockets' : AMMO_NAME[a.k]} (${Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9)})` : w === 'xbow' ? AMMO[this.load.ammo].name : 'none'; }
 
   /* ---------- rules ---------- */
   update(dt: number) {
     if (!this.running || this.paused || this.labOpen || this.recipeFor) return;
     this.t += dt;
     this.reload = Math.max(0, this.reload - dt);
+    this.holdFire(dt);
     this.noTargetT -= dt;
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
 
@@ -1834,6 +1959,15 @@ export class Survival {
 
     const entering = new Set<Gate>();
     const guyOut = !insideBase(this.x, this.y);
+    // no camp: bears gather by their spawners, and once there are enough of them they all come at once
+    if (NO_BASE) {
+      const gathering = this.bears.filter(b => b.state === 'walk' || b.state === 'wait');
+      if (gathering.length >= this.groupSize) {
+        for (const b of gathering) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
+        this.say(`${gathering.length} bears are coming for you!`, 3); Sound.alarm();
+        this.groupSize = this.newGroup();
+      }
+    }
     for (const b of this.bears) {
       if (b.state === 'dead') { b.dead += dt; continue; }
       b.hurt = Math.max(0, b.hurt - dt); b.swipe = Math.max(0, b.swipe - dt);
@@ -1841,6 +1975,9 @@ export class Survival {
       if ((b.state === 'walk' || b.state === 'wait') && guyOut && dist(b.x, b.y, this.x, this.y) < SURVIVAL.chaseRange) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
       if (b.state === 'walk') {
         if (this.navTo(b, b.tx, b.ty, SURVIVAL.bearSpeed, dt, 12)) b.state = 'wait';
+      } else if (b.state === 'wait' && NO_BASE) {
+        // gathering by its spawner: it looks your way until the group is big enough
+        b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 1.5);
       } else if (b.state === 'wait') {
         b.wait += dt;
         const G = gateAt(b.gate);
@@ -1999,8 +2136,9 @@ export class Survival {
     let tx = clamp(G.ox + Math.cos(a) * ring * (G.nx ? 1 : 1.4), 40, W - 40), ty = clamp(G.oy + Math.sin(a) * ring * (G.ny ? 1 : 1.4), 40, H - 40);
     // keep the spot clear of the fence
     for (let i = 0; i < 40 && nearFence(tx, ty, BEAR_R + 12); i++) { tx += G.nx * 10; ty += G.ny * 10; }
+    if (NO_BASE) { const ga = Math.random() * Math.PI * 2, gr = SPAWNER_R + 40 + Math.random() * 70; tx = clamp(sp.x + Math.cos(ga) * gr, 40, W - 40); ty = clamp(sp.y + Math.sin(ga) * gr, 40, H - 40); }
     const x = sp.x + (Math.random() - .5) * 20, y = sp.y + (Math.random() - .5) * 20;
-    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
+    this.bears.push({ tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE && wave ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -2233,6 +2371,14 @@ export class Survival {
       g.fillStyle = '#8d8a84'; g.beginPath(); g.moveTo(-6, -3); g.lineTo(-1, -7); g.lineTo(6, -4); g.lineTo(7, 3); g.lineTo(1, 7); g.lineTo(-6, 4); g.closePath(); g.fill();
       g.fillStyle = '#b5b1a8'; g.beginPath(); g.arc(-1, -2, 2.5, 0, 7); g.fill();
       g.restore();
+    }
+    // the rapid crossbow: a flickering yellow line to what it's shooting
+    if (this.firingAt) {
+      const tg = this.firingAt, j = () => (Math.random() - .5) * 10;
+      g.strokeStyle = 'rgba(255,225,74,.9)'; g.lineWidth = 1.6;
+      g.beginPath(); g.moveTo(this.x + Math.cos(this.face) * 24, this.y + Math.sin(this.face) * 24); g.lineTo(tg.x + j(), tg.y + j()); g.stroke();
+      g.strokeStyle = 'rgba(255,255,200,.5)'; g.lineWidth = .8;
+      g.beginPath(); g.moveTo(this.x + Math.cos(this.face) * 24, this.y + Math.sin(this.face) * 24); g.lineTo(tg.x + j(), tg.y + j()); g.stroke();
     }
     // rockets: a smoke trail, then the rocket
     for (const rk of this.rockets) {
@@ -2481,7 +2627,7 @@ export class Survival {
     g.restore();
     if (b.state === 'dead') return;
     // waiting at the gate: a ring that fills over 30 seconds, and the seconds left
-    if (b.state === 'wait') {
+    if (b.state === 'wait' && !NO_BASE) {
       const k = b.wait / (this.gateWait + (this.brickGate ? 10 : 0));
       g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 4; g.beginPath(); g.arc(b.x, b.y, BEAR_R + 7, 0, 7); g.stroke();
       g.strokeStyle = k > .8 ? '#ff6a5a' : '#ffcf8c'; g.lineWidth = 3;
@@ -2502,7 +2648,7 @@ export class Survival {
     g.save(); g.translate(this.x, this.y);
     g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
     if (this.hurtFlash > 0) { g.fillStyle = `rgba(255,60,50,${this.hurtFlash})`; g.beginPath(); g.arc(0, 0, GUY_R + 10, 0, 7); g.fill(); }
-    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 ? 0 : 1, this.useAmmo === 'ammo' ? STONE : this.useAmmo === 'rocket' ? '#d64545' : this.useAmmo ? metalOf(this.useAmmo).color : undefined, this.useAmmo === 'rocket');
+    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 && this.weapon() !== 'rxbow' ? 0 : 1, this.weapon() === 'rxbow' ? '#ffe14a' : this.weapon() === 'rgun' ? '#d64545' : this.ammoTint(), this.weapon() === 'rgun', !this.weapon());
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
@@ -2533,7 +2679,7 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
-    g.fillText(NO_BASE ? `${inside} bear${inside === 1 ? '' : 's'} after you · ${sps} spawner${sps === 1 ? '' : 's'}` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    g.fillText(NO_BASE ? `${inside} after you · ${waiting}/${this.groupSize} gathering` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;
@@ -2547,8 +2693,8 @@ export class Survival {
       g.textAlign = 'left'; g.fillStyle = '#d9d4ca';
       const res = [`Stone ${this.bag.stone}`, this.bag.ironPlate ? `Iron plates ${this.bag.ironPlate}` : '', this.bag.copperPlate ? `Copper plates ${this.bag.copperPlate}` : '', this.bag.rocket ? `Rockets ${this.bag.rocket}` : ''].filter(Boolean).join('  ');
       g.fillText(res, x, y + h + 38);
-      g.fillStyle = this.useAmmo ? '#fff' : '#fff5ea';
-      g.fillText(`Ammo: ${this.ammoName()}${this.useAmmo ? ` (${this.bag[this.useAmmo]} left)` : ''}`, x, y + h + 56);
+      g.fillStyle = '#fff5ea';
+      const wp = this.weapon(); g.fillText(`${wp ? ONE_NAME[wp] : 'No weapon'} · ammo: ${this.ammoName()}`, x, y + h + 56);
     }
 
     // bubbles: red for health lost, small white numbers on bears
@@ -2592,7 +2738,7 @@ export class Survival {
     }
 
     // reload shown on the buttons
-    const r = Math.min(1, this.reload / ((this.useAmmo === 'rocket' ? SURVIVAL.rgunReload : AMMO[this.load.ammo].reload) * ST.reloadMul));
+    const r = Math.min(1, this.reload / ((this.weapon() === 'rgun' ? SURVIVAL.rgunReload : AMMO[this.load.ammo].reload) * ST.reloadMul));
     this.pad.style.setProperty('--reload', String(r));
     this.pad.classList.toggle('loading', this.reload > 0);
     const nearMine = this.mineOn && !!near(this.mines, this.x, this.y), nearMachine = this.mineOn && !!near(this.machines, this.x, this.y);
@@ -2600,7 +2746,8 @@ export class Survival {
     mb.hidden = !nearMine && !nearMachine;
     const label = nearMine ? (this.mining ? 'Stop' : 'Mine') : 'Machine';
     if (mb.firstElementChild!.textContent !== label) mb.firstElementChild!.textContent = label;
-    ab.hidden = !AMMO_KINDS.some(k => this.bag[k]) && !(this.bag.rgun && this.bag.rocket) && !this.useAmmo;
+    ab.hidden = true; // the weapon and ammo slots do this now
+    this.renderArms();
     const hb = this.pad.querySelector<HTMLElement>('#svHire')!;
     hb.hidden = !nearMine || this.miners.length >= SURVIVAL.maxMiners * this.mines.length;
     const hl = `H: ${this.minerCost()} stone`;
@@ -2632,7 +2779,7 @@ export class Survival {
 }
 
 /** The little guy, centred on the origin, facing angle a. */
-function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number, boltColor = AMMO[L.ammo].color, tube = false) {
+function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: number, pull: number, boltColor = AMMO[L.ammo].color, tube = false, bare = false) {
   g.rotate(a);
   // feet
   g.fillStyle = '#3a2c20'; g.beginPath(); g.arc(3 + bob, -6, 3.5, 0, 7); g.arc(3 - bob, 6, 3.5, 0, 7); g.fill();
@@ -2640,7 +2787,7 @@ function paintGuy(g: CanvasRenderingContext2D, L: Loadout, a: number, bob: numbe
   g.fillStyle = L.color; g.beginPath(); g.ellipse(0, 0, GUY_R * .8, GUY_R, 0, 0, 7); g.fill();
   g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 1.5; g.stroke();
   g.fillStyle = '#f0c8a0'; g.beginPath(); g.arc(12, -5, 3, 0, 7); g.arc(12, 5, 3, 0, 7); g.fill();
-  if (tube) {
+  if (bare) { /* nothing in hand */ } else if (tube) {
     // the rocket gun: a green tube on the shoulder, with a rocket tip showing when loaded
     g.fillStyle = '#4a5a4a'; g.fillRect(-6, -4.5, 30, 9); g.fillStyle = '#3a463a'; g.fillRect(4, 4, 4, 6);
     g.fillStyle = '#2a2a2a'; g.fillRect(22, -5.5, 4, 11); g.fillRect(-8, -5.5, 3, 11);
@@ -2874,6 +3021,15 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     return;
   }
   if (k === 'rocket') { paintRocket(g, x, y, 0, .8); return; }
+  if (k === 'xbow' || k === 'rxbow') {
+    // a crossbow lying flat: stock, bow and string (the rapid one has a yellow magazine on top)
+    g.save(); g.translate(x, y); g.rotate(-Math.PI / 4);
+    g.strokeStyle = '#5a3d22'; g.lineWidth = 2.6; g.beginPath(); g.moveTo(-8, 0); g.lineTo(8, 0); g.stroke();
+    g.strokeStyle = '#3a2a1a'; g.lineWidth = 2; g.beginPath(); g.moveTo(5, -7); g.quadraticCurveTo(9, 0, 5, 7); g.stroke();
+    g.strokeStyle = '#e8e0d0'; g.lineWidth = .8; g.beginPath(); g.moveTo(5, -7); g.lineTo(0, 0); g.lineTo(5, 7); g.stroke();
+    if (k === 'rxbow') { g.fillStyle = '#ffe14a'; g.fillRect(-5, -4.5, 6, 3); g.fillStyle = '#c9a020'; g.fillRect(-5, -2, 6, 1.2); }
+    g.restore(); return;
+  }
   if (k === 'rgun') {
     g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(x - 7, y - 1, 16, 6);
     g.fillStyle = '#4a5a4a'; g.fillRect(x - 8, y - 3, 16, 6); g.fillStyle = '#2a2a2a'; g.fillRect(x + 6, y - 4, 3, 8); g.fillRect(x - 9, y - 4, 2, 8);
