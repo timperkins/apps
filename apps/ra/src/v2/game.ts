@@ -2,7 +2,8 @@
 import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import type { Action, GameLike } from '../types';
+import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
+import { START_CREDITS, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
 import {
@@ -37,11 +38,14 @@ const BNAME: Record<BuildingKind, string> = {
   tower: 'Gun tower',
   silo: 'Ore silo',
   helipad: 'Helipad',
+  lab: 'Tech lab',
 };
 // The faction you play.
 const ME = 0;
 // Deploying: the Foundry vehicle turns to line up, then the yard rises.
 const RISE_S = 1.8;
+// How far (world units) a new building may stand from the rest of your base.
+const BUILD_GAP = 30;
 const PACK_S = 1.2;
 
 interface Unit {
@@ -178,6 +182,11 @@ export class IsoGame implements GameLike {
     this.sparks = [];
     this.lastTap = null;
     this.mapVersion++;
+    this.credits = START_CREDITS;
+    this.jobs = new Map();
+    this.known = new Set();
+    this.fresh = new Set();
+    this.ghost = null;
     this.forestF = new WorldField(w, h, 50, this.seed + 500, 2, 10);
     this.ov = null;
 
@@ -352,6 +361,229 @@ export class IsoGame implements GameLike {
     return u;
   }
 
+  // ---------- Building: credits, the build menu and placing ----------
+
+  credits = START_CREDITS;
+  // what each tab of the menu is working on (one thing at a time)
+  private jobs = new Map<Tab, { tech: Tech; spent: number; paused: boolean; ready: boolean }>();
+  private known = new Set<string>(); // items that have been on the menu
+  private fresh = new Set<string>(); // ...and those not looked at yet
+  private ghost: { tech: Tech; x: number; y: number; pad: Rect; why: string } | null = null;
+  private icons = new Map<string, string>();
+  onNotice: (msg: string) => void = () => {};
+  private noted = new Map<string, number>();
+
+  // A message for the player, at most every few seconds for the same one.
+  private notice(msg: string): void {
+    const t = this.noted.get(msg) ?? -1e9;
+    if (this.time - t < 4) return;
+    this.noted.set(msg, this.time);
+    this.onNotice(msg);
+  }
+
+  // Kinds of building you have standing.
+  private have(): Set<BuildingKind> {
+    const s = new Set<BuildingKind>();
+    for (const b of this.buildings) if (b.own && b.rise >= 1 && !b.packing) s.add(b.kind);
+    return s;
+  }
+
+  private available(have = this.have()): Tech[] {
+    return TECH.filter((t) => t.needs.every((k) => have.has(k)));
+  }
+
+  private icon(t: Tech): string {
+    let url = this.icons.get(t.id);
+    if (!url) {
+      const spr = this.buildingArt(t.building!, ME).spr.img;
+      const W = 64;
+      const H = 48;
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const c = cv.getContext('2d')!;
+      const k = Math.min(W / spr.width, H / spr.height) * 1.15;
+      c.imageSmoothingQuality = 'high';
+      c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
+      url = cv.toDataURL();
+      this.icons.set(t.id, url);
+    }
+    return url;
+  }
+
+  buildMenu(): BuildMenu | null {
+    const have = this.have();
+    const avail = this.available(have);
+    if (!avail.length && !this.jobs.size) return null;
+    const items: BuildItem[] = [];
+    const list = [...avail];
+    for (const j of this.jobs.values()) if (!list.includes(j.tech)) list.push(j.tech);
+    for (const t of list) {
+      const j = this.jobs.get(t.tab);
+      const mine = j && j.tech === t;
+      let blocked: string | undefined;
+      if (t.building && !have.has('yard')) blocked = 'Needs a Foundry';
+      else if (j && !mine) blocked = `Busy: ${j.tech.name}`;
+      else if (!mine && this.credits <= 0) blocked = 'No credits';
+      items.push({
+        id: t.id,
+        name: t.name,
+        tab: t.tab,
+        cost: t.cost,
+        icon: this.icon(t),
+        blurb: t.blurb,
+        state: !mine ? 'idle' : j.ready ? 'ready' : j.paused ? 'paused' : 'building',
+        progress: mine ? j.spent / t.cost : 0,
+        count: mine ? 1 : 0,
+        isNew: this.fresh.has(t.id),
+        blocked,
+      });
+    }
+    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id));
+    return { credits: Math.floor(this.credits), tabs, items };
+  }
+
+  seen(id: string): void {
+    this.fresh.delete(id);
+  }
+
+  buildTap(id: string): void {
+    const t = TECH.find((x) => x.id === id);
+    if (!t) return;
+    this.fresh.delete(id);
+    const j = this.jobs.get(t.tab);
+    if (j && j.tech === t) {
+      if (j.ready) this.startPlace(t);
+      else j.paused = !j.paused;
+      return;
+    }
+    if (j) {
+      this.notice(`Busy building ${j.tech.name}`);
+      return;
+    }
+    if (!this.available().includes(t)) return;
+    if (t.building && !this.have().has('yard')) return;
+    this.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+  }
+
+  buildCancel(id: string): void {
+    const t = TECH.find((x) => x.id === id);
+    if (!t) return;
+    const j = this.jobs.get(t.tab);
+    if (!j || j.tech !== t) return;
+    this.credits += j.spent;
+    this.jobs.delete(t.tab);
+    if (this.ghost?.tech === t) this.ghost = null;
+  }
+
+  private updateBuild(dt: number): void {
+    const have = this.have();
+    // newly opened options
+    let opened = false;
+    for (const t of this.available(have))
+      if (!this.known.has(t.id)) {
+        this.known.add(t.id);
+        this.fresh.add(t.id);
+        opened = true;
+      }
+    if (opened) this.notice('New construction options');
+    for (const j of this.jobs.values()) {
+      if (j.ready || j.paused) continue;
+      if (j.tech.building && !have.has('yard')) continue;
+      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt;
+      const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
+      this.credits -= pay;
+      j.spent += pay;
+      if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) this.notice('Not enough credits');
+      if (j.spent >= j.tech.cost - 1e-6) {
+        j.spent = j.tech.cost;
+        j.ready = true;
+        this.notice(`${j.tech.name} ready: tap it to place`);
+      }
+    }
+  }
+
+  // ---------- Placing a finished building ----------
+
+  placing(): boolean {
+    return this.ghost !== null;
+  }
+
+  private startPlace(t: Tech): void {
+    this.ghost = { tech: t, x: 0, y: 0, pad: { x: 0, y: 0, w: 0, h: 0 }, why: '' };
+    // until main.ts moves it: next to your Foundry
+    const yard = this.buildings.find((b) => b.own && b.kind === 'yard');
+    if (yard) {
+      const [sx, sy] = toScreen(yard.x, yard.y + yard.art.ry + 40);
+      this.placeAt(sx, sy);
+    }
+    for (const u of this.units) u.sel = false;
+    for (const b of this.buildings) b.sel = false;
+    this.emit();
+  }
+
+  placeAt(x: number, y: number): void {
+    const gh = this.ghost;
+    if (!gh) return;
+    const art = this.buildingArt(gh.tech.building!, ME);
+    let [wx, wy] = this.fold(...toWorld(x, y, 0));
+    wx = Math.round(wx / 4) * 4;
+    wy = Math.round(wy / 4) * 4;
+    gh.x = wx;
+    gh.y = wy;
+    gh.pad = { x: wx - art.rx - 3, y: wy - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+    gh.why = this.placeWhy(gh.pad);
+  }
+
+  // Why a building can't go on pad r ('' if it can): it needs clear, level
+  // ground next to the rest of your base.
+  private placeWhy(r: Rect): string {
+    if (!this.siteOk(r)) return 'Blocked: needs open, level ground';
+    const [gsx, gsy] = toScreen(r.x + r.w / 2, r.y + r.h / 2);
+    for (const b of this.buildings) {
+      if (!b.own) continue;
+      const [bsx, bsy] = toScreen(b.x, b.y);
+      const [nx, ny] = nearestCopy(gsx, gsy, bsx, bsy, this.w, this.h);
+      const [bx, by] = toWorld(nx, ny, 0);
+      const gx = Math.abs(bx - (r.x + r.w / 2)) - (r.w + b.pad.w) / 2;
+      const gy = Math.abs(by - (r.y + r.h / 2)) - (r.h + b.pad.h) / 2;
+      if (Math.max(gx, gy) <= BUILD_GAP) return '';
+    }
+    return 'Too far from your base';
+  }
+
+  private placeNow(): void {
+    const gh = this.ghost;
+    if (!gh || gh.why) return;
+    const t = gh.tech;
+    const art = this.buildingArt(t.building!, ME);
+    const b: Building = { kind: t.building!, f: ME, x: gh.x, y: gh.y, art, phase: 0, gun: 0, gunGoal: 0, pad: gh.pad, own: true, sel: false, rise: 0 };
+    this.buildings.push(b);
+    this.clearSite(gh.pad, null);
+    this.setPad(gh.pad, true);
+    this.puff(b, 12);
+    this.jobs.delete(t.tab);
+    this.ghost = null;
+    this.emit();
+  }
+
+  // Everyone standing on rect r (but `keep`) drives off it.
+  private clearSite(r: Rect, keep: Unit | null): void {
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    for (const o of this.units) {
+      if (o === keep || o.kind === 'heli' || o.kind === 'boat') continue;
+      if (!inside(o.x, o.y, r, 6) && !(o.moving && inside(o.tx, o.ty, r, 6))) continue;
+      let dx = o.x - cx;
+      let dy = o.y - cy;
+      if (Math.hypot(dx, dy) < 1) dx = 1;
+      const k = Math.max(Math.abs(dx) / (r.w / 2), Math.abs(dy) / (r.h / 2));
+      o.tx = cx + dx / k + Math.sign(dx) * 10;
+      o.ty = cy + dy / k + Math.sign(dy) * 10;
+      o.moving = true;
+    }
+  }
+
   // ---------- Foundry: deploy and pack up ----------
 
   // The pad a Foundry standing at (x, y) would deploy onto.
@@ -372,6 +604,13 @@ export class IsoGame implements GameLike {
   }
 
   actions(): Action[] {
+    if (this.ghost) {
+      const why = this.ghost.why;
+      return [
+        { id: 'place', label: 'Place', icon: 'ok', disabled: !!why, title: why || `Put the ${this.ghost.tech.name} here` },
+        { id: 'unplace', label: 'Cancel', icon: 'x', title: 'Keep it for later' },
+      ];
+    }
     const b = this.selB();
     if (b) {
       if (b.own && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
@@ -384,7 +623,9 @@ export class IsoGame implements GameLike {
   }
 
   act(id: string): void {
-    if (id === 'deploy') {
+    if (id === 'place') this.placeNow();
+    else if (id === 'unplace') this.ghost = null;
+    else if (id === 'deploy') {
       for (const u of this.selected()) if (!u.deploy && this.deployable(u)) this.startDeploy(u);
     } else if (id === 'pack') {
       const b = this.selB();
@@ -398,20 +639,7 @@ export class IsoGame implements GameLike {
     u.tx = u.x;
     u.ty = u.y;
     // clear the way: everyone else standing on the site drives off it
-    const r = this.siteOf(u.x, u.y);
-    const cx = r.x + r.w / 2;
-    const cy = r.y + r.h / 2;
-    for (const o of this.units) {
-      if (o === u || o.kind === 'heli' || o.kind === 'boat') continue;
-      if (!inside(o.x, o.y, r, 6) && !(o.moving && inside(o.tx, o.ty, r, 6))) continue;
-      let dx = o.x - cx;
-      let dy = o.y - cy;
-      if (Math.hypot(dx, dy) < 1) dx = 1;
-      const k = Math.max(Math.abs(dx) / (r.w / 2), Math.abs(dy) / (r.h / 2));
-      o.tx = cx + dx / k + Math.sign(dx) * 10;
-      o.ty = cy + dy / k + Math.sign(dy) * 10;
-      o.moving = true;
-    }
+    this.clearSite(this.siteOf(u.x, u.y), u);
   }
 
   // The Foundry vehicle has lined up: it unfolds into the yard.
@@ -690,6 +918,7 @@ export class IsoGame implements GameLike {
 
   update(dt: number): void {
     this.time += dt;
+    this.updateBuild(dt);
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
@@ -788,7 +1017,7 @@ export class IsoGame implements GameLike {
         continue;
       }
       if (b.rise < 1) {
-        b.rise = Math.min(1, b.rise + dt / RISE_S);
+        b.rise = Math.min(1, b.rise + dt / (b.kind === 'yard' ? RISE_S : 1 + (b.art.rx + b.art.ry) / 30));
         if (Math.random() < dt * 14) this.puff(b, 1);
         if (b.rise === 1) this.mapVersion++;
         continue;
@@ -993,6 +1222,17 @@ export class IsoGame implements GameLike {
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
+
+    // the building being placed: a see-through ghost over its footprint
+    const gh = this.ghost;
+    if (gh && seen(gh.x, gh.y, 10)) {
+      const col = gh.why ? '#ff6a5a' : '#9dff9d';
+      this.drawFoot(gh.pad, col, 1, true, false);
+      c.globalAlpha = 0.65;
+      this.blit(this.buildingArt(gh.tech.building!, ME).spr, gh.x, gh.y, 0);
+      c.globalAlpha = 1;
+      this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
+    }
   }
 
   // A footprint outline on the ground, dashed round its edge.
@@ -1195,6 +1435,12 @@ export class IsoGame implements GameLike {
           c.fillStyle = '#ff7a5c';
           c.fillRect(x, y, 1, 1);
         }
+        break;
+      }
+      case 'lab': {
+        const [x, y] = fx(0);
+        c.fillStyle = `rgba(160,240,255,${0.25 + 0.2 * Math.sin(b.phase * 3)})`;
+        c.fillRect(x - 3, y - 5, 7, 9);
         break;
       }
       case 'hq': {

@@ -4,6 +4,7 @@ import { Globe, View } from './planet';
 import { CH } from './tiles';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
+import { initBuild } from './build-ui';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#c')!;
 const ctx = canvas.getContext('2d', { alpha: false })!;
@@ -103,14 +104,25 @@ const ICONS: Record<string, string> = {
   // arrows pushing out from a box
   deploy: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="1" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="9" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="1" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="9" y="4" width="1" height="3"/>',
   // arrows folding in
+  ok: '<rect x="1" y="5" width="2" height="2"/><rect x="3" y="7" width="2" height="2"/><rect x="5" y="5" width="2" height="2"/><rect x="7" y="3" width="2" height="2"/><rect x="9" y="1" width="1" height="2"/>',
+  x: '<rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/>',
   pack: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="2" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="8" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="2" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="8" y="4" width="1" height="3"/>',
 };
 let actsKey = '';
+let hasActs = false;
+// The bar above the toolbar: commands, and More / Clear while something is selected.
+function updateSelBar(): void {
+  selBar.hidden = lastNames.length === 0 && !hasActs;
+  moreBtn.hidden = lastNames.length === 0;
+  clearBtn.hidden = lastNames.length === 0;
+}
 function refreshActions(): void {
   const acts = (!planet && game?.actions?.()) || [];
   const key = JSON.stringify(acts);
   if (key === actsKey) return;
   actsKey = key;
+  hasActs = acts.length > 0;
+  updateSelBar();
   actsEl.replaceChildren(
     ...acts.map((a) => {
       const b = document.createElement('button');
@@ -135,8 +147,12 @@ function selectView(add: boolean): void {
 
 function showSelection(names: string[]): void {
   lastNames = names;
-  selBar.hidden = names.length === 0;
+  updateSelBar();
   if (!names.length) setAdditive(false);
+  if (!names.length && placingNow()) {
+    selEl.textContent = matchMedia('(pointer: fine)').matches ? 'Click to place · Esc: cancel' : 'Tap or drag to move it';
+    return;
+  }
   if (!names.length) {
     selEl.textContent = planet ? 'Drag: spin · Tap: fly down' : mode === 'pan' ? 'Drag: pan · Tap: move' : 'Drag: select · Tap: move';
     return;
@@ -245,6 +261,7 @@ function start(v: string): void {
     setTimeout(() => {
       game = VERSIONS[v](seed);
       game.onSelect = showSelection;
+      build.reset();
       built = { w: 0, h: 0 };
       fit(true);
       draw(performance.now(), true); // paint the first view while the note is up
@@ -272,6 +289,7 @@ window.addEventListener('resize', () => {
 });
 
 regen.addEventListener('click', () => {
+  build.reset();
   seed = Math.floor(Math.random() * 100000);
   game.seed = seed;
   setMenu(false);
@@ -381,6 +399,34 @@ mini.addEventListener('pointercancel', (e) => {
 });
 mini.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
 
+// ---------- Build menu and placing buildings ----------
+
+const build = initBuild(() => game);
+const placingNow = () => !planet && !!game?.placing?.();
+// The ghost of the building being placed, in map pixels (on the copy of the
+// map in view). Mice move it by hovering and put it down with a click; on a
+// touch screen a tap moves it, a drag that starts on it carries it, and the
+// Place button puts it down.
+let ghostP: { x: number; y: number } | null = null;
+function moveGhost(x: number, y: number): void {
+  ghostP = { x, y };
+  game.placeAt?.(x, y);
+}
+let wasPlacing = false;
+function syncGhost(): void {
+  const on = placingNow();
+  if (on !== wasPlacing) {
+    wasPlacing = on;
+    showSelection(lastNames);
+  }
+  if (!on) {
+    ghostP = null;
+    return;
+  }
+  if (!ghostP) moveGhost(cen.x, cen.y + 20);
+}
+let ghostDrag: { dx: number; dy: number } | null = null;
+
 // ---------- Pointer input ----------
 // Select mode: tap selects a unit or sends the selection, drag draws a box.
 // Pan mode: drag moves the camera, tap still selects or sends units.
@@ -489,6 +535,18 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (multi || down) return;
   const p = toMap(e.clientX, e.clientY);
+  if (placingNow()) {
+    if (e.button === 2) {
+      game.act?.('unplace');
+      return;
+    }
+    // a drag that starts on the ghost carries it; anywhere else it pans
+    ghostDrag = null;
+    if (ghostP && e.pointerType !== 'mouse' && Math.hypot(p.x - ghostP.x, p.y - (ghostP.y - 12)) < 34) ghostDrag = { dx: ghostP.x - p.x, dy: ghostP.y - p.y };
+    down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: !ghostDrag };
+    dragging = false;
+    return;
+  }
   if (e.button === 2) {
     if (planet) spaceTap(e, true);
     else {
@@ -502,8 +560,19 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (multi) return;
+  if (placingNow() && e.pointerType === 'mouse' && (!down || !dragging)) {
+    const p = toMap(e.clientX, e.clientY);
+    moveGhost(p.x, p.y);
+  }
   if (!down || e.pointerId !== down.id) return;
   if (!dragging && Math.hypot(e.clientX - down.cx, e.clientY - down.cy) > 8) dragging = true;
+  if (dragging && ghostDrag && placingNow()) {
+    const p = toMap(e.clientX, e.clientY);
+    moveGhost(p.x + ghostDrag.dx, p.y + ghostDrag.dy);
+    down.lx = e.clientX;
+    down.ly = e.clientY;
+    return;
+  }
   if (dragging) {
     if (planet) spin(e.clientX - down.lx, e.clientY - down.ly);
     else if (down.pan) {
@@ -543,7 +612,12 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   if (!down || e.pointerId !== down.id) return;
   const p = toMap(e.clientX, e.clientY);
   const add = additive || e.shiftKey || e.ctrlKey || e.metaKey;
-  if (!cancel) {
+  if (!cancel && placingNow()) {
+    if (!dragging) {
+      moveGhost(p.x, p.y);
+      if (e.pointerType === 'mouse') game.act?.('place');
+    }
+  } else if (!cancel) {
     if (planet) {
       if (!dragging) spaceTap(e);
     } else if (!dragging) {
@@ -553,6 +627,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   box = null;
   down = null;
   dragging = false;
+  ghostDrag = null;
 };
 canvas.addEventListener('pointerup', (e) => finish(e, false));
 canvas.addEventListener('pointercancel', (e) => finish(e, true));
@@ -578,8 +653,10 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.key.toLowerCase());
   if (e.key === 'Escape') {
     if (!menu.hidden) setMenu(false);
+    else if (placingNow()) game.act?.('unplace');
     else game.deselect();
   }
+  if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
   if (e.key === 's' && !e.ctrlKey && !e.metaKey) setMode('select');
   if (e.key === 'p') setMode('pan');
   if (e.key === 'd') game.act?.('deploy');
@@ -696,6 +773,8 @@ function draw(now: number, first: boolean): void {
     lastSnap = -Infinity;
   }
   refreshActions();
+  syncGhost();
+  build.update(now);
   if (first) lastSnap = -Infinity;
   snapshot(now);
   ctx.setTransform(1, 0, 0, 1, 0, 0);

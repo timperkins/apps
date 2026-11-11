@@ -297,3 +297,319 @@ body {
   background: #9dff9d;
   border-color: #d8ffd8;
 }
+
+/* ---------- Credits, build menu and messages ---------- */
+
+#credits {
+  padding: 2px 6px;
+  color: #10170d;
+  background: #e0b83c;
+  border: 1px solid #f7e2a0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#credits[hidden],
+#buildBtn[hidden],
+#toolbar .sep[hidden],
+#selBar button[hidden] {
+  display: none;
+}
+
+#buildBtn.alert:not([aria-pressed='true']) {
+  position: relative;
+}
+
+#buildBtn.alert:not([aria-pressed='true'])::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: #e0b83c;
+  box-shadow: 0 0 0 1px #10170d;
+  animation: blink 0.8s steps(2) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+#build {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 16px));
+  max-height: min(46vh, 380px);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  color: var(--ink);
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+#build[hidden],
+body.sheet-open #selBar {
+  display: none;
+}
+
+#build .head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 4px 10px;
+  font-size: 12px;
+}
+
+#build .title {
+  flex: 1;
+}
+
+#build .credits {
+  padding: 2px 6px;
+  color: #10170d;
+  background: #e0b83c;
+  border: 1px solid #f7e2a0;
+}
+
+#build .close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+}
+
+#build .close svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+#build .tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 6px 6px;
+  overflow-x: auto;
+}
+
+#build .tabs button {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#build .tabs button[aria-pressed='true'] {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #d8ffd8 #3c7a3c #3c7a3c #d8ffd8;
+}
+
+#build .tabs button.alert::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  background: #e0b83c;
+}
+
+#build .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  padding: 0 6px 6px;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+
+#build .item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 2px 3px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-bottom-color: rgba(0, 0, 0, 0.6);
+  border-right-color: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+#build .item:active {
+  transform: translateY(1px);
+}
+
+#build .item img {
+  width: 64px;
+  height: 48px;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+#build .item .name {
+  font-size: 9px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+#build .item .cost {
+  font-size: 9px;
+  color: #f0d27a;
+}
+
+#build .item .wipe {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#build .item .state {
+  position: absolute;
+  top: 18px;
+  left: 0;
+  right: 0;
+  font-size: 10px;
+  font-weight: normal;
+  text-align: center;
+  text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
+  pointer-events: none;
+}
+
+#build .item .new {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: none;
+  padding: 1px 3px;
+  font-size: 8px;
+  font-style: normal;
+  color: #10170d;
+  background: #9dff9d;
+}
+
+#build .item.fresh .new {
+  display: block;
+}
+
+#build .item .count {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 10px;
+  text-shadow: 1px 1px 0 #000;
+}
+
+#build .item[data-state='ready'] {
+  border-color: #f7e2a0;
+  box-shadow: inset 0 0 0 1px #e0b83c;
+}
+
+#build .item[data-state='ready'] .state {
+  color: #ffe08a;
+  animation: blink 0.8s steps(2) infinite;
+}
+
+#build .item[data-state='paused'] .state {
+  color: #ffb0a0;
+}
+
+#build .item.blocked {
+  opacity: 0.5;
+}
+
+#build .hint {
+  padding: 0 8px 6px;
+  font-size: 8px;
+  opacity: 0.65;
+}
+
+/* On a wide screen the menu is a sidebar down the right, under the minimap. */
+@media (min-width: 900px) {
+  #build {
+    left: auto;
+    right: calc(8px + env(safe-area-inset-right));
+    top: calc(142px + env(safe-area-inset-top));
+    bottom: auto;
+    transform: none;
+    width: 216px;
+    max-height: calc(100vh - 170px);
+  }
+  #build .tabs {
+    flex-wrap: wrap;
+  }
+  #build .tabs button {
+    flex: 1 1 40%;
+  }
+}
+
+#toast {
+  position: fixed;
+  z-index: 3;
+  left: 50%;
+  top: calc(52px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: 12px;
+  color: #10170d;
+  background: #e0b83c;
+  border: 2px solid #f7e2a0;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  text-align: center;
+}
+
+#toast[hidden] {
+  display: none;
+}
+
+#toast.show {
+  animation: toast 2.6s ease forwards;
+}
+
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  8%,
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
