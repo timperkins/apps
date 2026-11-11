@@ -99,7 +99,8 @@ body {
 }
 
 #version,
-#regen {
+#regen,
+#unitsLink {
   font: inherit;
   font-size: 12px;
   color: var(--ink);
@@ -123,6 +124,10 @@ body {
 
 #version option {
   color: #111;
+}
+
+#unitsLink {
+  text-decoration: none;
 }
 
 #regen:active {
@@ -668,7 +673,14 @@ body.sheet-open #selBar {
   font-size: 16px;
 }
 
-#picker .head button {
+@media (max-width: 400px) {
+  #picker .title {
+    font-size: 13px;
+  }
+}
+
+#picker .head button,
+#picker .head a {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -681,6 +693,10 @@ body.sheet-open #selBar {
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
   cursor: pointer;
+}
+
+#picker .head a {
+  text-decoration: none;
 }
 
 #picker .head button[hidden] {
@@ -788,3 +804,4 @@ body.sheet-open #selBar {
 #c.panning.hovering {
   cursor: none;
 }
+
