@@ -41,8 +41,8 @@ body {
   left: calc(8px + env(safe-area-inset-left));
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 3px 10px 3px 3px;
+  gap: 6px;
+  padding: 3px;
   font-size: 12px;
   max-width: calc(100vw - 160px);
   pointer-events: none;
@@ -72,12 +72,6 @@ body {
   width: 18px;
   height: 18px;
   fill: currentColor;
-}
-
-#sel {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 #menu {
@@ -158,9 +152,6 @@ body {
   }
   #hud {
     max-width: calc(100vw - 130px);
-  }
-  #sel {
-    font-size: 11px;
   }
 }
 
@@ -301,6 +292,7 @@ body {
 /* ---------- Credits, build menu and messages ---------- */
 
 #credits {
+  margin-right: 3px;
   padding: 2px 6px;
   color: #10170d;
   background: #e0b83c;
@@ -635,4 +627,164 @@ body.sheet-open #selBar {
   100% {
     opacity: 0;
   }
+}
+
+/* ---------- Map picker ---------- */
+
+#picker {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(8, 12, 7, 0.82);
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  color: var(--ink);
+  overflow-y: auto;
+}
+
+#picker[hidden] {
+  display: none;
+}
+
+#picker .box {
+  margin: auto;
+  width: min(760px, 100%);
+  padding: 12px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+#picker .head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#picker .title {
+  flex: 1;
+  font-size: 16px;
+}
+
+#picker .head button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+#picker .head button[hidden] {
+  display: none;
+}
+
+#picker .head svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+#picker .maps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 520px) {
+  #picker .maps {
+    grid-template-columns: 1fr;
+  }
+}
+
+#picker .map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#picker .map:hover,
+#picker .map:focus-visible {
+  border-color: #9dff9d;
+  outline: none;
+}
+
+#picker .map:active {
+  transform: translateY(1px);
+}
+
+#picker .map canvas {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border: 1px solid #10170d;
+}
+
+#picker .map .name {
+  font-size: 13px;
+}
+
+#picker .map .first {
+  margin-left: 6px;
+  padding: 1px 4px;
+  font-size: 9px;
+  color: #10170d;
+  background: #9dff9d;
+  vertical-align: middle;
+}
+
+#picker .map .blurb {
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+
+#picker .hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+#picker .hint i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #10170d;
+}
+
+#picker .hint i.you {
+  background: #8fb2dc;
+}
+
+#picker .hint i.foe {
+  margin-left: 8px;
+  background: #eba05d;
+}
+
+/* a unit under the mouse is outlined instead */
+#c.hovering,
+#c.panning.hovering {
+  cursor: none;
 }

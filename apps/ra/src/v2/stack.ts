@@ -25,6 +25,7 @@ export interface StackOpts {
   bakeShadow?: boolean;
   shadowAlpha?: number;
   outline?: RGB;
+  flat?: boolean; // no outline or edge lighting (ground decals)
   top?: number;
   left?: number;
   right?: number;
@@ -102,7 +103,7 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
       if (hit) sh.set(x, y, [0, 0, 0], Math.round(255 * (o.shadowAlpha ?? 0.34)));
     }
 
-  p.finish(o.outline ?? [18, 20, 16], 0.12, -0.18);
+  if (!o.flat) p.finish(o.outline ?? [18, 20, 16], 0.12, -0.18);
   let img: HTMLCanvasElement;
   if (o.bakeShadow) {
     // shadow underneath, sprite on top

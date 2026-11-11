@@ -6,6 +6,7 @@ import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
 import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
+import { MAPS, mapDef, mapPreview } from './maps';
 import {
   BuildingKind,
   DIRS,
@@ -18,6 +19,7 @@ import {
   makeDish,
   makeOre,
   makeFactionArt,
+  OreArt,
   makeRocks,
   makeTrees,
 } from './sprites';
@@ -80,6 +82,13 @@ interface Unit {
   // it home, unloading, or waiting for something to change
   job?: { st: 'seek' | 'go' | 'dig' | 'home' | 'ret' | 'unload' | 'wait'; node?: OreNode; ref?: Building; t: number };
   load?: number;
+  // getting round water: which way it is sliding along the shore, and how
+  // long since it last got any closer to where it is going
+  slide?: number;
+  best?: number;
+  stuck?: number;
+  goal?: [number, number];
+  slideT?: number;
 }
 
 interface OreNode {
@@ -102,6 +111,7 @@ interface Building {
   own: boolean; // built (or deployed) by the player
   sel: boolean;
   rise: number; // 0..1, how far it has gone up (1 when standing)
+  hp: number; // 0..1
   packing?: boolean;
   rally?: [number, number]; // where new units head (world, first copy)
   gift?: boolean; // a refinery's free hauler has been handed over
@@ -148,11 +158,20 @@ export class IsoGame implements GameLike {
   bushes = makeBushes();
   clutter = makeClutter();
   dish = makeDish();
-  oreArt = makeOre();
+  oreArt: OreArt = makeOre();
   ore: OreNode[] = [];
   private oreGrid = new Map<number, OreNode[]>();
   time = 0;
-    onSelect: (names: string[]) => void = () => {};
+  onSelect: (names: string[]) => void = () => {};
+  // which map generate() makes (see maps.ts)
+  mapId = MAPS[0].id;
+
+  maps(): { id: string; name: string; blurb: string }[] {
+    return MAPS.map(({ id, name, blurb }) => ({ id, name, blurb }));
+  }
+  preview(id: string, w: number, h: number): HTMLCanvasElement {
+    return mapPreview(mapDef(id), this.seed, w, h);
+  }
 
   constructor(
     public ctx: CanvasRenderingContext2D,
@@ -194,7 +213,8 @@ export class IsoGame implements GameLike {
   // Sites are chosen on the screen-space map and placed on the ground below.
   generate(w: number, h: number): void {
     const rand = rng(this.seed * 7919 + 29);
-    const T = (this.terrain = new IsoTerrain(w, h, this.seed));
+    const def = mapDef(this.mapId);
+    const T = (this.terrain = new IsoTerrain(w, h, this.seed, def));
     this.units = [];
     this.buildings = [];
     this.props = [];
@@ -203,6 +223,7 @@ export class IsoGame implements GameLike {
     this.sparkles = [];
     this.sparks = [];
     this.lastTap = null;
+    this.hov = null;
     this.mapVersion++;
     this.credits = START_CREDITS;
     this.jobs = new Map();
@@ -216,47 +237,56 @@ export class IsoGame implements GameLike {
     this.forestF = new WorldField(w, h, 50, this.seed + 500, 2, 10);
     this.ov = null;
 
-    const wrapD = (ax: number, ay: number, bx: number, by: number) => {
-      const [x, y] = nearestCopy(ax, ay, bx, by, w, h);
-      return Math.hypot(x - ax, (y - ay) * 2);
-    };
-    type Site = { sx: number; sy: number; f: number; home: boolean };
-    const sites: Site[] = [
-      { sx: 1440 * 0.24, sy: 720 * 0.44, f: 0, home: true },
-      { sx: 1440 * 0.74, sy: 720 * 0.3, f: 1, home: true },
-    ];
-    const want = Math.max(2, Math.round((w * h) / 9e6));
-    const gap = Math.sqrt((w * h) / want) * 0.6;
     const flat = (sx: number, sy: number) => {
       const [x, y] = T.at(sx, sy);
       return T.k(x, y) === K.Grass && T.k(x + 40, y + 40) === K.Grass && T.k(x - 40, y - 40) === K.Grass;
     };
-    for (let i = 0; i < 3000 && sites.length < want + 2; i++) {
-      const sx = rand() * w;
-      const sy = rand() * h;
-      if (sites.some((o) => wrapD(o.sx, o.sy, sx, sy) < gap)) continue;
-      if (!flat(sx, sy)) continue;
-      sites.push({ sx, sy, f: sites.length % 2, home: false });
-    }
-    // roads from each base to its two nearest neighbours
-    const lines: [number, number][][] = [];
-    const done = new Set<string>();
-    sites.forEach((a, i) => {
-      const near = sites
-        .map((b, j) => ({ j, d: wrapD(a.sx, a.sy, b.sx, b.sy) }))
-        .filter((o) => o.j !== i)
-        .sort((p, q) => p.d - q.d)
-        .slice(0, 2);
-      for (const { j } of near) {
-        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
-        if (done.has(key)) continue;
-        done.add(key);
-        const [bsx, bsy] = nearestCopy(a.sx, a.sy, sites[j].sx, sites[j].sy, w, h);
-        const [ax, ay] = T.at(a.sx, a.sy);
-        const [bx, by] = T.at(bsx, bsy);
-        lines.push(windingRoad(ax, ay, bx, by, rand));
+    const wrapS = (sx: number, sy: number): [number, number] => [sx - Math.floor(sx / w) * w, sy - Math.floor(sy / h) * h];
+    // the nearest open, level grass to a screen point, spiralling out
+    const findLand = (sx0: number, sy0: number, reach = 3000): [number, number] | null => {
+      for (let r = 0; r < reach; r += 16)
+        for (let t = 0; t < Math.max(1, r / 8); t++) {
+          const a = rand() * Math.PI * 2;
+          const sx = sx0 + Math.cos(a) * r;
+          const sy = sy0 + Math.sin(a) * r * 0.5;
+          if (flat(sx, sy)) return wrapS(sx, sy);
+        }
+      return null;
+    };
+    // Two sides: you, starting with a Foundry vehicle and a small escort,
+    // and the enemy, dug in with a full base and an army on the far side of
+    // the planet.
+    type Site = { sx: number; sy: number; f: number };
+    const at = (p: [number, number], f: number): Site => {
+      const [sx, sy] = findLand(p[0] * w, p[1] * h) ?? [p[0] * w, p[1] * h];
+      return { sx, sy, f };
+    };
+    const homeSite = at(def.home, ME);
+    const foe = at(def.enemy, 1);
+
+    // a road from your start to the enemy base, kept to dry land: it winds
+    // between waypoints found on the way
+    const pts: [number, number][] = [[homeSite.sx, homeSite.sy]];
+    const steps = 8;
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const p = findLand(homeSite.sx + (foe.sx - homeSite.sx) * t, homeSite.sy + (foe.sy - homeSite.sy) * t, 900);
+      if (p) {
+        // keep it on the same lap as the line it follows
+        const [lx, ly] = pts[pts.length - 1];
+        pts.push(nearestCopy(lx, ly, p[0], p[1], w, h));
       }
-    });
+    }
+    {
+      const [lx, ly] = pts[pts.length - 1];
+      pts.push(nearestCopy(lx, ly, foe.sx, foe.sy, w, h));
+    }
+    const lines: [number, number][][] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, ay] = T.at(...pts[i]);
+      const [bx, by] = T.at(...pts[i + 1]);
+      lines.push(windingRoad(ax, ay, bx, by, rand));
+    }
     T.setRoads(lines);
 
     const pads: Rect[] = [];
@@ -276,15 +306,13 @@ export class IsoGame implements GameLike {
             if (pads.some((p) => overlap(p, pad, 4))) continue;
             pads.push(pad);
             T.markPad(pad);
-            this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2, pad, own: false, sel: false, rise: 1 });
+            this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2, pad, own: false, sel: false, rise: 1, hp: 1 });
             ok = true;
           }
         }
       }
     };
-    const OUTPOST: BuildingKind[] = ['hq', 'power', 'barracks', 'refinery', 'silo', 'tower', 'tower', 'radar', 'factory', 'helipad'];
-    // your home base is still to be built: you start with a Foundry vehicle
-    for (const st of sites) if (!(st.home && st.f === ME)) place(st.home ? BASE_B : OUTPOST.slice(0, 5 + Math.floor(rand() * 5)), st.f, st.sx, st.sy);
+    place(['yard', ...BASE_B], foe.f, foe.sx, foe.sy);
 
     // a little clutter beside some buildings
     for (const b of this.buildings) {
@@ -320,14 +348,14 @@ export class IsoGame implements GameLike {
       return null;
     };
     const army: [Kind, number][] = [
-      ['light', 4],
-      ['heavy', 2],
-      ['buggy', 2],
+      ['light', 6],
+      ['heavy', 3],
+      ['buggy', 3],
       ['hauler', 1],
-      ['arty', 1],
+      ['arty', 2],
       ['heli', 1],
-      ['inf', 6],
-      ['rocket', 3],
+      ['inf', 8],
+      ['rocket', 4],
     ];
     // you start with a handful: the Foundry vehicle and a small escort
     const start: [Kind, number][] = [
@@ -337,30 +365,30 @@ export class IsoGame implements GameLike {
       ['inf', 3],
     ];
     // the Foundry vehicle starts on the nearest open ground to your home site
-    const hs = sites[0];
-    let ms: [number, number] = [hs.sx, hs.sy];
+    let ms: [number, number] = [homeSite.sx, homeSite.sy];
     found: for (let r = 0; r < 1200; r += 12)
       for (let t = 0; t < Math.max(1, r / 6); t++) {
         const a = rand() * Math.PI * 2;
-        const sx = hs.sx + Math.cos(a) * r;
-        const sy = hs.sy + Math.sin(a) * r * 0.5;
+        const sx = homeSite.sx + Math.cos(a) * r;
+        const sy = homeSite.sy + Math.sin(a) * r * 0.5;
         const [x, y] = toWorld(sx, sy, 0);
         if (this.siteOk(this.siteOf(x, y))) {
           ms = [sx, sy];
           break found;
         }
       }
-    // ore fields: two near where you start, one by every other base, and
-    // more scattered round the planet
+    // ore fields: two near where you start, one by the enemy base, one
+    // half way, and more scattered round the land
     const startSite = this.siteOf(...toWorld(ms[0], ms[1], 0));
     const field = (sx: number, sy: number, n: number) => {
+      const reach = 6 + Math.sqrt(n) * 5.5;
       for (let i = 0, t = 0; i < n && t < n * 30; t++) {
         const a = rand() * Math.PI * 2;
-        const d = Math.sqrt(rand()) * (30 + n * 3);
+        const d = Math.sqrt(rand()) * reach;
         const [x, y] = toWorld(sx + Math.cos(a) * d * 1.6, sy + Math.sin(a) * d * 0.8, 0);
-        if (T.k(x, y) !== K.Grass || T.k(x + 6, y + 6) !== K.Grass || T.k(x - 6, y - 6) !== K.Grass) continue;
+        if (T.k(x, y) !== K.Grass || T.k(x + 5, y + 5) !== K.Grass || T.k(x - 5, y - 5) !== K.Grass) continue;
         if (inside(x, y, startSite, 10)) continue;
-        if (this.oreNear(x, y, 7).length) continue;
+        if (this.oreNear(x, y, 5).length) continue;
         const [fx, fy] = T.fold(x, y);
         this.addOre({ x: fx, y: fy, amt: ORE.node * (0.6 + rand() * 0.4), v: Math.floor(rand() * 4) });
         i++;
@@ -379,35 +407,45 @@ export class IsoGame implements GameLike {
         }
       }
     };
-    nearField(ms[0], ms[1], 170, 22);
-    nearField(ms[0], ms[1], 420, 26);
-    for (const st of sites) if (st !== sites[0]) nearField(st.sx, st.sy, 200, 14 + Math.floor(rand() * 8));
-    for (let i = 0; i < want; i++) nearField(rand() * w, rand() * h, 0, 12 + Math.floor(rand() * 14));
+    nearField(ms[0], ms[1], 170, 30);
+    nearField(ms[0], ms[1], 420, 34);
+    nearField(foe.sx, foe.sy, 220, 28);
+    {
+      const [mx, my] = nearestCopy(homeSite.sx, homeSite.sy, foe.sx, foe.sy, w, h);
+      const mid = findLand((homeSite.sx + mx) / 2, (homeSite.sy + my) / 2, 900);
+      if (mid) nearField(mid[0], mid[1], 0, 40);
+    }
+    const extra = Math.max(1, Math.round((w * h * (1 - def.water)) / 1.2e7));
+    for (let i = 0; i < extra; i++)
+      for (let t = 0; t < 60; t++) {
+        const sx = rand() * w;
+        const sy = rand() * h;
+        if (!flat(sx, sy)) continue;
+        nearField(sx, sy, 0, 16 + Math.floor(rand() * 16));
+        break;
+      }
 
     const mine: [number, number][] = [];
-    for (const st of sites)
-      for (const [kind, c] of st.home && st.f === ME ? start : army)
-        for (let i = 0; i < (st.home && st.f === ME ? c : Math.max(1, Math.round(c * (st.home ? 1.4 : 0.6)))); i++) {
-          const own = st.home && st.f === ME;
-          const u = own ? (kind === 'mcv' ? spawn(kind, st.f, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0) : spawn(kind, st.f, ms[0], ms[1] + 45, 70)) : spawn(kind, st.f, st.sx + (st.home ? 60 : 0), st.sy + (st.home ? 140 : 70), st.home ? 220 : 150);
-          if (u && own) mine.push(toScreen(u.x, u.y));
-        }
-    // boats on the nearest lake to home
-    const hx = (sites[0].sx + sites[1].sx) / 2;
-    const hy = (sites[0].sy + sites[1].sy) / 2;
+    for (const [kind, c] of start)
+      for (let i = 0; i < c; i++) {
+        const u = kind === 'mcv' ? spawn(kind, ME, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0) : spawn(kind, ME, ms[0], ms[1] + 45, 70);
+        if (u) mine.push(toScreen(u.x, u.y));
+      }
+    for (const [kind, c] of army) for (let i = 0; i < c; i++) spawn(kind, foe.f, foe.sx + 60, foe.sy + 140, 220);
+    // enemy patrol boats on the nearest water to their base
     let lake: [number, number] | null = null;
-    for (let r = 100; r < 3000 && !lake; r += 100)
+    for (let r = 100; r < 2000 && !lake; r += 100)
       for (let t = 0; t < 40 && !lake; t++) {
         const a = rand() * Math.PI * 2;
-        const sx = hx + Math.cos(a) * r;
-        const sy = hy + Math.sin(a) * r * 0.5;
+        const sx = foe.sx + Math.cos(a) * r;
+        const sy = foe.sy + Math.sin(a) * r * 0.5;
         const [x, y] = toWorld(sx, sy, 0);
         if (T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water && T.k(x, y + 30) === K.Water && T.k(x, y - 30) === K.Water) lake = [sx, sy];
       }
-    if (lake) for (let f = 0; f < 2; f++) for (let i = 0; i < 2; i++) spawn('boat', f, lake[0], lake[1], 40);
+    if (lake) for (let i = 0; i < 3; i++) spawn('boat', foe.f, lake[0], lake[1], 40);
     for (const u of this.units) u.z = this.groundZ(u);
 
-    this.home = mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: sites[0].sx, y: sites[0].sy };
+    this.home = mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty));
     this.emit();
   }
@@ -724,7 +762,7 @@ export class IsoGame implements GameLike {
     if (!gh || gh.why) return;
     const t = gh.tech;
     const art = this.buildingArt(t.building!, ME);
-    const b: Building = { kind: t.building!, f: ME, x: gh.x, y: gh.y, art, phase: 0, gun: 0, gunGoal: 0, pad: gh.pad, own: true, sel: false, rise: 0 };
+    const b: Building = { kind: t.building!, f: ME, x: gh.x, y: gh.y, art, phase: 0, gun: 0, gunGoal: 0, pad: gh.pad, own: true, sel: false, rise: 0, hp: 1 };
     this.buildings.push(b);
     this.clearSite(gh.pad, null);
     this.setPad(gh.pad, true);
@@ -988,7 +1026,7 @@ export class IsoGame implements GameLike {
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
     if (!mcvs.length) return idle.length ? [{ id: 'harvest', label: 'Harvest', icon: 'ore', title: 'Go back to gathering ore' }] : [];
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
-    return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (D)' : 'Needs open, level ground: move somewhere clear' }];
+    return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' }];
   }
 
   act(id: string): void {
@@ -1029,7 +1067,7 @@ export class IsoGame implements GameLike {
     }
     this.units.splice(this.units.indexOf(u), 1);
     const art = this.buildingArt('yard', u.f);
-    const b: Building = { kind: 'yard', f: u.f, x: pad.x + pad.w / 2, y: pad.y + pad.h / 2, art, phase: 0, gun: 0, gunGoal: 0, pad, own: true, sel: u.sel, rise: 0 };
+    const b: Building = { kind: 'yard', f: u.f, x: pad.x + pad.w / 2, y: pad.y + pad.h / 2, art, phase: 0, gun: 0, gunGoal: 0, pad, own: true, sel: u.sel, rise: 0, hp: 1 };
     this.buildings.push(b);
     if (u.sel) for (const o of this.units) o.sel = false;
     this.setPad(pad, true);
@@ -1103,7 +1141,7 @@ export class IsoGame implements GameLike {
         if (k !== K.Grass && k !== K.High) continue;
         // keep clear of building pads, more so in front of them where a tree would hide them
         if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 9, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 9) === K.Pad || kAt(wx - 8, wy - 8) === K.Pad || kAt(wx - 4, wy + 4) === K.Pad || kAt(wx + 4, wy - 4) === K.Pad) continue;
-        if (this.oreNear(wx, wy, 8).length) continue;
+        if (this.oreNear(wx, wy, 12).length) continue;
         const forest = (this.forestF.at(jx, jy) - 0.6) * 2.4;
         const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
         let spr: StackSprite | null = null;
@@ -1114,6 +1152,12 @@ export class IsoGame implements GameLike {
         if (spr) props.push({ spr, x: wx, y: wy, z });
       }
     return { canvas: p.canvas, foam: p.foam, foam2: p.foam2, props, used: 0 };
+  }
+
+  // Can unit u be at (x, y)? Boats need water, everyone else dry land.
+  private okAt(u: Unit, x: number, y: number): boolean {
+    const w = this.terrain.k(x, y) === K.Water;
+    return u.kind === 'boat' ? w : !w;
   }
 
   private groundZ(u: Unit): number {
@@ -1142,8 +1186,9 @@ export class IsoGame implements GameLike {
     return [Math.round((x - sx) / this.w), Math.round((y - sy) / this.h)];
   }
 
-  // Screen (x, y) may be on any copy of the world; each unit's nearest copy is tested.
-  click(x: number, y: number, add: boolean): void {
+  // The unit under screen point (x, y), which may be on any copy of the
+  // world (each unit's nearest copy is tested), and which copy it is.
+  private unitAt(x: number, y: number): { u: Unit; lap: [number, number] } | null {
     let best: Unit | null = null;
     let bestLap: [number, number] = [0, 0];
     let bd = 1e9;
@@ -1157,23 +1202,49 @@ export class IsoGame implements GameLike {
         bestLap = lap;
       }
     }
-    if (best) {
+    return best ? { u: best, lap: bestLap } : null;
+  }
+
+  // The unit the mouse is over, outlined so you can see it can be picked.
+  private hov: Unit | null = null;
+  hover(x: number, y: number): boolean {
+    this.hov = this.unitAt(x, y)?.u ?? null;
+    return !!this.hov;
+  }
+  unhover(): void {
+    this.hov = null;
+  }
+
+  private mine(): Unit[] {
+    return this.units.filter((u) => u.sel && u.f === ME);
+  }
+
+  // You command your own side. Enemy units and buildings can be tapped to
+  // look at them (their health), but not ordered about.
+  click(x: number, y: number, add: boolean): void {
+    const hitU = this.unitAt(x, y);
+    const mine = this.mine();
+    if (hitU && (hitU.u.f === ME || !mine.length)) {
+      const best = hitU.u;
       // a second tap on a lone Foundry vehicle deploys it
       const now = performance.now();
       const again = this.lastTap && this.lastTap.u === best && now - this.lastTap.t < 400 && best.sel && !add;
       this.lastTap = { u: best, t: now };
       for (const b of this.buildings) b.sel = false;
-      if (!add) for (const o of this.units) o.sel = false;
-      best.sel = add ? !best.sel : true;
-      [best.lap, best.lapY] = bestLap;
+      const enemy = best.f !== ME;
+      // enemies are looked at one at a time, never mixed into your selection
+      if (!add || enemy || this.units.some((o) => o.sel && o.f !== ME)) for (const o of this.units) if (o !== best) o.sel = false;
+      best.sel = add && !enemy ? !best.sel : true;
+      [best.lap, best.lapY] = hitU.lap;
       if (again && this.deployable(best) && !best.deploy) this.startDeploy(best);
       this.emit();
       return;
     }
     this.lastTap = null;
     const hit = this.buildingAt(x, y);
-    // with units selected, a tap on a building is still a move order
-    if (hit && hit.own && !this.selected().length) {
+    // with units of yours selected, a tap on a building is still a move order
+    if (hit && !mine.length) {
+      for (const o of this.units) o.sel = false;
       for (const b of this.buildings) b.sel = b === hit;
       this.emit();
       return;
@@ -1182,13 +1253,17 @@ export class IsoGame implements GameLike {
     if (sb) {
       // with a barracks, works or helipad selected, a tap on the ground sets
       // where its new units go
-      if (MAKERS.includes(sb.kind) && sb.rise >= 1) {
+      if (sb.own && MAKERS.includes(sb.kind) && sb.rise >= 1) {
         const [wx, wy] = this.fold(...this.groundAt(x, y));
         sb.rally = [wx, wy];
         this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
         return;
       }
       this.deselect();
+      return;
+    }
+    if (!mine.length) {
+      if (this.units.some((u) => u.sel)) this.deselect();
       return;
     }
     this.order(x, y);
@@ -1222,7 +1297,7 @@ export class IsoGame implements GameLike {
   }
 
   order(x: number, y: number, shortest = false): void {
-    const sel = this.units.filter((u) => u.sel && !u.deploy);
+    const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === ME);
     if (!sel.length) return;
     // haulers sent onto ore dig there; sent anywhere else they stop work
     {
@@ -1290,17 +1365,34 @@ export class IsoGame implements GameLike {
       const [ux, uy] = this.screenOf(u);
       const sx = ux + lap[0] * this.w;
       const sy = uy + lap[1] * this.h;
-      const hit = sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3;
+      const hit = u.f === ME && sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3;
       if (hit) {
         u.sel = true;
         [u.lap, u.lapY] = lap;
-      } else if (!add) u.sel = false;
+      } else if (!add || u.f !== ME) u.sel = false;
     }
     if (this.units.some((u) => u.sel)) for (const b of this.buildings) b.sel = false;
     this.emit();
   }
 
   focus(): { x: number; y: number } {
+    return this.home;
+  }
+
+  // Your home base: the Foundry if it stands, or else the Foundry vehicle, or
+  // else where you started (screen position, on the first copy of the map).
+  homeBase(): { x: number; y: number } {
+    const yard = this.buildings.find((b) => b.own && b.kind === 'yard');
+    const mcv = this.units.find((u) => u.f === ME && u.kind === 'mcv');
+    const b = yard ?? this.buildings.find((o) => o.own);
+    if (b) {
+      const [sx, sy] = toScreen(b.x, b.y);
+      return { x: sx, y: sy };
+    }
+    if (mcv) {
+      const [sx, sy] = toScreen(mcv.x, mcv.y);
+      return { x: sx, y: sy };
+    }
     return this.home;
   }
 
@@ -1350,16 +1442,70 @@ export class IsoGame implements GameLike {
           u.x = u.tx;
           u.y = u.ty;
         } else {
+          // a new destination: start afresh
+          if (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty) {
+            u.goal = [u.tx, u.ty];
+            u.best = dist;
+            u.stuck = 0;
+            u.slide = undefined;
+          }
           const want = Math.atan2(dy, dx);
-          const diff = angDiff(want, u.a);
-          const stepA = st.turn * dt;
-          u.a = Math.abs(diff) <= stepA ? want : u.a + Math.sign(diff) * stepA;
           const free = foot || u.kind === 'heli';
-          const go = free ? 1 : Math.max(0, Math.cos(angDiff(want, u.a)) - 0.4) / 0.6;
-          const sp = Math.min(dist, st.speed * 1.1 * dt * go);
-          const ang = free ? want : u.a;
-          u.x += Math.cos(ang) * sp;
-          u.y += Math.sin(ang) * sp;
+          let ang = free ? want : u.a;
+          let sp = 0;
+          let face = want;
+          // Ground units keep out of the water and boats keep to it. Heading
+          // into the edge, they slide along it whichever way is nearer to
+          // where they are going (and stick to that way, so they don't dither).
+          let slideA: number | null = null;
+          if (u.kind !== 'heli' && this.okAt(u, u.x, u.y)) {
+            const ahead = (a: number) =>
+              this.okAt(u, u.x + Math.cos(a) * 2, u.y + Math.sin(a) * 2) && this.okAt(u, u.x + Math.cos(a) * 3.5, u.y + Math.sin(a) * 3.5) && this.okAt(u, u.x + Math.cos(a) * 5, u.y + Math.sin(a) * 5);
+            if (!ahead(want)) {
+              const side = u.slide ?? (hash2(Math.floor(u.x), Math.floor(u.y), 5) < 0.5 ? 1 : -1);
+              search: for (const k of [0.35, 0.7, 1.05, 1.4, 1.75, 2.1]) {
+                for (const sg of [side, -side]) {
+                  if (ahead(want + sg * k)) {
+                    slideA = want + sg * k;
+                    u.slide = sg;
+                    break search;
+                  }
+                }
+              }
+              if (slideA === null) u.moving = false;
+              else face = slideA;
+            }
+          }
+          // a long slide along the shore means it is trying to get somewhere
+          // across the water: give up
+          u.slideT = slideA === null ? Math.max(0, (u.slideT ?? 0) - dt * 0.5) : (u.slideT ?? 0) + dt;
+          if (u.slideT > 8) u.moving = false;
+          const diff = angDiff(face, u.a);
+          const stepA = st.turn * dt;
+          u.a = Math.abs(diff) <= stepA ? face : u.a + Math.sign(diff) * stepA;
+          if (slideA !== null) {
+            ang = slideA;
+            sp = Math.min(dist, st.speed * dt * (free ? 1 : 0.8));
+          } else if (u.moving) {
+            const go = free ? 1 : Math.max(0, Math.cos(angDiff(want, u.a)) - 0.4) / 0.6;
+            ang = free ? want : u.a;
+            // (a tank still turning towards dry land waits to get there)
+            sp = u.kind !== 'heli' && !this.okAt(u, u.x + Math.cos(ang) * 5, u.y + Math.sin(ang) * 5) && this.okAt(u, u.x, u.y) ? 0 : Math.min(dist, st.speed * 1.1 * dt * go);
+          }
+          // give up if it has got hardly any closer in the last few seconds
+          // (it has hit a dead end)
+          if ((u.stuck = (u.stuck ?? 0) + dt) > 4) {
+            if ((u.best ?? 1e9) - dist < 4) u.moving = false;
+            u.best = dist;
+            u.stuck = 0;
+          }
+          // never step from dry land into the water (or a boat onto land)
+          const nx = u.x + Math.cos(ang) * sp;
+          const ny = u.y + Math.sin(ang) * sp;
+          if (u.kind === 'heli' || this.okAt(u, nx, ny) || !this.okAt(u, u.x, u.y)) {
+            u.x = nx;
+            u.y = ny;
+          }
           u.trackAcc += sp;
           if (u.trackAcc > 1.5) {
             u.trackAcc = 0;
@@ -1564,6 +1710,12 @@ export class IsoGame implements GameLike {
       c.fillRect(Math.round(p.x), Math.round(p.y + r * 0.5), 1, 1);
     }
 
+    // ore fields stain the ground under their nuggets
+    c.globalAlpha = 0.9;
+    for (const n of this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5))
+      if (n.amt >= 10) this.blit(this.oreArt.stain[n.v][n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0], n.x, n.y, 0);
+    c.globalAlpha = 1;
+
     // move markers: shrinking iso diamond
     for (const m of this.markers) {
       const k = m.t / 0.7;
@@ -1609,9 +1761,10 @@ export class IsoGame implements GameLike {
       }
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
-    for (const n of this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5)) {
-      if (n.amt < 10) continue;
-      const spr = this.oreArt[n.v][n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0];
+    const ore = this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5).filter((n) => n.amt >= 10);
+    const oreSize = (n: OreNode) => (n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0);
+    for (const n of ore) {
+      const spr = this.oreArt.lumps[n.v][oreSize(n)];
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
     for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
@@ -1644,6 +1797,8 @@ export class IsoGame implements GameLike {
     for (const [r, col] of feet) this.drawFoot(r, col, 0.75 + 0.25 * Math.sin(this.time * 6), false, true);
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
+    const hv = this.hov;
+    if (hv && this.units.includes(hv) && seen(hv.x, hv.y, hv.z)) this.drawHover(hv);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
 
     // the building being placed: a see-through ghost over its footprint
@@ -1713,7 +1868,7 @@ export class IsoGame implements GameLike {
       c.fillRect(X + 1, Y - 7, 4, 1);
     }
     const { rx, ry } = b.art;
-    c.fillStyle = '#ffffff';
+    c.fillStyle = b.own ? '#ffffff' : '#ff6a5a';
     const L = 7;
     for (const [cx, cy, dx, dy] of [
       [-rx, -ry, 1, 1],
@@ -1728,6 +1883,31 @@ export class IsoGame implements GameLike {
         c.fillRect(Math.round(bx), Math.round(by), 1, 1);
       }
     }
+    // its health, over the top of the building
+    const spr = b.art.spr;
+    const [sx, sy] = toScreen(b.x, b.y);
+    const top = this.spriteTop(b);
+    const bw = Math.max(16, Math.round((rx + ry) * 1.1));
+    healthBar(c, Math.round(sx - bw / 2), Math.round(Math.min(sy - spr.cy + top, sy - 8) - 5), bw, b.hp);
+  }
+
+  // How far down a building's sprite its first solid pixel is.
+  private tops = new Map<V2BuildingArt, number>();
+  private spriteTop(b: Building): number {
+    let t = this.tops.get(b.art);
+    if (t === undefined) {
+      const img = b.art.spr.img;
+      const d = img.getContext('2d')!.getImageData(0, 0, img.width, img.height).data;
+      t = 0;
+      find: for (let y = 0; y < img.height; y++)
+        for (let x = 0; x < img.width; x++)
+          if (d[(y * img.width + x) * 4 + 3] > 200) {
+            t = y;
+            break find;
+          }
+      this.tops.set(b.art, t);
+    }
+    return t;
   }
 
   // The whole map for the globe, one pixel per OV screen pixels: the overview
@@ -1824,24 +2004,31 @@ export class IsoGame implements GameLike {
     }
   }
 
-  private drawSelection(u: Unit): void {
-    const c = this.ctx;
+  // The box round a unit: half-size and centre on the screen.
+  private unitBox(u: Unit): { x: number; y: number; rx: number; ry: number } {
     const st = UNIT[u.kind];
     const [sx, sy] = this.screenOf(u);
     const foot = u.kind === 'inf' || u.kind === 'rocket';
-    const rx = foot ? 5 : st.r + 4;
-    const ry = foot ? 7 : Math.round(st.r * 0.75) + 2;
-    c.fillStyle = '#ffffff';
-    corners(c, Math.round(sx), Math.round(sy), rx, ry, 2);
+    return { x: Math.round(sx), y: Math.round(sy), rx: foot ? 5 : st.r + 4, ry: foot ? 7 : Math.round(st.r * 0.75) + 2 };
+  }
+
+  private drawSelection(u: Unit): void {
+    const c = this.ctx;
+    const { x, y, rx, ry } = this.unitBox(u);
+    c.fillStyle = u.f === ME ? '#ffffff' : '#ff6a5a';
+    corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
-    const bx = Math.round(sx - bw / 2);
-    const by = Math.round(sy - ry - 4);
-    c.fillStyle = '#111';
-    c.fillRect(bx - 1, by - 1, bw + 2, 4);
-    c.fillStyle = u.hp > 0.66 ? '#5ee05e' : u.hp > 0.33 ? '#e8d24a' : '#e85a4a';
-    c.fillRect(bx, by, Math.round(bw * u.hp), 2);
-    c.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
+    healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
+  }
+
+  // The mouse is over a unit: a box round it in place of the pointer,
+  // breathing a little, so you can see you can pick it.
+  private drawHover(u: Unit): void {
+    const c = this.ctx;
+    const { x, y, rx, ry } = this.unitBox(u);
+    const grow = Math.round(1 + Math.sin(this.time * 8));
+    c.fillStyle = u.f === ME ? 'rgba(157,255,157,0.95)' : 'rgba(255,106,90,0.95)';
+    corners(c, x, y, rx + grow, ry + grow, 3);
   }
 
   private drawBuilding(b: Building): void {
@@ -1931,6 +2118,16 @@ function overlap(a: Rect, b: Rect, m: number): boolean {
 
 function inside(x: number, y: number, r: Rect, m: number): boolean {
   return x >= r.x - m && x <= r.x + r.w + m && y >= r.y - m && y <= r.y + r.h + m;
+}
+
+// A health bar: a dark frame, green to red by how much is left, in segments.
+function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
+  c.fillStyle = '#111';
+  c.fillRect(bx - 1, by - 1, bw + 2, 4);
+  c.fillStyle = hp > 0.66 ? '#5ee05e' : hp > 0.33 ? '#e8d24a' : '#e85a4a';
+  c.fillRect(bx, by, Math.round(bw * hp), 2);
+  c.fillStyle = 'rgba(0,0,0,0.35)';
+  for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
 }
 
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {

@@ -87,4 +87,15 @@ export interface GameLike {
   // placeAt (map coordinates); act('place') puts it down.
   placing?(): boolean;
   placeAt?(x: number, y: number): void;
+  // Maps to pick from before generate(), with a small picture of each for
+  // the current seed; mapId is the one generate() makes.
+  maps?(): { id: string; name: string; blurb: string }[];
+  preview?(id: string, w: number, h: number): HTMLCanvasElement;
+  mapId?: string;
+  // The mouse is over map point (x, y): true if that is over a unit, which
+  // the game then outlines. unhover() clears it.
+  hover?(x: number, y: number): boolean;
+  unhover?(): void;
+  // Where your home base is now, for the Home button.
+  homeBase?(): { x: number; y: number };
 }

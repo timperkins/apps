@@ -22,7 +22,6 @@
     <div id="hud">
       <button type="button" id="menuBtn" aria-label="Menu" aria-expanded="false" aria-controls="menu" title="Menu"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="2" width="9" height="2"/><rect x="1" y="5" width="9" height="2"/><rect x="1" y="8" width="9" height="2"/></svg></button>
       <span id="credits" hidden></span>
-      <div id="sel">Drag: select · Tap: move</div>
     </div>
     <div id="menu" hidden>
       <label class="ver">
@@ -41,10 +40,11 @@
       <button type="button" id="clearBtn" title="Clear selection (Esc)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/></svg>Clear</button>
     </div>
     <nav id="toolbar" aria-label="Controls">
-      <button type="button" data-mode="select" class="on" aria-pressed="true" title="Select (S)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="1" width="1" height="8"/><rect x="3" y="2" width="1" height="6"/><rect x="4" y="3" width="1" height="5"/><rect x="5" y="4" width="1" height="3"/><rect x="6" y="5" width="1" height="2"/><rect x="7" y="6" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="8" width="1" height="2"/></svg><span>Select</span></button>
+      <button type="button" data-mode="select" class="on" aria-pressed="true" title="Select (Q)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="1" width="1" height="8"/><rect x="3" y="2" width="1" height="6"/><rect x="4" y="3" width="1" height="5"/><rect x="5" y="4" width="1" height="3"/><rect x="6" y="5" width="1" height="2"/><rect x="7" y="6" width="1" height="1"/><rect x="5" y="7" width="1" height="1"/><rect x="6" y="8" width="1" height="2"/></svg><span>Select</span></button>
       <button type="button" data-mode="pan" aria-pressed="false" title="Pan (P)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="11"/><rect x="0" y="5" width="11" height="1"/><rect x="4" y="1" width="3" height="1"/><rect x="4" y="9" width="3" height="1"/><rect x="1" y="4" width="1" height="3"/><rect x="9" y="4" width="1" height="3"/></svg><span>Pan</span></button>
       <i class="sep"></i>
       <button type="button" id="allBtn" title="Select everything on screen"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="0" width="1" height="3"/><rect x="8" y="0" width="3" height="1"/><rect x="10" y="0" width="1" height="3"/><rect x="0" y="10" width="3" height="1"/><rect x="0" y="8" width="1" height="3"/><rect x="8" y="10" width="3" height="1"/><rect x="10" y="8" width="1" height="3"/><rect x="3" y="3" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="6" y="6" width="2" height="2"/></svg><span>All</span></button>
+      <button type="button" id="homeBtn" title="Back to your base (H)"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="5" y="0" width="1" height="1"/><rect x="4" y="1" width="3" height="1"/><rect x="3" y="2" width="5" height="1"/><rect x="2" y="3" width="7" height="1"/><rect x="1" y="4" width="9" height="1"/><rect x="0" y="5" width="11" height="1"/><rect x="1" y="6" width="3" height="5"/><rect x="7" y="6" width="3" height="5"/><rect x="4" y="6" width="3" height="2"/><rect x="8" y="1" width="2" height="3"/></svg><span>Home</span></button>
       <i class="sep" id="buildSep" hidden></i>
       <button type="button" id="buildBtn" aria-pressed="false" title="Build (B)" hidden><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="1" width="6" height="3"/><rect x="0" y="2" width="1" height="2"/><rect x="7" y="2" width="2" height="1"/><rect x="4" y="4" width="2" height="7"/></svg><span>Build</span></button>
     </nav>
@@ -53,6 +53,17 @@
       <div class="tabs"></div>
       <div class="grid"></div>
       <div class="hint">Tap to build · tap again to hold · hold to cancel</div>
+    </div>
+    <div id="picker" hidden>
+      <div class="box" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+        <div class="head">
+          <span class="title" id="pickTitle">Choose a map</span>
+          <button type="button" id="reroll" title="Show other versions of these maps"><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="3" y="1" width="5" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="8" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="5"/><rect x="9" y="3" width="1" height="2"/><rect x="7" y="4" width="4" height="1"/><rect x="8" y="5" width="2" height="1"/><rect x="2" y="8" width="1" height="1"/><rect x="8" y="8" width="1" height="1"/><rect x="3" y="9" width="5" height="1"/><rect x="9" y="7" width="1" height="1"/></svg>Shuffle</button>
+          <button type="button" class="close" id="pickClose" aria-label="Close" title="Close" hidden><svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/></svg></button>
+        </div>
+        <div class="maps"></div>
+        <div class="hint"><i class="you"></i> You start here · <i class="foe"></i> Enemy base</div>
+      </div>
     </div>
     <div id="toast" hidden></div>
     <div id="loading" hidden>Drawing…</div>

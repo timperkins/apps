@@ -692,46 +692,84 @@ export function makeTrees(): StackSprite[] {
   return out;
 }
 
-// Ore: clumps of amber crystals poking out of the ground, [variant][size],
-// the size going down as the ore is mined out.
-export function makeOre(): StackSprite[][] {
-  const amber = hex('#eab443');
-  const deep = hex('#9a5f1c');
-  const tip = hex('#ffe7a0');
-  const out: StackSprite[][] = [];
+// Ore: low mounds of rough golden nuggets, packed close so a field reads as a
+// lumpy carpet over the ground, [variant][size] with the size going down as it
+// is dug. Each clump also has a flat stain of ore-darkened earth under it,
+// drawn with the ground so neighbouring clumps run together.
+export interface OreArt {
+  lumps: StackSprite[][];
+  stain: StackSprite[][];
+}
+
+export function makeOre(): OreArt {
+  const low = hex('#6a4614');
+  const mid = hex('#ad7c26');
+  const hi = hex('#dcab42');
+  const glint = hex('#fbe48e');
+  const earth = hex('#5a4520');
+  const earthD = hex('#3d2f15');
+  const lumps: StackSprite[][] = [];
+  const stain: StackSprite[][] = [];
   for (let vnt = 0; vnt < 4; vnt++) {
-    const sizes: StackSprite[] = [];
+    const ls: StackSprite[] = [];
+    const ss: StackSprite[] = [];
     for (let st = 0; st < 3; st++) {
-      const k = 0.45 + st * 0.28;
-      // a handful of leaning crystals round the clump's centre
-      const cr: { u: number; v: number; r: number; h: number; lu: number; lv: number }[] = [];
-      const n = 3 + ((vnt + st) % 3);
+      const k = 0.5 + st * 0.25;
+      // pebbles: small squashed lumps heaped towards the middle, each with a
+      // dark rim so they read as separate stones
+      const ns: { u: number; v: number; r: number; h: number }[] = [];
+      const n = Math.round((10 + (vnt % 3) * 3) * k);
       for (let i = 0; i < n; i++) {
         const a = hash2(i, vnt, 71) * Math.PI * 2;
-        const d = i === 0 ? 0 : 1.5 + hash2(i, vnt, 72) * 2.5;
-        cr.push({ u: Math.cos(a) * d * k * 1.4, v: Math.sin(a) * d * k * 1.4, r: (0.9 + hash2(i, vnt, 73) * 0.7) * (0.7 + k * 0.4), h: (4.5 + hash2(i, vnt, 74) * 5) * k + (i === 0 ? 2.5 * k : 0), lu: Math.cos(a) * 0.25, lv: Math.sin(a) * 0.25 });
+        const d = i === 0 ? 0 : Math.sqrt(hash2(i, vnt, 72)) * 4.2 * k + 0.6;
+        const r = (0.75 + hash2(i, vnt, 73) * 0.6) * (0.8 + k * 0.3) * (d < 1.5 ? 1.3 : 1);
+        ns.push({ u: Math.cos(a) * d, v: Math.sin(a) * d, r, h: r * (0.8 + hash2(i, vnt, 74) * 0.4) * (d < 2 ? 1.4 : 1) });
       }
-      sizes.push(
+      ls.push(
         renderStack(
           (u, v, z) => {
-            if (z < 0.6 && u * u + v * v < (4.5 * k + 1) ** 2 && hash2(Math.floor(u * 2), Math.floor(v * 2), vnt + 80) < 0.35) return shade(deep, -0.2); // grit round the foot
-            for (const c of cr) {
-              const du = u - c.u - c.lu * z;
-              const dv = v - c.v - c.lv * z;
-              const rr = c.r * (1 - z / (c.h + 0.01));
-              if (z > c.h || Math.max(Math.abs(du), Math.abs(dv), (Math.abs(du) + Math.abs(dv)) * 0.75) > rr) continue;
-              if (z > c.h * 0.7) return tip;
-              return du > 0.2 ? deep : amber;
+            let best: { q: number; t: number; du: number } | null = null;
+            for (const c of ns) {
+              const du = u - c.u;
+              const dv = v - c.v;
+              const q = (du * du + dv * dv) / (c.r * c.r) + (z * z) / (c.h * c.h);
+              if (q <= 1 && (!best || z / c.h > best.t)) best = { q, t: z / c.h, du };
             }
-            return null;
+            if (!best) return null;
+            if (best.q > 0.72 && best.t < 0.5) return low; // the rim
+            if (best.t > 0.6 && best.du < 0) return best.q < 0.35 ? glint : hi;
+            return best.t > 0.3 ? mid : shade(mid, -0.2);
           },
-          { r: 7, zmax: 12, bakeShadow: true, outline: [60, 34, 10], shadowAlpha: 0.25 },
+          { r: 6.5, zmax: 4, step: 0.25, bakeShadow: true, outline: [44, 28, 8], shadowAlpha: 0.32 },
+        ),
+      );
+      // the carpet: a ragged patch of ore-darkened earth, gritty with gold
+      const R = 6 + k * 3;
+      ss.push(
+        renderStack(
+          (u, v, z) => {
+            if (z > 0.4) return null;
+            const ang = Math.atan2(v, u);
+            const edge = R * (0.82 + 0.18 * Math.sin(ang * 3 + vnt * 1.7) * Math.cos(ang * 2 - vnt));
+            const d = Math.hypot(u, v);
+            const hh = hash2(Math.floor(u * 2 + 50), Math.floor(v * 2 + 50), vnt + 95);
+            const ragged = edge + (hh - 0.5) * 2.5;
+            if (d > ragged) return null;
+            // thinner, sparser grit towards the edge
+            const inner = 1 - d / ragged;
+            if (inner < 0.25 && hh < 0.45) return null;
+            const g = hash2(Math.floor(u * 1.4 + 50), Math.floor(v * 1.4 + 50), vnt + 97);
+            if (g > 0.78 - inner * 0.2) return g > 0.93 ? glint : hh > 0.5 ? hi : mid;
+            return hh < 0.35 ? earthD : earth;
+          },
+          { r: 10, zmax: 1, flat: true, top: 0, left: 0, right: 0 },
         ),
       );
     }
-    out.push(sizes);
+    lumps.push(ls);
+    stain.push(ss);
   }
-  return out;
+  return { lumps, stain };
 }
 
 export function makeRocks(): StackSprite[] {

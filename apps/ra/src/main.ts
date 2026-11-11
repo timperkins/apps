@@ -10,7 +10,6 @@ const canvas = document.querySelector<HTMLCanvasElement>('#c')!;
 const ctx = canvas.getContext('2d', { alpha: false })!;
 const mini = document.querySelector<HTMLCanvasElement>('#mini')!;
 const mctx = mini.getContext('2d')!;
-const selEl = document.querySelector<HTMLDivElement>('#sel')!;
 const regen = document.querySelector<HTMLButtonElement>('#regen')!;
 const versionEl = document.querySelector<HTMLSelectElement>('#version')!;
 const menuBtn = document.querySelector<HTMLButtonElement>('#menuBtn')!;
@@ -22,6 +21,11 @@ const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
 const actsEl = document.querySelector<HTMLSpanElement>('#acts')!;
+const homeBtn = document.querySelector<HTMLButtonElement>('#homeBtn')!;
+const picker = document.querySelector<HTMLDivElement>('#picker')!;
+const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
+const rerollBtn = document.querySelector<HTMLButtonElement>('#reroll')!;
+const pickClose = document.querySelector<HTMLButtonElement>('#pickClose')!;
 
 const VERSIONS: Record<string, (seed: number) => GameLike> = {
   '1': (seed) => new Game(ctx, seed),
@@ -151,18 +155,22 @@ function showSelection(names: string[]): void {
   lastNames = names;
   updateSelBar();
   if (!names.length) setAdditive(false);
-  if (!names.length && placingNow()) {
-    selEl.textContent = matchMedia('(pointer: fine)').matches ? 'Click to place · Esc: cancel' : 'Tap or drag to move it';
-    return;
-  }
-  if (!names.length) {
-    selEl.textContent = planet ? 'Drag: spin · Tap: fly down' : mode === 'pan' ? 'Drag: pan · Tap: move' : 'Drag: select · Tap: move';
-    return;
-  }
-  const counts = new Map<string, number>();
-  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
-  selEl.textContent = [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(' · ');
 }
+
+// Home: back to your base (the Foundry, or the vehicle that will become one),
+// on the copy of the world nearest the camera, down from space if need be.
+function goHome(): void {
+  if (!game || !built.w) return;
+  const p = game.homeBase?.() ?? game.focus();
+  cen.x = p.x + Math.round((cen.x - p.x) / built.w) * built.w;
+  cen.y = p.y + Math.round((cen.y - p.y) / built.h) * built.h;
+  if (planet) {
+    zoom = 1;
+    applyScale();
+  }
+  clampCen();
+}
+homeBtn.addEventListener('click', goHome);
 
 // ---------- Sizing, camera and zoom ----------
 
@@ -180,9 +188,9 @@ let zMin = 0.03;
 let planet = false;
 
 // The map is twice as wide as it is tall (it wraps round both ways), and
-// planet-sized: about twenty screens across. Its sides are whole numbers of
+// planet-sized: about fourteen screens across. Its sides are whole numbers of
 // ground tiles.
-const WORLD = { w: CH * 112, h: CH * 56 };
+const WORLD = { w: CH * 80, h: CH * 40 };
 
 const TAU = Math.PI * 2;
 // Things in the middle of the globe come out a bit smaller than on the flat map
@@ -257,6 +265,7 @@ function fit(force = false): void {
 }
 
 // Building sprites takes a moment, so show a note and yield a frame first.
+// Versions with a choice of maps ask which one first.
 function start(v: string): void {
   loading.hidden = false;
   requestAnimationFrame(() =>
@@ -265,12 +274,74 @@ function start(v: string): void {
       game.onSelect = showSelection;
       build.reset();
       built = { w: 0, h: 0 };
+      loading.hidden = true;
+      if (game.maps) showPicker();
+      else makeWorld();
+    }, 0),
+  );
+}
+
+// Generate the world (a fresh one each time) and paint the first view while
+// the note is up.
+function makeWorld(): void {
+  build.reset();
+  game.seed = seed;
+  loading.hidden = false;
+  requestAnimationFrame(() =>
+    setTimeout(() => {
       fit(true);
-      draw(performance.now(), true); // paint the first view while the note is up
+      draw(performance.now(), true);
       loading.hidden = true;
     }, 0),
   );
 }
+
+// ---------- Map picker ----------
+
+function showPicker(): void {
+  if (!game.maps) return makeWorld();
+  setMenu(false);
+  pickClose.hidden = !built.w;
+  picker.hidden = false;
+  // previews are of the seed the new world will be made from
+  const was = game.seed;
+  game.seed = seed;
+  const cards = game.maps().map((m, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'map';
+    b.append(game.preview?.(m.id, WORLD.w, WORLD.h) ?? document.createElement('canvas'));
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = m.name;
+    if (i === 0) {
+      const tag = document.createElement('span');
+      tag.className = 'first';
+      tag.textContent = 'Test';
+      name.append(tag);
+    }
+    const blurb = document.createElement('span');
+    blurb.className = 'blurb';
+    blurb.textContent = m.blurb;
+    b.append(name, blurb);
+    b.addEventListener('click', () => {
+      picker.hidden = true;
+      game.mapId = m.id;
+      makeWorld();
+    });
+    return b;
+  });
+  game.seed = was;
+  pickMaps.replaceChildren(...cards);
+}
+rerollBtn.addEventListener('click', () => {
+  seed = Math.floor(Math.random() * 100000);
+  showPicker();
+});
+// back to the game in progress
+pickClose.addEventListener('click', () => {
+  picker.hidden = true;
+});
 start(version);
 
 versionEl.addEventListener('change', () => {
@@ -287,22 +358,15 @@ versionEl.addEventListener('change', () => {
 let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(() => game && fit(), 150);
+  resizeTimer = window.setTimeout(() => game && built.w && fit(), 150);
 });
 
+// New map: a fresh seed, and (where there is a choice) pick the map again.
 regen.addEventListener('click', () => {
-  build.reset();
-  seed = Math.floor(Math.random() * 100000);
-  game.seed = seed;
   setMenu(false);
-  loading.hidden = false;
-  requestAnimationFrame(() =>
-    setTimeout(() => {
-      fit(true);
-      draw(performance.now(), true);
-      loading.hidden = true;
-    }, 0),
-  );
+  seed = Math.floor(Math.random() * 100000);
+  if (game.maps) showPicker();
+  else makeWorld();
 });
 
 // ---------- The globe (space view and minimap) ----------
@@ -632,6 +696,24 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   ghostDrag = null;
 };
 canvas.addEventListener('pointerup', (e) => finish(e, false));
+
+// With a mouse, a unit under the pointer gets a box round it in place of the
+// pointer, to show it can be picked. Checked every frame, as the units and
+// the camera move under a still mouse too.
+let mouse: { x: number; y: number } | null = null;
+let hovering = false;
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointerleave', () => (mouse = null));
+function hoverNow(): void {
+  const on = !!mouse && !planet && !placingNow() && !dragging && picker.hidden && !!game.hover?.(toMap(mouse.x, mouse.y).x, toMap(mouse.x, mouse.y).y);
+  if (!on) game.unhover?.();
+  if (on !== hovering) {
+    hovering = on;
+    canvas.classList.toggle('hovering', on);
+  }
+}
 canvas.addEventListener('pointercancel', (e) => finish(e, true));
 
 // Scroll wheel or trackpad pinch zooms around the cursor.
@@ -647,21 +729,27 @@ canvas.addEventListener(
 // Stop Safari's own page pinch from fighting ours.
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
-// ---------- Keyboard: S / P switch modes, arrow keys pan, +/- zoom, Esc clears ----------
+// ---------- Keyboard: WASD or the arrow keys pan, Q / P switch modes, +/- zoom, Esc clears ----------
 
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
   if (!game || (e.target as HTMLElement).tagName === 'SELECT') return;
-  keys.add(e.key.toLowerCase());
+  if (!picker.hidden) {
+    if (e.key === 'Escape' && !pickClose.hidden) pickClose.click();
+    return;
+  }
+  // (with ctrl or cmd held, letters are the browser's: ctrl+S, ctrl+D...)
+  if (!e.ctrlKey && !e.metaKey && !e.altKey) keys.add(e.key.toLowerCase());
   if (e.key === 'Escape') {
     if (!menu.hidden) setMenu(false);
     else if (placingNow()) game.act?.('unplace');
     else game.deselect();
   }
   if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
-  if (e.key === 's' && !e.ctrlKey && !e.metaKey) setMode('select');
+  if (e.key === 'q') setMode('select');
   if (e.key === 'p') setMode('pan');
-  if (e.key === 'd') game.act?.('deploy');
+  if (e.key === 'f') game.act?.('deploy');
+  if (e.key === 'h') goHome();
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '-' || e.key === '_') zoomTo(zoom / 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '0') zoomTo(1, window.innerWidth / 2, window.innerHeight / 2);
@@ -747,12 +835,13 @@ function frame(now: number): void {
   last = now;
   if (game && built.w) {
     const sp = (320 * dt) / zoom;
-    if (keys.has('arrowleft')) cen.x -= sp;
-    if (keys.has('arrowright')) cen.x += sp;
-    if (keys.has('arrowup')) cen.y -= sp / 2;
-    if (keys.has('arrowdown')) cen.y += sp / 2;
+    if (keys.has('arrowleft') || keys.has('a')) cen.x -= sp;
+    if (keys.has('arrowright') || keys.has('d')) cen.x += sp;
+    if (keys.has('arrowup') || keys.has('w')) cen.y -= sp / 2;
+    if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
+    hoverNow();
     draw(now, false);
   }
   requestAnimationFrame(frame);
@@ -813,3 +902,9 @@ Object.defineProperty(window, 'game', { get: () => game });
 Object.defineProperty(window, 'cam', { get: () => ({ x: camX(), y: camY(), cx: cen.x, cy: cen.y }) });
 Object.defineProperty(window, 'zoom', { get: () => zoom });
 Object.defineProperty(window, 'planet', { get: () => planet });
+Object.defineProperty(window, 'look', {
+  value: (x: number, y: number) => {
+    cen.x = x;
+    cen.y = y;
+  },
+});
