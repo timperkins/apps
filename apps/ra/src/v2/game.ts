@@ -3,7 +3,7 @@ import { RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '..
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
-import { START_CREDITS, TABS, TECH, Tab, Tech, buildTime } from './tech';
+import { QUEUE_MAX, START_CREDITS, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, toScreen, toWorld } from './stack';
 import {
@@ -44,6 +44,8 @@ const BNAME: Record<BuildingKind, string> = {
 const ME = 0;
 // Deploying: the Foundry vehicle turns to line up, then the yard rises.
 const RISE_S = 1.8;
+// Buildings that make units, and so have rally points.
+const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
 const PACK_S = 1.2;
@@ -87,6 +89,8 @@ interface Building {
   sel: boolean;
   rise: number; // 0..1, how far it has gone up (1 when standing)
   packing?: boolean;
+  rally?: [number, number]; // where new units head (world, first copy)
+  primary?: boolean; // the one of its kind that makes the units
 }
 
 interface Prop {
@@ -150,7 +154,7 @@ export class IsoGame implements GameLike {
 
   private emit(): void {
     const b = this.selB();
-    this.onSelect(b ? [BNAME[b.kind]] : this.selected().map((u) => UNIT[u.kind].name));
+    this.onSelect(b ? [MAKERS.includes(b.kind) ? `${BNAME[b.kind]} · tap ground: rally point` : BNAME[b.kind]] : this.selected().map((u) => UNIT[u.kind].name));
   }
 
   private selB(): Building | undefined {
@@ -184,6 +188,7 @@ export class IsoGame implements GameLike {
     this.mapVersion++;
     this.credits = START_CREDITS;
     this.jobs = new Map();
+    this.queue = new Map();
     this.known = new Set();
     this.fresh = new Set();
     this.ghost = null;
@@ -366,6 +371,8 @@ export class IsoGame implements GameLike {
   credits = START_CREDITS;
   // what each tab of the menu is working on (one thing at a time)
   private jobs = new Map<Tab, { tech: Tech; spent: number; paused: boolean; ready: boolean }>();
+  // units waiting behind the one being made, per tab
+  private queue = new Map<Tab, Tech[]>();
   private known = new Set<string>(); // items that have been on the menu
   private fresh = new Set<string>(); // ...and those not looked at yet
   private ghost: { tech: Tech; x: number; y: number; pad: Rect; why: string } | null = null;
@@ -395,20 +402,46 @@ export class IsoGame implements GameLike {
   private icon(t: Tech): string {
     let url = this.icons.get(t.id);
     if (!url) {
-      const spr = this.buildingArt(t.building!, ME).spr.img;
       const W = 64;
       const H = 48;
       const cv = document.createElement('canvas');
       cv.width = W;
       cv.height = H;
       const c = cv.getContext('2d')!;
-      const k = Math.min(W / spr.width, H / spr.height) * 1.15;
-      c.imageSmoothingQuality = 'high';
-      c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
+      if (t.building) {
+        const spr = this.buildingArt(t.building, ME).spr.img;
+        const k = Math.min(W / spr.width, H / spr.height) * 1.15;
+        c.imageSmoothingQuality = 'high';
+        c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
+      } else {
+        // the unit itself, facing down and to the left, blown up in whole pixels
+        const kind = t.unit as Kind;
+        const a = Math.PI * 0.62;
+        const art = this.art[ME];
+        const di = dirIndex(a, DIRS);
+        const layers: StackSprite[] =
+          kind === 'inf' || kind === 'rocket'
+            ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
+            : kind === 'light'
+              ? [art.lightTank[di], art.lightTurret[di]]
+              : kind === 'heavy'
+                ? [art.heavyTank[di], art.heavyTurret[di]]
+                : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+        const base = layers[0];
+        const k = Math.max(1, Math.min(3, Math.floor(Math.min(W / (base.img.width * 0.55), H / (base.img.height * 0.65)))));
+        c.imageSmoothingEnabled = false;
+        c.translate(W / 2, H / 2 + 4);
+        c.scale(k, k);
+        for (const s of layers) c.drawImage(s.img, -s.cx, -s.cy);
+      }
       url = cv.toDataURL();
       this.icons.set(t.id, url);
     }
     return url;
+  }
+
+  private queued(t: Tech): number {
+    return (this.queue.get(t.tab) ?? []).filter((q) => q === t).length;
   }
 
   buildMenu(): BuildMenu | null {
@@ -423,7 +456,7 @@ export class IsoGame implements GameLike {
       const mine = j && j.tech === t;
       let blocked: string | undefined;
       if (t.building && !have.has('yard')) blocked = 'Needs a Foundry';
-      else if (j && !mine) blocked = `Busy: ${j.tech.name}`;
+      else if (t.building && j && !mine) blocked = `Busy: ${j.tech.name}`;
       else if (!mine && this.credits <= 0) blocked = 'No credits';
       items.push({
         id: t.id,
@@ -434,7 +467,7 @@ export class IsoGame implements GameLike {
         blurb: t.blurb,
         state: !mine ? 'idle' : j.ready ? 'ready' : j.paused ? 'paused' : 'building',
         progress: mine ? j.spent / t.cost : 0,
-        count: mine ? 1 : 0,
+        count: (mine ? 1 : 0) + this.queued(t),
         isNew: this.fresh.has(t.id),
         blocked,
       });
@@ -452,6 +485,22 @@ export class IsoGame implements GameLike {
     if (!t) return;
     this.fresh.delete(id);
     const j = this.jobs.get(t.tab);
+    if (t.unit) {
+      // units queue up: tap again for another (a held one starts again)
+      if (j && j.tech === t && j.paused) {
+        j.paused = false;
+        return;
+      }
+      if (!this.available().includes(t)) return;
+      if ((j?.tech === t ? 1 : 0) + this.queued(t) >= QUEUE_MAX) return;
+      if (!j) this.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+      else {
+        const q = this.queue.get(t.tab) ?? [];
+        q.push(t);
+        this.queue.set(t.tab, q);
+      }
+      return;
+    }
     if (j && j.tech === t) {
       if (j.ready) this.startPlace(t);
       else j.paused = !j.paused;
@@ -469,11 +518,57 @@ export class IsoGame implements GameLike {
   buildCancel(id: string): void {
     const t = TECH.find((x) => x.id === id);
     if (!t) return;
+    // a queued unit goes first (one at a time), then the one being made
+    const q = this.queue.get(t.tab) ?? [];
+    const qi = q.lastIndexOf(t);
+    if (qi >= 0) {
+      q.splice(qi, 1);
+      return;
+    }
     const j = this.jobs.get(t.tab);
     if (!j || j.tech !== t) return;
     this.credits += j.spent;
-    this.jobs.delete(t.tab);
+    this.nextJob(t.tab);
     if (this.ghost?.tech === t) this.ghost = null;
+  }
+
+  // The tab's job is done with: start the next one in its queue.
+  private nextJob(tab: Tab): void {
+    this.jobs.delete(tab);
+    const q = this.queue.get(tab);
+    const n = q?.shift();
+    if (n) this.jobs.set(tab, { tech: n, spent: 0, paused: false, ready: false });
+  }
+
+  // A finished unit comes out of the building that makes it (the one picked
+  // as primary, or the newest) and heads for its rally point.
+  private deliver(t: Tech): boolean {
+    const makers = this.buildings.filter((b) => b.own && b.kind === t.from && b.rise >= 1 && !b.packing);
+    if (!makers.length) return false;
+    const b = makers.find((m) => m.primary) ?? makers[makers.length - 1];
+    const kind = t.unit as Kind;
+    const air = kind === 'heli';
+    // out of the door on the near (+y) side, or up off the helipad
+    const x = air ? b.x : b.x + (Math.random() - 0.5) * 6;
+    const y = air ? b.y : b.y + b.art.ry - 2;
+    const [fx, fy] = this.fold(x, y);
+    const u = this.newUnit(kind, ME, fx, fy, Math.PI / 2);
+    const [rx, ry] = b.rally ?? [b.x + (Math.random() - 0.5) * 30, b.y + b.art.ry + 22 + Math.random() * 14];
+    u.tx = rx + (b.rally ? (Math.random() - 0.5) * 16 : 0);
+    u.ty = ry + (b.rally ? (Math.random() - 0.5) * 16 : 0);
+    // the rally point is near the building, so go the short way round
+    [u.tx, u.ty] = this.nearPoint(u.x, u.y, u.tx, u.ty);
+    u.moving = true;
+    this.mapVersion++;
+    return true;
+  }
+
+  // The copy of world point (x, y) nearest (ax, ay).
+  private nearPoint(ax: number, ay: number, x: number, y: number): [number, number] {
+    const [asx, asy] = toScreen(ax, ay);
+    const [sx, sy] = toScreen(x, y);
+    const [nx, ny] = nearestCopy(asx, asy, sx, sy, this.w, this.h);
+    return toWorld(nx, ny, 0);
   }
 
   private updateBuild(dt: number): void {
@@ -490,6 +585,7 @@ export class IsoGame implements GameLike {
     for (const j of this.jobs.values()) {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
+      if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
       const want = (j.tech.cost / buildTime(j.tech.cost)) * dt;
       const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
       this.credits -= pay;
@@ -497,8 +593,15 @@ export class IsoGame implements GameLike {
       if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) this.notice('Not enough credits');
       if (j.spent >= j.tech.cost - 1e-6) {
         j.spent = j.tech.cost;
-        j.ready = true;
-        this.notice(`${j.tech.name} ready: tap it to place`);
+        if (j.tech.unit) {
+          if (this.deliver(j.tech)) {
+            this.notice(`${j.tech.name} ready`);
+            this.nextJob(j.tech.tab);
+          }
+        } else {
+          j.ready = true;
+          this.notice(`${j.tech.name} ready: tap it to place`);
+        }
       }
     }
   }
@@ -614,6 +717,13 @@ export class IsoGame implements GameLike {
     const b = this.selB();
     if (b) {
       if (b.own && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
+      if (b.own && MAKERS.includes(b.kind)) {
+        const acts: Action[] = [];
+        if (this.buildings.filter((o) => o.own && o.kind === b.kind).length > 1)
+          acts.push({ id: 'primary', label: b.primary ? 'Primary' : 'Make primary', icon: 'star', disabled: !!b.primary, title: 'New units come out of this one' });
+        if (b.rally) acts.push({ id: 'unrally', label: 'Clear rally', icon: 'x', title: 'New units wait by the door' });
+        return acts;
+      }
       return [];
     }
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
@@ -623,6 +733,9 @@ export class IsoGame implements GameLike {
   }
 
   act(id: string): void {
+    const sb = this.selB();
+    if (id === 'primary' && sb) for (const o of this.buildings) o.primary = o.own && o.kind === sb.kind ? o === sb : o.primary;
+    if (id === 'unrally' && sb) sb.rally = undefined;
     if (id === 'place') this.placeNow();
     else if (id === 'unplace') this.ghost = null;
     else if (id === 'deploy') {
@@ -799,7 +912,16 @@ export class IsoGame implements GameLike {
       this.emit();
       return;
     }
-    if (this.selB()) {
+    const sb = this.selB();
+    if (sb) {
+      // with a barracks, works or helipad selected, a tap on the ground sets
+      // where its new units go
+      if (MAKERS.includes(sb.kind) && sb.rise >= 1) {
+        const [wx, wy] = this.fold(...this.groundAt(x, y));
+        sb.rally = [wx, wy];
+        this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
+        return;
+      }
       this.deselect();
       return;
     }
@@ -1272,6 +1394,23 @@ export class IsoGame implements GameLike {
   // Brackets round the corners of a selected building's footprint.
   private drawBuildingSel(b: Building): void {
     const c = this.ctx;
+    if (b.rally) {
+      // a dotted line out to a little flag
+      const [rx, ry] = this.nearPoint(b.x, b.y, ...b.rally);
+      const [ax, ay] = toScreen(b.x, b.y + b.art.ry);
+      const [bx, by] = toScreen(rx, ry, this.terrain.elev(rx, ry));
+      const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 3);
+      c.fillStyle = 'rgba(157,255,157,0.85)';
+      for (let i = 0; i < n; i += 1) if (i % 2 === 0) c.fillRect(Math.round(ax + ((bx - ax) * i) / n), Math.round(ay + ((by - ay) * i) / n), 1, 1);
+      const X = Math.round(bx);
+      const Y = Math.round(by);
+      c.fillStyle = '#e9f0d8';
+      c.fillRect(X, Y - 9, 1, 10);
+      c.fillStyle = '#9dff9d';
+      c.fillRect(X + 1, Y - 9, 4, 3);
+      c.fillStyle = '#3c7a3c';
+      c.fillRect(X + 1, Y - 7, 4, 1);
+    }
     const { rx, ry } = b.art;
     c.fillStyle = '#ffffff';
     const L = 7;

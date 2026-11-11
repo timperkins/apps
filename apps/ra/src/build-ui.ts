@@ -21,6 +21,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   const creditsEl = document.querySelector<HTMLSpanElement>('#credits')!;
   const closeBtn = panel.querySelector<HTMLButtonElement>('.close')!;
   const toast = document.querySelector<HTMLDivElement>('#toast')!;
+  const hint = panel.querySelector<HTMLDivElement>('.hint')!;
 
   let open = false;
   let tab = '';
@@ -137,6 +138,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     }
 
     const shown = menu.items.filter((i) => i.tab === tab);
+    hint.textContent = tab === 'inf' || tab === 'veh' ? 'Tap to queue more · hold to take one off' : 'Tap to build · tap again to hold · hold to cancel';
     // looking at a tab counts as seeing what is new on it (after a moment)
     for (const it of shown)
       if (it.isNew && !seenSoon.has(it.id)) {
