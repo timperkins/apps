@@ -97,9 +97,9 @@ export interface GameLike {
   // false: don't mark where move orders go (the mouse cursor shows it).
   moveMarks?: boolean;
   // What a tap at map point (x, y) would do, for the mouse cursor: pick a
-  // unit, send the selection there, set a building's rally point, put the building being
+  // unit, send the selection there, attack an enemy, set a building's rally point, put the building being
   // placed down, or nothing it can do ('blocked'). null: nothing to show.
-  cursorAt?(x: number, y: number): 'pick' | 'move' | 'rally' | 'build' | 'blocked' | null;
+  cursorAt?(x: number, y: number): 'pick' | 'move' | 'attack' | 'rally' | 'build' | 'blocked' | null;
   // Where your home base is now, for the Home button.
   homeBase?(): { x: number; y: number };
 }

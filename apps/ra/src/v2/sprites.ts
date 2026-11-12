@@ -1,7 +1,7 @@
 // Isometric art for v2: units, buildings and props as shaded voxel shapes.
 // Everything is modelled in world units (one unit is one pixel across the
 // ground) down to half a unit, which is the finest the renderer samples.
-import { RGB, hash2, hex, mix, shade } from '../gfx';
+import { RGB, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
 import { Shape, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
 
@@ -1554,4 +1554,103 @@ export function makeClutter(): StackSprite[] {
     return shade(SAND_BAG, (hash2(Math.floor(a), course, 5) - 0.5) * 0.2);
   };
   return [crates, barrels, sandbags].map((s) => renderStack(s, { r: 6, zmax: 8, bakeShadow: true, outline: [28, 24, 18] }));
+}
+
+// ---------- Battle damage ----------
+
+const SOOT = hex('#2b2723');
+const ASH = hex('#5a544c');
+const EMBER = hex('#d65c28');
+
+export interface BuildingStates {
+  damaged: V2BuildingArt; // holed and scorched; its fx are where fires burn
+  ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
+}
+
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11 };
+
+// A building badly hit, and what is left of it once it is destroyed.
+export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {
+  const b = buildingShape(kind, f);
+  const { shape, rx, ry, zmax } = b;
+  const seed = B_SEED[kind] * 31 + 7;
+  const rand = rng(seed * 977);
+  // the height of the roof at (u, v)
+  const topAt = (u: number, v: number) => {
+    for (let z = zmax; z >= 0; z -= 0.5) if (shape(u, v, z)) return z;
+    return 0;
+  };
+  // shell holes: a few through the roof (where fires burn) and a few in the
+  // two walls that face the viewer
+  const holes: { u: number; v: number; z: number; r: number }[] = [];
+  const fires: V2BuildingArt['fx'] = [];
+  for (let i = 0, t = 0; i < 3 && t < 40; t++) {
+    const u = (rand() * 2 - 1) * rx * 0.7;
+    const v = (rand() * 2 - 1) * ry * 0.7;
+    const z = topAt(u, v);
+    if (z < 4 || holes.some((h) => Math.hypot(h.u - u, h.v - v) < 7)) continue;
+    const r = Math.min(3 + rand() * 2.5, rx * 0.35, ry * 0.35);
+    holes.push({ u, v, z, r });
+    fires.push({ x: u, y: v, z: z - r * 0.4 });
+    i++;
+  }
+  for (let i = 0, t = 0; i < 2 && t < 40; t++) {
+    const side = rand() < 0.5;
+    const u = side ? rx - 0.5 : (rand() * 2 - 1) * rx * 0.7;
+    const v = side ? (rand() * 2 - 1) * ry * 0.7 : ry - 0.5;
+    const top = topAt(u - (side ? 1.5 : 0), v - (side ? 0 : 1.5));
+    if (top < 8) continue;
+    const z = 3 + rand() * (top - 7);
+    holes.push({ u, v, z, r: 1.8 + rand() * 1.2 });
+    i++;
+  }
+  const damaged: Shape = (u, v, z) => {
+    const c = shape(u, v, z);
+    if (!c) return null;
+    let near = 1e9;
+    for (const h of holes) {
+      const d = Math.hypot(u - h.u, v - h.v, (z - h.z) * 1.1) - h.r;
+      if (d < 0) return null;
+      near = Math.min(near, d);
+    }
+    if (near < 1.4) return mix(c, SOOT, 0.8 - near * 0.2);
+    const s = vnoise(u / 3.5 + 3, v / 3.5 + z / 6, seed);
+    if (s > 0.6) return mix(c, SOOT, Math.min(0.75, (s - 0.6) * 3.5));
+    if (hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 89, seed) > 0.985) return shade(c, -0.35); // pockmarks
+    return c;
+  };
+  // the ruin: knocked down to a heap a few units high, with stumps of wall
+  // left standing along the edges
+  const capAt = (u: number, v: number) => {
+    const base = 1.2 + vnoise(u / 5 + 1, v / 5 + 1, seed + 1) * 3.2;
+    const edge = Math.min(rx - Math.abs(u), ry - Math.abs(v));
+    if (edge < 2.2 && hash2(Math.floor(u / 3), Math.floor(v / 3), seed + 2) > 0.5) return Math.min(zmax * 0.5, 4 + hash2(Math.floor(u / 3), Math.floor(v / 3), seed + 3) * 9);
+    return base;
+  };
+  const ruin: Shape = (u, v, z) => {
+    if (z > capAt(u, v)) return null;
+    const c = shape(u, v, z);
+    const r = hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 101, seed);
+    if (c) {
+      if (r > 0.992) return EMBER;
+      return shade(mix(c, SOOT, 0.35 + vnoise(u / 2, v / 2 + z, seed + 4) * 0.4), (r - 0.5) * 0.18);
+    }
+    if (Math.abs(u) > rx - 0.5 || Math.abs(v) > ry - 0.5) return null;
+    const heap = 0.6 + vnoise(u / 2.4 + 5, v / 2.4 + 5, seed + 5) * 2.6;
+    if (z > heap) return null;
+    const pick = hash2(Math.floor(u / 1.5), Math.floor(v / 1.5) + Math.floor(z) * 37, seed + 6);
+    const col = pick < 0.25 ? CONC : pick < 0.45 ? CONC_D : pick < 0.6 ? shade(BRICK, -0.2) : pick < 0.68 ? RUST : pick < 0.85 ? ASH : SOOT;
+    return shade(col, (r - 0.5) * 0.2);
+  };
+  const smokes: V2BuildingArt['fx'] = [];
+  for (let i = 0; i < 3; i++) {
+    const u = (rand() * 2 - 1) * rx * 0.6;
+    const v = (rand() * 2 - 1) * ry * 0.6;
+    smokes.push({ x: u, y: v, z: capAt(u, v) });
+  }
+  const o = { r: 0, rx, ry, zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 };
+  return {
+    damaged: { spr: renderStack(damaged, o), rx, ry, fx: fires },
+    ruin: { spr: renderStack(ruin, { ...o, zmax: Math.ceil(Math.min(zmax, Math.max(8, zmax * 0.5 + 1))), shadowAlpha: 0.22 }), rx, ry, fx: smokes },
+  };
 }

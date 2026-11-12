@@ -3,9 +3,10 @@
 // once, at start-up, and set as --cur-* variables on the page for style.css.
 //
 // The move cursor turns and plays a burst on click, and the corners cursor
-// (over a unit you can pick) breathes: main.ts steps through their frames.
+// (over a unit you can pick) and the attack cursor (over an enemy your units
+// can fire on) breathe: main.ts steps through their frames.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -20,7 +21,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -180,6 +181,7 @@ const FALLBACK: Record<CursorKind, string> = {
   grabbing: 'grabbing',
   move: 'crosshair',
   corners: 'pointer',
+  attack: 'crosshair',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
@@ -299,17 +301,43 @@ function cornerRows(h: number): string[] {
   });
 }
 
+// Over an enemy your units can fire on: a red gunsight, a broken ring of
+// radius r with four ticks pointing in at the target and a dot on it.
+function attackRows(r: number): string[] {
+  return drawn(17, (put) => {
+    const C = 8;
+    for (let y = 0; y < 17; y++)
+      for (let x = 0; x < 17; x++) {
+        const dx = x - C;
+        const dy = y - C;
+        if (Math.abs(Math.hypot(dx, dy) - r) < 0.55 && Math.abs(dx) > 1.5 && Math.abs(dy) > 1.5) put(x, y, 'r');
+      }
+    for (let i = 3; i <= Math.round(r) + 1; i++) {
+      const col = i > r - 1 ? 'R' : 'r';
+      put(C + i, C, col);
+      put(C - i, C, col);
+      put(C, C + i, col);
+      put(C, C - i, col);
+    }
+    put(C, C, 'R');
+  });
+}
+
 export const CURSORS = {} as Record<CursorKind, string>;
+// The attack cursor through one breath.
+export const ATTACK_FRAMES: string[] = [];
 // The corners cursor through one breath.
 export const CORNER_FRAMES: string[] = [];
 
 // Build every cursor and publish them as --cur-<kind> on the page.
 export function initCursors(): void {
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
+  for (const r of [5, 5.5, 6, 5.5]) ATTACK_FRAMES.push(gridCss(attackRows(r), [8, 8], FALLBACK.attack));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);
     else if (kind === 'corners') CURSORS[kind] = CORNER_FRAMES[0];
+    else if (kind === 'attack') CURSORS[kind] = ATTACK_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }

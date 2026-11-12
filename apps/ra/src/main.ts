@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
+import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -742,6 +742,7 @@ function hoverNow(now: number): void {
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
+  else if (k === 'attack') css = ATTACK_FRAMES[Math.floor(now / 140) % ATTACK_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;
@@ -936,6 +937,7 @@ requestAnimationFrame(frame);
 Object.defineProperty(window, 'game', { get: () => game });
 Object.defineProperty(window, 'cam', { get: () => ({ x: camX(), y: camY(), cx: cen.x, cy: cen.y }) });
 Object.defineProperty(window, 'zoom', { get: () => zoom });
+if (import.meta.env.DEV) Object.assign(window, { cen }); // to move the camera from the console
 Object.defineProperty(window, 'planet', { get: () => planet });
 Object.defineProperty(window, 'look', {
   value: (x: number, y: number) => {
