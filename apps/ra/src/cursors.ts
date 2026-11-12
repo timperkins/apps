@@ -397,6 +397,17 @@ export function initCursors(): void {
   }
 }
 
+// The move cursor's arrowheads, turning round a touch screen's confirm
+// button: one picture per turn step, as image URLs (a grid pixel to a pixel),
+// with the tips far enough out to clear the button.
+const ringFrames: string[] = [];
+export function moveRingFrames(): string[] {
+  if (!ringFrames.length)
+    for (let i = 0; i < MOVE_STEPS; i++) ringFrames.push(gridCanvas(moveRows((i / MOVE_STEPS) * (Math.PI / 2), { d: 7 }), 1).toDataURL('image/png'));
+  return ringFrames;
+}
+export const MOVE_RING_SIZE = MS;
+
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
 // on the map where you tapped: one grid pixel to a map pixel, centred on the

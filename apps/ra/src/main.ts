@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -29,7 +29,7 @@ const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
 const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
 const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
 const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
-const noBtn = document.querySelector<HTMLButtonElement>('#noBtn')!;
+const okRing = document.querySelector<HTMLDivElement>('#okRing')!;
 const homeBtn = document.querySelector<HTMLButtonElement>('#homeBtn')!;
 const picker = document.querySelector<HTMLDivElement>('#picker')!;
 const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
@@ -210,9 +210,11 @@ function showSelection(names: string[]): void {
 
 // ---------- Confirming orders on a touch screen ----------
 // With units selected, a tap on the ground (or an enemy) doesn't send them
-// straight away: a green check comes up where you tapped, with a red X next
-// to it. The check sends them, the X calls it off, and another tap moves it.
+// straight away: a round green check comes up where you tapped, with the move
+// cursor's arrowheads turning round it. The check sends them, another tap
+// moves it, and clearing the selection calls it off.
 let pending: { x: number; y: number } | null = null;
+let ringFrame = -1;
 function setPending(p: { x: number; y: number } | null): void {
   pending = p;
   confirmEl.hidden = !p;
@@ -226,6 +228,19 @@ function placeConfirm(): void {
     return;
   }
   const r = canvas.getBoundingClientRect();
+  // the arrowheads at the game's pixel size, turning as the cursor does
+  const px = Math.max(3, Math.round(base) + 1);
+  const size = `${MOVE_RING_SIZE * px}px`;
+  if (okRing.style.width !== size) {
+    okRing.style.width = okRing.style.height = size;
+    okRing.style.backgroundSize = size;
+  }
+  const frames = moveRingFrames();
+  const i = Math.floor(performance.now() / 150) % frames.length;
+  if (i !== ringFrame) {
+    ringFrame = i;
+    okRing.style.backgroundImage = `url(${frames[i]})`;
+  }
   confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
 }
 okBtn.addEventListener('click', () => {
@@ -234,7 +249,7 @@ okBtn.addEventListener('click', () => {
   setPending(null);
   game.click(p.x, p.y, false);
 });
-noBtn.addEventListener('click', () => setPending(null));
+
 
 // Home: back to your base (the Foundry, or the vehicle that will become one),
 // on the copy of the world nearest the camera, down from space if need be.

@@ -285,18 +285,20 @@ body {
 #selMenu button {
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 42px;
   height: 44px;
   padding: 3px 4px 2px;
   font-size: 8px;
+  line-height: 1;
   letter-spacing: 0;
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5);
 }
 
-#selMenu button svg {
-  width: 16px;
-  height: 16px;
+#selBar #selMenu button svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
 }
 
 #selBar button.type {
@@ -361,58 +363,54 @@ body {
   cursor: var(--cur-arrow);
 }
 
-/* confirming an order on a touch screen: a check over the spot, an X beside it */
+/* confirming an order on a touch screen: a round check over the spot, with
+   the move cursor's arrowheads turning round it (main.ts sizes and steps them) */
 #confirm {
   position: fixed;
   z-index: 1;
   left: 0;
   top: 0;
-  display: flex;
-  gap: 8px;
-  margin: -20px 0 0 -20px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
-#confirm button {
+#okRing {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.35));
+}
+
+#okBtn {
+  position: absolute;
+  left: -18px;
+  top: -18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  border: 2px solid;
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3), inset -1px -1px 0 rgba(0, 0, 0, 0.4), 0 2px 0 rgba(0, 0, 0, 0.45);
+  border-radius: 50%;
+  color: #10170d;
+  background: #4fd84a;
+  border: 2px solid #10140c;
+  box-shadow: inset 2px 2px 0 #b8ff9c, inset -2px -2px 0 #2a8a2a, 0 2px 0 rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
   cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
   animation: pop 0.12s steps(3);
 }
 
-#confirm button svg {
-  width: 20px;
-  height: 20px;
+#okBtn svg {
+  width: 18px;
+  height: 18px;
   fill: currentColor;
 }
 
-#okBtn {
-  color: #10170d;
-  background: #9dff9d;
-  border-color: #d8ffd8 #3c7a3c #3c7a3c #d8ffd8;
-}
-
-#noBtn {
-  margin-top: 6px;
-  width: 30px !important;
-  height: 30px !important;
-  color: #fff;
-  background: #d6463a;
-  border-color: #ff9a8f #7a1f17 #7a1f17 #ff9a8f;
-}
-
-#noBtn svg {
-  width: 13px !important;
-  height: 13px !important;
-}
-
-#confirm button:active {
+#okBtn:active {
   transform: translateY(1px);
 }
 
