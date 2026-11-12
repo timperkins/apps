@@ -76,6 +76,7 @@ const icons: Partial<Record<UpgradeId, string>> = {
   firebox: '📦',
   lake: '🎣',
   rod: '🪝',
+  fisher: '🐟',
   wall: '🛡️',
   guard: '💂',
   dog: '🐶',

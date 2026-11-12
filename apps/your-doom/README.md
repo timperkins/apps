@@ -15,7 +15,7 @@ A snowy isometric wood-gathering game at [your-doom.trom.dev](https://your-doom.
 
 Before the game starts you pick one of 8 ways to play (Restart brings the picker back):
 1. **Night & blizzards**: day/night cycle; feed the campfire logs or customers leave. Lantern and Firewood box upgrades.
-2. **Frozen lake**: buy Ice fishing, fish at the holes on the lake, sell fish at the crate in camp.
+2. **Frozen lake**: buy Ice fishing, fish at the holes on the lake, sell fish at the crate in camp. Then hire up to 3 fishers who fish and sell for you.
 3. **Boss wolf**: a giant wolf raids the counter now and then; fight it, buy Spiked gates and guards.
 4. **Build the town**: bring logs to three house plots; each house brings more (and richer) customers.
 5. **Pets**: a dog that chases wolves off and a reindeer that carries 10 more logs.

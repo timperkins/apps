@@ -46,7 +46,7 @@ type BaseId =
   // Second tier: each appears once the upgrade it follows is maxed out.
   | 'beltspeed' | 'sled' | 'chainsaw' | 'crew' | 'skates' | 'royal' | 'market' | 'seeds' | 'megatree'
   // Only offered in one play mode.
-  | 'lantern' | 'firebox' | 'lake' | 'rod' | 'wall' | 'guard' | 'dog' | 'reindeer';
+  | 'lantern' | 'firebox' | 'lake' | 'rod' | 'wall' | 'guard' | 'dog' | 'reindeer' | 'fisher';
 // Endless last tier: every upgrade with nothing after it turns into a golden version.
 export type UpgradeId = BaseId | `gold-${BaseId}`;
 interface Upgrade {
@@ -122,6 +122,20 @@ interface House {
   need: number;
   have: number;
   pending: number;
+}
+
+interface Fisher {
+  x: number;
+  y: number;
+  face: number;
+  walk: number;
+  moving: boolean;
+  path: { x: number; y: number }[];
+  state: 'toHole' | 'fish' | 'toCrate' | 'sell';
+  hole: number;
+  fish: number;
+  t: number;
+  hat: string;
 }
 
 interface Pet {
@@ -400,6 +414,8 @@ export class Game {
         ['reindeer', 'Reindeer', 'pets', [500]],
       ] as [UpgradeId, string, Mode, number[]][]
     ).map(([id, name, mode, prices]): Upgrade => ({ id, name, mode, prices, x0: 0, y0: 0, x1: 0, y1: 0, level: 0, paid: 0, payT: 0, menuOnly: true })),
+    // Fishers show up once the fishing holes are open.
+    { id: 'fisher', name: 'Hire fisher', mode: 'lake', after: 'lake', prices: [150, 350, 700], x0: 0, y0: 0, x1: 0, y1: 0, level: 0, paid: 0, payT: 0, menuOnly: true },
   ];
   // Golden upgrades never run out: each level costs more and adds 5% to every sale.
   private goldens: Upgrade[] = this.upgrades
@@ -429,6 +445,7 @@ export class Game {
   private bossWarned = false;
   private bossHitT = 0;
   private guards: Guard[] = [];
+  private fishers: Fisher[] = [];
   // Town
   private houses: House[] = [];
   private houseSave: number[] = [];
@@ -677,6 +694,7 @@ export class Game {
     if (u.id === 'worker') this.hireWorker(u.level - 1);
     if (u.id === 'dog' || u.id === 'reindeer') this.spawnPet(u.id);
     if (u.id === 'guard') this.addGuard(u.level - 1);
+    if (u.id === 'fisher') this.addFisher(u.level - 1);
     sfx.upgrade();
     const cx = u.menuOnly ? this.player.x : (u.x0 + u.x1) / 2;
     const cy = u.menuOnly ? this.player.y : (u.y0 + u.y1) / 2;
@@ -721,7 +739,8 @@ export class Game {
       lantern: () => 'See farther at night.',
       firebox: () => 'The campfire burns half as fast.',
       lake: () => 'Open three fishing holes on the frozen lake.',
-      rod: () => 'Catch fish faster.',
+      rod: () => 'Catch fish faster (you and your fishers).',
+      fisher: (l) => `A helper who catches fish at the lake and sells them for you. You have ${l} of 3.`,
       wall: () => 'The boss wolf is slower and weaker.',
       guard: (l) => `A guard who fights the boss wolf. You have ${l} of 2.`,
       dog: () => 'Follows you and scares wolves away.',
@@ -882,6 +901,7 @@ export class Game {
     if (this.mode !== 'boss') this.updateWolf(dt);
     this.updateNight(dt);
     this.updateLake(dt);
+    this.updateFishers(dt);
     this.updateBoss(dt);
     this.updatePets(dt);
     this.updateChest(dt);
@@ -1341,8 +1361,8 @@ export class Game {
   }
 
   /** Move along the waypoint path; true once the last point is reached. */
-  private walkPath(w: Worker, dt: number): boolean {
-    let budget = this.workerSpeed * dt;
+  private walkPath(w: { x: number; y: number; face: number; walk: number; moving: boolean; path: { x: number; y: number }[] }, dt: number, speed = this.workerSpeed): boolean {
+    let budget = speed * dt;
     while (w.path.length && budget > 0) {
       const t = w.path[0];
       const dx = t.x - w.x;
@@ -1684,6 +1704,7 @@ export class Game {
       if (this.lvl('reindeer')) this.spawnPet('reindeer');
     }
     if (m === 'boss') for (let i = 0; i < this.lvl('guard'); i++) this.addGuard(i);
+    if (m === 'lake') for (let i = 0; i < this.lvl('fisher'); i++) this.addFisher(i);
     if (m === 'chest' && Date.now() - this.lastChest >= CHEST_EVERY) {
       this.chest = { x: CHEST_SPOT.x, y: CHEST_SPOT.y, open: 0, done: false, fade: 0 };
     }
@@ -1775,6 +1796,114 @@ export class Game {
   }
 
   // --- Frozen lake -------------------------------------------------------------
+
+  private addFisher(i: number) {
+    const hats = ['#2e9e8f', '#e0b12a', '#b85a6f'];
+    this.fishers.push({
+      x: (FISH_DROP.x0 + FISH_DROP.x1) / 2,
+      y: (FISH_DROP.y0 + FISH_DROP.y1) / 2,
+      face: -1, walk: 0, moving: false, path: [], state: 'toHole', hole: i % HOLES.length, fish: 0, t: 0,
+      hat: hats[i % hats.length],
+    });
+  }
+
+  private updateFishers(dt: number) {
+    const cap = 4 + 2 * this.lvl('crew');
+    for (const f of this.fishers) {
+      f.moving = false;
+      if (f.state === 'toHole') {
+        if (!f.path.length) {
+          const h = HOLES[f.hole];
+          f.path = this.route(f, { x: h.x + 0.55, y: h.y + 0.25 });
+        }
+        if (this.walkPath(f, dt, 2.6)) {
+          f.state = 'fish';
+          f.t = 0;
+        }
+      } else if (f.state === 'fish') {
+        const h = HOLES[f.hole];
+        const sx = h.x - h.y - (f.x - f.y);
+        if (Math.abs(sx) > 0.05) f.face = sx > 0 ? 1 : -1;
+        f.t += dt * (1 + 0.6 * this.lvl('rod'));
+        if (f.t >= 2.2) {
+          f.t = 0;
+          f.fish++;
+          if (this.onScreen(h.x, h.y, 0)) {
+            this.texts.push({ x: h.x, y: h.y, z: 1.4, t: 0, text: '+1 🐟' });
+            sfx.pop();
+          }
+          for (let i = 0; i < 8; i++) {
+            this.particles.push({
+              x: h.x, y: h.y, z: 0.1,
+              vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, vz: 2 + Math.random() * 2,
+              life: 0.6, max: 0.6, color: i % 2 ? '#7cc7f0' : '#ffffff', size: 0.06, gravity: 9,
+            });
+          }
+          if (f.fish >= cap) {
+            f.state = 'toCrate';
+            f.path = [];
+          }
+        }
+      } else if (f.state === 'toCrate') {
+        if (!f.path.length) {
+          f.path = this.route(f, {
+            x: lerp(FISH_DROP.x0 + 0.3, FISH_DROP.x1 - 0.3, Math.random()),
+            y: lerp(FISH_DROP.y0 + 0.3, FISH_DROP.y1 - 0.3, Math.random()),
+          });
+        }
+        if (this.walkPath(f, dt, 2.6)) {
+          f.state = 'sell';
+          f.t = 0;
+        }
+      } else {
+        f.t += dt;
+        while (f.t >= 0.2 && f.fish > 0) {
+          f.t -= 0.2;
+          f.fish--;
+          const amount = Math.round(FISH_PRICE * this.starBoost);
+          this.texts.push({ x: f.x, y: f.y, z: 1.9, t: 0, text: `+${amount}` });
+          const s = this.project(f.x, f.y, 1.4);
+          this.coins.push({ x: s.x, y: s.y, t: 0, dur: 0.55, onArrive: () => this.earn(amount, false) });
+        }
+        if (f.fish <= 0) f.state = 'toHole';
+      }
+    }
+  }
+
+  private drawFisher(f: Fisher) {
+    const u = this.S;
+    this.drawPerson(
+      f.x,
+      f.y,
+      { face: f.face, walk: f.walk, moving: f.moving, coat: '#2e6f9e', coatDark: '#24577c', skin: '#eebd94', hat: 'beanie', hatColor: f.hat },
+      (bx, by) => {
+        for (let i = 0; i < f.fish; i++) this.drawFish(bx - f.face * u * 0.3, by - u * 0.5 - i * u * 0.14, u * 0.24);
+      },
+      (bx, by) => {
+        if (f.state !== 'fish') return;
+        // Fishing rod with a line down to the hole.
+        const g = this.g;
+        const hx = bx + f.face * u * 0.25;
+        const hy = by - u * 0.5;
+        const tipX = hx + f.face * u * 0.55;
+        const tipY = hy - u * 0.55;
+        g.strokeStyle = '#7b4a24';
+        g.lineWidth = u * 0.05;
+        g.lineCap = 'round';
+        g.beginPath();
+        g.moveTo(hx, hy);
+        g.lineTo(tipX, tipY);
+        g.stroke();
+        const h = this.project(HOLES[f.hole].x, HOLES[f.hole].y, 0);
+        g.strokeStyle = 'rgba(255,255,255,0.8)';
+        g.lineWidth = Math.max(1, u * 0.015);
+        g.beginPath();
+        g.moveTo(tipX, tipY);
+        g.quadraticCurveTo(tipX, h.y - u * 0.2, h.x, h.y);
+        g.stroke();
+      },
+    );
+  }
 
   private updateLake(dt: number) {
     if (this.mode !== 'lake') return;
@@ -2379,6 +2508,9 @@ export class Game {
             },
           ),
       });
+    }
+    for (const f of this.fishers) {
+      if (this.onScreen(f.x, f.y)) items.push({ key: f.x + f.y + 0.012, draw: () => this.drawFisher(f) });
     }
     for (const pet of this.pets) {
       if (this.onScreen(pet.x, pet.y)) items.push({ key: pet.x + pet.y + 0.01, draw: () => this.drawPet(pet) });
