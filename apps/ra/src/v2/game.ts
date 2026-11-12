@@ -150,6 +150,9 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   markers: { x: number; y: number; z: number; t: number }[] = [];
+  // Mark where a move order goes. main.ts turns it off for the mouse, whose
+  // cursor shows the order instead.
+  moveMarks = true;
   sparkles: { x: number; y: number; life: number }[] = [];
   sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
   art: V2FactionArt[];
@@ -1330,7 +1333,7 @@ export class IsoGame implements GameLike {
         }
       if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
         const [mx, my] = this.fold(...this.groundAt(x, y));
-        this.markers.push({ x: mx, y: my, z: 0, t: 0 });
+        if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0 });
         return;
       }
     }
@@ -1343,7 +1346,7 @@ export class IsoGame implements GameLike {
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
     const [mx, my] = this.fold(wx, wy);
-    this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
+    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
     const cols = Math.ceil(Math.sqrt(sel.length));
     const rows = Math.ceil(sel.length / cols);
     const gap = 14;

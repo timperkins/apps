@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { CURSORS, initCursors, type CursorKind } from './cursors';
+import { CORNER_FRAMES, CURSORS, MOVE_FRAMES, initCursors, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -612,6 +612,7 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   if (multi || down) return;
+  if (game.moveMarks !== undefined) game.moveMarks = e.pointerType !== 'mouse';
   const p = toMap(e.clientX, e.clientY);
   if (placingNow()) {
     if (e.button === 2) {
@@ -628,6 +629,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button === 2) {
     if (planet) spaceTap(e, true);
     else {
+      if (cursorKind === 'move') movedAt = performance.now();
       game.order(p.x, p.y);
     }
     return;
@@ -699,6 +701,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
     if (planet) {
       if (!dragging) spaceTap(e);
     } else if (!dragging) {
+      if (e.pointerType === 'mouse' && cursorKind === 'move') movedAt = performance.now();
       game.click(down.x, down.y, add);
     } else if (!down.pan) game.boxSelect(down.x, down.y, p.x, p.y, add);
   }
@@ -709,32 +712,46 @@ const finish = (e: PointerEvent, cancel: boolean) => {
 };
 canvas.addEventListener('pointerup', (e) => finish(e, false));
 
-// With a mouse, a unit under the pointer gets a spinning ring round it in
-// place of the pointer, to show it can be picked; elsewhere the pointer shows
-// what a click would do (send units, set a rally point, place a building, or
-// can't). Checked every frame, as the units and the camera move under a still
-// mouse too.
+// With a mouse, the pointer shows what a click would do. Over a unit: white
+// corners, breathing, when nothing is selected; with something selected the
+// pointer hides and the game spins a ring round the unit. Elsewhere: send
+// units (whose arrowheads close in on the spot when clicked), set a rally
+// point, place a building, or can't. Checked every frame, as the units and
+// the camera move under a still mouse too.
 let mouse: { x: number; y: number } | null = null;
-let cursor: CursorKind | '' = '';
+let cursor = '';
+let cursorKind: CursorKind = 'arrow';
+// when the last move order was clicked, for the move cursor's close-in
+let movedAt = -Infinity;
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
 });
 canvas.addEventListener('pointerleave', () => (mouse = null));
-function hoverNow(): void {
+function hoverNow(now: number): void {
   const m = mouse && toMap(mouse.x, mouse.y);
   const on = !!m && !planet && !placingNow() && !dragging && picker.hidden && !!game.hover?.(m.x, m.y);
-  if (!on) game.unhover?.();
+  const ring = on && game.selectedPoints().length > 0;
+  if (!ring) game.unhover?.();
   let k: CursorKind = 'arrow';
   if (down && (down.pan || ghostDrag) && (dragging || mode === 'pan' || planet)) k = 'grabbing';
-  else if (on) k = 'none';
+  else if (on) k = ring ? 'none' : 'corners';
   else if (m && !planet && !(dragging && box)) {
     const what = game.cursorAt?.(m.x, m.y);
     if (what) k = what;
     else if (mode === 'pan') k = 'grab';
   } else if (planet) k = 'grab';
-  if (k !== cursor) {
-    cursor = k;
-    canvas.style.cursor = CURSORS[k];
+  cursorKind = k;
+  canvas.dataset.cursor = k;
+  let css = CURSORS[k];
+  if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
+  else if (k === 'move') {
+    // arrowheads 4 → 1 px out over 240 ms, then back to rest
+    const t = (now - movedAt) / 60;
+    if (t >= 0 && t < 4) css = MOVE_FRAMES[4 - Math.floor(t)];
+  }
+  if (css !== cursor) {
+    cursor = css;
+    canvas.style.cursor = css;
   }
 }
 canvas.addEventListener('pointercancel', (e) => finish(e, true));
@@ -864,7 +881,7 @@ function frame(now: number): void {
     if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
-    hoverNow();
+    hoverNow(now);
     draw(now, false);
   }
   requestAnimationFrame(frame);
