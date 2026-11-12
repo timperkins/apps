@@ -54,6 +54,8 @@ const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
 const PACK_S = 1.2;
+const PACE_SPEED = 3.5; // a soldier pacing about, in map pixels a second
+const PACE_R = 6; // and how far from where it was left
 
 interface Unit {
   kind: Kind;
@@ -89,6 +91,12 @@ interface Unit {
   stuck?: number;
   goal?: [number, number];
   slideT?: number;
+  // standing about: soldiers pace round the spot they stopped on (home),
+  // stepping to `pace`; buggies and artillery shift on their wheels to `look`
+  home?: [number, number];
+  pace?: [number, number];
+  look?: number;
+  face?: number; // the way it was left facing, which it shifts about
 }
 
 interface OreNode {
@@ -1166,6 +1174,45 @@ export class IsoGame implements GameLike {
     return this.terrain.elev(u.x, u.y);
   }
 
+  // A soldier with nothing to do: stands a while, then wanders a step or two
+  // round the spot it was left on, or just turns to look somewhere else.
+  private paceAbout(u: Unit, dt: number): void {
+    if (!u.home) u.home = [u.x, u.y];
+    if (u.pace) {
+      const dx = u.pace[0] - u.x;
+      const dy = u.pace[1] - u.y;
+      const dist = Math.hypot(dx, dy);
+      const want = Math.atan2(dy, dx);
+      const diff = angDiff(want, u.a);
+      const stepA = UNIT[u.kind].turn * dt;
+      u.a = Math.abs(diff) <= stepA ? want : u.a + Math.sign(diff) * stepA;
+      const sp = Math.min(dist, PACE_SPEED * dt);
+      const nx = u.x + Math.cos(want) * sp;
+      const ny = u.y + Math.sin(want) * sp;
+      if (dist < 0.3 || !this.okAt(u, nx, ny)) {
+        u.pace = undefined;
+        u.idle = 1.5 + Math.random() * 4;
+      } else {
+        u.x = nx;
+        u.y = ny;
+      }
+      return;
+    }
+    u.idle -= dt;
+    if (u.idle > 0) return;
+    u.idle = 1.5 + Math.random() * 4;
+    if (Math.random() < 0.35) {
+      u.a += (Math.random() - 0.5) * 2.5; // just look round
+      return;
+    }
+    const r = 2 + Math.random() * (PACE_R - 2);
+    const th = Math.random() * Math.PI * 2;
+    const px = u.home[0] + Math.cos(th) * r;
+    const py = u.home[1] + Math.sin(th) * r;
+    if (!this.okAt(u, px, py) || this.buildings.some((b) => Math.abs(b.x - px) < b.art.rx + 1 && Math.abs(b.y - py) < b.art.ry + 1)) return;
+    u.pace = [px, py];
+  }
+
   // ---------- Input (screen coordinates) ----------
 
   private screenOf(u: Unit): [number, number] {
@@ -1560,6 +1607,27 @@ export class IsoGame implements GameLike {
         }
         const d = angDiff(u.turretGoal, u.turret);
         u.turret += Math.sign(d) * Math.min(Math.abs(d), 2.2 * dt);
+      }
+      if (u.moving || u.deploy || u.job) {
+        u.home = u.pace = u.look = u.face = undefined;
+      } else if (foot) this.paceAbout(u, dt);
+      else if (u.kind === 'buggy' || u.kind === 'arty') {
+        // edge round a little now and then, as if the driver were looking about
+        if (u.look === undefined) {
+          u.idle -= dt;
+          if (u.idle <= 0) {
+            u.idle = 3 + Math.random() * 6;
+            u.face ??= u.a;
+            u.look = u.face + (angDiff(u.a, u.face) > 0 ? -1 : 1) * (0.25 + Math.random() * 0.35);
+          }
+        } else {
+          const d = angDiff(u.look, u.a);
+          const stepA = st.turn * 0.35 * dt;
+          if (Math.abs(d) <= stepA) {
+            u.a = u.look;
+            u.look = undefined;
+          } else u.a += Math.sign(d) * stepA;
+        }
       }
     }
 
@@ -1966,7 +2034,7 @@ export class IsoGame implements GameLike {
       case 'inf':
       case 'rocket': {
         const frames = u.kind === 'inf' ? art.infantry : art.rocket;
-        const fr = u.moving ? 1 + (Math.floor(u.anim * 7) % 2) : 0;
+        const fr = u.moving ? 1 + (Math.floor(u.anim * 7) % 2) : u.pace ? 1 + (Math.floor(u.anim * 4) % 2) : 0;
         this.blit(frames[fr][dirIndex(u.a, 16)], u.x, u.y, u.z);
         break;
       }
