@@ -798,9 +798,14 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
 
   plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13, idleShuffle(me.artillery, 2));
 
-  // the hauler also digs ore
+  // the hauler also digs ore, and its bed shows how full it is
   const ore = makeOre();
-  plain('Ore hauler', 'hauler', (a) => a.hauler, 18, 13, (draw) => [
+  plain('Ore hauler', 'hauler', (a) => a.hauler, 18, 13, () => [
+    ...['Empty', 'Partly full', 'Full'].map((label, fill) => ({
+      label,
+      box: boxOf(me.haulerLoad[fill][di(Math.PI / 2)]),
+      draw: (s: Scene) => s.blit(me.haulerLoad[fill][di(Math.PI / 2)], 0, 0, 0),
+    })),
     {
       label: 'Dig ore',
       box: union(boxOf(me.hauler[0], -6, -6), boxOf(ore.lumps[0][2], 8, 8)),
@@ -811,7 +816,8 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         const size = k < 0.33 ? 2 : k < 0.66 ? 1 : 0;
         s.blit(ore.stain[0][size], 8, 8, 0);
         s.blit(ore.lumps[0][size], 8, 8, 0);
-        draw(s, -6, -6, Math.PI / 4, t);
+        // and the hauler fills up as it goes
+        s.blit(me.haulerLoad[2 - size][di(Math.PI / 4)], -6, -6, 0);
         if (Math.random() < dt * 6) {
           const [sx, sy] = toScreen(8, 8, 2);
           s.puff(sx + (Math.random() - 0.5) * 6, sy, 'dust', { vx: (Math.random() - 0.5) * 6, vy: -4, max: 0.8 });

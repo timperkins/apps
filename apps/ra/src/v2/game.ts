@@ -2,7 +2,7 @@
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import type { Action, BuildItem, BuildMenu, GameLike, UnitType } from '../types';
+import type { Action, BuildItem, BuildMenu, CursorAt, GameLike, UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
@@ -203,6 +203,17 @@ interface Particle {
 const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
 
 // Height of each unit's visual centre above the ground (for picking and brackets).
+// Which of the hauler's three pictures to show for a load: empty, partly
+// full or full.
+function haulerFill(load = 0): number {
+  return load < 1 ? 0 : load >= ORE.load * 0.9 ? 2 : 1;
+}
+
+// Which click burst an order marker plays.
+function markKind(m: { foe?: boolean; ore?: boolean }): 'move' | 'attack' | 'harvest' {
+  return m.foe ? 'attack' : m.ore ? 'harvest' : 'move';
+}
+
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
 
 // Stages to start a game in, for testing: the real start, or straight into a
@@ -256,7 +267,7 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   // where you tapped an order: the move (or attack, foe) burst plays there
-  markers: { x: number; y: number; z: number; t: number; foe?: boolean }[] = [];
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private bStates = new Map<string, BuildingStates>();
@@ -1200,10 +1211,8 @@ export class IsoGame implements GameLike {
       }
       return [];
     }
-    const haulers = this.selected().filter((u) => u.kind === 'hauler' && u.f === ME);
-    const idle = haulers.filter((u) => !u.job);
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
-    if (!mcvs.length) return idle.length ? [{ id: 'harvest', label: 'Harvest', icon: 'ore', title: 'Go back to gathering ore' }] : [];
+    if (!mcvs.length) return [];
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
     return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' }];
   }
@@ -1212,12 +1221,6 @@ export class IsoGame implements GameLike {
     const sb = this.selB();
     if (id === 'primary' && sb) for (const o of this.buildings) o.primary = o.own && o.kind === sb.kind ? o === sb : o.primary;
     if (id === 'unrally' && sb) sb.rally = undefined;
-    if (id === 'harvest')
-      for (const u of this.selected())
-        if (u.kind === 'hauler' && u.f === ME && !u.job) {
-          u.job = { st: 'seek', t: 0 };
-          u.load ??= 0;
-        }
     if (id === 'place') this.placeNow();
     else if (id === 'unplace') this.ghost = null;
     else if (id === 'deploy') {
@@ -1424,7 +1427,7 @@ export class IsoGame implements GameLike {
   }
 
   // What a tap at (x, y) would do, for the mouse cursor. Follows click().
-  cursorAt(x: number, y: number): 'pick' | 'move' | 'attack' | 'rally' | 'build' | 'blocked' | null {
+  cursorAt(x: number, y: number): CursorAt {
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
     const hit = this.unitAt(x, y);
@@ -1439,8 +1442,10 @@ export class IsoGame implements GameLike {
     // over an enemy that one of them can shoot at: attack it
     const foe = this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) return 'attack';
-    // boats can't go onto land, nor anyone else into the water
+    // over ore with a hauler selected: dig it (haulers only ever go after ore)
     const [gx, gy] = this.fold(...this.groundAt(x, y));
+    if (sel.some((u) => u.kind === 'hauler') && this.oreNear(gx, gy, 16).some((n) => n.amt > 20)) return 'harvest';
+    // boats can't go onto land, nor anyone else into the water
     return sel.some((u) => this.okAt(u, gx, gy)) ? 'move' : 'blocked';
   }
 
@@ -1535,19 +1540,21 @@ export class IsoGame implements GameLike {
       return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
+    let dig = false;
     {
       const [gx, gy] = this.fold(...this.groundAt(x, y));
       const near = this.oreNear(gx, gy, 16).filter((n) => n.amt > 20);
       for (const u of sel)
         if (u.kind === 'hauler' && u.f === ME) {
           if (near.length) {
+            dig = true;
             u.job = { st: 'seek', node: near[0], t: 0 };
             u.load ??= 0;
           } else u.job = undefined;
         }
       if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
         const [mx, my] = this.fold(...this.groundAt(x, y));
-        if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0 });
+        if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0, ore: true });
         return;
       }
     }
@@ -1560,7 +1567,7 @@ export class IsoGame implements GameLike {
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
     const [mx, my] = this.fold(wx, wy);
-    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
+    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0, ore: dig });
     const cols = Math.ceil(Math.sqrt(sel.length));
     const rows = Math.ceil(sel.length / cols);
     const gap = 14;
@@ -1659,6 +1666,21 @@ export class IsoGame implements GameLike {
         }
       }
     }
+    this.emit();
+  }
+
+  // All (and Ctrl+A): everything of yours in the rect but the ore haulers,
+  // which are left at work unless they are all there is.
+  selectAll(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
+    const army = this.units.some((u) => u.kind !== 'hauler' && this.inRect(u, x0, y0, x1, y1));
+    for (const u of this.units) {
+      const lap = army && u.kind === 'hauler' ? null : this.inRect(u, x0, y0, x1, y1);
+      if (lap) {
+        u.sel = true;
+        [u.lap, u.lapY] = lap;
+      } else if (!add || u.f !== ME) u.sel = false;
+    }
+    if (this.units.some((u) => u.sel)) for (const b of this.buildings) b.sel = false;
     this.emit();
   }
 
@@ -1987,7 +2009,7 @@ export class IsoGame implements GameLike {
     }
     this.sparks = this.sparks.filter((s) => s.life < 0.5);
     for (const m of this.markers) m.t += dt;
-    this.markers = this.markers.filter((m) => m.t < BURST_FRAME * burstFrames(m.foe ? 'attack' : 'move').length);
+    this.markers = this.markers.filter((m) => m.t < BURST_FRAME * burstFrames(markKind(m)).length);
     for (const q of this.quakes) q.t += dt;
     this.quakes = this.quakes.filter((q) => q.t < QUAKE_S);
 
@@ -2484,6 +2506,8 @@ export class IsoGame implements GameLike {
         return [[art.heli[di], u.x, u.y, u.z + HELI_ALT]];
       case 'boat':
         return [[art.boat[di], u.x, u.y, 0]];
+      case 'hauler':
+        return [[art.haulerLoad[haulerFill(u.load)][di], u.x, u.y, u.z]];
       default:
         return [[{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
     }
@@ -2762,7 +2786,7 @@ export class IsoGame implements GameLike {
 
     // order markers: the cursor's click burst, on top of everything
     for (const m of this.markers) {
-      const frames = burstFrames(m.foe ? 'attack' : 'move');
+      const frames = burstFrames(markKind(m));
       const img = frames[Math.min(frames.length - 1, Math.floor(m.t / BURST_FRAME))];
       const [sx, sy] = toScreen(m.x, m.y, m.z);
       if (!inView(sx, sy)) continue;
@@ -2979,7 +3003,7 @@ export class IsoGame implements GameLike {
         break;
       }
       default: {
-        const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'hauler' ? art.hauler : art.artillery;
+        const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'hauler' ? art.haulerLoad[haulerFill(u.load)] : art.artillery;
         const back = u.kind === 'arty' ? kick : 0;
         this.blit(spr[di], u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
         if (u.kind === 'buggy' && !u.moving) drawBuggyLights(this.ctx, u.x, u.y, u.z, u.a, u.anim);

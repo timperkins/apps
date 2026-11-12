@@ -431,6 +431,13 @@ body {
   box-shadow: inset 2px 2px 0 #ff9c86, inset -2px -2px 0 #8a2414, 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
+/* sending ore haulers to dig: gold, inside the harvest cursor's diamond */
+#confirm.ore #okBtn {
+  color: #2a1e06;
+  background: #f2c94c;
+  box-shadow: inset 2px 2px 0 #fff1a8, inset -2px -2px 0 #a07a1c, 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+
 #okBtn svg {
   width: 18px;
   height: 18px;
