@@ -3,10 +3,10 @@ import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } fro
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
-import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
+import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
-import { MAPS, mapDef, mapPreview } from './maps';
+import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, drawFlame, makeShot, muzzles } from './combat';
 import {
   BuildingKind,
@@ -116,6 +116,9 @@ interface Unit {
   hitT?: number;
   flashT?: number;
   dead?: boolean;
+  // the enemy's guards (Combat stage): which post it holds, and its spot there
+  post?: number;
+  spot?: [number, number];
 }
 
 type Target = Unit | Building;
@@ -194,6 +197,30 @@ const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery'
 // Height of each unit's visual centre above the ground (for picking and brackets).
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
 
+// Stages to start a game in, for testing: the real start, or straight into a
+// fight with a full base each, close together.
+export type Stage = 'initial' | 'combat';
+const STAGES: { id: Stage; name: string; blurb: string }[] = [
+  { id: 'initial', name: 'Initial', blurb: 'A Foundry vehicle and a few units. The enemy is far away.' },
+  { id: 'combat', name: 'Combat', blurb: 'Two full bases close together, an army each and $50000. The enemy rebuilds its losses.' },
+];
+// The enemy's army in the Combat stage: it keeps this many of each, making
+// more (for free) at the building for each kind whenever it is short.
+const GARRISON: [Kind, number][] = [
+  ['light', 6],
+  ['heavy', 3],
+  ['buggy', 3],
+  ['arty', 2],
+  ['heli', 1],
+  ['inf', 8],
+  ['rocket', 4],
+];
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', light: 'factory', heavy: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
+// ...and it waits in groups of this many at each of its posts round its base.
+const SQUAD = 4;
+const POSTS = 6;
+const ENEMY = 1;
+
 
 export class IsoGame implements GameLike {
   readonly fine = true;
@@ -223,14 +250,20 @@ export class IsoGame implements GameLike {
   private oreGrid = new Map<number, OreNode[]>();
   time = 0;
   onSelect: (names: string[]) => void = () => {};
-  // which map generate() makes (see maps.ts)
+  // which map generate() makes (see maps.ts), and the stage it starts at
   mapId = MAPS[0].id;
+  stage: Stage = 'initial';
+
+  stages(): { id: string; name: string; blurb: string }[] {
+    return STAGES;
+  }
 
   maps(): { id: string; name: string; blurb: string }[] {
     return MAPS.map(({ id, name, blurb }) => ({ id, name, blurb }));
   }
   preview(id: string, w: number, h: number): HTMLCanvasElement {
-    return mapPreview(mapDef(id), this.seed, w, h);
+    const def = mapDef(id);
+    return mapPreview(this.stage === 'combat' ? { ...def, home: combatHome(def) } : def, this.seed, w, h);
   }
 
   constructor(
@@ -297,7 +330,11 @@ export class IsoGame implements GameLike {
     this.ruins = [];
     this.lastTap = null;
     this.mapVersion++;
-    this.credits = START_CREDITS;
+    const combat = this.stage === 'combat';
+    this.credits = combat ? COMBAT_CREDITS : START_CREDITS;
+    this.posts = [];
+    this.aiJobs = new Map();
+    this.aiT = 0;
     this.jobs = new Map();
     this.queue = new Map();
     this.ore = [];
@@ -333,7 +370,7 @@ export class IsoGame implements GameLike {
       const [sx, sy] = findLand(p[0] * w, p[1] * h) ?? [p[0] * w, p[1] * h];
       return { sx, sy, f };
     };
-    const homeSite = at(def.home, ME);
+    const homeSite = at(combat ? combatHome(def) : def.home, ME);
     const foe = at(def.enemy, 1);
 
     // a road from your start to the enemy base, kept to dry land: it winds
@@ -385,6 +422,13 @@ export class IsoGame implements GameLike {
       }
     };
     place(['yard', ...BASE_B], foe.f, foe.sx, foe.sy);
+    // in the Combat stage you have a full base too, already built
+    if (combat) {
+      place(['yard', ...BASE_B, 'lab', 'power'], ME, homeSite.sx, homeSite.sy);
+      for (const b of this.buildings) if (b.f === ME) b.own = true;
+      // what it opens up is already known, not news
+      for (const t of this.available()) this.known.add(t.id);
+    }
 
     // a little clutter beside some buildings
     for (const b of this.buildings) {
@@ -430,15 +474,17 @@ export class IsoGame implements GameLike {
       ['rocket', 4],
     ];
     // you start with a handful: the Foundry vehicle and a small escort
-    const start: [Kind, number][] = [
-      ['mcv', 1],
-      ['light', 2],
-      ['buggy', 1],
-      ['inf', 3],
-    ];
+    const start: [Kind, number][] = combat
+      ? GARRISON
+      : [
+          ['mcv', 1],
+          ['light', 2],
+          ['buggy', 1],
+          ['inf', 3],
+        ];
     // the Foundry vehicle starts on the nearest open ground to your home site
     let ms: [number, number] = [homeSite.sx, homeSite.sy];
-    found: for (let r = 0; r < 1200; r += 12)
+    found: for (let r = 0; r < (combat ? 0 : 1200); r += 12)
       for (let t = 0; t < Math.max(1, r / 6); t++) {
         const a = rand() * Math.PI * 2;
         const sx = homeSite.sx + Math.cos(a) * r;
@@ -500,9 +546,25 @@ export class IsoGame implements GameLike {
     const mine: [number, number][] = [];
     for (const [kind, c] of start)
       for (let i = 0; i < c; i++) {
-        const u = kind === 'mcv' ? spawn(kind, ME, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0) : spawn(kind, ME, ms[0], ms[1] + 45, 70);
+        const u =
+          kind === 'mcv'
+            ? spawn(kind, ME, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0)
+            : combat
+              ? spawn(kind, ME, ms[0] - 60, ms[1] + 140, 220)
+              : spawn(kind, ME, ms[0], ms[1] + 45, 70);
         if (u) mine.push(toScreen(u.x, u.y));
       }
+    if (combat) {
+      // your refinery's hauler is already at work
+      for (const b of this.buildings)
+        if (b.own && b.kind === 'refinery') {
+          b.gift = true;
+          const u = this.newUnit('hauler', ME, ...this.fold(b.x + DOCK[0], b.y + DOCK[1] + 6), Math.PI / 2);
+          u.job = { st: 'seek', t: 0 };
+          u.load = 0;
+        }
+      this.makePosts(foe.sx, foe.sy, homeSite.sx, homeSite.sy, rand);
+    }
     for (const [kind, c] of army) for (let i = 0; i < c; i++) spawn(kind, foe.f, foe.sx + 60, foe.sy + 140, 220);
     // enemy patrol boats on the nearest water to their base
     let lake: [number, number] | null = null;
@@ -517,7 +579,8 @@ export class IsoGame implements GameLike {
     if (lake) for (let i = 0; i < 3; i++) spawn('boat', foe.f, lake[0], lake[1], 40);
     for (const u of this.units) u.z = this.groundZ(u);
 
-    this.home = mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
+    const yard = combat && this.buildings.find((b) => b.own && b.kind === 'yard');
+    this.home = yard ? { x: toScreen(yard.x, yard.y)[0], y: toScreen(yard.x, yard.y)[1] } : mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
     this.emit();
   }
@@ -948,6 +1011,7 @@ export class IsoGame implements GameLike {
   private lowPower = false;
 
   private store(): number {
+    if (this.stage === 'combat') return COMBAT_STORE;
     let s = STORE.base;
     for (const b of this.buildings) if (b.own && b.rise >= 1) s += b.kind === 'refinery' ? STORE.refinery : b.kind === 'silo' ? STORE.silo : 0;
     return s;
@@ -1547,6 +1611,7 @@ export class IsoGame implements GameLike {
   update(dt: number): void {
     this.time += dt;
     this.updateBuild(dt);
+    this.enemyAI(dt);
     for (const u of this.units) if (u.job) this.haul(u, dt);
     for (const u of [...this.units]) if (!u.dead) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
@@ -1814,6 +1879,140 @@ export class IsoGame implements GameLike {
     }
     for (const s of this.sparkles) s.life += dt;
     this.sparkles = this.sparkles.filter((s) => s.life < 1.2);
+  }
+
+  // ---------- The enemy (Combat stage) ----------
+
+  // Posts round the enemy base where its units wait in small groups, in
+  // world coordinates (first copy). The last one is the muster point by its
+  // Foundry, where new units gather until there are enough to send out.
+  private posts: [number, number][] = [];
+  // what each of its unit-making buildings is turning out, and how long to go
+  private aiJobs = new Map<Building, { kind: Kind; t: number }>();
+  private aiT = 0;
+
+  // Posts at a ring round the enemy base (screen point sx, sy), on open
+  // ground clear of buildings, and keeping well back from your base (hx, hy).
+  private makePosts(sx: number, sy: number, hx: number, hy: number, rand: () => number): void {
+    const T = this.terrain;
+    const [nhx, nhy] = nearestCopy(sx, sy, hx, hy, this.w, this.h);
+    const apart = Math.hypot(nhx - sx, nhy - sy);
+    const a0 = rand() * Math.PI * 2;
+    for (let i = 0; i < POSTS; i++) {
+      let got: [number, number] | null = null;
+      for (let t = 0; t < 120 && !got; t++) {
+        const a = a0 + (i / POSTS) * Math.PI * 2 + (rand() - 0.5) * 0.6;
+        const r = 300 - t * 1.2;
+        const px = sx + Math.cos(a) * r;
+        const py = sy + Math.sin(a) * r * 0.5;
+        if (Math.hypot(px - nhx, py - nhy) < apart * 0.6) continue;
+        const [x, y] = toWorld(px, py, 0);
+        const ok = (dx: number, dy: number) => {
+          const k = T.k(x + dx, y + dy);
+          return (k === K.Grass || k === K.Road) && !T.isHigh(x + dx, y + dy);
+        };
+        if (!ok(0, 0) || !ok(14, 0) || !ok(-14, 0) || !ok(0, 14) || !ok(0, -14)) continue;
+        if (this.buildings.some((b) => inside(x, y, b.pad, 14))) continue;
+        got = T.fold(x, y);
+      }
+      if (got) this.posts.push(got);
+    }
+    const yard = this.buildings.find((b) => b.f === ENEMY && b.kind === 'yard');
+    this.posts.push(yard ? this.fold(yard.x + 10, yard.y + yard.art.ry + 24) : this.fold(...toWorld(sx, sy, 0)));
+  }
+
+  // Units that stand guard: not boats (they keep to their lake) or haulers.
+  private guard(u: Unit): boolean {
+    return u.f === ENEMY && u.kind !== 'boat' && u.kind !== 'hauler' && u.kind !== 'mcv';
+  }
+
+  private sendTo(u: Unit, p: [number, number]): void {
+    [u.tx, u.ty] = this.nearPoint(u.x, u.y, p[0], p[1]);
+    u.moving = true;
+    u.target = undefined;
+    u.forced = u.chase = false;
+    u.anchor = undefined;
+  }
+
+  // The enemy never goes looking for a fight: it keeps its army up to
+  // strength and its posts manned, and its units fight whatever comes near.
+  private enemyAI(dt: number): void {
+    if (this.stage !== 'combat' || !this.posts.length) return;
+    // replace what has been lost, one at a time at each building
+    for (const [b, j] of [...this.aiJobs]) {
+      if (b.dead) {
+        this.aiJobs.delete(b);
+        continue;
+      }
+      if ((j.t -= dt) > 0) continue;
+      this.aiJobs.delete(b);
+      this.enemyUnit(b, j.kind);
+    }
+    const count = new Map<Kind, number>();
+    for (const u of this.units) if (u.f === ENEMY) count.set(u.kind, (count.get(u.kind) ?? 0) + 1);
+    for (const j of this.aiJobs.values()) count.set(j.kind, (count.get(j.kind) ?? 0) + 1);
+    for (const b of this.buildings) {
+      if (b.f !== ENEMY || b.dead || b.rise < 1 || !MAKERS.includes(b.kind) || this.aiJobs.has(b)) continue;
+      let best: Kind | null = null;
+      let short = 0;
+      for (const [k, n] of GARRISON) {
+        if (MAKER[k] !== b.kind) continue;
+        const s = (n - (count.get(k) ?? 0)) / n;
+        if (s > short) {
+          short = s;
+          best = k;
+        }
+      }
+      if (!best) continue;
+      const cost = TECH.find((t) => t.unit === best)?.cost ?? 500;
+      this.aiJobs.set(b, { kind: best, t: buildTime(cost) * 0.8 });
+      count.set(best, (count.get(best) ?? 0) + 1);
+    }
+
+    if ((this.aiT -= dt) > 0) return;
+    this.aiT = 1;
+    const out = this.posts.length - 1; // posts out round the base (the last is the muster point)
+    const fill = this.posts.map(() => 0);
+    const free: Unit[] = [];
+    for (const u of this.units) {
+      if (!this.guard(u)) continue;
+      if (u.post !== undefined && u.post < out) fill[u.post]++;
+      else if (!u.moving && !u.target) free.push(u);
+      // one that has wandered off its spot (after a chase) goes back to it
+      if (u.spot && !u.moving && !u.target && Math.hypot(u.x - u.spot[0], u.y - u.spot[1]) > 20 && Math.random() < 0.3) this.sendTo(u, this.nearPoint(u.x, u.y, ...u.spot));
+    }
+    // the post most short of its group gets a group from the muster point,
+    // once there are enough there to fill it
+    let pi = -1;
+    for (let i = 0; i < out; i++) if (fill[i] < SQUAD && (pi < 0 || fill[i] < fill[pi])) pi = i;
+    if (pi < 0) return;
+    const need = SQUAD - fill[pi];
+    if (free.length < need) return;
+    const p = this.posts[pi];
+    const dist = (u: Unit) => {
+      const [x, y] = this.nearPoint(p[0], p[1], u.x, u.y);
+      return Math.hypot(x - p[0], y - p[1]);
+    };
+    free.sort((a, b) => dist(a) - dist(b));
+    for (let i = 0; i < need; i++) {
+      const u = free[i];
+      const a = ((fill[pi] + i) / SQUAD) * Math.PI * 2;
+      u.post = pi;
+      u.spot = [p[0] + Math.cos(a) * 9, p[1] + Math.sin(a) * 9];
+      this.sendTo(u, u.spot);
+    }
+  }
+
+  // A new enemy unit comes out of b and goes to the muster point.
+  private enemyUnit(b: Building, kind: Kind): void {
+    const air = kind === 'heli';
+    const [fx, fy] = this.fold(air ? b.x : b.x + (Math.random() - 0.5) * 6, air ? b.y : b.y + b.art.ry - 2);
+    const u = this.newUnit(kind, ENEMY, fx, fy, Math.PI / 2);
+    const m = this.posts[this.posts.length - 1];
+    u.post = this.posts.length - 1;
+    u.spot = [m[0] + (Math.random() - 0.5) * 30, m[1] + (Math.random() - 0.5) * 30];
+    this.sendTo(u, u.spot);
+    this.mapVersion++;
   }
 
   // ---------- Combat ----------

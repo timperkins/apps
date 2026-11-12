@@ -85,6 +85,10 @@ export const MAPS: MapDef[] = [
   },
 ];
 
+// Where you start in the Combat stage: a base of your own a short drive
+// from the enemy's (about a screen and a half).
+export const combatHome = (def: MapDef): [number, number] => [(def.enemy[0] + 0.89) % 1, def.enemy[1]];
+
 export const mapDef = (id: string): MapDef => MAPS.find((m) => m.id === id) ?? MAPS[0];
 
 const percentile = (s: Float32Array, q: number) => {

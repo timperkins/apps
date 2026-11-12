@@ -30,6 +30,7 @@ const picker = document.querySelector<HTMLDivElement>('#picker')!;
 const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
 const rerollBtn = document.querySelector<HTMLButtonElement>('#reroll')!;
 const pickClose = document.querySelector<HTMLButtonElement>('#pickClose')!;
+const pickStages = picker.querySelector<HTMLDivElement>('.stages')!;
 
 const VERSIONS: Record<string, (seed: number) => GameLike> = {
   '1': (seed) => new Game(ctx, seed),
@@ -318,6 +319,31 @@ function showPicker(): void {
   // previews are of the seed the new world will be made from
   const was = game.seed;
   game.seed = seed;
+  // which stage to start in (for testing), remembered
+  const stages = game.stages?.() ?? [];
+  pickStages.hidden = !stages.length;
+  if (stages.length) {
+    const want = load('ra-stage');
+    game.stage = stages.some((s) => s.id === want) ? want! : stages[0].id;
+    const seg = pickStages.querySelector('.seg')!;
+    const blurb = pickStages.querySelector('.blurb')!;
+    seg.replaceChildren(
+      ...stages.map((st) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.role = 'radio';
+        b.textContent = st.name;
+        b.setAttribute('aria-checked', String(st.id === game.stage));
+        if (st.id === game.stage) blurb.textContent = st.blurb;
+        b.addEventListener('click', () => {
+          if (st.id === game.stage) return;
+          save('ra-stage', st.id);
+          showPicker(); // the previews show where you start
+        });
+        return b;
+      }),
+    );
+  }
   const cards = game.maps().map((m, i) => {
     const b = document.createElement('button');
     b.type = 'button';

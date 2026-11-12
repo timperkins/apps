@@ -94,6 +94,10 @@ export interface GameLike {
   maps?(): { id: string; name: string; blurb: string }[];
   preview?(id: string, w: number, h: number): HTMLCanvasElement;
   mapId?: string;
+  // Stages to start in, for testing (the normal start, a ready-made fight...);
+  // stage is the one generate() makes.
+  stages?(): { id: string; name: string; blurb: string }[];
+  stage?: string;
   // false: don't mark where move orders go (the mouse cursor shows it).
   moveMarks?: boolean;
   // What a tap at map point (x, y) would do, for the mouse cursor: pick a
