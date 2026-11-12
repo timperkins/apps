@@ -7,7 +7,7 @@ import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, bui
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { MAPS, mapDef, mapPreview } from './maps';
-import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, Shot, UNIT_DEF, VERSUS, WEAPON, WRECK_FADE, WRECK_S, Weapon, drawFlame, makeShot, muzzles } from './combat';
+import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, drawFlame, makeShot, muzzles } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -23,9 +23,7 @@ import {
   makeOre,
   makeFactionArt,
   makeBuildingStates,
-  makeWreckArt,
   OreArt,
-  WreckArt,
   makeRocks,
   makeTrees,
 } from './sprites';
@@ -129,20 +127,6 @@ const HELP = 7 * CELL;
 // The size of the explosion when each kind of vehicle is destroyed.
 const BOOM: Partial<Record<Kind, number>> = { buggy: 6, light: 8, heavy: 10, hauler: 10, arty: 7, mcv: 12, heli: 8, boat: 9 };
 
-// What is left of a destroyed unit: it lies there WRECK_S seconds, then fades.
-interface Wreck {
-  kind: Kind;
-  f: number;
-  x: number;
-  y: number;
-  z: number;
-  a: number;
-  tur: number;
-  t: number;
-  fall: number; // a copter's height as it comes down
-  vz: number;
-}
-
 // A destroyed building: rubble, for good (t < 0 while it is still blowing up).
 interface Ruin {
   kind: BuildingKind;
@@ -220,9 +204,7 @@ export class IsoGame implements GameLike {
   particles: Particle[] = [];
   markers: { x: number; y: number; z: number; t: number; foe?: boolean }[] = [];
   fx = new Fx();
-  wrecks: Wreck[] = [];
   ruins: Ruin[] = [];
-  wArt: WreckArt[];
   private bStates = new Map<string, BuildingStates>();
   // Mark where a move order goes. main.ts turns it off for the mouse, whose
   // cursor shows the order instead.
@@ -256,7 +238,6 @@ export class IsoGame implements GameLike {
     public seed: number,
   ) {
     this.art = FACTIONS.map(makeFactionArt);
-    this.wArt = FACTIONS.map(makeWreckArt);
   }
 
   // A building's damaged and ruined looks, drawn the first time they're needed.
@@ -313,7 +294,6 @@ export class IsoGame implements GameLike {
     this.sparkles = [];
     this.sparks = [];
     this.fx.clear();
-    this.wrecks = [];
     this.ruins = [];
     this.lastTap = null;
     this.mapVersion++;
@@ -1803,7 +1783,7 @@ export class IsoGame implements GameLike {
             this.fx.smoke(sx, sy, true, 1.5);
           }
     }
-    this.updateWrecks(dt);
+    this.updateRuins(dt);
     this.fx.step(dt);
 
     for (const p of this.particles) {
@@ -2080,21 +2060,47 @@ export class IsoGame implements GameLike {
     u.repath = 0;
   }
 
-  // A unit is destroyed: vehicles blow up, soldiers fall, and the wreck or
-  // body is left lying for a while.
+  // A unit is destroyed: it blows up and flies to pieces, which land round
+  // where it was and fade away (a copter's rain down from the sky).
   private kill(u: Unit): void {
     u.dead = true;
     this.units.splice(this.units.indexOf(u), 1);
     if (this.lastTap?.u === u) this.lastTap = null;
     const air = u.kind === 'heli' ? HELI_ALT : 0;
-    const r = BOOM[u.kind];
-    if (r) {
-      const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
-      this.fx.boom(sx, sy, r);
-      this.fx.boom(sx + (Math.random() - 0.5) * r, sy - r * 0.3, r * 0.6, 0.15);
+    const r = BOOM[u.kind] ?? 3;
+    const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
+    const [, gy] = toScreen(u.x, u.y, u.z);
+    const foot = u.kind === 'inf' || u.kind === 'rocket';
+    for (const [spr, x, y, z] of this.layers(u)) {
+      const [px, py] = toScreen(x, y, z);
+      this.fx.shatter(spr, px, py, sx, sy, gy, foot ? 2 : 4, foot ? 22 : 30 + r * 2);
     }
-    this.wrecks.push({ kind: u.kind, f: u.f, x: u.x, y: u.y, z: u.z, a: u.a, tur: u.turret + (Math.random() - 0.5) * 0.8, t: 0, fall: air, vz: 0 });
+    this.fx.boom(sx, sy, r);
+    if (!foot) this.fx.boom(sx + (Math.random() - 0.5) * r, sy - r * 0.3, r * 0.6, 0.15);
     if (u.sel) this.emit();
+  }
+
+  // The sprites a unit is drawn with, and where (world point and height).
+  private layers(u: Unit): [StackSprite, number, number, number][] {
+    const art = this.art[u.f];
+    const di = dirIndex(u.a, DIRS);
+    switch (u.kind) {
+      case 'inf':
+      case 'rocket':
+        return [[(u.kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(u.a, 16)], u.x, u.y, u.z]];
+      case 'light':
+      case 'heavy':
+        return [
+          [(u.kind === 'light' ? art.lightTank : art.heavyTank)[di], u.x, u.y, u.z],
+          [(u.kind === 'light' ? art.lightTurret : art.heavyTurret)[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z],
+        ];
+      case 'heli':
+        return [[art.heli[di], u.x, u.y, u.z + HELI_ALT]];
+      case 'boat':
+        return [[art.boat[di], u.x, u.y, 0]];
+      default:
+        return [[{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
+    }
   }
 
   // A building is destroyed: it goes up in a string of explosions and leaves a ruin.
@@ -2115,71 +2121,25 @@ export class IsoGame implements GameLike {
     if (b.sel) this.emit();
   }
 
-  private updateWrecks(dt: number): void {
-    for (const w of this.wrecks) {
-      w.t += dt;
-      if (w.fall > 0) {
-        // a copter comes down and blows up again where it lands
-        w.vz += 50 * dt;
-        w.fall = Math.max(0, w.fall - w.vz * dt);
-        w.a += dt * 4;
-        if (w.fall === 0) {
-          const [sx, sy] = toScreen(w.x, w.y, w.z + 3);
-          this.fx.boom(sx, sy, 7);
-        }
-      }
-      // burning out
-      if (w.kind !== 'inf' && w.kind !== 'rocket' && w.t < 7 && Math.random() < dt * (w.t < 3 ? 6 : 2)) {
-        const [sx, sy] = toScreen(w.x, w.y, w.z + w.fall + 6);
-        this.fx.smoke(sx, sy, true, 1.5);
-      }
-    }
-    this.wrecks = this.wrecks.filter((w) => w.t < WRECK_S + WRECK_FADE);
+  private updateRuins(dt: number): void {
     for (const r of this.ruins) {
+      const was = r.t;
       r.t += dt;
-      // smoke pours off it for a while, then wisps
-      const rate = r.t < 20 ? 3 : 0.4;
-      if (r.t > 0)
+      if (was < 0 && r.t >= 0) {
+        // the big bang: the building flies to pieces over the ruin
+        const [sx, sy] = toScreen(r.x, r.y, 0);
+        const [ox, oy] = toScreen(r.x, r.y, 10);
+        this.fx.shatter(r.states.damaged.spr, sx, sy, ox, oy, sy, 6, 55, 260);
+      }
+      // smoke pours off it for a while, thins out and stops (the ruin stays)
+      const rate = r.t < 15 ? 3 : 3 * Math.max(0, 1 - (r.t - 15) / 25);
+      if (r.t > 0 && rate > 0)
         for (const p of r.states.ruin.fx)
           if (Math.random() < (dt * rate) / 2) {
             const [sx, sy] = toScreen(r.x + p.x, r.y + p.y, p.z + 1);
             this.fx.smoke(sx, sy, true, 2);
           }
     }
-  }
-
-  private drawWreck(w: Wreck): void {
-    const c = this.ctx;
-    const k = w.t < WRECK_S ? 1 : Math.max(0, 1 - (w.t - WRECK_S) / WRECK_FADE);
-    c.globalAlpha = k;
-    const art = this.wArt[w.f];
-    const di = dirIndex(w.a, DIRS);
-    const z = w.z + w.fall;
-    switch (w.kind) {
-      case 'inf':
-      case 'rocket': {
-        const frames = w.kind === 'inf' ? art.infantry : art.rocket;
-        this.blit(frames[w.t < 0.18 ? 0 : 1][dirIndex(w.a, 16)], w.x, w.y, z);
-        break;
-      }
-      case 'light':
-      case 'heavy': {
-        this.blit((w.kind === 'light' ? art.lightTank : art.heavyTank)[di], w.x, w.y, z);
-        this.blit((w.kind === 'light' ? art.lightTurret : art.heavyTurret)[dirIndex(w.tur, DIRS)], w.x - Math.cos(w.a) * 1.2, w.y - Math.sin(w.a) * 1.2, z - 0.5);
-        break;
-      }
-      case 'boat':
-        // it settles into the water as it burns
-        this.blit(art.boat[di], w.x, w.y, -Math.min(5, w.t * 0.5));
-        break;
-      default:
-        this.blit({ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli }[w.kind][di], w.x, w.y, z);
-    }
-    if (w.kind !== 'inf' && w.kind !== 'rocket' && w.t < 3.5 && w.fall === 0) {
-      const [sx, sy] = toScreen(w.x, w.y, z + MID[w.kind] + 1);
-      drawFlame(c, sx, sy, 3.5 * (1 - w.t / 4), this.time, 7);
-    }
-    c.globalAlpha = 1;
   }
 
   private drawRuin(r: Ruin): void {
@@ -2328,7 +2288,6 @@ export class IsoGame implements GameLike {
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
     for (const r of this.ruins) if (seen(r.x, r.y, 4)) items.push({ k: r.x + r.y + Math.min(r.states.ruin.rx, r.states.ruin.ry), draw: () => this.drawRuin(r) });
-    for (const w of this.wrecks) if (w.fall === 0 && seen(w.x, w.y, w.z)) items.push({ k: w.x + w.y + w.z * 2 - 0.5, draw: () => this.drawWreck(w) });
     const ore = this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5).filter((n) => n.amt >= 10);
     const oreSize = (n: OreNode) => (n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0);
     for (const n of ore) {
@@ -2361,7 +2320,6 @@ export class IsoGame implements GameLike {
 
     this.fx.drawBelow(c);
     for (const u of this.units) if (u.kind === 'heli' && seen(u.x, u.y, u.z)) this.drawUnit(u);
-    for (const w of this.wrecks) if (w.fall > 0 && seen(w.x, w.y, w.z)) this.drawWreck(w);
     this.fx.drawAbove(c);
 
     for (const s of this.sparks) {

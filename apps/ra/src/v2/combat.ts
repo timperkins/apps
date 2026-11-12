@@ -7,9 +7,9 @@
 // are the other way round, high explosive is good against buildings). Units
 // with nothing to do pick the nearest enemy in range and fire on it, and a
 // unit that is hit turns on whoever hit it. All the numbers are our own.
-import { RGB, hash2, vnoise } from '../gfx';
+import { ART, RGB, hash2, vnoise } from '../gfx';
 import type { BuildingKind } from './sprites';
-import { toScreen } from './stack';
+import { StackSprite, toScreen } from './stack';
 
 export type Armor = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 export type Warhead = 'SA' | 'AP' | 'HE';
@@ -83,9 +83,8 @@ export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor
 
 // A building is shown damaged (scorched, holed, on fire) at or below this much health.
 export const DAMAGED = 0.5;
-// A wreck or body lies this long, then fades out over WRECK_FADE seconds.
-export const WRECK_S = 10;
-export const WRECK_FADE = 1.5;
+// How long the pieces of something destroyed fly about before they're gone.
+export const PIECE_S = 1.3;
 export const HELI_ALT = 20;
 
 // Where a weapon's rounds leave from, in world units: one point per barrel.
@@ -189,6 +188,25 @@ interface Boom {
   t: number; // < 0 while waiting to go off
   seed: number;
 }
+// A chunk of a sprite thrown off when it is destroyed: the patch of the
+// picture at (px, py), pw by ph art pixels, flying about and landing on its
+// own bit of ground (floor).
+interface Piece {
+  img: HTMLCanvasElement;
+  px: number;
+  py: number;
+  pw: number;
+  ph: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  floor: number;
+  life: number;
+  max: number;
+}
+const alphaOf = new WeakMap<HTMLCanvasElement, Uint8ClampedArray>();
+
 interface Flash {
   x: number;
   y: number;
@@ -268,8 +286,10 @@ export class Fx {
   private booms: Boom[] = [];
   private flashes: Flash[] = [];
   private tracers: { x0: number; y0: number; x1: number; y1: number; t: number }[] = [];
+  private pieces: Piece[] = [];
 
   clear(): void {
+    this.pieces = [];
     this.shots = [];
     this.ps = [];
     this.booms = [];
@@ -310,6 +330,56 @@ export class Fx {
   // then debris and embers thrown out, and smoke rolling up after it.
   boom(x: number, y: number, r: number, delay = 0): void {
     this.booms.push({ x, y, r, t: -delay, seed: Math.floor(Math.random() * 1e6) });
+  }
+
+  // Blow a sprite drawn with its ground origin at screen point (sx, sy) to
+  // pieces: it is cut into chunks of `chunk` art pixels which fly out from
+  // (ox, oy), fall back to the ground round gy and fade (PIECE_S seconds).
+  // Chunks that are mostly shadow are left out; at most `cap` are thrown.
+  shatter(spr: StackSprite, sx: number, sy: number, ox: number, oy: number, gy: number, chunk: number, force: number, cap = 160): void {
+    const img = spr.img;
+    let a = alphaOf.get(img);
+    if (!a) {
+      a = img.getContext('2d')!.getImageData(0, 0, img.width, img.height).data;
+      alphaOf.set(img, a);
+    }
+    const W = img.width;
+    const H = img.height;
+    const out: Piece[] = [];
+    for (let py = 0; py < H; py += chunk)
+      for (let px = 0; px < W; px += chunk) {
+        let solid = 0;
+        let n = 0;
+        for (let y = py; y < Math.min(H, py + chunk); y++)
+          for (let x = px; x < Math.min(W, px + chunk); x++) {
+            n++;
+            if (a[(y * W + x) * 4 + 3] > 200) solid++;
+          }
+        if (solid * 2 < n) continue;
+        const x = sx - spr.cx + px / ART;
+        const y = sy - spr.cy + py / ART;
+        const dx = x + chunk / ART / 2 - ox;
+        const dy = y + chunk / ART / 2 - oy;
+        const d = Math.hypot(dx, dy) || 1;
+        const v = force * (0.5 + Math.random() * 0.8);
+        out.push({
+          img,
+          px,
+          py,
+          pw: Math.min(chunk, W - px),
+          ph: Math.min(chunk, H - py),
+          x,
+          y,
+          vx: (dx / d) * v + (Math.random() - 0.5) * force * 0.4,
+          vy: (dy / d) * v * 0.6 - force * (0.5 + Math.random() * 0.7),
+          floor: gy + (Math.random() - 0.3) * (6 + force * 0.12),
+          life: 0,
+          max: PIECE_S * (0.6 + Math.random() * 0.5),
+        });
+      }
+    // too many: keep an even spread of them
+    while (out.length > cap) out.splice(Math.floor(Math.random() * out.length), 1);
+    this.pieces.push(...out);
   }
 
   smoke(x: number, y: number, dark = true, size = 1.5): void {
@@ -378,6 +448,21 @@ export class Fx {
       }
     }
     this.ps = this.ps.filter((p) => p.life < p.max);
+    for (const p of this.pieces) {
+      p.life += dt;
+      if (p.y < p.floor || p.vy < 0) {
+        p.vy += 140 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if (p.y >= p.floor && p.vy > 0) {
+          // land with a little bounce, then lie there
+          p.y = p.floor;
+          p.vy = Math.abs(p.vy) > 25 ? -p.vy * 0.3 : 0;
+          p.vx *= 0.5;
+        }
+      }
+    }
+    this.pieces = this.pieces.filter((p) => p.life < p.max);
   }
 
   private boomLen(b: Boom): number {
@@ -401,8 +486,20 @@ export class Fx {
     }
   }
 
-  // Shots, fireballs, flashes and sparks, over everything.
+  // Shots, flying pieces, fireballs, flashes and sparks, over everything.
   drawAbove(c: CanvasRenderingContext2D): void {
+    for (const p of this.pieces) {
+      // scorched as they fly, fading out towards the end
+      const k = p.life / p.max;
+      c.globalAlpha = k < 0.45 ? 1 : Math.max(0, 1 - (k - 0.45) / 0.55);
+      const X = Math.round(p.x * ART) / ART;
+      const Y = Math.round(p.y * ART) / ART;
+      c.drawImage(p.img, p.px, p.py, p.pw, p.ph, X, Y, p.pw / ART, p.ph / ART);
+      c.globalAlpha *= Math.min(0.3, k * 0.6);
+      c.fillStyle = '#1e1b18';
+      c.fillRect(X, Y, p.pw / ART, p.ph / ART);
+    }
+    c.globalAlpha = 1;
     for (const t of this.tracers) {
       c.fillStyle = 'rgba(255,236,150,0.9)';
       const n = Math.ceil(Math.hypot(t.x1 - t.x0, t.y1 - t.y0) * 2);

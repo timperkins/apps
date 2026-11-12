@@ -2,8 +2,8 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, WreckArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre, makeWreckArt } from './v2/sprites';
-import { DAMAGED, Fx, Shot, UnitKind, WEAPON, WRECK_FADE, WRECK_S, drawFlame, makeShot, muzzles } from './v2/combat';
+import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DAMAGED, Fx, PIECE_S, Shot, UnitKind, WEAPON, drawFlame, makeShot, muzzles } from './v2/combat';
 import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -548,17 +548,18 @@ interface Fighter {
   kind: UnitKind;
   spr: StackSprite; // for sizing
   still?: Box; // its room standing still, if not just the sprite's
-  wreckSpr: StackSprite;
   air?: number;
-  soft?: boolean; // a soldier: no explosion, it falls
+  soft?: boolean; // a soldier: a smaller bang, smaller pieces
   hullOff?: number; // a tank's hull turned this far from where its turret aims
   draw: (s: Scene, x: number, y: number, a: number, tur: number, t: number, kick: boolean) => void;
-  wreck: (s: Scene, x: number, y: number, a: number, z: number, since: number) => void;
+  // the sprites it is drawn with at the origin, facing the viewer, and where
+  // (world point and height), to blow to pieces
+  parts: [StackSprite, number, number, number][];
 }
 
 // A unit's fighting cells: firing (if armed), being hit, being destroyed
-// (its wreck or body lies WRECK_S seconds and fades, as in the game), the
-// wreck itself, and the explosion on its own.
+// (it blows up and flies to pieces, which land and fade away, as in the
+// game), and the explosion on its own.
 function combatCells(o: Fighter): Cell[] {
   const z = o.air ?? 0;
   const mid = MID[o.kind];
@@ -579,19 +580,19 @@ function combatCells(o: Fighter): Cell[] {
   );
   const r = BOOM[o.kind];
   const boomBox: Box = r ? { l: r * 1.3 + 2, r: r * 1.3 + 2, u: r * 1.6 + z + mid, d: r * 0.6 } : still;
-  const wreckBox = boxOf(o.wreckSpr);
-  const L = 1.4 + WRECK_S + WRECK_FADE + 1;
+  const L = 1.4 + PIECE_S + 1.2;
   const HITS = [0.35, 0.75, 1.15];
-  const fallT = z ? Math.sqrt((2 * z) / 50) : 0;
+  // room for the pieces to fly
+  const flying: Box = { l: 16, r: 16, u: still.u + 8, d: 8 };
   cells.push({
     label: 'Destroyed',
-    box: union(withBar, wreckBox, boomBox),
+    box: union(withBar, boomBox, flying),
     anim: true,
     draw: (s, t, dt) => {
       const k = t % L;
       const ev = (e: number) => k >= e && k - dt < e;
       if (k < 1.4) {
-        // shot to pieces
+        // shot at until it goes
         let n = 0;
         let since = 9;
         for (const e of HITS) {
@@ -614,28 +615,14 @@ function combatCells(o: Fighter): Cell[] {
         healthBar(s.c, Math.round(bar.x - bar.w / 2), Math.round(bar.y), bar.w, 1 - n * 0.3);
         return;
       }
-      const since = k - 1.4;
-      if (ev(1.4) && r) blowUp(s.fx, ...toScreen(0, 0, z + mid * 0.5), r);
-      // a copter comes down spinning and blows up again where it lands; a
-      // soldier falls across the cell, so you can see it is lying down
-      let h = 0;
-      let a = o.soft ? A - Math.PI / 2 : A;
-      if (z) {
-        h = since < fallT ? z - 25 * since * since : 0;
-        a = A + Math.min(since, fallT) * 4;
-        if (ev(1.4 + fallT)) s.fx.boom(...toScreen(0, 0, 3), 7);
-      }
-      s.c.globalAlpha = since < WRECK_S ? 1 : Math.max(0, 1 - (since - WRECK_S) / WRECK_FADE);
-      o.wreck(s, 0, 0, a, h, since);
-      s.c.globalAlpha = 1;
-      if (!o.soft && h === 0) {
-        const [sx, sy] = toScreen(0, 0, mid + 1);
-        if (since < 3.5) drawFlame(s.c, sx, sy, 3.5 * (1 - since / 4), t, 7);
-        if (since < 7 && Math.random() < dt * (since < 3 ? 6 : 2)) s.fx.smoke(sx, sy - 4, true, 1.5);
-      }
+      if (!ev(1.4)) return;
+      // gone: a bang, and it flies to pieces (a copter's rain down)
+      const [ox, oy] = toScreen(0, 0, z + mid * 0.5);
+      for (const [spr, x, y, h] of o.parts) s.fx.shatter(spr, ...toScreen(x, y, h), ox, oy, 0, o.soft ? 2 : 4, o.soft ? 22 : 30 + (r ?? 3) * 2);
+      if (r) blowUp(s.fx, ox, oy, r);
+      else s.fx.boom(ox, oy, 3);
     },
   });
-  cells.push({ label: o.soft ? 'Fallen' : 'Wreck', box: wreckBox, draw: (s) => o.wreck(s, 0, 0, o.soft ? A - Math.PI / 2 : A, 0, 5) });
   if (r)
     cells.push({
       label: 'Explosion',
@@ -650,7 +637,6 @@ function combatCells(o: Fighter): Cell[] {
 
 function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, yard: V2BuildingArt): void {
   const di = (a: number) => dirIndex(a, DIRS);
-  const wa: WreckArt = makeWreckArt(FACTIONS[0]);
 
   // soldiers: 16 headings, a two-step walk
   for (const kind of ['inf', 'rocket'] as const) {
@@ -677,9 +663,8 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
             kind,
             spr,
             soft: true,
-            wreckSpr: wa.infantry[1][dirIndex(A - Math.PI / 2, 16)],
             draw: (s, x, y, a, _tur, t) => draw(me)(s, x, y, a, t, 0),
-            wreck: (s, x, y, a, z, since) => s.blit((kind === 'inf' ? wa.infantry : wa.rocket)[since < 0.18 ? 0 : 1][dirIndex(a, 16)], x, y, z),
+            parts: [[frames(me)[0][dirIndex(A, 16)], 0, 0, 0]],
           }),
         ],
       }),
@@ -692,18 +677,16 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       (art: V2FactionArt): Draw =>
       (s, x, y, a) =>
         s.blit(pick(art)[di(a)], x, y, 0);
-    const wreck = wa[({ buggy: 'buggy', arty: 'artillery', hauler: 'hauler', mcv: 'mcv' } as const)[kind]];
     const fight = combatCells({
       kind,
       spr: pick(me)[0],
-      wreckSpr: wreck[di(A)],
       // (the howitzer rolls back on its tracks as it fires)
       draw: (s, x, y, a, _tur, t, kick) => {
         const back = kind === 'arty' && kick ? 1 : 0;
         s.blit(pick(me)[di(a)], x - Math.cos(a) * back, y - Math.sin(a) * back, 0);
         if (kind === 'buggy') drawBuggyLights(s.c, x, y, 0, a, t);
       },
-      wreck: (s, x, y, a, z) => s.blit(wreck[di(a)], x, y, z),
+      parts: [[pick(me)[di(A)], 0, 0, 0]],
     });
     addRow(parent, name, blurbOf(kind), unitCells(pick(me)[0], draw(me), draw(foe), { R, speed, more: [...more(draw(me)), ...fight] }));
   };
@@ -752,17 +735,16 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
           spr: hull(me)[0],
           still: spr,
           hullOff: 0.6,
-          wreckSpr: (kind === 'light' ? wa.lightTank : wa.heavyTank)[di(A)],
           // the turret kicks back as it fires
           draw: (s, x, y, a, ta, _t, kick) => {
             s.blit(hull(me)[di(a)], x, y, 0);
             const k = kick ? 1 : 0;
             s.blit(tur(me)[di(ta)], x - Math.cos(a) * 1.2 - Math.cos(ta) * k, y - Math.sin(a) * 1.2 - Math.sin(ta) * k, 0);
           },
-          wreck: (s, x, y, a, z) => {
-            s.blit((kind === 'light' ? wa.lightTank : wa.heavyTank)[di(a)], x, y, z);
-            s.blit((kind === 'light' ? wa.lightTurret : wa.heavyTurret)[di(a + 0.4)], x - Math.cos(a) * 1.2, y - Math.sin(a) * 1.2, z - 0.5);
-          },
+          parts: [
+            [hull(me)[di(A)], 0, 0, 0],
+            [tur(me)[di(A)], -Math.cos(A) * 1.2, -Math.sin(A) * 1.2, 0],
+          ],
         }),
       ],
     });
@@ -862,9 +844,8 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         spr,
         still: air,
         air: HELI_ALT,
-        wreckSpr: wa.heli[di(A)],
         draw: (s, x, y, a, _tur, t) => heliDraw(me)(s, x, y, a, t),
-        wreck: (s, x, y, a, z) => s.blit(wa.heli[di(a)], x, y, z),
+        parts: [[me.heli[di(A)], 0, 0, HELI_ALT]],
       }),
     );
     cells.push({ label: 'Enemy', box: air, anim: true, draw: (s, t) => heliDraw(foe)(s, 0, 0, Math.PI / 4, t) });
@@ -884,9 +865,8 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         kind: 'boat',
         spr: me.boat[0],
         still: box,
-        wreckSpr: wa.boat[di(A)],
         draw: (s, x, y, a, _tur, t) => boatDraw(me)(s, x, y, a, t),
-        wreck: (s, x, y, a, z) => s.blit(wa.boat[di(a)], x, y, z),
+        parts: [[me.boat[di(A)], 0, 0, 0]],
       }),
     );
     cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => boatDraw(foe)(s, 0, 0, Math.PI / 4, t) });
@@ -1161,6 +1141,8 @@ function buildingFight(kind: BuildingKind, b: V2BuildingArt, st: BuildingStates,
         s.blit(st.damaged.spr, 0, 0, 0);
         return;
       }
+      // the big bang: the building flies to pieces over its ruin
+      if (k - dt < 4.45) s.fx.shatter(st.damaged.spr, 0, 0, ...toScreen(0, 0, 10), 0, 6, 55, 260);
       s.blit(st.ruin.spr, 0, 0, 0);
       const since = k - 4.45;
       if (since < 6) flames(s, st.ruin.fx, t, dt, 4 * (1 - since / 7));
