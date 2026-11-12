@@ -234,12 +234,192 @@ body {
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 16px);
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 6px;
 }
 
-#selBar[hidden] {
+#selBar[hidden],
+#selMenu[hidden],
+#acts[hidden],
+#noTypes[hidden],
+#confirm[hidden] {
   display: none;
+}
+
+#acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* the selection menu: a button per kind of unit on screen, then All, Clear */
+#selMenu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+#types {
+  display: contents;
+}
+
+#noTypes {
+  padding: 0 6px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+#selMenu button {
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 42px;
+  height: 44px;
+  padding: 3px 4px 2px;
+  font-size: 8px;
+  letter-spacing: 0;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5);
+}
+
+#selMenu button svg {
+  width: 16px;
+  height: 16px;
+}
+
+#selBar button.type {
+  position: relative;
+  width: 42px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* the build-menu picture of the unit, cropped in close */
+#selBar button.type .pic {
+  width: 38px;
+  height: 40px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#selBar button.type img {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  margin-top: -6px;
+  image-rendering: pixelated;
+}
+
+#selBar button.type .count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  color: #10170d;
+  background: var(--ink);
+  border: 1px solid #10170d;
+}
+
+#selBar button.type[aria-pressed='true'] {
+  background: rgba(157, 255, 157, 0.28);
+  border-color: #9dff9d;
+}
+
+#selBar button.type[aria-pressed='true'] .count {
+  background: #9dff9d;
+}
+
+#selBar button.type.part {
+  border-color: #9dff9d;
+  border-style: dashed;
+}
+
+#clearBtn:disabled {
+  opacity: 0.5;
+  cursor: var(--cur-arrow);
+}
+
+/* confirming an order on a touch screen: a check over the spot, an X beside it */
+#confirm {
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 8px;
+  margin: -20px 0 0 -20px;
+}
+
+#confirm button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3), inset -1px -1px 0 rgba(0, 0, 0, 0.4), 0 2px 0 rgba(0, 0, 0, 0.45);
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+  animation: pop 0.12s steps(3);
+}
+
+#confirm button svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+#okBtn {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #d8ffd8 #3c7a3c #3c7a3c #d8ffd8;
+}
+
+#noBtn {
+  margin-top: 6px;
+  width: 30px !important;
+  height: 30px !important;
+  color: #fff;
+  background: #d6463a;
+  border-color: #ff9a8f #7a1f17 #7a1f17 #ff9a8f;
+}
+
+#noBtn svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
+#confirm button:active {
+  transform: translateY(1px);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+  }
 }
 
 #selBar button {
@@ -264,10 +444,6 @@ body {
   fill: currentColor;
 }
 
-#acts {
-  display: contents;
-}
-
 #selBar button.act {
   color: #10170d;
   background: #e0b83c;
@@ -280,12 +456,6 @@ body {
   border-color: var(--edge);
   opacity: 0.6;
   cursor: var(--cur-arrow);
-}
-
-#moreBtn[aria-pressed='true'] {
-  color: #10170d;
-  background: #9dff9d;
-  border-color: #d8ffd8;
 }
 
 /* ---------- Credits, build menu and messages ---------- */

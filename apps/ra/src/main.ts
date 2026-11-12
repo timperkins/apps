@@ -19,12 +19,17 @@ const versionEl = document.querySelector<HTMLSelectElement>('#version')!;
 const menuBtn = document.querySelector<HTMLButtonElement>('#menuBtn')!;
 const menu = document.querySelector<HTMLDivElement>('#menu')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
-const modeBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar [data-mode]')];
-const moreBtn = document.querySelector<HTMLButtonElement>('#moreBtn')!;
+const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
+const selMenu = document.querySelector<HTMLDivElement>('#selMenu')!;
+const typesEl = document.querySelector<HTMLSpanElement>('#types')!;
+const noTypes = document.querySelector<HTMLSpanElement>('#noTypes')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
-const actsEl = document.querySelector<HTMLSpanElement>('#acts')!;
+const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
+const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
+const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
+const noBtn = document.querySelector<HTMLButtonElement>('#noBtn')!;
 const homeBtn = document.querySelector<HTMLButtonElement>('#homeBtn')!;
 const picker = document.querySelector<HTMLDivElement>('#picker')!;
 const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
@@ -78,32 +83,23 @@ document.addEventListener('pointerdown', (e) => {
   if (!menu.hidden && !menu.contains(e.target as Node) && !menuBtn.contains(e.target as Node)) setMenu(false);
 });
 
-// ---------- Toolbar: select / pan modes, additive selection, all, clear ----------
+// ---------- Toolbar and the selection menu ----------
+// Select opens the selection menu above the toolbar (so does tapping a unit):
+// a button for each kind of unit of yours on screen, with how many there are,
+// which adds them all to the selection or takes them out of it, then All and
+// Clear. A drag on a touch screen pans; with a mouse it draws a box.
 
-type Mode = 'select' | 'pan';
-let mode: Mode = 'select';
-let additive = false;
 let lastNames: string[] = [];
+let selOpen = false;
 
-function setMode(m: Mode): void {
-  mode = m;
-  for (const b of modeBtns) {
-    const on = b.dataset.mode === m;
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-pressed', String(on));
-  }
-  canvas.classList.toggle('panning', m === 'pan');
-  showSelection(lastNames);
+function setSelOpen(open: boolean): void {
+  selOpen = open;
+  selectBtn.setAttribute('aria-pressed', String(open));
+  typesKey = '';
+  updateSelBar();
 }
-for (const b of modeBtns) b.addEventListener('click', () => setMode(b.dataset.mode as Mode));
-// "More" and "Clear" only show while something is selected; when on, taps and
-// boxes add to the selection instead of replacing it.
-function setAdditive(on: boolean): void {
-  additive = on;
-  moreBtn.setAttribute('aria-pressed', String(on));
-}
-moreBtn.addEventListener('click', () => setAdditive(!additive));
-allBtn.addEventListener('click', () => selectView(additive));
+selectBtn.addEventListener('click', () => setSelOpen(!selOpen));
+allBtn.addEventListener('click', () => selectView(true));
 clearBtn.addEventListener('click', () => game?.deselect());
 
 // Commands for the selection (Deploy, Pack up...), drawn as buttons before
@@ -121,11 +117,59 @@ const ICONS: Record<string, string> = {
 };
 let actsKey = '';
 let hasActs = false;
-// The bar above the toolbar: commands, and More / Clear while something is selected.
+// The bar above the toolbar: commands for the selection, and the selection menu.
 function updateSelBar(): void {
-  selBar.hidden = lastNames.length === 0 && !hasActs;
-  moreBtn.hidden = lastNames.length === 0;
-  clearBtn.hidden = lastNames.length === 0;
+  const menuOn = selOpen && !placingNow();
+  selMenu.hidden = !menuOn;
+  actsEl.hidden = !hasActs;
+  selBar.hidden = !menuOn && !hasActs;
+}
+
+// The map rect that counts as on screen: the view, or from space the near
+// side of the world.
+function viewRect(): [number, number, number, number] {
+  if (planet) return [cen.x - built.w / 4, cen.y - built.h / 4, cen.x + built.w / 4, cen.y + built.h / 4];
+  return [camX(), camY(), camX() + view.w, camY() + view.h];
+}
+
+// The selection menu's buttons, checked every frame as units come and go
+// from the view, and only rebuilt when something about them changes.
+let typesKey = '';
+function refreshTypes(): void {
+  if (!selOpen || selMenu.hidden || !game) return;
+  const r = viewRect();
+  const types = game.unitTypes?.(...r) ?? [];
+  const key = JSON.stringify([types.map((t) => [t.kind, t.count, t.sel]), lastNames.length]);
+  if (key === typesKey) return;
+  typesKey = key;
+  noTypes.hidden = types.length > 0 || !game.unitTypes;
+  allBtn.hidden = types.length > 0 ? types.every((t) => t.sel === t.count) : !!game.unitTypes;
+  clearBtn.disabled = lastNames.length === 0;
+  typesEl.replaceChildren(
+    ...types.map((t) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'type';
+      const all = t.sel === t.count;
+      b.classList.toggle('part', t.sel > 0 && !all);
+      b.setAttribute('aria-pressed', String(all));
+      b.title = `${t.name}: ${t.sel ? `${t.sel} of ${t.count} selected` : `${t.count} on screen`}`;
+      b.setAttribute('aria-label', b.title);
+      const img = document.createElement('img');
+      img.src = t.icon;
+      img.alt = '';
+      const n = document.createElement('span');
+      n.className = 'count';
+      n.textContent = t.sel && !all ? `${t.sel}/${t.count}` : String(t.count);
+      const pic = document.createElement('span');
+      pic.className = 'pic';
+      pic.append(img);
+      b.append(pic, n);
+      // a kind not all selected: add the rest; all selected: drop them
+      b.addEventListener('click', () => game.selectKind?.(t.kind, !all, ...viewRect()));
+      return b;
+    }),
+  );
 }
 function refreshActions(): void {
   const acts = (!planet && game?.actions?.()) || [];
@@ -152,15 +196,45 @@ function refreshActions(): void {
 // Everything on screen; from space, everything on the near side of the world.
 function selectView(add: boolean): void {
   if (!game) return;
-  if (planet) game.boxSelect(cen.x - built.w / 4, cen.y - built.h / 4, cen.x + built.w / 4, cen.y + built.h / 4, add);
-  else game.boxSelect(camX(), camY(), camX() + view.w, camY() + view.h, add);
+  game.boxSelect(...viewRect(), add);
 }
 
 function showSelection(names: string[]): void {
+  // picking something opens the menu, so you can add other kinds to it
+  if (names.length && !lastNames.length && !selOpen) setSelOpen(true);
   lastNames = names;
+  typesKey = '';
+  if (!names.length) setPending(null);
   updateSelBar();
-  if (!names.length) setAdditive(false);
 }
+
+// ---------- Confirming orders on a touch screen ----------
+// With units selected, a tap on the ground (or an enemy) doesn't send them
+// straight away: a green check comes up where you tapped, with a red X next
+// to it. The check sends them, the X calls it off, and another tap moves it.
+let pending: { x: number; y: number } | null = null;
+function setPending(p: { x: number; y: number } | null): void {
+  pending = p;
+  confirmEl.hidden = !p;
+  if (p) placeConfirm();
+}
+// Keep the check over the map point as the camera moves.
+function placeConfirm(): void {
+  if (!pending) return;
+  if (planet) {
+    setPending(null);
+    return;
+  }
+  const r = canvas.getBoundingClientRect();
+  confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
+}
+okBtn.addEventListener('click', () => {
+  if (!pending || !game) return;
+  const p = pending;
+  setPending(null);
+  game.click(p.x, p.y, false);
+});
+noBtn.addEventListener('click', () => setPending(null));
 
 // Home: back to your base (the Foundry, or the vehicle that will become one),
 // on the copy of the world nearest the camera, down from space if need be.
@@ -532,9 +606,9 @@ function syncGhost(): void {
 let ghostDrag: { dx: number; dy: number } | null = null;
 
 // ---------- Pointer input ----------
-// Select mode: tap selects a unit or sends the selection, drag draws a box.
-// Pan mode: drag moves the camera, tap still selects or sends units.
-// The middle mouse button always pans. In space, a drag spins the world and a
+// A tap selects a unit or sends the selection (on a touch screen, once you
+// confirm it). A drag pans on a touch screen and draws a selection box with a
+// mouse; the middle mouse button pans. In space, a drag spins the world and a
 // tap sends the selection there the shortest way (or flies down if nothing is
 // selected).
 
@@ -660,7 +734,7 @@ canvas.addEventListener('pointerdown', (e) => {
     }
     return;
   }
-  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || mode === 'pan' || e.button === 1 };
+  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || e.pointerType !== 'mouse' || e.button === 1 };
   dragging = false;
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -708,6 +782,16 @@ function spaceTap(e: PointerEvent, orderOnly = false): void {
   }
 }
 
+// A tap on the map with a finger: orders wait for the check.
+function touchTap(x: number, y: number): void {
+  const what = game.cursorAt?.(x, y);
+  if (what === 'move' || what === 'attack') setPending({ x, y });
+  else {
+    setPending(null);
+    game.click(x, y, false);
+  }
+}
+
 const finish = (e: PointerEvent, cancel: boolean) => {
   pointers.delete(e.pointerId);
   if (multi) {
@@ -717,7 +801,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   }
   if (!down || e.pointerId !== down.id) return;
   const p = toMap(e.clientX, e.clientY);
-  const add = additive || e.shiftKey || e.ctrlKey || e.metaKey;
+  const add = e.shiftKey || e.ctrlKey || e.metaKey;
   if (!cancel && placingNow()) {
     if (!dragging) {
       moveGhost(p.x, p.y);
@@ -727,8 +811,10 @@ const finish = (e: PointerEvent, cancel: boolean) => {
     if (planet) {
       if (!dragging) spaceTap(e);
     } else if (!dragging) {
-      if (e.pointerType === 'mouse') clicked();
-      game.click(down.x, down.y, add);
+      if (e.pointerType === 'mouse') {
+        clicked();
+        game.click(down.x, down.y, add);
+      } else touchTap(down.x, down.y);
     } else if (!down.pan) game.boxSelect(down.x, down.y, p.x, p.y, add);
   }
   box = null;
@@ -761,12 +847,11 @@ canvas.addEventListener('pointerleave', () => (mouse = null));
 function hoverNow(now: number): void {
   const m = mouse && toMap(mouse.x, mouse.y);
   let k: CursorKind = 'arrow';
-  if (down && (down.pan || ghostDrag) && (dragging || mode === 'pan' || planet)) k = 'grabbing';
+  if (down && (down.pan || ghostDrag) && (dragging || planet)) k = 'grabbing';
   else if (m && !planet && !(dragging && box) && picker.hidden) {
     const what = game.cursorAt?.(m.x, m.y);
     if (what === 'pick') k = 'corners';
     else if (what) k = what;
-    else if (mode === 'pan') k = 'grab';
   } else if (planet) k = 'grab';
   const burst = Math.floor((now - movedAt) / 55);
   if (burst >= 0 && burst < MOVE_CLICK_FRAMES && k !== 'grabbing') k = 'move';
@@ -799,7 +884,7 @@ canvas.addEventListener(
 // Stop Safari's own page pinch from fighting ours.
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
-// ---------- Keyboard: WASD or the arrow keys pan, Q / P switch modes, +/- zoom, Esc clears ----------
+// ---------- Keyboard: WASD or the arrow keys pan, Q opens the selection menu, +/- zoom, Esc clears ----------
 
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
@@ -813,11 +898,12 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!menu.hidden) setMenu(false);
     else if (placingNow()) game.act?.('unplace');
-    else game.deselect();
+    else if (pending) setPending(null);
+    else if (lastNames.length) game.deselect();
+    else setSelOpen(false);
   }
   if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
-  if (e.key === 'q') setMode('select');
-  if (e.key === 'p') setMode('pan');
+  if (e.key === 'q') setSelOpen(!selOpen);
   if (e.key === 'f') game.act?.('deploy');
   if (e.key === 'h') goHome();
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);
@@ -935,6 +1021,8 @@ function draw(now: number, first: boolean): void {
   }
   refreshActions();
   syncGhost();
+  refreshTypes();
+  placeConfirm();
   build.update(now);
   if (first) lastSnap = -Infinity;
   snapshot(now);
