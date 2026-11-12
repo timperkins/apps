@@ -539,6 +539,7 @@ export class Survival {
       if (k === 'Shift' || k === 'b') { if (!e.repeat) this.openShop(); return; }
       const qn = '1234567890'.indexOf(k);
       if (qn >= 0) { if (!e.repeat) this.useQuick(qn); return; }
+      if (k === 'g' && this.hand && (isShot(this.hand) || isWeapon(this.hand)) && !this.placing) { if (!e.repeat) { if (this.bag[this.hand] > 0) this.armsPut(this.hand); else { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[this.hand]} left`, 'info'); Sound.denied(); } } return; }
       const pk = (Object.entries(PLACE_KEY) as [Placeable, string][]).find(([, key]) => key.toLowerCase() === k);
       if (pk) { if (!e.repeat) this.togglePlacing(pk[0]); return; }
       if (k === 'y') { if (!e.repeat) this.openLab(); return; }
@@ -1193,7 +1194,7 @@ export class Survival {
     // anything else goes in your hand (tap again to put it away)
     this.placing = false;
     this.hand = this.hand === p ? null : p;
-    if (this.hand) this.bubble(this.x, this.y - 30, `${ONE_NAME[p]} in hand. D puts one in`, 'info');
+    if (this.hand) this.bubble(this.x, this.y - 30, isShot(p) ? `${ONE_NAME[p]} in hand. G puts one in your gun, D drops one` : `${ONE_NAME[p]} in hand. D puts one in`, 'info');
     Sound.click();
   }
   /** D: put one of the thing in your hand (or being placed) into whatever is at the tile in front of you (or under the mouse):
@@ -1202,7 +1203,8 @@ export class Survival {
     const k = this.placing ? this.placeType as Kind : this.hand;
     if (!k) { this.bubble(this.x, this.y - 30, 'Pick something in your inventory or quickbar first', 'info'); Sound.denied(); return; }
     if (this.bag[k] < 1) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[k]} left`, 'info'); Sound.denied(); return; }
-    if (!this.placing && this.armsPut(k)) return;
+    // ammo gets dropped where you point (G puts it in your gun); a weapon still goes in a weapon slot
+    if (!this.placing && !isShot(k) && this.armsPut(k)) return;
     const t = this.ghost(); if (!t) { Sound.denied(); return; }
     const key = t.c + ',' + t.r, x = tileX(t.c), y = tileY(t.r), nm = ONE_NAME[k].toLowerCase();
     const ok = (what: string) => { this.bag[k]--; this.bubble(x, y - 18, `1 ${nm} → ${what}`, 'info'); Sound.thump(); this.bldSig = ''; };

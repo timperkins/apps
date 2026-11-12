@@ -22,7 +22,7 @@ const isComputer = () => matchMedia('(pointer: fine)').matches && !matchMedia('(
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 let mode: Mode = 'menu';
 
-/* ---------- layout: a phone-shaped column, below iOS's status bar strip ---------- */
+/* ---------- layout: the whole window, below iOS's status bar strip ---------- */
 /** Height of iOS 26's soft edge effect at the top of an installed app, in CSS px (see Sky Defender 2's README). */
 const GLASS_BAND = 44;
 const CARD_RADIUS = 14;
@@ -30,7 +30,6 @@ const iosApp = (navigator as { standalone?: boolean }).standalone === true;
 function layout() {
   const W = innerWidth, H = innerHeight;
   let sw = W, sh = H;
-  if (W > H) sw = Math.round(Math.min(W, H * .62)); // a wide window or a turned phone: a portrait column
   const inset = parseFloat(getComputedStyle($('safe')).paddingTop) || 0;
   const band = inset > 0 ? inset + GLASS_BAND : iosApp ? GLASS_BAND : 0;
   sh -= band;
@@ -128,7 +127,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🏹', title: 'Walk and shoot', lines: [
     'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone. The map is big: the small map in the corner shows where everything is.',
     '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear (or bear spawner) in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
-    'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>D</kbd> to put in one ammo. <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
+    'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>G</kbd> to put one ammo in your gun (<kbd>D</kbd> drops it where the mouse is). <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
     'The rapid crossbow keeps firing with no ammo, but does no damage ("No Ammo").',
     'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
@@ -182,19 +181,6 @@ $('svIntroBack').addEventListener('click', e => { e.stopPropagation(); Sound.ui(
 $('svIntroSkip').addEventListener('click', e => { e.stopPropagation(); Sound.ui(); endIntro(); });
 $('svHow').addEventListener('click', e => { e.stopPropagation(); Sound.init(); Sound.ui(); showIntro(null); });
 
-/** Full screen on any device that allows it: asked for on a tap or key press (browsers only allow it then), and again
- *  after leaving it. iPhones don't let web pages go full screen; there the app added to the home screen fills the screen. */
-function goFull() {
-  const d = document as Document & { webkitFullscreenElement?: Element; webkitFullscreenEnabled?: boolean };
-  if (d.fullscreenElement || d.webkitFullscreenElement) return;
-  const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
-  try {
-    if (el.requestFullscreen) el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
-    else el.webkitRequestFullscreen?.();
-  } catch { /* not allowed here */ }
-}
-addEventListener('pointerup', goFull, { capture: true });
-addEventListener('keyup', e => { if (e.key !== 'Escape') goFull(); }, { capture: true });
 function start() {
   Sound.init(); Sound.ui();
   (document.activeElement as HTMLElement | null)?.blur?.();
