@@ -3,7 +3,7 @@
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { BOOM, DAMAGED, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './v2/combat';
+import { BOOM, DAMAGED, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './v2/combat';
 import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -609,7 +609,7 @@ function combatCells(o: Fighter): Cell[] {
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
   cells.push(
     // (soldiers are knocked back by rifle fire; tanks by a heavy tank's 105mm shells)
-    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, z + mid + (Math.random() - 0.5) * 2], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8, knockback(o.soft ? WEAPON.inf! : WEAPON.heavy!, o.kind), o.soft ? undefined : toScreen(0, 0, z + mid + 2)),
+    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 1.6 * HIT_SPREAD[o.kind], (Math.random() - 0.5) * 1.6 * HIT_SPREAD[o.kind], z + mid + (Math.random() - 0.5) * mid * 0.8], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8, knockback(o.soft ? WEAPON.inf! : WEAPON.heavy!, o.kind), o.soft ? undefined : toScreen(0, 0, z + mid + 2)),
   );
   const r = BOOM[o.kind];
   const boomBox: Box = r ? { l: r * 1.3 + 2, r: r * 1.3 + 2, u: r * 1.6 + z + mid, d: r * 0.6 } : still;
