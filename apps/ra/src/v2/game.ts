@@ -227,7 +227,6 @@ export class IsoGame implements GameLike {
     this.sparkles = [];
     this.sparks = [];
     this.lastTap = null;
-    this.hov = null;
     this.mapVersion++;
     this.credits = START_CREDITS;
     this.jobs = new Map();
@@ -1209,21 +1208,12 @@ export class IsoGame implements GameLike {
     return best ? { u: best, lap: bestLap } : null;
   }
 
-  // The unit the mouse is over, outlined so you can see it can be picked.
-  private hov: Unit | null = null;
-  hover(x: number, y: number): boolean {
-    this.hov = this.unitAt(x, y)?.u ?? null;
-    return !!this.hov;
-  }
-  unhover(): void {
-    this.hov = null;
-  }
-
-  // What a tap at (x, y) would do, for the mouse cursor. Follows click():
-  // units over a unit are main.ts's business (it asks hover() first).
-  cursorAt(x: number, y: number): 'move' | 'rally' | 'build' | 'blocked' | null {
+  // What a tap at (x, y) would do, for the mouse cursor. Follows click().
+  cursorAt(x: number, y: number): 'pick' | 'move' | 'rally' | 'build' | 'blocked' | null {
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
+    const hit = this.unitAt(x, y);
+    if (hit && (hit.u.f === ME || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
       const sb = this.selB();
@@ -1828,8 +1818,6 @@ export class IsoGame implements GameLike {
     for (const [r, col] of feet) this.drawFoot(r, col, 0.75 + 0.25 * Math.sin(this.time * 6), false, true);
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
-    const hv = this.hov;
-    if (hv && this.units.includes(hv) && seen(hv.x, hv.y, hv.z)) this.drawHover(hv);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
 
     // the building being placed: a see-through ghost over its footprint
@@ -2050,52 +2038,6 @@ export class IsoGame implements GameLike {
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
     healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
-  }
-
-  // The mouse is over a unit: in place of the pointer, a ring of little
-  // arrowheads on the ground round it, turning and breathing in and out, so
-  // you can see you can pick it. Green for yours, red for the enemy's.
-  private drawHover(u: Unit): void {
-    const c = this.ctx;
-    const { x, y, rx } = this.unitBox(u);
-    const [lit, mid, dark] = u.f === ME ? ['#c8ffae', '#3fd23a', '#0b260a'] : ['#ffc2b0', '#ec4a33', '#2c0b07'];
-    const ex = rx + 5 + 1.5 * Math.sin(this.time * 5);
-    const ey = Math.max(5, ex * 0.6);
-    const turn = this.time * 1.4;
-    const N = 8;
-    const hw = Math.min(0.24, 1.4 / ex); // half a segment, in radians
-    // d: pixels out from the ellipse; 0 is the bright edge, 1 the main colour
-    const px = new Map<string, string>();
-    const put = (a: number, d: number, col: string) => {
-      const X = Math.round(x + Math.cos(a) * (ex + d));
-      const Y = Math.round(y + Math.sin(a) * (ey + d));
-      const k = `${X},${Y}`;
-      if (px.get(k) !== lit) px.set(k, col);
-    };
-    for (let i = 0; i < N; i++) {
-      const a0 = turn + (i * Math.PI * 2) / N;
-      const step = 0.5 / ex;
-      // the shaft, trailing behind
-      for (let a = a0 - hw; a <= a0 + hw * 0.3; a += step) {
-        put(a, 0, lit);
-        put(a, 1, mid);
-      }
-      // the head, wide at the back and coming to a point
-      const h = a0 + hw * 0.3;
-      for (let a = h; a <= h + 0.35 * hw; a += step) for (let d = -1; d <= 2; d++) put(a, d, d === 0 ? lit : mid);
-      for (let a = h + 0.35 * hw; a <= h + 0.75 * hw; a += step) for (let d = 0; d <= 1; d++) put(a, d, d === 0 ? lit : mid);
-      put(h + hw, 0, mid);
-    }
-    c.fillStyle = dark;
-    for (const k of px.keys()) {
-      const [X, Y] = k.split(',').map(Number);
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (!px.has(`${X + dx},${Y + dy}`)) c.fillRect(X + dx, Y + dy, 1, 1);
-    }
-    for (const [k, col] of px) {
-      const [X, Y] = k.split(',').map(Number);
-      c.fillStyle = col;
-      c.fillRect(X, Y, 1, 1);
-    }
   }
 
   private drawBuilding(b: Building): void {

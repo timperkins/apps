@@ -94,16 +94,12 @@ export interface GameLike {
   maps?(): { id: string; name: string; blurb: string }[];
   preview?(id: string, w: number, h: number): HTMLCanvasElement;
   mapId?: string;
-  // The mouse is over map point (x, y): true if that is over a unit, which
-  // the game then outlines. unhover() clears it.
-  hover?(x: number, y: number): boolean;
-  unhover?(): void;
   // false: don't mark where move orders go (the mouse cursor shows it).
   moveMarks?: boolean;
-  // What a tap at map point (x, y) would do, for the mouse cursor: send the
-  // selection there, set a building's rally point, put the building being
+  // What a tap at map point (x, y) would do, for the mouse cursor: pick a
+  // unit, send the selection there, set a building's rally point, put the building being
   // placed down, or nothing it can do ('blocked'). null: nothing to show.
-  cursorAt?(x: number, y: number): 'move' | 'rally' | 'build' | 'blocked' | null;
+  cursorAt?(x: number, y: number): 'pick' | 'move' | 'rally' | 'build' | 'blocked' | null;
   // Where your home base is now, for the Home button.
   homeBase?(): { x: number; y: number };
 }

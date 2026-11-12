@@ -2,10 +2,10 @@
 // match the chunky pixels of the game. They are turned into CSS cursor values
 // once, at start-up, and set as --cur-* variables on the page for style.css.
 //
-// Over a unit with something selected the pointer hides and the game draws a
-// spinning ring round the unit instead (see drawHover in v2/game.ts).
+// The move cursor turns and plays a burst on click, and the corners cursor
+// (over a unit you can pick) breathes: main.ts steps through their frames.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'rally' | 'blocked' | 'build' | 'none';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -20,7 +20,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'none' | 'move' | 'corners'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -183,15 +183,15 @@ const FALLBACK: Record<CursorKind, string> = {
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
-  none: 'none',
 };
 
 const SCALE = 2;
 
-// A 16x16 grid of colour letters (as in COLORS) to a CSS cursor value.
+// A size x size grid of colour letters (as in COLORS) to a CSS cursor value.
 function gridCss(rows: string[], hot: [number, number], fallback: string): string {
+  const n = rows.length;
   const c = document.createElement('canvas');
-  c.width = c.height = 16 * SCALE;
+  c.width = c.height = n * SCALE;
   const g = c.getContext('2d')!;
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
@@ -204,15 +204,16 @@ function gridCss(rows: string[], hot: [number, number], fallback: string): strin
   return `url(${c.toDataURL('image/png')}) ${hot[0] * SCALE} ${hot[1] * SCALE}, ${fallback}`;
 }
 
-// Draw with put(x, y, colour letter); every drawn pixel gets a dark outline.
-function drawn(draw: (put: (x: number, y: number, col: string) => void) => void): string[] {
-  const g = Array.from({ length: 16 }, () => Array<string>(16).fill('.'));
+// Draw on a size x size grid with put(x, y, colour letter); every drawn pixel
+// gets a dark outline.
+function drawn(size: number, draw: (put: (x: number, y: number, col: string) => void) => void): string[] {
+  const g = Array.from({ length: size }, () => Array<string>(size).fill('.'));
   draw((x, y, col) => {
-    if (x >= 0 && y >= 0 && x < 16 && y < 16) g[y][x] = col;
+    if (x >= 0 && y >= 0 && x < size && y < size) g[y][x] = col;
   });
   const out = g.map((r) => [...r]);
-  for (let y = 0; y < 16; y++)
-    for (let x = 0; x < 16; x++) {
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
       if (g[y][x] !== '.') continue;
       const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] && g[y + dy][x + dx] !== '.');
       if (near) out[y][x] = 'k';
@@ -220,27 +221,75 @@ function drawn(draw: (put: (x: number, y: number, col: string) => void) => void)
   return out.map((r) => r.join(''));
 }
 
-// The move cursor: four green arrowheads round the click point (7, 7), their
-// tips d pixels out. Clicking plays it with d running down to 0, so the
-// arrowheads close in on the spot the units are sent to.
-function moveRows(d: number): string[] {
-  return drawn((put) => {
-    for (let i = 0; i < 3; i++)
-      for (let j = -i; j <= i; j++) {
-        const col = i === 2 ? 'G' : 'g';
-        const r = d + i;
-        put(7 + j, 7 - r, col);
-        put(7 + j, 7 + r, col);
-        put(7 - r, 7 + j, col);
-        put(7 + r, 7 + j, col);
+// ---------- The move cursor ----------
+// Four green arrowheads pointing in at the click point, turned by angle a,
+// their tips d pixels out. It slowly turns while your units are selected;
+// a click plays MOVE_CLICK: the arrowheads snap in to a white flash, a ring
+// bursts out from the spot, and they grow back out behind it. (d < 0: hidden)
+
+const MS = 25; // grid size: room for the ring to burst out
+const MC = 12; // the click point
+const REST = 4;
+export const MOVE_STEPS = 12; // drawn turns through a quarter circle
+
+interface MoveFrame {
+  d: number;
+  flash?: number;
+  ring?: number;
+  dots?: boolean;
+}
+const MOVE_CLICK: MoveFrame[] = [
+  { d: 2 },
+  { d: 0, flash: 1.5 },
+  { d: -9, flash: 2.5, ring: 3 },
+  { d: -9, ring: 5 },
+  { d: -9, ring: 7 },
+  { d: 1, ring: 9 },
+  { d: 2.5, ring: 11, dots: true },
+  { d: 3.5, ring: 12, dots: true },
+];
+export const MOVE_CLICK_FRAMES = MOVE_CLICK.length;
+
+function moveRows(a: number, f: MoveFrame): string[] {
+  return drawn(MS, (put) => {
+    for (let y = 0; y < MS; y++)
+      for (let x = 0; x < MS; x++) {
+        const vx = x - MC;
+        const vy = y - MC;
+        const r = Math.hypot(vx, vy);
+        if (f.ring && Math.abs(r - f.ring) < 0.55) {
+          const ang = Math.atan2(vy, vx);
+          if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : 'G');
+        }
+        for (let k = 0; k < 4 && f.d >= 0; k++) {
+          const t = a + (k * Math.PI) / 2;
+          const along = vx * Math.cos(t) + vy * Math.sin(t);
+          const across = -vx * Math.sin(t) + vy * Math.cos(t);
+          const into = along - f.d;
+          if (into >= -0.3 && into <= 4 && Math.abs(across) <= into * 0.8 + 0.5) put(x, y, into > 3 ? 'G' : 'g');
+        }
+        if (f.flash && r <= f.flash) put(x, y, 'w');
       }
   });
 }
 
-// Over a unit with nothing selected: white corners, h pixels out from the
+const moveCache = new Map<string, string>();
+// The move cursor at turn step (0 to MOVE_STEPS - 1) and click frame (-1: at rest).
+export function moveCursor(step: number, frame = -1): string {
+  const key = `${step},${frame}`;
+  let css = moveCache.get(key);
+  if (!css) {
+    const f = MOVE_CLICK[frame] ?? { d: REST };
+    css = gridCss(moveRows((step / MOVE_STEPS) * (Math.PI / 2), f), [MC, MC], FALLBACK.move);
+    moveCache.set(key, css);
+  }
+  return css;
+}
+
+// Over a unit a click would pick: white corners, h pixels out from the
 // middle, breathing in and out (see CORNER_FRAMES).
 function cornerRows(h: number): string[] {
-  return drawn((put) => {
+  return drawn(16, (put) => {
     for (const sx of [-1, 1])
       for (const sy of [-1, 1])
         for (let i = 0; i < 3; i++) {
@@ -251,19 +300,15 @@ function cornerRows(h: number): string[] {
 }
 
 export const CURSORS = {} as Record<CursorKind, string>;
-// MOVE_FRAMES[d]: the move cursor with its arrowheads d pixels out; the last is the resting one.
-export const MOVE_FRAMES: string[] = [];
 // The corners cursor through one breath.
 export const CORNER_FRAMES: string[] = [];
 
 // Build every cursor and publish them as --cur-<kind> on the page.
 export function initCursors(): void {
-  for (let d = 0; d <= 4; d++) MOVE_FRAMES.push(gridCss(moveRows(d), [7, 7], FALLBACK.move));
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
-    if (kind === 'none') CURSORS[kind] = 'none';
-    else if (kind === 'move') CURSORS[kind] = MOVE_FRAMES[4];
+    if (kind === 'move') CURSORS[kind] = moveCursor(0);
     else if (kind === 'corners') CURSORS[kind] = CORNER_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);

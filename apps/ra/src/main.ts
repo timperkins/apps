@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { CORNER_FRAMES, CURSORS, MOVE_FRAMES, initCursors, type CursorKind } from './cursors';
+import { CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -712,16 +712,15 @@ const finish = (e: PointerEvent, cancel: boolean) => {
 };
 canvas.addEventListener('pointerup', (e) => finish(e, false));
 
-// With a mouse, the pointer shows what a click would do. Over a unit: white
-// corners, breathing, when nothing is selected; with something selected the
-// pointer hides and the game spins a ring round the unit. Elsewhere: send
-// units (whose arrowheads close in on the spot when clicked), set a rally
-// point, place a building, or can't. Checked every frame, as the units and
-// the camera move under a still mouse too.
+// With a mouse, the pointer shows what a click would do: pick a unit (white
+// corners, breathing), send your units there (green arrowheads, slowly
+// turning, with a burst when clicked), set a rally point, place a building,
+// or can't. Checked every frame, as the units and the camera move under a
+// still mouse too.
 let mouse: { x: number; y: number } | null = null;
 let cursor = '';
 let cursorKind: CursorKind = 'arrow';
-// when the last move order was clicked, for the move cursor's close-in
+// when the last move order was clicked, for the move cursor's burst
 let movedAt = -Infinity;
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
@@ -729,26 +728,21 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerleave', () => (mouse = null));
 function hoverNow(now: number): void {
   const m = mouse && toMap(mouse.x, mouse.y);
-  const on = !!m && !planet && !placingNow() && !dragging && picker.hidden && !!game.hover?.(m.x, m.y);
-  const ring = on && game.selectedPoints().length > 0;
-  if (!ring) game.unhover?.();
   let k: CursorKind = 'arrow';
   if (down && (down.pan || ghostDrag) && (dragging || mode === 'pan' || planet)) k = 'grabbing';
-  else if (on) k = ring ? 'none' : 'corners';
-  else if (m && !planet && !(dragging && box)) {
+  else if (m && !planet && !(dragging && box) && picker.hidden) {
     const what = game.cursorAt?.(m.x, m.y);
-    if (what) k = what;
+    if (what === 'pick') k = 'corners';
+    else if (what) k = what;
     else if (mode === 'pan') k = 'grab';
   } else if (planet) k = 'grab';
+  const burst = Math.floor((now - movedAt) / 55);
+  if (burst >= 0 && burst < MOVE_CLICK_FRAMES && k !== 'grabbing') k = 'move';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
-  else if (k === 'move') {
-    // arrowheads 4 → 1 px out over 240 ms, then back to rest
-    const t = (now - movedAt) / 60;
-    if (t >= 0 && t < 4) css = MOVE_FRAMES[4 - Math.floor(t)];
-  }
+  else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;
     canvas.style.cursor = css;
