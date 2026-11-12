@@ -190,20 +190,27 @@ const FALLBACK: Record<CursorKind, string> = {
 
 const SCALE = 2;
 
-// A size x size grid of colour letters (as in COLORS) to a CSS cursor value.
-function gridCss(rows: string[], hot: [number, number], fallback: string): string {
+// A size x size grid of colour letters (as in COLORS) drawn on a canvas,
+// scale pixels to a letter.
+function gridCanvas(rows: string[], scale: number): HTMLCanvasElement {
   const n = rows.length;
   const c = document.createElement('canvas');
-  c.width = c.height = n * SCALE;
+  c.width = c.height = n * scale;
   const g = c.getContext('2d')!;
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
       const col = COLORS[row[x]];
       if (!col) continue;
       g.fillStyle = col;
-      g.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
+      g.fillRect(x * scale, y * scale, scale, scale);
     }
   });
+  return c;
+}
+
+// The same grid as a CSS cursor value.
+function gridCss(rows: string[], hot: [number, number], fallback: string): string {
+  const c = gridCanvas(rows, SCALE);
   return `url(${c.toDataURL('image/png')}) ${hot[0] * SCALE} ${hot[1] * SCALE}, ${fallback}`;
 }
 
@@ -388,4 +395,21 @@ export function initCursors(): void {
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }
+}
+
+// ---------- The click bursts, drawn on the map ----------
+// With touch there is no cursor, so the game draws the move or attack burst
+// on the map where you tapped: one grid pixel to a map pixel, centred on the
+// tap (BURST_CENTER). BURST_FRAME is how long each frame shows, in seconds.
+
+export const BURST_CENTER = MC;
+export const BURST_FRAME = 0.055;
+const bursts: Record<'move' | 'attack', HTMLCanvasElement[]> = { move: [], attack: [] };
+export function burstFrames(kind: 'move' | 'attack'): HTMLCanvasElement[] {
+  const out = bursts[kind];
+  if (!out.length) {
+    if (kind === 'move') for (const f of MOVE_CLICK) out.push(gridCanvas(moveRows(0, f), 1));
+    else for (const f of ATTACK_CLICK) out.push(gridCanvas(attackClickRows(f), 1));
+  }
+  return out;
 }
