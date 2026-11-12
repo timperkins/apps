@@ -79,6 +79,8 @@ CLAUDE.md
 
 For App Hosting apps: `"type": "apphosting"`, `"backend": "news"`, `"previewBackend": "news-preview"`.
 
+A Hosting app can opt in to a fixed preview address with `"previewSite": "trom-ra-preview"` and `"previewDomain": "ra-preview.trom.dev"`. `create-app` creates that site and attaches the domain, and every preview build (branch pushes and merges to main) is deployed to the site's live channel instead of the `latest` preview channel.
+
 Apps can also list Cloud Run jobs, for work too long for a request (video processing, renders):
 `"jobServiceAccount": "<app>-jobs@apps-97595.iam.gserviceaccount.com"` and
 `"jobs": [{ "name": "process", "cpu": "4", "memory": "16Gi", "timeout": "3600s", "maxRetries": 1, "env": { ... } }]`.
