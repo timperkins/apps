@@ -94,7 +94,7 @@ permissions the deploy account, the jobs and App Hosting need. A job's `"secrets
 
 **Preview: on push to any branch other than `main`**
 1. `changed-apps.mjs` diffs the branch against its merge-base with `main`.
-2. For each changed Hosting app: build with preview env (preview database), then deploy a Hosting preview channel named after the branch (expires after 7 days), and the same build to a fixed `latest` channel whose link never changes and always shows the most recent preview push from any branch (30-day expiry, reset on each deploy and extended weekly by `preview-keepalive.yml`).
+2. For each changed Hosting app: build with preview env (preview database), then deploy a Hosting preview channel named after the branch (expires after 7 days), and the same build to a fixed `latest` channel whose link never changes and always shows the most recent preview push from any branch (30-day expiry, reset on each deploy and extended weekly by `preview-keepalive.yml`). Each merge to main also rebuilds the merged Hosting apps with the preview environment and deploys them to `latest`.
 3. For each changed App Hosting app: `firebase apphosting:rollouts:create <previewBackend> --git-branch <branch>`.
 4. Write the preview URLs to the run's job summary, a commit status, and a PR comment if a PR exists. Claude reads them with `gh run watch` / `gh run view` and replies with the links.
 
