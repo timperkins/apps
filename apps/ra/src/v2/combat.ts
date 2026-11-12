@@ -38,6 +38,7 @@ export interface Weapon {
   ground: boolean; // can hit things on the ground or water
   splash?: number; // radius of an area hit (artillery)
   scatter?: number; // how far off the aim point a round may land
+  big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
 }
 
 export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket';
@@ -47,8 +48,8 @@ export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
   rocket: { name: 'Rocket launcher', dmg: 35, rof: 2.6, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 120, barrels: 1, air: true, ground: true },
   buggy: { name: 'Machine gun', dmg: 15, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
   light: { name: '75mm gun', dmg: 25, rof: 1.6, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 1, air: false, ground: true },
-  heavy: { name: 'Twin 105mm', dmg: 30, rof: 2.2, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
-  arty: { name: '155mm howitzer', dmg: 150, rof: 4.5, range: 6.5 * CELL, wh: 'HE', shot: 'arc', speed: 95, barrels: 1, air: false, ground: true, splash: 14, scatter: 8 },
+  heavy: { name: 'Twin 105mm', dmg: 30, rof: 2.2, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: true, ground: true, big: true },
+  arty: { name: '155mm howitzer', dmg: 150, rof: 4.5, range: 6.5 * CELL, wh: 'HE', shot: 'arc', speed: 95, barrels: 1, air: false, ground: true, splash: 14, scatter: 8, big: true },
   heli: { name: 'Rocket pods', dmg: 40, rof: 1.6, range: 4 * CELL, wh: 'AP', shot: 'rocket', speed: 150, barrels: 2, air: true, ground: true },
   boat: { name: 'Deck gun', dmg: 25, rof: 1.4, range: 5 * CELL, wh: 'HE', shot: 'shell', speed: 240, barrels: 1, air: false, ground: true },
   tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
@@ -86,6 +87,30 @@ export const DAMAGED = 0.5;
 // How long the pieces of something destroyed fly about before they're gone.
 export const PIECE_S = 1.3;
 export const HELI_ALT = 20;
+
+// The size of the explosion when each kind of vehicle is destroyed (map pixels).
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 7, light: 11, heavy: 14, hauler: 12, arty: 8, mcv: 15, heli: 9, boat: 10 };
+// Tracked armour: these cook off in a string of explosions when destroyed.
+const TANKS = new Set<UnitKind>(['light', 'heavy', 'mcv', 'hauler']);
+
+// How hard the screen shakes (in map pixels) when something big is
+// destroyed nearby: tanks and the like, and every building, by its size.
+export const QUAKE: Partial<Record<UnitKind, number>> = { light: 1.5, heavy: 2, mcv: 2, hauler: 1.6, boat: 1.2 };
+export const buildingQuake = (rx: number, ry: number) => Math.min(3.5, 1.8 + (rx + ry) * 0.04);
+// How long a shake lasts, in seconds.
+export const QUAKE_S = 0.5;
+
+// How far (world units) a round shoves what it hits, away from where it came
+// from: soldiers are knocked back by anything, tanks only by heavy rounds.
+// k is how much of the round's force reaches it (less further from a burst).
+export function knockback(w: Weapon, kind: UnitKind, k = 1): number {
+  if (kind === 'inf' || kind === 'rocket') return k * (w.shot === 'bullet' ? 1.6 : w.shot === 'arc' ? 6 : w.shot === 'rocket' ? 3.5 : 3);
+  if ((kind === 'light' || kind === 'heavy') && w.big) return k * (w.shot === 'arc' ? 2.8 : 1.6);
+  return 0;
+}
+// A knock in progress slides it this far each second, as a share of what is
+// left (so the shove is quick and eases off).
+export const KNOCK_EASE = 12;
 
 // Where a weapon's rounds leave from, in world units: one point per barrel.
 // a is the way the body faces, tur the turret's (tanks and towers). For a
@@ -287,9 +312,13 @@ export class Fx {
   private flashes: Flash[] = [];
   private tracers: { x0: number; y0: number; x1: number; y1: number; t: number }[] = [];
   private pieces: Piece[] = [];
+  // columns of smoke rising from wrecks: `rate` puffs a second, thinning out
+  // over `dur` seconds
+  private plumes: { x: number; y: number; t: number; dur: number; rate: number; size: number; w: number }[] = [];
 
   clear(): void {
     this.pieces = [];
+    this.plumes = [];
     this.shots = [];
     this.ps = [];
     this.booms = [];
@@ -382,6 +411,68 @@ export class Fx {
     this.pieces.push(...out);
   }
 
+  // A column of dark smoke rising from (x, y) for dur seconds, w pixels wide.
+  plume(x: number, y: number, dur: number, rate: number, size: number, w = 3): void {
+    this.plumes.push({ x, y, t: 0, dur, rate, size, w });
+  }
+
+  // A thick cloud of smoke rolling up over an area w by h pixels round (x, y).
+  billow(x: number, y: number, w: number, h: number, n: number, size: number): void {
+    for (let i = 0; i < n; i++)
+      this.p(x + (Math.random() - 0.5) * w, y + (Math.random() - 0.5) * h, i % 4 ? 'soot' : 'smoke', {
+        vx: (Math.random() - 0.5) * 8,
+        vy: -4 - Math.random() * 7,
+        max: 2.4 + Math.random() * 1.8,
+        size: size * (0.7 + Math.random() * 0.6),
+      });
+  }
+
+  // A unit is destroyed: it blows up, breaks into a few big chunks and leaves
+  // a column of smoke (tanks cook off in a string of explosions, the turret
+  // thrown high). parts are the sprites it is drawn with and the screen
+  // points they are drawn at, (ox, oy) is its middle and gy the ground under it.
+  wreck(kind: UnitKind, parts: [StackSprite, number, number][], ox: number, oy: number, gy: number): void {
+    const foot = kind === 'inf' || kind === 'rocket';
+    const tank = TANKS.has(kind);
+    const r = BOOM[kind] ?? 3;
+    parts.forEach(([spr, px, py], i) => {
+      if (foot) this.shatter(spr, px, py, ox, oy, gy, 3, 18, 7);
+      else this.shatter(spr, px, py, ox, oy, gy, 6, 30 + r * 2 + (tank && i ? 25 : 0), i ? 6 : 14);
+    });
+    if (foot) {
+      this.boom(ox, oy, 3);
+      this.billow(ox, oy, 3, 2, 5, 1.5);
+      return;
+    }
+    this.boom(ox, oy, r);
+    this.boom(ox + (Math.random() - 0.5) * r, oy - r * 0.3, r * 0.6, 0.15);
+    if (tank) {
+      // it cooks off: more bangs round it, and a fountain of embers
+      for (const [d, k] of [
+        [0.3, 0.55],
+        [0.5, 0.7],
+        [0.8, 0.5],
+      ])
+        this.boom(ox + (Math.random() - 0.5) * r * 1.2, oy - Math.random() * r * 0.5, r * k, d);
+      for (let i = 0; i < 18; i++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+        const v = 30 + Math.random() * 40;
+        this.p(ox, oy, i % 2 ? 'ember' : 'spark', { vx: Math.cos(a) * v, vy: Math.sin(a) * v, max: 0.6 + Math.random() * 0.7, g: 70 });
+      }
+    }
+    this.billow(ox, oy - r * 0.2, r * 1.4, r * 0.6, Math.round(r * 1.6), 2 + r * 0.2);
+    this.plume(ox, gy - 2, tank ? 7 : 4.5, tank ? 9 : 6, 1.6 + r * 0.12, r * 0.5);
+  }
+
+  // A building's big bang: it breaks into a few big chunks over its ruin and
+  // smoke rolls up over the whole of it. (sx, sy) is where its sprite is drawn,
+  // (ox, oy) where the pieces fly out from, w by h its size on screen.
+  collapse(spr: StackSprite, sx: number, sy: number, ox: number, oy: number, w: number, h: number): void {
+    this.shatter(spr, sx, sy, ox, oy, sy, 10, 55, 40);
+    this.billow(ox, (oy + sy) / 2, w, h, Math.round(14 + w * 0.6), 3.5);
+    this.plume(ox, sy - 2, 9, 12, 3, w * 0.4);
+  }
+
   smoke(x: number, y: number, dark = true, size = 1.5): void {
     this.p(x + (Math.random() - 0.5) * 3, y, dark ? 'soot' : 'smoke', { vx: 2 + Math.random() * 3, vy: -6 - Math.random() * 4, max: 2.2 + Math.random() * 1.2, size });
   }
@@ -426,13 +517,25 @@ export class Fx {
         for (let i = 0; i < n; i++) {
           const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.8;
           const v = (16 + Math.random() * 34) * Math.sqrt(b.r / 6);
-          this.p(b.x, b.y - b.r * 0.2, i % 3 ? 'spark' : 'debris', { vx: Math.cos(a) * v, vy: Math.sin(a) * v, max: 0.4 + Math.random() * 0.6, g: 110 });
+          this.p(b.x, b.y - b.r * 0.2, i % 5 ? 'spark' : 'debris', { vx: Math.cos(a) * v, vy: Math.sin(a) * v, max: 0.4 + Math.random() * 0.6, g: 110 });
         }
         for (let i = 0; i < Math.round(b.r * 0.6); i++)
           this.p(b.x + (Math.random() - 0.5) * b.r, b.y - Math.random() * b.r * 0.5, 'soot', { vx: (Math.random() - 0.5) * 6, vy: -5 - Math.random() * 6, max: 1.8 + Math.random() * 1.4, size: 1.5 + b.r * 0.15 });
       }
     }
     this.booms = this.booms.filter((b) => b.t < this.boomLen(b));
+    for (const m of this.plumes) {
+      m.t += dt;
+      const k = 1 - m.t / m.dur;
+      if (Math.random() < m.rate * dt * k)
+        this.p(m.x + (Math.random() - 0.5) * m.w, m.y, Math.random() < 0.8 ? 'soot' : 'smoke', {
+          vx: 2 + Math.random() * 4,
+          vy: -7 - Math.random() * 5,
+          max: 2 + Math.random() * 1.4,
+          size: m.size * (0.6 + 0.4 * k),
+        });
+    }
+    this.plumes = this.plumes.filter((m) => m.t < m.dur);
     for (const f of this.flashes) f.t += dt;
     this.flashes = this.flashes.filter((f) => f.t < 0.07);
     for (const t of this.tracers) t.t += dt;

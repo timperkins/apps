@@ -7,7 +7,7 @@ import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STO
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
-import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, drawFlame, makeShot, muzzles } from './combat';
+import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -118,6 +118,8 @@ interface Unit {
   // when you last ordered an attack on it: it blinks white so you can see which
   aimT?: number;
   dead?: boolean;
+  // being knocked back by a hit: how far it still has to slide (world units)
+  knock?: [number, number];
   // the enemy's guards (Combat stage): which post it holds, and its spot there
   post?: number;
   spot?: [number, number];
@@ -129,8 +131,6 @@ const isB = (t: Target): t is Building => 'pad' in t;
 const LEASH = 10 * CELL;
 // How close a friend has to be to come and help when one of its side is hit.
 const HELP = 7 * CELL;
-// The size of the explosion when each kind of vehicle is destroyed.
-const BOOM: Partial<Record<Kind, number>> = { buggy: 6, light: 8, heavy: 10, hauler: 10, arty: 7, mcv: 12, heli: 8, boat: 9 };
 
 // A destroyed building: rubble, for good (t < 0 while it is still blowing up).
 interface Ruin {
@@ -1762,6 +1762,23 @@ export class IsoGame implements GameLike {
         u.lap += kx;
         u.lapY += ky;
       }
+      // knocked back by a hit: a quick shove that eases off (never into the water)
+      if (u.knock) {
+        const k = Math.min(1, KNOCK_EASE * dt);
+        const dx = u.knock[0] * k;
+        const dy = u.knock[1] * k;
+        if (u.kind === 'heli' || this.okAt(u, u.x + dx * 3, u.y + dy * 3)) {
+          u.x += dx;
+          u.y += dy;
+          if (!u.moving) {
+            u.tx = u.x;
+            u.ty = u.y;
+          }
+        }
+        u.knock[0] -= dx;
+        u.knock[1] -= dy;
+        if (Math.hypot(u.knock[0], u.knock[1]) < 0.05) u.knock = undefined;
+      }
       // smoothly follow the ground height (units climb plateaus freely)
       const gz = this.groundZ(u);
       u.z += (gz - u.z) * Math.min(1, dt * 8);
@@ -1889,6 +1906,8 @@ export class IsoGame implements GameLike {
     this.sparks = this.sparks.filter((s) => s.life < 0.5);
     for (const m of this.markers) m.t += dt;
     this.markers = this.markers.filter((m) => m.t < 0.7);
+    for (const q of this.quakes) q.t += dt;
+    this.quakes = this.quakes.filter((q) => q.t < QUAKE_S);
 
     // water sparkles, where you are looking
     const v = this.view;
@@ -2231,7 +2250,9 @@ export class IsoGame implements GameLike {
       for (const o of [...this.units]) {
         if (o.f === src.f || o.kind === 'heli' || o.dead) continue;
         const d = this.reach(s.x, s.y, o);
-        if (d < R) this.damage(o, w.dmg * VERSUS[w.wh][UNIT_DEF[o.kind].armor] * (1 - (d / R) * 0.6), src);
+        if (d >= R) continue;
+        this.shove(o, knockback(w, o.kind, 1 - d / R), o.x - s.x, o.y - s.y);
+        this.damage(o, w.dmg * VERSUS[w.wh][UNIT_DEF[o.kind].armor] * (1 - (d / R) * 0.6), src);
       }
       for (const b of [...this.buildings]) {
         if (b.f === src.f || b.dead) continue;
@@ -2249,8 +2270,46 @@ export class IsoGame implements GameLike {
       this.fx.sparks(sx, sy, 6);
     }
     if (t.dead) return;
+    if (!isB(t)) this.shove(t, knockback(w, t.kind), s.x1 - s.x0, s.y1 - s.y0);
     const arm = isB(t) ? BUILDING_DEF[t.kind].armor : UNIT_DEF[t.kind].armor;
     this.damage(t, w.dmg * VERSUS[w.wh][arm], src);
+  }
+
+  // Knock u back by d world units along (dx, dy), on top of any knock it is already taking.
+  private shove(u: Unit, d: number, dx: number, dy: number): void {
+    const n = Math.hypot(dx, dy);
+    if (d <= 0 || n < 1e-6) return;
+    const [kx, ky] = u.knock ?? [0, 0];
+    u.knock = [kx + (dx / n) * d, ky + (dy / n) * d];
+  }
+
+  // The screen shakes when something big is destroyed: a shake of s map
+  // pixels at screen point (x, y), felt less the further it is from the
+  // middle of the view (see shake()).
+  private quakes: { x: number; y: number; s: number; t: number }[] = [];
+  private quake(x: number, y: number, s: number): void {
+    this.quakes.push({ x, y, s, t: 0 });
+  }
+
+  // How far to shake the view this frame, in map pixels: the shakes going
+  // on, each strongest in the middle of the view and gone a little way off
+  // its edge, so one somewhere else on the map isn't felt at all.
+  shake(): [number, number] {
+    const v = this.view;
+    const cx = (v.x0 + v.x1) / 2;
+    const cy = (v.y0 + v.y1) / 2;
+    const half = Math.hypot(v.x1 - v.x0, v.y1 - v.y0) / 2 || 1;
+    let amp = 0;
+    for (const q of this.quakes) {
+      const [qx, qy] = nearestCopy(cx, cy, q.x, q.y, this.w, this.h);
+      const d = Math.hypot(qx - cx, qy - cy) / half;
+      const near = Math.max(0, Math.min(1, (1.2 - d) / 0.8));
+      amp += q.s * near * (1 - q.t / QUAKE_S) ** 2;
+    }
+    if (amp < 0.05) return [0, 0];
+    amp = Math.min(amp, 4);
+    const t = this.time;
+    return [amp * (Math.sin(t * 71) * 0.6 + Math.sin(t * 43 + 1.3) * 0.4), amp * 0.7 * (Math.sin(t * 59 + 2.1) * 0.6 + Math.sin(t * 37 + 0.4) * 0.4)];
   }
 
   private damage(t: Target, amt: number, src: Unit | Building): void {
@@ -2287,16 +2346,17 @@ export class IsoGame implements GameLike {
     this.units.splice(this.units.indexOf(u), 1);
     if (this.lastTap?.u === u) this.lastTap = null;
     const air = u.kind === 'heli' ? HELI_ALT : 0;
-    const r = BOOM[u.kind] ?? 3;
     const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
     const [, gy] = toScreen(u.x, u.y, u.z);
-    const foot = u.kind === 'inf' || u.kind === 'rocket';
-    for (const [spr, x, y, z] of this.layers(u)) {
-      const [px, py] = toScreen(x, y, z);
-      this.fx.shatter(spr, px, py, sx, sy, gy, foot ? 2 : 4, foot ? 22 : 30 + r * 2);
-    }
-    this.fx.boom(sx, sy, r);
-    if (!foot) this.fx.boom(sx + (Math.random() - 0.5) * r, sy - r * 0.3, r * 0.6, 0.15);
+    this.fx.wreck(
+      u.kind,
+      this.layers(u).map(([spr, x, y, z]) => [spr, ...toScreen(x, y, z)]),
+      sx,
+      sy,
+      gy,
+    );
+    const q = QUAKE[u.kind];
+    if (q) this.quake(sx, sy, q);
     if (u.sel) this.emit();
   }
 
@@ -2335,6 +2395,7 @@ export class IsoGame implements GameLike {
     }
     const [cx, cy] = toScreen(b.x, b.y, 8);
     this.fx.boom(cx, cy, (rx + ry) * 0.45, 0.4);
+    this.quake(cx, cy, buildingQuake(rx, ry) * 0.6);
     this.ruins.push({ kind: b.kind, f: b.f, x: b.x, y: b.y, states: this.states(b.kind, b.f), t: -0.45 });
     if (b.own) this.notice(`${BNAME[b.kind]} destroyed`);
     this.mapVersion++;
@@ -2349,10 +2410,12 @@ export class IsoGame implements GameLike {
         // the big bang: the building flies to pieces over the ruin
         const [sx, sy] = toScreen(r.x, r.y, 0);
         const [ox, oy] = toScreen(r.x, r.y, 10);
-        this.fx.shatter(r.states.damaged.spr, sx, sy, ox, oy, sy, 6, 55, 260);
+        const { rx, ry } = r.states.damaged;
+        this.fx.collapse(r.states.damaged.spr, sx, sy, ox, oy, rx + ry, (rx + ry) * 0.5);
+        this.quake(ox, oy, buildingQuake(rx, ry));
       }
       // smoke pours off it for a while, thins out and stops (the ruin stays)
-      const rate = r.t < 15 ? 3 : 3 * Math.max(0, 1 - (r.t - 15) / 25);
+      const rate = r.t < 15 ? 5 : 5 * Math.max(0, 1 - (r.t - 15) / 25);
       if (r.t > 0 && rate > 0)
         for (const p of r.states.ruin.fx)
           if (Math.random() < (dt * rate) / 2) {

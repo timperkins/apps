@@ -3,7 +3,7 @@
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { DAMAGED, Fx, PIECE_S, Shot, UnitKind, WEAPON, drawFlame, makeShot, muzzles } from './v2/combat';
+import { BOOM, DAMAGED, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './v2/combat';
 import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -74,7 +74,23 @@ class Scene {
   particles: Particle[] = [];
   fx = new Fx();
   lit = 0; // > 0: what's drawn has just been hit, and flashes this bright
+  // the scene shakes when something big is destroyed in it, as the game's view does
+  quakes: { s: number; t: number }[] = [];
   constructor(public c: CanvasRenderingContext2D) {}
+
+  quake(s: number): void {
+    this.quakes.push({ s, t: 0 });
+  }
+
+  // How far to shake the scene this frame, in map pixels.
+  shake(time: number): [number, number] {
+    let amp = 0;
+    for (const q of this.quakes) amp += q.s * (1 - q.t / QUAKE_S) ** 2;
+    if (amp < 0.05) return [0, 0];
+    amp = Math.min(amp, 4);
+    const r = (v: number) => Math.round(v * ART) / ART;
+    return [r(amp * (Math.sin(time * 71) * 0.6 + Math.sin(time * 43 + 1.3) * 0.4)), r(amp * 0.7 * (Math.sin(time * 59 + 2.1) * 0.6 + Math.sin(time * 37 + 0.4) * 0.4))];
+  }
 
   blit(spr: StackSprite, wx: number, wy: number, z: number): void {
     const [sx, sy] = toScreen(wx, wy, z);
@@ -99,6 +115,8 @@ class Scene {
   }
 
   step(dt: number): void {
+    for (const q of this.quakes) q.t += dt;
+    this.quakes = this.quakes.filter((q) => q.t < QUAKE_S);
     for (const p of this.particles) {
       p.life += dt;
       p.x += p.vx * dt;
@@ -254,8 +272,10 @@ function paint(l: Live, dt: number): void {
   const c = l.scene.c;
   c.setTransform(ART, 0, 0, ART, 0, 0);
   c.imageSmoothingEnabled = false;
-  c.drawImage(grass, l.gx * ART, l.gy * ART, l.w * ART, l.h * ART, 0, 0, l.w, l.h);
-  c.translate(l.ox, l.oy);
+  const [qx, qy] = l.scene.shake(l.t);
+  // (a cell's grass is cut from at least 4 pixels inside the texture, so a shake never runs off it)
+  c.drawImage(grass, (l.gx + qx) * ART, (l.gy + qy) * ART, l.w * ART, l.h * ART, 0, 0, l.w, l.h);
+  c.translate(l.ox - qx, l.oy - qy);
   l.scene.step(dt);
   l.scene.fx.step(dt);
   l.cell.draw(l.scene, l.t, dt);
@@ -299,8 +319,8 @@ function addRow(parent: HTMLElement, name: string, blurb: string, cells: Cell[],
       cell,
       ox: Math.round(w / 2 + (cell.box.l - cell.box.r) / 2),
       oy: Math.round(PAD + up + (hgt - PAD * 2 - up - Math.max(...cells.map((c) => c.box.d))) / 2),
-      gx: Math.floor(Math.random() * (GW - w)),
-      gy: Math.floor(Math.random() * (GH - hgt)),
+      gx: 4 + Math.floor(Math.random() * Math.max(0, GW - w - 8)),
+      gy: 4 + Math.floor(Math.random() * Math.max(0, GH - hgt - 8)),
       w,
       h: hgt,
       t: Math.random() * 10,
@@ -449,7 +469,6 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 
 const A = Math.PI / 4; // facing the viewer
 const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
-const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, light: 8, heavy: 10, hauler: 10, arty: 7, mcv: 12, heli: 8, boat: 9 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -474,12 +493,6 @@ function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
     fx.boom(sx, sy, kind === 'rocket' ? 3.5 : 3);
     fx.sparks(sx, sy, 6);
   }
-}
-
-// A vehicle blowing up: the fireball and a second, smaller one after it.
-function blowUp(fx: Fx, sx: number, sy: number, r: number): void {
-  fx.boom(sx, sy, r);
-  fx.boom(sx + (Math.random() - 0.5) * r, sy - r * 0.3, r * 0.6, 0.15);
 }
 
 // Firing at a spot on the ground in front of it, as fast as it reloads
@@ -513,11 +526,15 @@ function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: numb
 
 // Being shot at from off to the left: rounds land on it, it flashes, and its
 // health runs down (then starts again). spot() picks where each one lands.
-function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [number, number, number], round: 'bullet' | 'shell', bar: { x: number; y: number; w: number }, lit: number, every: number): Cell {
+// knock: how far (world units) each round shoves it back, as in the game; it
+// creeps back to its spot between rounds.
+function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [number, number, number], round: 'bullet' | 'shell', bar: { x: number; y: number; w: number }, lit: number, every: number, knock = 0): Cell {
   let hp = 1;
   let cool = 0.3;
   let flash = -9;
   let clock = 0;
+  let off = 0; // how far back it is now
+  let left = 0; // and still to go
   return {
     label: 'Hit',
     box,
@@ -528,16 +545,29 @@ function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [num
         cool = every;
         const p = spot();
         s.fx.fire(
-          makeShot(round, [p[0] - 70, p[1] + 70, p[2] + 3], p, 260, (sh) => {
+          makeShot(round, [p[0] - 70 - off * 0.7, p[1] + 70 + off * 0.7, p[2] + 3], [p[0] + off * 0.7, p[1] - off * 0.7, p[2]], 260, (sh) => {
             impactFx(s.fx, round, sh, round === 'bullet');
             flash = clock;
+            left += knock;
             hp -= round === 'bullet' ? 0.08 : 0.1;
             if (hp < 0.15) hp = 1;
           }),
         );
       }
+      if (left > 0.01) {
+        const k = Math.min(1, KNOCK_EASE * dt) * left;
+        off += k;
+        left -= k;
+      } else off = Math.max(0, off - dt * 3);
       s.lit = clock - flash < 0.07 ? lit : 0;
+      // shoved back away from the shots (which come from down and to the left)
+      const [kx, ky] = toScreen(off * 0.7, -off * 0.7, 0);
+      const [bx, by] = toScreen(0, 0, 0);
+      const r = (v: number) => Math.round(v * ART) / ART;
+      s.c.save();
+      s.c.translate(r(kx - bx), r(ky - by));
       draw(s, t);
+      s.c.restore();
       s.lit = 0;
       healthBar(s.c, Math.round(bar.x - bar.w / 2), Math.round(bar.y), bar.w, hp);
     },
@@ -576,11 +606,12 @@ function combatCells(o: Fighter): Cell[] {
   const bar = { x: 0, y: -still.u - 3, w: Math.max(10, Math.round((still.l + still.r) * 0.6)) };
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
   cells.push(
-    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, z + mid + (Math.random() - 0.5) * 2], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8),
+    // (soldiers are knocked back by rifle fire; tanks by a heavy tank's 105mm shells)
+    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, z + mid + (Math.random() - 0.5) * 2], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8, knockback(o.soft ? WEAPON.inf! : WEAPON.heavy!, o.kind)),
   );
   const r = BOOM[o.kind];
   const boomBox: Box = r ? { l: r * 1.3 + 2, r: r * 1.3 + 2, u: r * 1.6 + z + mid, d: r * 0.6 } : still;
-  const L = 1.4 + PIECE_S + 1.2;
+  const L = 1.4 + PIECE_S + (o.soft ? 1.2 : 3.5);
   const HITS = [0.35, 0.75, 1.15];
   // room for the pieces to fly
   const flying: Box = { l: 16, r: 16, u: still.u + 8, d: 8 };
@@ -616,11 +647,18 @@ function combatCells(o: Fighter): Cell[] {
         return;
       }
       if (!ev(1.4)) return;
-      // gone: a bang, and it flies to pieces (a copter's rain down)
+      // gone: a bang, it breaks into a few chunks (a copter's rain down)
+      // and smoke pours off where it was
       const [ox, oy] = toScreen(0, 0, z + mid * 0.5);
-      for (const [spr, x, y, h] of o.parts) s.fx.shatter(spr, ...toScreen(x, y, h), ox, oy, 0, o.soft ? 2 : 4, o.soft ? 22 : 30 + (r ?? 3) * 2);
-      if (r) blowUp(s.fx, ox, oy, r);
-      else s.fx.boom(ox, oy, 3);
+      s.fx.wreck(
+        o.kind,
+        o.parts.map(([spr, x, y, h]) => [spr, ...toScreen(x, y, h)]),
+        ox,
+        oy,
+        0,
+      );
+      const q = QUAKE[o.kind];
+      if (q) s.quake(q);
     },
   });
   if (r)
@@ -629,7 +667,10 @@ function combatCells(o: Fighter): Cell[] {
       box: boomBox,
       anim: true,
       draw: (s, t, dt) => {
-        if (t % 1.8 < dt) blowUp(s.fx, ...toScreen(0, 0, z + mid * 0.5), r);
+        if (t % 4 < dt) {
+          const [ox, oy] = toScreen(0, 0, z + mid * 0.5);
+          s.fx.wreck(o.kind, [], ox, oy, 0);
+        }
       },
     });
   return cells;
@@ -1142,7 +1183,10 @@ function buildingFight(kind: BuildingKind, b: V2BuildingArt, st: BuildingStates,
         return;
       }
       // the big bang: the building flies to pieces over its ruin
-      if (k - dt < 4.45) s.fx.shatter(st.damaged.spr, 0, 0, ...toScreen(0, 0, 10), 0, 6, 55, 260);
+      if (k - dt < 4.45) {
+        s.fx.collapse(st.damaged.spr, 0, 0, ...toScreen(0, 0, 10), b.rx + b.ry, (b.rx + b.ry) * 0.5);
+        s.quake(buildingQuake(b.rx, b.ry));
+      }
       s.blit(st.ruin.spr, 0, 0, 0);
       const since = k - 4.45;
       if (since < 6) flames(s, st.ruin.fx, t, dt, 4 * (1 - since / 7));
