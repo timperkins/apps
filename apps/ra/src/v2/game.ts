@@ -115,6 +115,8 @@ interface Unit {
   fired?: number;
   hitT?: number;
   flashT?: number;
+  // when you last ordered an attack on it: it blinks white so you can see which
+  aimT?: number;
   dead?: boolean;
   // the enemy's guards (Combat stage): which post it holds, and its spot there
   post?: number;
@@ -171,6 +173,8 @@ interface Building {
   cool?: number;
   hitT?: number;
   flashT?: number;
+  // when you last ordered an attack on it: it blinks white so you can see which
+  aimT?: number;
   dead?: boolean;
 }
 
@@ -222,6 +226,24 @@ const POSTS = 6;
 const ENEMY = 1;
 
 
+// A sprite as a flat white silhouette (made once per sprite image).
+const whites = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function whiteOf(img: HTMLCanvasElement): HTMLCanvasElement {
+  let w = whites.get(img);
+  if (!w) {
+    w = document.createElement('canvas');
+    w.width = img.width;
+    w.height = img.height;
+    const g = w.getContext('2d')!;
+    g.drawImage(img, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, w.width, w.height);
+    whites.set(img, w);
+  }
+  return w;
+}
+
 export class IsoGame implements GameLike {
   readonly fine = true;
   terrain!: IsoTerrain;
@@ -229,7 +251,7 @@ export class IsoGame implements GameLike {
   buildings: Building[] = [];
   props: Prop[] = [];
   particles: Particle[] = [];
-  markers: { x: number; y: number; z: number; t: number; foe?: boolean }[] = [];
+  markers: { x: number; y: number; z: number; t: number }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private bStates = new Map<string, BuildingStates>();
@@ -2084,8 +2106,7 @@ export class IsoGame implements GameLike {
       u.repath = 0;
       u.pace = undefined;
     }
-    const [mx, my] = this.fold(t.x, t.y);
-    this.markers.push({ x: mx, y: my, z: isB(t) ? 0 : t.z, t: 0, foe: true });
+    t.aimT = this.time;
   }
 
   // One unit's fighting, each frame: pick a target if it is standing about,
@@ -2371,7 +2392,20 @@ export class IsoGame implements GameLike {
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     }
+    if (this.aimed && !shadowOnly) {
+      // just ordered to attack: a white silhouette over it
+      this.ctx.globalAlpha = this.aimed;
+      drawSprite(this.ctx, whiteOf(c), spr, sx, sy);
+      this.ctx.globalAlpha = 1;
+    }
   }
+  // the white silhouette's strength while drawing an attack target
+  private aimed = 0;
+  // Ordered to attack lately: three quick white blinks over 0.6s.
+  private aimFlash = (t: { aimT?: number }) => {
+    const dt = this.time - (t.aimT ?? -9);
+    return dt >= 0 && dt < 0.6 && Math.floor(dt / 0.1) % 2 === 0 ? 0.85 : 0;
+  };
   // true while drawing something that has just been hit
   private lit = 0;
   private justHit = (t: { flashT?: number }) => this.time - (t.flashT ?? -9) < 0.07;
@@ -2445,7 +2479,7 @@ export class IsoGame implements GameLike {
     for (const m of this.markers) {
       const k = m.t / 0.7;
       const r = 9 - k * 6;
-      c.fillStyle = m.foe ? (Math.floor(m.t * 12) % 2 ? 'rgba(0,0,0,0)' : `rgba(255,96,72,${1 - k * 0.4})`) : `rgba(120,255,120,${1 - k * 0.6})`;
+      c.fillStyle = `rgba(120,255,120,${1 - k * 0.6})`;
       for (const [ax, ay] of [
         [r, 0],
         [0, r],
@@ -2699,10 +2733,12 @@ export class IsoGame implements GameLike {
 
   private drawUnit(u: Unit): void {
     this.lit = this.justHit(u) ? 0.45 : 0;
+    this.aimed = this.aimFlash(u);
     try {
       this.drawUnitNow(u);
     } finally {
       this.lit = 0;
+      this.aimed = 0;
     }
   }
 
@@ -2804,8 +2840,10 @@ export class IsoGame implements GameLike {
     }
     const hurt = b.hp <= DAMAGED ? this.states(b.kind, b.f).damaged : null;
     this.lit = this.justHit(b) ? 0.22 : 0;
+    this.aimed = this.aimFlash(b);
     this.blit(hurt ? hurt.spr : b.art.spr, b.x, b.y, 0);
     this.lit = 0;
+    this.aimed = 0;
     if (hurt)
       for (const [i, p] of hurt.fx.entries()) {
         const [x, y] = toScreen(b.x + p.x, b.y + p.y, p.z);
