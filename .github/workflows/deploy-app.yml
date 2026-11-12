@@ -75,6 +75,9 @@ jobs:
             echo "site=$(jq -r '.hostingSite // empty' app.json)"
             echo "backend=$(jq -r '.backend // empty' app.json)"
             echo "preview_backend=$(jq -r '.previewBackend // empty' app.json)"
+            # Optional own Hosting site (and custom domain) for the fixed preview link, e.g. ra-preview.trom.dev.
+            echo "preview_site=$(jq -r '.previewSite // empty' app.json)"
+            echo "preview_domain=$(jq -r '.previewDomain // empty' app.json)"
             # An app without a preview database (single-user tools) builds its previews against prod.
             echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // .firestore.prod // empty' app.json)"
             # The database that belongs to this target. Rules are deployed only to this one.
@@ -145,9 +148,10 @@ jobs:
       # never changes and always shows the most recent preview push from any branch or merge to main
       # (last one wins; prod.yml runs this with latest_only after each merge).
       # Channels last at most 30 days; every deploy resets that, and preview-keepalive.yml extends it weekly.
+      # An app with previewSite in app.json gets its fixed link from that site instead (next step).
       - name: Deploy fixed latest channel
         id: hosting_latest
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.preview_site == ''
         continue-on-error: ${{ !inputs.latest_only }}
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy latest \
@@ -158,6 +162,26 @@ jobs:
           }
           url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/latest.json")
           echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # The fixed link on its own Hosting site, so it can have a custom domain (preview channels can't).
+      # The site and domain are set up by create-app.yml. This deploys the same preview build to the
+      # site's live channel, which never expires.
+      - name: Deploy fixed preview site
+        id: hosting_preview_site
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.preview_site != ''
+        continue-on-error: ${{ !inputs.latest_only }}
+        env:
+          SITE: ${{ steps.app.outputs.preview_site }}
+          DOMAIN: ${{ steps.app.outputs.preview_domain }}
+        run: |
+          cp firebase.json "$RUNNER_TEMP/firebase.json.orig"
+          jq --arg s "$SITE" '.hosting.site = $s' "$RUNNER_TEMP/firebase.json.orig" > firebase.json
+          status=0
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only hosting --project "$FIREBASE_PROJECT" --force \
+            --message "${{ inputs.app }} preview ${{ steps.app.outputs.sha }}" || status=$?
+          cp "$RUNNER_TEMP/firebase.json.orig" firebase.json
+          [ "$status" = 0 ] || { echo "::warning title=preview site::deploy to $SITE failed"; exit "$status"; }
+          echo "url=https://${DOMAIN:-$SITE.web.app}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to prod
         id: hosting_prod
@@ -253,9 +277,9 @@ jobs:
         id: report
         env:
           GH_TOKEN: ${{ github.token }}
-          URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url || steps.hosting_latest.outputs.url }}
+          URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url || steps.hosting_preview_site.outputs.url || steps.hosting_latest.outputs.url }}
           NOTE: ${{ steps.apphosting.outputs.note }}
-          LATEST: ${{ steps.hosting_latest.outputs.url }}
+          LATEST: ${{ steps.hosting_preview_site.outputs.url || steps.hosting_latest.outputs.url }}
         run: |
           echo "- **${{ inputs.app }}** (${{ inputs.target }}): ${URL:-$NOTE}" >> "$GITHUB_STEP_SUMMARY"
           [ -z "$LATEST" ] || echo "  - fixed link (always the latest preview): $LATEST" >> "$GITHUB_STEP_SUMMARY"

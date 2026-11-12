@@ -2,5 +2,7 @@
   "name": "ra",
   "type": "hosting",
   "domain": "ra.trom.dev",
-  "hostingSite": "trom-ra"
+  "hostingSite": "trom-ra",
+  "previewSite": "trom-ra-preview",
+  "previewDomain": "ra-preview.trom.dev"
 }
