@@ -2,7 +2,7 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, BuildingKind, V2BuildingArt, V2FactionArt, makeBuilding, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, BuildingKind, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { StackSprite, drawSprite, toScreen } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -332,6 +332,84 @@ const round = (t: number, R: number, speed: number): [number, number, number] =>
 
 type Draw = (s: Scene, x: number, y: number, a: number, t: number, extra?: number) => void;
 
+// Standing about, as the game does it (see paceAbout and the turret code in
+// v2/game.ts): each Idle cell keeps its own little state between frames.
+const PACE_SPEED = 3.5;
+const PACE_R = 6;
+const angDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+// A soldier: waits, then steps somewhere near where it was left, or turns.
+function pacer(draw: Draw): (s: Scene, t: number, dt: number) => void {
+  const u = { x: 0, y: 0, a: Math.PI / 4, idle: 1 + Math.random() * 2, pace: null as [number, number] | null };
+  return (s, t, dt) => {
+    if (u.pace) {
+      const dx = u.pace[0] - u.x;
+      const dy = u.pace[1] - u.y;
+      const dist = Math.hypot(dx, dy);
+      u.a = Math.atan2(dy, dx);
+      const sp = Math.min(dist, PACE_SPEED * dt);
+      u.x += Math.cos(u.a) * sp;
+      u.y += Math.sin(u.a) * sp;
+      if (dist < 0.3) {
+        u.pace = null;
+        u.idle = 1.5 + Math.random() * 4;
+      }
+    } else if ((u.idle -= dt) <= 0) {
+      u.idle = 1.5 + Math.random() * 4;
+      if (Math.random() < 0.35) u.a += (Math.random() - 0.5) * 2.5;
+      else {
+        const r = 2 + Math.random() * (PACE_R - 2);
+        const th = Math.random() * TAU;
+        u.pace = [Math.cos(th) * r, Math.sin(th) * r];
+      }
+    }
+    draw(s, u.x, u.y, u.a, t, u.pace ? 2 : 0);
+  };
+}
+
+// A tank: the hull sits still and the turret looks about.
+function scanner(draw: Draw): (s: Scene, t: number, dt: number) => void {
+  const a = Math.PI / 4;
+  let tur = a;
+  let goal = a;
+  let idle = 0.5;
+  return (s, t, dt) => {
+    if ((idle -= dt) <= 0) {
+      idle = 2 + Math.random() * 5;
+      goal = a + (Math.random() - 0.5) * 2.4;
+    }
+    const d = angDiff(goal, tur);
+    tur += Math.sign(d) * Math.min(Math.abs(d), 2.2 * dt);
+    draw(s, 0, 0, a, t, tur);
+  };
+}
+
+// The gun: edges round on its wheels a little now and then, back and
+// forth about the way it was left facing.
+function shuffler(draw: Draw, turn: number): (s: Scene, t: number, dt: number) => void {
+  const home = Math.PI / 4;
+  let a = home;
+  let look: number | null = null;
+  let idle = 1;
+  return (s, t, dt) => {
+    if (look === null) {
+      if ((idle -= dt) <= 0) {
+        idle = 3 + Math.random() * 6;
+        // (the game lets it drift; here it stays near the camera's view)
+        look = home + (a > home ? -1 : 1) * (0.25 + Math.random() * 0.35);
+      }
+    } else {
+      const d = angDiff(look, a);
+      const stepA = turn * 0.35 * dt;
+      if (Math.abs(d) <= stepA) {
+        a = look;
+        look = null;
+      } else a += Math.sign(d) * stepA;
+    }
+    draw(s, 0, 0, a, t);
+  };
+}
+
 // The standard set for a vehicle or soldier: eight angles, driving round, and
 // the other side's colours; plus whatever else it does.
 function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; speed: number; z?: number; more?: Cell[]; moveLabel?: string }): Cell[] {
@@ -361,7 +439,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a, t, moving) => {
-        const fr = moving ? 1 + (Math.floor(t * 7) % 2) : 0;
+        const fr = moving ? 1 + (Math.floor(t * (moving === 2 ? 4 : 7)) % 2) : 0;
         s.blit(frames(art)[fr][dirIndex(a, 16)], x, y, 0);
       };
     const spr = frames(me)[0][0];
@@ -373,7 +451,10 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         R: 9,
         speed: 9,
         moveLabel: 'Walk around',
-        more: [{ label: 'Walk', box: boxOf(spr), anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, 1) }],
+        more: [
+          { label: 'Idle', box: circleBox(spr, PACE_R), anim: true, draw: pacer(draw(me)) },
+          { label: 'Walk', box: boxOf(spr), anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, 1) },
+        ],
       }),
     );
   }
@@ -386,7 +467,22 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         s.blit(pick(art)[di(a)], x, y, 0);
     addRow(parent, name, blurbOf(kind), unitCells(pick(me)[0], draw(me), draw(foe), { R, speed, more: more(draw(me)) }));
   };
-  plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34);
+  // (turn: the game's turn rate for it, from STATS in v1/game.ts)
+  const idleShuffle = (sprs: StackSprite[], turn: number) => (draw: Draw): Cell[] => [
+    { label: 'Idle', box: union(...[-0.6, 0, 0.6].map((k) => boxOf(sprs[di(Math.PI / 4 + k)]))), anim: true, draw: shuffler(draw, turn) },
+  ];
+  // a parked buggy blinks the red light on its aerial every 8 seconds
+  plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34, (draw) => [
+    {
+      label: 'Idle',
+      box: union(boxOf(me.buggy[0]), { l: 6, r: 6, u: 14, d: 6 }),
+      anim: true,
+      draw: (s, t) => {
+        draw(s, 0, 0, Math.PI / 4, t);
+        drawBuggyLights(s.c, 0, 0, 0, Math.PI / 4, t);
+      },
+    },
+  ]);
 
   // tanks: a hull and a turret that turns on its own
   for (const kind of ['light', 'heavy'] as const) {
@@ -404,6 +500,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       R: kind === 'light' ? 16 : 18,
       speed: kind === 'light' ? 20 : 13,
       more: [
+        { label: 'Idle', box: spr, anim: true, draw: scanner(draw(me)) },
         {
           label: 'Turret turns',
           box: spr,
@@ -416,7 +513,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     addRow(parent, kind === 'light' ? 'Lancer tank' : 'Bastion tank', blurbOf(kind), cells);
   }
 
-  plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13);
+  plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13, idleShuffle(me.artillery, 2));
 
   // the hauler also digs ore
   const ore = makeOre();

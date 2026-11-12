@@ -3,7 +3,7 @@
 // ground) down to half a unit, which is the finest the renderer samples.
 import { RGB, hash2, hex, mix, shade } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
-import { Shape, StackSprite, inBox, renderDirs, renderStack } from './stack';
+import { Shape, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
 
 export { FACTIONS };
 export type { Faction };
@@ -255,6 +255,22 @@ function buggy(f: Faction): Shape {
     if (av > 3 && z > 2.6 && z < 3.3 && Math.abs(u) < 2.2) return WHITE; // side stripe
     return g(av > 3 ? f.dark : f.main, u, v, z);
   };
+}
+
+// A parked buggy: the red lamp on the tip of its whip aerial gives one short
+// flash every 8 seconds. Drawn over the buggy's sprite at (x, y, z) facing a,
+// at time t. The position matches the aerial in buggy() above.
+export function drawBuggyLights(c: CanvasRenderingContext2D, x: number, y: number, z: number, a: number, t: number): void {
+  if (t % 8 >= 0.3) return;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const [sx, sy] = toScreen(x - 5 * ca + 3 * sa, y - 5 * sa - 3 * ca, z + 9.3);
+  const X = Math.round(sx);
+  const Y = Math.round(sy);
+  c.fillStyle = 'rgba(255,80,60,0.4)';
+  c.fillRect(X - 1, Y - 1, 3, 3);
+  c.fillStyle = '#ff6a5a';
+  c.fillRect(X, Y, 1, 1);
 }
 
 function hauler(f: Faction): Shape {
