@@ -74,3 +74,7 @@ export const STORE = { base: 3000, refinery: 2000, silo: 3000 };
 
 // Ore: what one clump holds, what a hauler carries, and how fast it digs.
 export const ORE = { node: 600, load: 700, digRate: 70, unloadRate: 350, regrow: 2 };
+
+// The Combat test stage: plenty of money, and room to hold it.
+export const COMBAT_CREDITS = 50000;
+export const COMBAT_STORE = 100000;
