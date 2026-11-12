@@ -89,7 +89,7 @@ export const PIECE_S = 1.3;
 export const HELI_ALT = 20;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
-export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 7, light: 11, heavy: 14, hauler: 12, arty: 8, mcv: 15, heli: 9, boat: 10 };
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, light: 9.5, heavy: 12, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
 // Tracked armour: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'mcv', 'hauler']);
 
@@ -240,11 +240,15 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
     cv = document.createElement('canvas');
     cv.width = img.width;
     cv.height = img.height;
-    const c = cv.getContext('2d')!;
-    c.drawImage(img, 0, 0);
-    c.globalCompositeOperation = 'source-in';
-    c.fillStyle = '#15130f';
-    c.fillRect(0, 0, cv.width, cv.height);
+    // solid: every pixel that is solid in the picture is pure black, the rest
+    // (soft shadow and edges) is left out
+    const src = img.getContext('2d')!.getImageData(0, 0, img.width, img.height);
+    const d = src.data;
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = d[i + 1] = d[i + 2] = 0;
+      d[i + 3] = d[i + 3] > 200 ? 255 : 0;
+    }
+    cv.getContext('2d')!.putImageData(src, 0, 0);
     charOf.set(img, cv);
   }
   return cv;
@@ -466,8 +470,8 @@ export class Fx {
     const tank = TANKS.has(kind);
     const r = BOOM[kind] ?? 3;
     parts.forEach(([spr, px, py], i) => {
-      if (foot) this.shatter(spr, px, py, ox, oy, gy, 3, 18, 7);
-      else this.shatter(spr, px, py, ox, oy, gy, 6, 30 + r * 2 + (tank && i ? 25 : 0), i ? 6 : 14);
+      if (foot) this.shatter(spr, px, py, ox, oy, gy, 2, 13, 7);
+      else this.shatter(spr, px, py, ox, oy, gy, 3, 20 + r * 1.3 + (tank && i ? 16 : 0), i ? 7 : 16);
     });
     if (foot) {
       this.boom(ox, oy, 3);
@@ -622,14 +626,15 @@ export class Fx {
   // Shots, flying pieces, fireballs, flashes and sparks, over everything.
   drawAbove(c: CanvasRenderingContext2D): void {
     for (const p of this.pieces) {
-      // burnt black, fading out towards the end
+      // solid black, shrinking away at the end instead of fading
       const k = p.life / p.max;
-      c.globalAlpha = k < 0.45 ? 1 : Math.max(0, 1 - (k - 0.45) / 0.55);
-      const X = Math.round(p.x * ART) / ART;
-      const Y = Math.round(p.y * ART) / ART;
-      c.drawImage(p.img, p.px, p.py, p.pw, p.ph, X, Y, p.pw / ART, p.ph / ART);
+      const sc = k < 0.7 ? 1 : Math.max(0, 1 - (k - 0.7) / 0.3);
+      const w = Math.max(1, Math.round(p.pw * sc));
+      const h = Math.max(1, Math.round(p.ph * sc));
+      const X = Math.round(p.x * ART + (p.pw - w) / 2) / ART;
+      const Y = Math.round(p.y * ART + (p.ph - h)) / ART;
+      if (sc > 0) c.drawImage(p.img, p.px, p.py, p.pw, p.ph, X, Y, w / ART, h / ART);
     }
-    c.globalAlpha = 1;
     for (const t of this.tracers) {
       c.fillStyle = 'rgba(255,236,150,0.9)';
       const n = Math.ceil(Math.hypot(t.x1 - t.x0, t.y1 - t.y0) * 2);
