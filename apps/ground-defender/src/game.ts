@@ -392,9 +392,9 @@ const SPAWNER_R = 26;
 const isBig = (p: Placeable) => p === 'mine' || p === 'machine';
 /** A gate in the fence: which side, and where along it (0 to 1). */
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
-interface Bolt { stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
+interface Bolt { from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
 /** A rocket swirls round a loop, then homes in on its target. */
-interface Rocket { x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
+interface Rocket { from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info' | 'tiny'; }
 
@@ -426,7 +426,8 @@ export class Survival {
   private weapons: (Weapon | null)[] = ['xbow', null, null]; private wSel = 0;
   private ammoSlots: (AmmoSlot | null)[] = [null, null, null]; private aSel = 0;
   /** Space (or the Shoot bear button) held down: keep firing. */
-  private fireHeld = false; private rxT = 0; private firingAt: Target | null = null; private noAmmoT = 0;
+  private fireHeld = false; private rxT = 0; private firingAt: Target | null = null; private firingEnd: { x: number; y: number } | null = null;
+  private sparks: { x: number; y: number; t: number }[] = []; private noAmmoT = 0;
   /** How many bears gather before they all attack. */
   private groupSize = 8;
   /** Acid: slime in the air, puddles on the ground, and the burn you have (damage a second, seconds left). */
@@ -586,7 +587,7 @@ export class Survival {
     this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
     Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); this.closeRecipe();
     this.weapons = ['xbow', null, null]; this.wSel = 0; this.ammoSlots = [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null]; this.aSel = 0;
-    this.fireHeld = false; this.firingAt = null; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.groupSize = this.newGroup(); this.armsSig = '';
+    this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.groupSize = this.newGroup(); this.armsSig = '';
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
@@ -737,7 +738,7 @@ export class Survival {
     if (w === 'rgun') {
       if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'Put rockets in an ammo slot', 'info'); this.noAmmoT = 1.5; } Sound.denied(); return; }
       this.useUp(i, SURVIVAL.ammoPoints); this.mining = false;
-      this.rockets.push({ x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+      this.rockets.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
       return;
@@ -747,14 +748,14 @@ export class Survival {
     const dmg = (use === 'ammo' ? AMMO.normal.damage * SURVIVAL.stoneDamage : use ? metalOf(use).dmg : ammo.damage) * ST.boltMul;
     if (use) this.useUp(i, SURVIVAL.ammoPoints);
     this.mining = false;
-    this.bolts.push({ x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone: !!use, color: use && use !== 'ammo' ? metalOf(use).color : undefined });
+    this.bolts.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone: !!use, color: use && use !== 'ammo' ? metalOf(use).color : undefined });
     this.reload = ammo.reload * ST.reloadMul;
     this.shots++;
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
   }
   /** Holding fire: the rapid crossbow streams at the nearest bear in range, other weapons fire each time they're ready. */
   private holdFire(dt: number) {
-    this.firingAt = null; this.noAmmoT -= dt;
+    this.firingAt = null; this.firingEnd = null; this.noAmmoT -= dt;
     if (!this.fireHeld) { this.rxT = 0; return; }
     const w = this.weapon();
     if (w !== 'rxbow') { if (this.reload <= 0) this.shoot(true); return; }
@@ -763,13 +764,15 @@ export class Survival {
     this.mining = false; this.digAt = null;
     this.face = Math.atan2(target.y - this.y, target.x - this.x);
     this.firingAt = target;
+    // a wall in the way stops the stream there
+    this.firingEnd = this.wallLine(this.x, this.y, target.x, target.y);
     // with no ammo it still fires, but does no damage
     if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x + 18, this.y - 22, 'No Ammo', 'tiny'); this.noAmmoT = .8; } }
     else this.useUp(i, SURVIVAL.rxUse * dt);
     this.rxT += dt;
     while (this.rxT >= SURVIVAL.rxEvery) {
       this.rxT -= SURVIVAL.rxEvery; this.shots++;
-      if (alive(target) && i >= 0) this.damageTarget(target, SURVIVAL.rxDamage * ST.boltMul);
+      if (alive(target) && i >= 0 && !this.firingEnd) this.damageTarget(target, SURVIVAL.rxDamage * ST.boltMul);
       Sound.rattle();
     }
   }
@@ -2086,7 +2089,7 @@ export class Survival {
       tu.face = a;
       if (tu.kind === 'rocket') {
         tu.ammo.rocket = (tu.ammo.rocket ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
-        this.rockets.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+        this.rockets.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
         Sound.rocket();
         continue;
       }
@@ -2102,7 +2105,7 @@ export class Survival {
         Sound.turret();
       }
       if ((tu.ammo[k] ?? 0) < 1e-6) delete tu.ammo[k];
-      this.bolts.push({ x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: range + 80, dmg, target, stone: true, color: k === 'ammo' ? undefined : metalOf(k).color });
+      this.bolts.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: range + 80, dmg, target, stone: true, color: k === 'ammo' ? undefined : metalOf(k).color });
     }
     this.separate(dt);
 
@@ -2115,6 +2118,8 @@ export class Survival {
         bo.vx = Math.cos(na) * s; bo.vy = Math.sin(na) * s;
       }
       bo.x += bo.vx * dt; bo.y += bo.vy * dt; bo.left -= SURVIVAL.boltSpeed * dt;
+      // your walls and gates stop bolts (the tile it was shot from doesn't count); the wall takes no damage
+      const wk = this.wallAt(bo.x, bo.y); if (wk && wk !== bo.from) { bo.left = 0; this.sparks.push({ x: bo.x, y: bo.y, t: 0 }); continue; }
       const hit = this.hitAt(bo.x, bo.y, 4);
       if (hit) { this.damageTarget(hit, bo.dmg); bo.left = 0; }
     }
@@ -2129,6 +2134,7 @@ export class Survival {
       const sp = SURVIVAL.rocketSpeed * (rk.t < swirl ? .55 : 1 + (rk.t - swirl) * .8);
       rk.x += Math.cos(rk.a) * sp * dt; rk.y += Math.sin(rk.a) * sp * dt;
       rk.trail.push({ x: rk.x, y: rk.y }); if (rk.trail.length > 18) rk.trail.shift();
+      const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(false); rk.t = 99; continue; }
       const hit = this.hitAt(rk.x, rk.y, 6);
       if (hit && (hit === rk.target || rk.t > swirl)) {
         this.damageTarget(hit, SURVIVAL.rocketDamage);
@@ -2138,9 +2144,12 @@ export class Survival {
     }
     this.rockets = this.rockets.filter(r => r.t < 8);
     for (const bl of this.blasts) bl.t += dt;
+    for (const sp of this.sparks) sp.t += dt;
+    this.sparks = this.sparks.filter(s => s.t < .25);
     this.blasts = this.blasts.filter(b => b.t < .5);
     for (const r of this.rocks) {
       r.x += r.vx * dt; r.y += r.vy * dt; r.left -= SURVIVAL.throwSpeed * dt; r.spin += dt * 9;
+      if (this.wallAt(r.x, r.y)) { r.left = 0; this.sparks.push({ x: r.x, y: r.y, t: 0 }); continue; }
       if (dist(r.x, r.y, this.x, this.y) < GUY_R + 5) { r.left = 0; this.hurt(SURVIVAL.bearThrow); }
     }
     this.rocks = this.rocks.filter(r => r.left > 0);
@@ -2263,6 +2272,19 @@ export class Survival {
     for (const b of live) { collide(b, BEAR_R, this.walls); b.x = clamp(b.x, BEAR_R, W - BEAR_R); b.y = clamp(b.y, BEAR_R, H - BEAR_R); }
   }
 
+  /** The key of your wall or gate at this point, if there is one. */
+  private wallAt(x: number, y: number) {
+    if (!this.pwalls.size) return null;
+    const k = Math.floor((x - GX0) / TILE) + ',' + Math.floor((y - GY0) / TILE);
+    return this.pwalls.has(k) ? k : null;
+  }
+  /** Where a straight line from (x0, y0) to (x1, y1) first runs into your wall (not counting the tile it starts on), or null. */
+  private wallLine(x0: number, y0: number, x1: number, y1: number) {
+    if (!this.pwalls.size) return null;
+    const d = dist(x0, y0, x1, y1), n = Math.ceil(d / 6), from = this.wallAt(x0, y0);
+    for (let i = 1; i <= n; i++) { const x = x0 + (x1 - x0) * i / n, y = y0 + (y1 - y0) * i / n, k = this.wallAt(x, y); if (k && k !== from) return { x, y }; }
+    return null;
+  }
   /** Your walls and gates as rectangles: [x0, y0, x1, y1, isGate, key]. */
   private wallRects: [number, number, number, number, boolean, string][] | null = null;
   private myWalls() {
@@ -2298,7 +2320,7 @@ export class Survival {
       const dx = sl.tx - sl.x, dy = sl.ty - sl.y, d = Math.hypot(dx, dy), step = 300 * dt;
       sl.t += dt;
       const hitMe = dist(sl.x, sl.y, this.x, this.y) < GUY_R + 6;
-      if (d > step && !hitMe) { sl.x += dx / d * step; sl.y += dy / d * step; continue; }
+      if (d > step && !hitMe) { sl.x += dx / d * step; sl.y += dy / d * step; if (this.wallAt(sl.x, sl.y)) { sl.t = -1; Sound.sizzle(); } continue; }
       if (!hitMe) { sl.x = sl.tx; sl.y = sl.ty; }
       sl.t = -1;
       this.puddles.push({ x: sl.x, y: sl.y, t: SURVIVAL.puddleTime });
@@ -2503,11 +2525,17 @@ export class Survival {
     }
     // the rapid crossbow: a flickering yellow line to what it's shooting
     if (this.firingAt) {
-      const tg = this.firingAt, j = () => (Math.random() - .5) * 10;
+      const tg = this.firingEnd ?? this.firingAt, j = () => (Math.random() - .5) * 10;
+      if (this.firingEnd) this.sparks.push({ x: tg.x, y: tg.y, t: .15 });
       g.strokeStyle = 'rgba(255,225,74,.9)'; g.lineWidth = 1.6;
       g.beginPath(); g.moveTo(this.x + Math.cos(this.face) * 24, this.y + Math.sin(this.face) * 24); g.lineTo(tg.x + j(), tg.y + j()); g.stroke();
       g.strokeStyle = 'rgba(255,255,200,.5)'; g.lineWidth = .8;
       g.beginPath(); g.moveTo(this.x + Math.cos(this.face) * 24, this.y + Math.sin(this.face) * 24); g.lineTo(tg.x + j(), tg.y + j()); g.stroke();
+    }
+    // a bolt or rock stopped by a wall: a quick spark
+    for (const sp of this.sparks) {
+      const k = 1 - sp.t / .25; g.strokeStyle = `rgba(255,236,170,${k})`; g.lineWidth = 1.5;
+      g.beginPath(); for (let i = 0; i < 5; i++) { const a = i * 1.257 + sp.x, r0 = 2, r1 = 4 + (1 - k) * 6; g.moveTo(sp.x + Math.cos(a) * r0, sp.y + Math.sin(a) * r0); g.lineTo(sp.x + Math.cos(a) * r1, sp.y + Math.sin(a) * r1); } g.stroke();
     }
     // rockets: a smoke trail, then the rocket
     for (const rk of this.rockets) {
