@@ -153,8 +153,12 @@ function refreshTypes(): void {
   typesKey = key;
   typesEl.classList.toggle('group', locked);
   noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
-  allBtn.hidden = locked || (types.length > 0 ? types.every((t) => t.sel === t.count) : !!game.unitTypes);
-  clearBtn.disabled = lastNames.length === 0;
+  // All and Clear share one slot, so the bar doesn't shift: All while nothing
+  // is selected (greyed out with nothing on screen), Clear once something is
+  const any = lastNames.length > 0;
+  allBtn.hidden = any;
+  allBtn.disabled = !!game.unitTypes && types.length === 0;
+  clearBtn.hidden = !any;
   typesEl.replaceChildren(
     ...types.map((t) => {
       const b = document.createElement('button');
