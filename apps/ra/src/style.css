@@ -15,6 +15,8 @@ body {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
   overscroll-behavior: none;
+  /* pixel cursors, made in cursors.ts; main.ts picks the map's one each frame */
+  cursor: var(--cur-arrow);
 }
 
 #c {
@@ -22,7 +24,7 @@ body {
   inset: 0;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  cursor: crosshair;
+  cursor: var(--cur-arrow);
 }
 
 #hud,
@@ -58,7 +60,7 @@ body {
   color: var(--ink);
   background: #2c446b;
   border: 1px solid #8fb2dc;
-  cursor: pointer;
+  cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -109,7 +111,7 @@ body {
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
   padding: 7px 26px 7px 8px;
-  cursor: pointer;
+  cursor: var(--cur-hand);
   text-align: left;
 }
 
@@ -142,7 +144,7 @@ body {
   height: 128px;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  cursor: grab;
+  cursor: var(--cur-grab);
   touch-action: none;
 }
 
@@ -200,7 +202,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
-  cursor: pointer;
+  cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -225,14 +227,6 @@ body {
   width: 2px;
   margin: 4px 2px;
   background: var(--edge);
-}
-
-#c.panning {
-  cursor: grab;
-}
-
-#c.panning:active {
-  cursor: grabbing;
 }
 
 #selBar {
@@ -260,7 +254,7 @@ body {
   background: var(--panel);
   border: 2px solid var(--edge);
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 2px 0 rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+  cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -285,7 +279,7 @@ body {
   background: var(--panel);
   border-color: var(--edge);
   opacity: 0.6;
-  cursor: default;
+  cursor: var(--cur-arrow);
 }
 
 #moreBtn[aria-pressed='true'] {
@@ -410,7 +404,7 @@ body.sheet-open #selBar {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  cursor: pointer;
+  cursor: var(--cur-hand);
 }
 
 #build .close svg {
@@ -438,7 +432,7 @@ body.sheet-open #selBar {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
-  cursor: pointer;
+  cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -480,7 +474,7 @@ body.sheet-open #selBar {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-bottom-color: rgba(0, 0, 0, 0.6);
   border-right-color: rgba(0, 0, 0, 0.6);
-  cursor: pointer;
+  cursor: var(--cur-hand);
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
@@ -692,7 +686,7 @@ body.sheet-open #selBar {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
-  cursor: pointer;
+  cursor: var(--cur-hand);
 }
 
 #picker .head a {
@@ -733,7 +727,7 @@ body.sheet-open #selBar {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-bottom-color: rgba(0, 0, 0, 0.5);
   border-right-color: rgba(0, 0, 0, 0.5);
-  cursor: pointer;
+  cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -799,9 +793,4 @@ body.sheet-open #selBar {
   background: #eba05d;
 }
 
-/* a unit under the mouse is outlined instead */
-#c.hovering,
-#c.panning.hovering {
-  cursor: none;
-}
 

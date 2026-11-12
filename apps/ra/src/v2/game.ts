@@ -160,6 +160,9 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   markers: { x: number; y: number; z: number; t: number }[] = [];
+  // Mark where a move order goes. main.ts turns it off for the mouse, whose
+  // cursor shows the order instead.
+  moveMarks = true;
   sparkles: { x: number; y: number; life: number }[] = [];
   sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
   art: V2FactionArt[];
@@ -234,7 +237,6 @@ export class IsoGame implements GameLike {
     this.sparkles = [];
     this.sparks = [];
     this.lastTap = null;
-    this.hov = null;
     this.mapVersion++;
     this.credits = START_CREDITS;
     this.jobs = new Map();
@@ -1255,14 +1257,22 @@ export class IsoGame implements GameLike {
     return best ? { u: best, lap: bestLap } : null;
   }
 
-  // The unit the mouse is over, outlined so you can see it can be picked.
-  private hov: Unit | null = null;
-  hover(x: number, y: number): boolean {
-    this.hov = this.unitAt(x, y)?.u ?? null;
-    return !!this.hov;
-  }
-  unhover(): void {
-    this.hov = null;
+  // What a tap at (x, y) would do, for the mouse cursor. Follows click().
+  cursorAt(x: number, y: number): 'pick' | 'move' | 'rally' | 'build' | 'blocked' | null {
+    if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
+    const mine = this.mine();
+    const hit = this.unitAt(x, y);
+    if (hit && (hit.u.f === ME || !mine.length)) return 'pick';
+    if (!mine.length) {
+      if (this.buildingAt(x, y)) return null;
+      const sb = this.selB();
+      return sb && sb.own && MAKERS.includes(sb.kind) && sb.rise >= 1 ? 'rally' : null;
+    }
+    const sel = mine.filter((u) => !u.deploy);
+    if (!sel.length) return null;
+    // boats can't go onto land, nor anyone else into the water
+    const [gx, gy] = this.fold(...this.groundAt(x, y));
+    return sel.some((u) => this.okAt(u, gx, gy)) ? 'move' : 'blocked';
   }
 
   private mine(): Unit[] {
@@ -1362,7 +1372,7 @@ export class IsoGame implements GameLike {
         }
       if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
         const [mx, my] = this.fold(...this.groundAt(x, y));
-        this.markers.push({ x: mx, y: my, z: 0, t: 0 });
+        if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0 });
         return;
       }
     }
@@ -1375,7 +1385,7 @@ export class IsoGame implements GameLike {
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
     const [mx, my] = this.fold(wx, wy);
-    this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
+    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0 });
     const cols = Math.ceil(Math.sqrt(sel.length));
     const rows = Math.ceil(sel.length / cols);
     const gap = 14;
@@ -1878,8 +1888,6 @@ export class IsoGame implements GameLike {
     for (const [r, col] of feet) this.drawFoot(r, col, 0.75 + 0.25 * Math.sin(this.time * 6), false, true);
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
-    const hv = this.hov;
-    if (hv && this.units.includes(hv) && seen(hv.x, hv.y, hv.z)) this.drawHover(hv);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
 
     // the building being placed: a see-through ghost over its footprint
@@ -2101,16 +2109,6 @@ export class IsoGame implements GameLike {
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
     healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
-  }
-
-  // The mouse is over a unit: a box round it in place of the pointer,
-  // breathing a little, so you can see you can pick it.
-  private drawHover(u: Unit): void {
-    const c = this.ctx;
-    const { x, y, rx, ry } = this.unitBox(u);
-    const grow = Math.round(1 + Math.sin(this.time * 8));
-    c.fillStyle = u.f === ME ? 'rgba(157,255,157,0.95)' : 'rgba(255,106,90,0.95)';
-    corners(c, x, y, rx + grow, ry + grow, 3);
   }
 
   private drawBuilding(b: Building): void {
