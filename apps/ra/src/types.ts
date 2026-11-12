@@ -104,6 +104,9 @@ export interface GameLike {
   // unit, send the selection there, attack an enemy, set a building's rally point, put the building being
   // placed down, or nothing it can do ('blocked'). null: nothing to show.
   cursorAt?(x: number, y: number): 'pick' | 'move' | 'attack' | 'rally' | 'build' | 'blocked' | null;
+  // How far to shake the view this frame (map pixels), when something big
+  // has just been destroyed near the middle of it.
+  shake?(): [number, number];
   // Where your home base is now, for the Home button.
   homeBase?(): { x: number; y: number };
 }

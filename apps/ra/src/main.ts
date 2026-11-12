@@ -944,13 +944,21 @@ function draw(now: number, first: boolean): void {
     globe.draw(ctx, v, true);
     drawSelected(ctx, v, 2);
   } else {
-    const x0 = Math.round(camX());
-    const y0 = Math.round(camY());
+    // the view shakes when something big is destroyed near the middle of it:
+    // less zoomed out, and not at all by the time you are near space
+    const [shx, shy] = game.shake?.() ?? [0, 0];
+    const shk = Math.max(0, Math.min(1, (zoom - Z_SPACE) / 0.4)) / Math.sqrt(Math.max(1, zoom));
+    const ox = Math.round(shx * shk * dens) / dens;
+    const oy = Math.round(shy * shk * dens) / dens;
+    const x0 = Math.round(camX()) + ox;
+    const y0 = Math.round(camY()) + oy;
     const x1 = x0 + view.w;
     const y1 = y0 + view.h;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(dens, 0, 0, dens, -x0 * dens, -y0 * dens);
-    game.renderGround(x0, y0, x1, y1, first ? 1e5 : 10);
+    // (a whole-pixel rect a little bigger, so a shake shows no unpainted edge)
+    const m = ox || oy ? 5 : 0;
+    game.renderGround(Math.floor(x0) - m, Math.floor(y0) - m, Math.ceil(x1) + m, Math.ceil(y1) + m, first ? 1e5 : 10);
     // Objects for every copy of the map in view (sprites hang over the edges).
     const W = built.w;
     const H = built.h;
