@@ -1,0 +1,729 @@
+// The showcase page (/units/): every unit and building in v2, one row each,
+// from eight angles and doing the things it does in the game, on plain grass.
+import './showcase.css';
+import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
+import { DIRS, FACTIONS, BuildingKind, V2BuildingArt, V2FactionArt, makeBuilding, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { StackSprite, drawSprite, toScreen } from './v2/stack';
+import { TECH } from './v2/tech';
+
+const TAU = Math.PI * 2;
+const HELI_ALT = 20; // as in the game
+const RISE_S = 1.8;
+
+// ---------- The ground: plain grass, in the game's greens ----------
+
+const GRASS = ['#22391b', '#284320', '#2f4d24', '#365628', '#3d5f2d', '#466833'].map(hex);
+const FLOWER = [hex('#e8dc72'), hex('#e6e0d0'), hex('#c98ac0'), hex('#d9694a'), hex('#8fa6e0')];
+const CLOVER = hex('#2a5a3a');
+const GW = 420; // grass texture size in map pixels
+const GH = 320;
+
+function makeGrass(): HTMLCanvasElement {
+  const W = GW * ART;
+  const H = GH * ART;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const c = cv.getContext('2d')!;
+  const img = c.createImageData(W, H);
+  const d = img.data;
+  const seed = 77;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const px = x / ART;
+      const py = y / ART;
+      const patch = fbm(px / 36, py / 36, seed + 11, 3);
+      const tone = fbm(px / 12, py / 12, seed + 12, 2);
+      const rnd = hash2(x, y, seed);
+      const cell = (hash2(x >> 1, y >> 1, seed + 2) - 0.5) * 1.3;
+      let gi = Math.floor((patch * 0.7 + tone * 0.3) * 6.4 - 0.2 + cell + (rnd - 0.5) * 1.2);
+      gi = Math.max(0, Math.min(GRASS.length - 1, gi));
+      let col: RGB = GRASS[gi];
+      const r2 = hash2(x, y, seed + 26);
+      const bloom = fbm(px / 30, py / 30, seed + 14, 2);
+      if (bloom < 0.32 && tone > 0.55 && rnd < 0.5) col = mix(col, CLOVER, 0.6);
+      else if (r2 > 0.992) col = shade(GRASS[5], rnd * 0.1);
+      else if (r2 < 0.02) col = shade(col, -0.2);
+      else if (r2 < 0.0206) col = FLOWER[Math.floor(rnd * FLOWER.length)];
+      const i = (y * W + x) * 4;
+      d[i] = col[0];
+      d[i + 1] = col[1];
+      d[i + 2] = col[2];
+      d[i + 3] = 255;
+    }
+  c.putImageData(img, 0, 0);
+  return cv;
+}
+
+// ---------- Cells: one small scene each ----------
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  kind: 'smoke' | 'soot' | 'dust' | 'spark';
+  size: number;
+}
+
+// What a scene draws with, in map pixels, with the ground origin at (0, 0).
+class Scene {
+  particles: Particle[] = [];
+  constructor(public c: CanvasRenderingContext2D) {}
+
+  blit(spr: StackSprite, wx: number, wy: number, z: number): void {
+    const [sx, sy] = toScreen(wx, wy, z);
+    drawSprite(this.c, spr.img, spr, sx, sy);
+  }
+
+  shadow(spr: StackSprite, wx: number, wy: number, z: number): void {
+    if (!spr.shadow) return;
+    const [sx, sy] = toScreen(wx, wy, z);
+    drawSprite(this.c, spr.shadow, spr, sx, sy);
+  }
+
+  puff(sx: number, sy: number, kind: Particle['kind'], o: Partial<Particle> = {}): void {
+    this.particles.push({ x: sx, y: sy, vx: 0, vy: 0, life: 0, max: 1, kind, size: 1, ...o });
+  }
+
+  step(dt: number): void {
+    for (const p of this.particles) {
+      p.life += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.kind === 'smoke' || p.kind === 'soot') p.size += dt * 1.8;
+      if (p.kind === 'spark') p.vy += 60 * dt;
+    }
+    this.particles = this.particles.filter((p) => p.life < p.max);
+  }
+
+  // The game's puffs of smoke and dust, and sparks.
+  drawParticles(): void {
+    const c = this.c;
+    for (const p of this.particles) {
+      const k = p.life / p.max;
+      if (p.kind === 'spark') {
+        c.fillStyle = p.life < 0.2 ? '#fff6c8' : '#ffb347';
+        c.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+        continue;
+      }
+      const s = Math.max(1, Math.round(p.size));
+      c.fillStyle =
+        p.kind === 'smoke' ? `rgba(222,222,216,${0.6 * (1 - k)})` : p.kind === 'soot' ? `rgba(70,66,60,${0.55 * (1 - k)})` : `rgba(165,145,105,${0.5 * (1 - k)})`;
+      const X = Math.round(p.x - s / 2);
+      const Y = Math.round(p.y - s / 2);
+      if (s > 1) {
+        c.fillRect(X + 0.5, Y, s - 1, s);
+        c.fillRect(X, Y + 0.5, 0.5, s - 1);
+        c.fillRect(X + s - 0.5, Y + 0.5, 0.5, s - 1);
+      } else c.fillRect(X, Y, s, s);
+      if (s > 2 && p.kind === 'smoke') {
+        c.fillStyle = `rgba(255,255,255,${0.35 * (1 - k)})`;
+        c.fillRect(X, Y, Math.ceil(s / 2), 1);
+      }
+    }
+  }
+
+  // A building site's dashed outline, as the game draws it.
+  foot(rx: number, ry: number, color: string, alpha: number): void {
+    const c = this.c;
+    const pts: [number, number][] = [
+      [-rx, -ry],
+      [rx, -ry],
+      [rx, ry],
+      [-rx, ry],
+    ];
+    c.fillStyle = color;
+    c.globalAlpha = alpha * 0.2;
+    c.beginPath();
+    pts.forEach(([x, y], i) => {
+      const [sx, sy] = toScreen(x, y);
+      if (i) c.lineTo(sx, sy);
+      else c.moveTo(sx, sy);
+    });
+    c.fill();
+    c.globalAlpha = alpha;
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = pts[i];
+      const [bx, by] = pts[(i + 1) % 4];
+      const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 2);
+      for (let k = 0; k <= n; k++) {
+        if (k % 4 === 3) continue;
+        const [sx, sy] = toScreen(ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n);
+        c.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+      }
+    }
+    c.globalAlpha = 1;
+  }
+}
+
+// A scene's size, in map pixels round its ground origin.
+interface Box {
+  l: number;
+  r: number;
+  u: number;
+  d: number;
+}
+// The painted part of a sprite (its picture has room to spare round it), in
+// map pixels from the left and top of the picture.
+const tight = new WeakMap<StackSprite, { x0: number; y0: number; x1: number; y1: number }>();
+function boundsOf(spr: StackSprite): { x0: number; y0: number; x1: number; y1: number } {
+  let b = tight.get(spr);
+  if (b) return b;
+  const { width: W, height: H } = spr.img;
+  const d = spr.img.getContext('2d')!.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if (d[(y * W + x) * 4 + 3] > 8) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+  b = x1 < x0 ? { x0: 0, y0: 0, x1: spr.w, y1: spr.h } : { x0: x0 / ART, y0: y0 / ART, x1: (x1 + 1) / ART, y1: (y1 + 1) / ART };
+  tight.set(spr, b);
+  return b;
+}
+const boxOf = (spr: StackSprite, wx = 0, wy = 0, z = 0): Box => {
+  const [sx, sy] = toScreen(wx, wy, z);
+  const b = boundsOf(spr);
+  return { l: spr.cx - b.x0 - sx, r: b.x1 - spr.cx + sx, u: spr.cy - b.y0 - sy, d: b.y1 - spr.cy + sy };
+};
+const union = (...bs: Box[]): Box => ({
+  l: Math.max(...bs.map((b) => b.l)),
+  r: Math.max(...bs.map((b) => b.r)),
+  u: Math.max(...bs.map((b) => b.u)),
+  d: Math.max(...bs.map((b) => b.d)),
+});
+// The room a sprite needs to go round a circle of radius R.
+const circleBox = (spr: StackSprite, R: number, z = 0): Box => {
+  const bs: Box[] = [];
+  for (let i = 0; i < 16; i++) bs.push(boxOf(spr, Math.cos((i / 16) * TAU) * R, Math.sin((i / 16) * TAU) * R, z));
+  return union(...bs);
+};
+
+interface Cell {
+  label: string;
+  box: Box;
+  draw: (s: Scene, t: number, dt: number) => void;
+  anim?: boolean;
+}
+
+interface Live {
+  cv: HTMLCanvasElement;
+  scene: Scene;
+  cell: Cell;
+  ox: number;
+  oy: number;
+  gx: number;
+  gy: number;
+  w: number;
+  h: number;
+  t: number;
+  seen: boolean;
+}
+
+let grass: HTMLCanvasElement;
+const live: Live[] = [];
+const PAD = 5;
+
+const io = new IntersectionObserver(
+  (es) => {
+    for (const e of es) {
+      const l = live.find((x) => x.cv === e.target);
+      if (l) l.seen = e.isIntersecting;
+    }
+  },
+  { rootMargin: '120px' },
+);
+
+function paint(l: Live, dt: number): void {
+  const c = l.scene.c;
+  c.setTransform(ART, 0, 0, ART, 0, 0);
+  c.imageSmoothingEnabled = false;
+  c.drawImage(grass, l.gx * ART, l.gy * ART, l.w * ART, l.h * ART, 0, 0, l.w, l.h);
+  c.translate(l.ox, l.oy);
+  l.scene.step(dt);
+  l.cell.draw(l.scene, l.t, dt);
+  l.scene.drawParticles();
+}
+
+// A row: the thing's name and what it is, then its scenes side by side, all
+// the same size so the sprites line up.
+function addRow(parent: HTMLElement, name: string, blurb: string, cells: Cell[], big = false): void {
+  const row = document.createElement('section');
+  row.className = big ? 'row big' : 'row';
+  const head = document.createElement('div');
+  head.className = 'head';
+  const h = document.createElement('h3');
+  h.textContent = name;
+  const p = document.createElement('p');
+  p.textContent = blurb;
+  head.append(h, p);
+  const strip = document.createElement('div');
+  strip.className = 'strip';
+  const hgt = Math.ceil(Math.max(...cells.map((c) => c.box.u + c.box.d))) + PAD * 2;
+  const up = Math.max(...cells.map((c) => c.box.u));
+  for (const cell of cells) {
+    const w = Math.max(30, Math.ceil(cell.box.l + cell.box.r) + PAD * 2);
+    const fig = document.createElement('figure');
+    const cv = document.createElement('canvas');
+    cv.width = w * ART;
+    cv.height = hgt * ART;
+    cv.style.setProperty('--w', String(w));
+    cv.style.setProperty('--h', String(hgt));
+    const cap = document.createElement('figcaption');
+    cap.textContent = cell.label;
+    if (cell.anim) cap.classList.add('anim');
+    fig.append(cv, cap);
+    strip.append(fig);
+    const l: Live = {
+      cv,
+      scene: new Scene(cv.getContext('2d')!),
+      cell,
+      ox: Math.round(w / 2 + (cell.box.l - cell.box.r) / 2),
+      oy: Math.round(PAD + up + (hgt - PAD * 2 - up - Math.max(...cells.map((c) => c.box.d))) / 2),
+      gx: Math.floor(Math.random() * (GW - w)),
+      gy: Math.floor(Math.random() * (GH - hgt)),
+      w,
+      h: hgt,
+      t: Math.random() * 10,
+      seen: false,
+    };
+    paint(l, 0);
+    if (cell.anim) {
+      live.push(l);
+      io.observe(cv);
+    }
+  }
+  row.append(head, strip);
+  parent.append(row);
+}
+
+// ---------- Angles ----------
+
+// Eight headings round the compass of the screen, from facing the viewer
+// round clockwise. World angle a points along (cos a, sin a); +x runs to the
+// lower right of the screen and +y to the lower left.
+const ANGLES: { a: number; label: string }[] = [
+  { a: Math.PI / 4, label: '↓ S' },
+  { a: Math.PI / 2, label: '↙ SW' },
+  { a: (3 * Math.PI) / 4, label: '← W' },
+  { a: Math.PI, label: '↖ NW' },
+  { a: (5 * Math.PI) / 4, label: '↑ N' },
+  { a: (3 * Math.PI) / 2, label: '↗ NE' },
+  { a: (7 * Math.PI) / 4, label: '→ E' },
+  { a: 0, label: '↘ SE' },
+];
+
+const blurbOf = (unit: string) => {
+  const t = TECH.find((x) => x.unit === unit || x.building === unit);
+  return t ? `${t.blurb} ${t.cost} credits.` : '';
+};
+
+// Going round a circle anticlockwise on the ground: position and heading.
+const round = (t: number, R: number, speed: number): [number, number, number] => {
+  const th = (t * speed) / R;
+  return [Math.cos(th) * R, Math.sin(th) * R, th + Math.PI / 2];
+};
+
+type Draw = (s: Scene, x: number, y: number, a: number, t: number, extra?: number) => void;
+
+// The standard set for a vehicle or soldier: eight angles, driving round, and
+// the other side's colours; plus whatever else it does.
+function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; speed: number; z?: number; more?: Cell[]; moveLabel?: string }): Cell[] {
+  const z = o.z ?? 0;
+  const still = boxOf(spr, 0, 0, z);
+  const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box: still, draw: (s, t) => draw(s, 0, 0, a, t) }));
+  cells.push(...(o.more ?? []));
+  cells.push({
+    label: o.moveLabel ?? 'Drive',
+    box: circleBox(spr, o.R, z),
+    anim: true,
+    draw: (s, t) => {
+      const [x, y, a] = round(t, o.R, o.speed);
+      draw(s, x, y, a, t, 1);
+    },
+  });
+  cells.push({ label: 'Enemy', box: still, draw: (s, t) => enemy(s, 0, 0, Math.PI / 4, t) });
+  return cells;
+}
+
+function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, yard: V2BuildingArt): void {
+  const di = (a: number) => dirIndex(a, DIRS);
+
+  // soldiers: 16 headings, a two-step walk
+  for (const kind of ['inf', 'rocket'] as const) {
+    const frames = (art: V2FactionArt) => (kind === 'inf' ? art.infantry : art.rocket);
+    const draw =
+      (art: V2FactionArt): Draw =>
+      (s, x, y, a, t, moving) => {
+        const fr = moving ? 1 + (Math.floor(t * 7) % 2) : 0;
+        s.blit(frames(art)[fr][dirIndex(a, 16)], x, y, 0);
+      };
+    const spr = frames(me)[0][0];
+    addRow(
+      parent,
+      kind === 'inf' ? 'Rifleman' : 'Rocketeer',
+      blurbOf(kind),
+      unitCells(spr, draw(me), draw(foe), {
+        R: 9,
+        speed: 9,
+        moveLabel: 'Walk around',
+        more: [{ label: 'Walk', box: boxOf(spr), anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, 1) }],
+      }),
+    );
+  }
+
+  // plain vehicles: one sprite each
+  const plain = (name: string, kind: string, pick: (a: V2FactionArt) => StackSprite[], R: number, speed: number, more: (draw: Draw) => Cell[] = () => []) => {
+    const draw =
+      (art: V2FactionArt): Draw =>
+      (s, x, y, a) =>
+        s.blit(pick(art)[di(a)], x, y, 0);
+    addRow(parent, name, blurbOf(kind), unitCells(pick(me)[0], draw(me), draw(foe), { R, speed, more: more(draw(me)) }));
+  };
+  plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34);
+
+  // tanks: a hull and a turret that turns on its own
+  for (const kind of ['light', 'heavy'] as const) {
+    const hull = (art: V2FactionArt) => (kind === 'light' ? art.lightTank : art.heavyTank);
+    const tur = (art: V2FactionArt) => (kind === 'light' ? art.lightTurret : art.heavyTurret);
+    const draw =
+      (art: V2FactionArt): Draw =>
+      (s, x, y, a, _t, turret) => {
+        s.blit(hull(art)[di(a)], x, y, 0);
+        const ta = turret === undefined || turret === 1 ? a : turret;
+        s.blit(tur(art)[di(ta)], x - Math.cos(a) * 1.2, y - Math.sin(a) * 1.2, 0);
+      };
+    const spr = union(boxOf(hull(me)[0]), boxOf(tur(me)[0]));
+    const cells = unitCells(hull(me)[0], draw(me), draw(foe), {
+      R: kind === 'light' ? 16 : 18,
+      speed: kind === 'light' ? 20 : 13,
+      more: [
+        {
+          label: 'Turret turns',
+          box: spr,
+          anim: true,
+          draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, Math.PI / 4 + t * 1.4),
+        },
+      ],
+    });
+    for (const c of cells) c.box = union(c.box, spr);
+    addRow(parent, kind === 'light' ? 'Lancer tank' : 'Bastion tank', blurbOf(kind), cells);
+  }
+
+  plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13);
+
+  // the hauler also digs ore
+  const ore = makeOre();
+  plain('Ore hauler', 'hauler', (a) => a.hauler, 18, 13, (draw) => [
+    {
+      label: 'Dig ore',
+      box: union(boxOf(me.hauler[0], -6, -6), boxOf(ore.lumps[0][2], 8, 8)),
+      anim: true,
+      draw: (s, t, dt) => {
+        // the clump wears down as it is dug, then grows back
+        const k = (t % 6) / 6;
+        const size = k < 0.33 ? 2 : k < 0.66 ? 1 : 0;
+        s.blit(ore.stain[0][size], 8, 8, 0);
+        s.blit(ore.lumps[0][size], 8, 8, 0);
+        draw(s, -6, -6, Math.PI / 4, t);
+        if (Math.random() < dt * 6) {
+          const [sx, sy] = toScreen(8, 8, 2);
+          s.puff(sx + (Math.random() - 0.5) * 6, sy, 'dust', { vx: (Math.random() - 0.5) * 6, vy: -4, max: 0.8 });
+        }
+      },
+    },
+  ]);
+
+  // the Mobile Foundry deploys: it lines up square, then the yard unfolds
+  const deploy: Cell = {
+    label: 'Deploy',
+    box: union(boxOf(yard.spr), boxOf(me.mcv[0])),
+    anim: true,
+    draw: (s, t, dt) => {
+      const k = t % 6; // turn 1s, rise 1.8s, stand, start again
+      if (k < 1.2) {
+        const a = Math.PI / 2 * Math.max(0, 1 - k / 1);
+        s.blit(me.mcv[di(a)], 0, 0, 0);
+        return;
+      }
+      const rise = Math.min(1, (k - 1.2) / RISE_S);
+      if (rise < 1) {
+        drawRising(s, yard, rise);
+        if (Math.random() < dt * 14) puffSite(s, yard);
+      } else s.blit(yard.spr, 0, 0, 0);
+    },
+  };
+  plain('Mobile Foundry', 'mcv', (a) => a.mcv, 22, 10, () => [deploy]);
+
+  // the copter flies at height, with a shadow below and its rotors spinning
+  const heliDraw =
+    (art: V2FactionArt): Draw =>
+    (s, x, y, a, t) => {
+      const spr = art.heli[di(a)];
+      const z = HELI_ALT + Math.sin(t * 2) * 1.2;
+      s.shadow(spr, x + 4, y - 2, 0);
+      s.blit(spr, x, y, z);
+      const c = s.c;
+      const hx = x + Math.cos(a) * 1;
+      const hy = y + Math.sin(a) * 1;
+      const ra = t * 26;
+      c.fillStyle = 'rgba(28,28,28,0.5)';
+      for (let b = 0; b < 2; b++) {
+        const ang = ra + b * Math.PI * 0.5;
+        const [x0, y0] = toScreen(hx - Math.cos(ang) * 12, hy - Math.sin(ang) * 12, z + 8);
+        const [x1, y1] = toScreen(hx + Math.cos(ang) * 12, hy + Math.sin(ang) * 12, z + 8);
+        pxLine(c, x0, y0, x1, y1);
+      }
+      const [mx, my] = toScreen(hx, hy, z + 8);
+      c.fillStyle = '#222';
+      c.fillRect(Math.round(mx), Math.round(my), 1, 1);
+      const [tx, ty] = toScreen(x - Math.cos(a) * 13.5, y - Math.sin(a) * 13.5, z + 6.5);
+      c.fillStyle = 'rgba(28,28,28,0.45)';
+      const sz = Math.floor(t * 20) % 2 ? 2 : 1;
+      c.fillRect(Math.round(tx), Math.round(ty) - sz, 1, sz * 2 + 1);
+    };
+  {
+    const spr = me.heli[0];
+    const air = union(boxOf(spr, 0, 0, HELI_ALT + 1.5), boxOf(spr, 4, -2, 0), { l: 18, r: 18, u: HELI_ALT + 14, d: 10 });
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box: air, anim: true, draw: (s, t) => heliDraw(me)(s, 0, 0, a, t) }));
+    const R = 20;
+    cells.push({
+      label: 'Fly',
+      box: union(circleBox(spr, R + 4, HELI_ALT + 1.5), { l: R * 1.42 + 18, r: R * 1.42 + 18, u: HELI_ALT + 26, d: R * 0.71 + 10 }),
+      anim: true,
+      draw: (s, t) => {
+        const [x, y, a] = round(t, R, 30);
+        heliDraw(me)(s, x, y, a, t);
+      },
+    });
+    cells.push({ label: 'Enemy', box: air, anim: true, draw: (s, t) => heliDraw(foe)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, 'Kestrel copter', blurbOf('heli'), cells);
+  }
+
+  // the boat bobs (it only goes on water in the game)
+  const boatDraw =
+    (art: V2FactionArt): Draw =>
+    (s, x, y, a, t) =>
+      s.blit(art.boat[di(a)], x, y, Math.sin(t * 2.2) * 0.6);
+  {
+    const box = union(boxOf(me.boat[0], 0, 0, 1), boxOf(me.boat[0], 0, 0, -1));
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box, anim: true, draw: (s, t) => boatDraw(me)(s, 0, 0, a, t) }));
+    cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => boatDraw(foe)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, 'Patrol boat', 'Patrols the water: it only goes on lakes and seas in the game.', cells);
+  }
+}
+
+// ---------- Buildings ----------
+
+function drawRising(s: Scene, b: V2BuildingArt, rise: number): void {
+  const spr = b.spr;
+  const [sx, sy] = toScreen(0, 0, 0);
+  const x = Math.round(sx - spr.cx);
+  const y = Math.round(sy - spr.cy);
+  const W = spr.img.width;
+  const H = spr.img.height;
+  const top = Math.round(H * (1 - rise));
+  s.foot(b.rx, b.ry, '#ffe08a', 0.8);
+  if (H - top > 0) s.c.drawImage(spr.img, 0, top, W, H - top, x, y + top / ART, spr.w, (H - top) / ART);
+}
+
+function puffSite(s: Scene, b: V2BuildingArt): void {
+  const t = Math.random() * 4;
+  const k = (t % 1) * 2 - 1;
+  const side = Math.floor(t);
+  const lx = side < 2 ? (side ? 1 : -1) * b.rx : k * b.rx;
+  const ly = side < 2 ? k * b.ry : (side === 3 ? 1 : -1) * b.ry;
+  const [sx, sy] = toScreen(lx, ly, 1);
+  s.puff(sx, sy, 'dust', { vx: (Math.random() - 0.5) * 8, vy: -3 - Math.random() * 3, max: 1 + Math.random() * 0.8, size: 1.5 });
+}
+
+const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
+  { kind: 'yard', name: 'Foundry', blurb: 'Where your base starts: builds everything else. Packs up into a Mobile Foundry.' },
+  { kind: 'power', name: 'Generator' },
+  { kind: 'barracks', name: 'Barracks' },
+  { kind: 'refinery', name: 'Ore refinery' },
+  { kind: 'silo', name: 'Ore silo' },
+  { kind: 'factory', name: 'Vehicle works' },
+  { kind: 'radar', name: 'Radar mast' },
+  { kind: 'helipad', name: 'Helipad' },
+  { kind: 'lab', name: 'Tech lab' },
+  { kind: 'tower', name: 'Gun tower' },
+  { kind: 'hq', name: 'Command post', blurb: 'The heart of an enemy base.' },
+];
+
+// The building's moving parts and smoke, as the game draws them.
+function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art: V2FactionArt, dish: StackSprite[], phase: number, dt: number, gun: number): void {
+  const c = s.c;
+  const f = FACTIONS[fi];
+  const fx = (i: number) => toScreen(b.fx[i].x, b.fx[i].y, b.fx[i].z).map(Math.round) as [number, number];
+  const emit = (i: number, kind: 'smoke' | 'soot', rate: number) => {
+    if (!b.fx[i] || Math.random() > dt * rate) return;
+    const [sx, sy] = toScreen(b.fx[i].x, b.fx[i].y, b.fx[i].z);
+    s.puff(sx + (Math.random() - 0.5) * 6, sy, kind, { vx: 3 + Math.random() * 3, vy: -7 - Math.random() * 4, max: 2.6 + Math.random(), size: 1.5 });
+  };
+  const blink = (rate: number) => {
+    if (Math.floor(phase * rate) % 2) return;
+    const [x, y] = fx(0);
+    c.fillStyle = 'rgba(255,90,60,0.35)';
+    c.fillRect(x - 1, y - 1, 3, 3);
+    c.fillStyle = '#ff7a5c';
+    c.fillRect(x, y, 1, 1);
+  };
+  switch (kind) {
+    case 'yard':
+      blink(1.2);
+      if (b.fx[1] && Math.random() < dt * 1.5) {
+        const [sx, sy] = toScreen(b.fx[1].x, b.fx[1].y, b.fx[1].z - 1);
+        for (let i = 0; i < 3; i++) s.puff(sx, sy, 'spark', { vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, max: 0.5 });
+      }
+      break;
+    case 'hq':
+      blink(1.5);
+      break;
+    case 'lab': {
+      const [x, y] = fx(0);
+      c.fillStyle = `rgba(160,240,255,${0.25 + 0.2 * Math.sin(phase * 3)})`;
+      c.fillRect(x - 3, y - 5, 7, 9);
+      break;
+    }
+    case 'barracks': {
+      const [x, y] = fx(0);
+      const wave = Math.floor(phase * 5) % 4;
+      for (let i = 0; i < 7; i++) {
+        const dy = Math.round(Math.sin(i * 0.9 - wave * 1.6) * 0.8);
+        c.fillStyle = cssOf(i < 2 ? f.light : i === 6 ? f.dark : f.main);
+        c.fillRect(x - 1 - i, y + dy, 1, 4);
+      }
+      break;
+    }
+    case 'radar': {
+      const p = b.fx[0];
+      s.blit(dish[Math.floor(((phase * 0.5) % 1) * 16)], p.x, p.y, p.z - 3);
+      break;
+    }
+    case 'tower': {
+      const p = b.fx[0];
+      s.blit(art.towerGun[dirIndex(gun, DIRS)], p.x, p.y, p.z);
+      break;
+    }
+    case 'power':
+      emit(0, 'smoke', 3);
+      emit(1, 'smoke', 3);
+      break;
+    case 'refinery':
+      emit(0, 'soot', 2);
+      break;
+    case 'factory':
+      emit(0, 'smoke', 0.8);
+      emit(1, 'smoke', 0.8);
+      break;
+  }
+}
+
+const cssOf = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts: V2FactionArt[], dish: StackSprite[]): void {
+  const me = makeBuilding(def.kind, FACTIONS[0]);
+  const foe = makeBuilding(def.kind, FACTIONS[1]);
+  // room for smoke drifting up off the roof
+  const smoky = def.kind === 'power' || def.kind === 'refinery' || def.kind === 'factory';
+  const box = union(boxOf(me.spr), smoky ? { ...boxOf(me.spr), u: boxOf(me.spr).u + 12, r: boxOf(me.spr).r + 8 } : boxOf(me.spr));
+  const still = (b: V2BuildingArt, fi: number, gun: number) => (s: Scene) => {
+    s.blit(b.spr, 0, 0, 0);
+    if (def.kind === 'radar') s.blit(dish[2], b.fx[0].x, b.fx[0].y, b.fx[0].z - 3);
+    if (def.kind === 'tower') s.blit(arts[fi].towerGun[dirIndex(gun, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
+  };
+  const cells: Cell[] = [];
+  if (def.kind === 'tower') {
+    // the building is fixed; its gun turns to any of 32 headings
+    for (const { a, label } of ANGLES) cells.push({ label: `Gun ${label}`, box, draw: still(me, 0, a) });
+  } else cells.push({ label: 'Standing', box, draw: still(me, 0, Math.PI / 4) });
+  cells.push({
+    label: 'Working',
+    box,
+    anim: true,
+    draw: (s, t, dt) => {
+      s.blit(me.spr, 0, 0, 0);
+      working(s, def.kind, me, 0, arts[0], dish, t, dt, Math.PI / 4 + Math.sin(t * 0.7) * 2.4);
+    },
+  });
+  cells.push({
+    label: 'Going up',
+    box,
+    anim: true,
+    draw: (s, t, dt) => {
+      const dur = def.kind === 'yard' ? RISE_S : 1 + (me.rx + me.ry) / 30;
+      const k = t % (dur + 2);
+      const rise = Math.min(1, k / dur);
+      if (rise < 1) {
+        drawRising(s, me, rise);
+        if (Math.random() < dt * 14) puffSite(s, me);
+      } else still(me, 0, Math.PI / 4)(s);
+    },
+  });
+  if (def.kind === 'yard') {
+    cells.push({
+      label: 'Pack up',
+      box: union(box, boxOf(arts[0].mcv[0])),
+      anim: true,
+      draw: (s, t, dt) => {
+        const k = t % 4.4;
+        if (k < 1) return s.blit(me.spr, 0, 0, 0);
+        const rise = 1 - Math.min(1, (k - 1) / 1.2);
+        if (rise > 0) {
+          drawRising(s, me, rise);
+          if (Math.random() < dt * 12) puffSite(s, me);
+        } else s.blit(arts[0].mcv[0], 0, 0, 0);
+      },
+    });
+  }
+  cells.push({ label: 'Enemy', box, draw: still(foe, 1, Math.PI / 4) });
+  const t = TECH.find((x) => x.building === def.kind);
+  addRow(parent, def.name, def.blurb ?? (t ? `${t.blurb} ${t.cost} credits.` : ''), cells, true);
+}
+
+function pxLine(c: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {
+  const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)));
+  for (let i = 0; i <= n; i++) c.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), 1, 1);
+}
+
+// ---------- Start ----------
+
+const status = document.querySelector<HTMLParagraphElement>('#status')!;
+const later = () => new Promise<void>((r) => setTimeout(r, 0));
+
+async function main(): Promise<void> {
+  await later(); // let "Drawing…" show first
+  grass = makeGrass();
+  const arts = FACTIONS.map(makeFactionArt);
+  const dish = makeDish();
+  const yard = makeBuilding('yard', FACTIONS[0]);
+  buildUnits(document.querySelector('#unitRows')!, arts[0], arts[1], yard);
+  const rows = document.querySelector<HTMLDivElement>('#buildingRows')!;
+  for (const def of BUILDINGS) {
+    await later();
+    buildingRow(rows, def, arts, dish);
+  }
+  status.hidden = true;
+  if (location.hash) document.querySelector(location.hash)?.scrollIntoView();
+}
+
+let last = performance.now();
+function frame(now: number): void {
+  const dt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  for (const l of live) {
+    if (!l.seen) continue;
+    l.t += dt;
+    paint(l, dt);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+main();
