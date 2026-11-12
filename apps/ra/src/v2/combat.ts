@@ -231,6 +231,28 @@ interface Piece {
   max: number;
 }
 const alphaOf = new WeakMap<HTMLCanvasElement, Uint8ClampedArray>();
+// A sprite's picture burnt black: its shape in near-black, for the pieces
+// thrown off when it is destroyed.
+const charOf = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function charred(img: HTMLCanvasElement): HTMLCanvasElement {
+  let cv = charOf.get(img);
+  if (!cv) {
+    cv = document.createElement('canvas');
+    cv.width = img.width;
+    cv.height = img.height;
+    const c = cv.getContext('2d')!;
+    c.drawImage(img, 0, 0);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = '#15130f';
+    c.fillRect(0, 0, cv.width, cv.height);
+    charOf.set(img, cv);
+  }
+  return cv;
+}
+
+// How far round its middle a round may land on each kind of unit (world
+// units): rounds hit all over it, not just dead centre.
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1 };
 
 interface Flash {
   x: number;
@@ -392,7 +414,7 @@ export class Fx {
         const d = Math.hypot(dx, dy) || 1;
         const v = force * (0.5 + Math.random() * 0.8);
         out.push({
-          img,
+          img: charred(img),
           px,
           py,
           pw: Math.min(chunk, W - px),
@@ -600,15 +622,12 @@ export class Fx {
   // Shots, flying pieces, fireballs, flashes and sparks, over everything.
   drawAbove(c: CanvasRenderingContext2D): void {
     for (const p of this.pieces) {
-      // scorched as they fly, fading out towards the end
+      // burnt black, fading out towards the end
       const k = p.life / p.max;
       c.globalAlpha = k < 0.45 ? 1 : Math.max(0, 1 - (k - 0.45) / 0.55);
       const X = Math.round(p.x * ART) / ART;
       const Y = Math.round(p.y * ART) / ART;
       c.drawImage(p.img, p.px, p.py, p.pw, p.ph, X, Y, p.pw / ART, p.ph / ART);
-      c.globalAlpha *= Math.min(0.3, k * 0.6);
-      c.fillStyle = '#1e1b18';
-      c.fillRect(X, Y, p.pw / ART, p.ph / ART);
     }
     c.globalAlpha = 1;
     for (const t of this.tracers) {

@@ -8,7 +8,7 @@ import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
-import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './combat';
+import { BUILDING_DEF, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -2322,7 +2322,27 @@ export class IsoGame implements GameLike {
         const ax = aim[0] + Math.cos(ang) * r;
         const ay = aim[1] + Math.sin(ang) * r;
         aim = [ax, ay, isB(t) ? 2 : this.terrain.elev(ax, ay)];
-      } else track = () => (t.dead ? null : this.aimPoint(m[0], m[1], t));
+      } else {
+        // each round lands somewhere on it, not always dead centre
+        const ang = Math.random() * Math.PI * 2;
+        let ox: number, oy: number, oz: number;
+        if (isB(t)) {
+          ox = (Math.random() - 0.5) * t.art.rx * 0.9;
+          oy = (Math.random() - 0.5) * t.art.ry * 0.9;
+          oz = Math.random() * 6 - 2;
+        } else {
+          const r = Math.sqrt(Math.random()) * HIT_SPREAD[t.kind];
+          ox = Math.cos(ang) * r;
+          oy = Math.sin(ang) * r;
+          oz = (Math.random() - 0.5) * MID[t.kind] * 0.8;
+        }
+        track = () => {
+          if (t.dead) return null;
+          const p = this.aimPoint(m[0], m[1], t);
+          return [p[0] + ox, p[1] + oy, Math.max(p[2] - 6, p[2] + oz)];
+        };
+        aim = track()!;
+      }
       this.fx.fire(makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track));
     }
   }
