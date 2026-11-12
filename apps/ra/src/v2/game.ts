@@ -13,6 +13,7 @@ import {
   FACTIONS,
   V2BuildingArt,
   V2FactionArt,
+  drawBuggyLights,
   makeBuilding,
   makeBushes,
   makeClutter,
@@ -92,7 +93,8 @@ interface Unit {
   goal?: [number, number];
   slideT?: number;
   // standing about: soldiers pace round the spot they stopped on (home),
-  // stepping to `pace`; buggies and artillery shift on their wheels to `look`
+  // stepping to `pace`; artillery shifts on its wheels to `look` (a buggy
+  // flashes its lights instead: see drawUnit)
   home?: [number, number];
   pace?: [number, number];
   look?: number;
@@ -1611,8 +1613,8 @@ export class IsoGame implements GameLike {
       if (u.moving || u.deploy || u.job) {
         u.home = u.pace = u.look = u.face = undefined;
       } else if (foot) this.paceAbout(u, dt);
-      else if (u.kind === 'buggy' || u.kind === 'arty') {
-        // edge round a little now and then, as if the driver were looking about
+      else if (u.kind === 'arty') {
+        // edge round a little now and then, as if the crew were looking about
         if (u.look === undefined) {
           u.idle -= dt;
           if (u.idle <= 0) {
@@ -2079,6 +2081,7 @@ export class IsoGame implements GameLike {
       default: {
         const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'hauler' ? art.hauler : art.artillery;
         this.blit(spr[di], u.x, u.y, u.z);
+        if (u.kind === 'buggy' && !u.moving) drawBuggyLights(this.ctx, u.x, u.y, u.z, u.a, u.anim);
       }
     }
   }

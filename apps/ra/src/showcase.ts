@@ -2,7 +2,7 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, BuildingKind, V2BuildingArt, V2FactionArt, makeBuilding, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, BuildingKind, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { StackSprite, drawSprite, toScreen } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -384,7 +384,7 @@ function scanner(draw: Draw): (s: Scene, t: number, dt: number) => void {
   };
 }
 
-// A buggy or gun: edges round on its wheels a little now and then, back and
+// The gun: edges round on its wheels a little now and then, back and
 // forth about the way it was left facing.
 function shuffler(draw: Draw, turn: number): (s: Scene, t: number, dt: number) => void {
   const home = Math.PI / 4;
@@ -471,7 +471,18 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   const idleShuffle = (sprs: StackSprite[], turn: number) => (draw: Draw): Cell[] => [
     { label: 'Idle', box: union(...[-0.6, 0, 0.6].map((k) => boxOf(sprs[di(Math.PI / 4 + k)]))), anim: true, draw: shuffler(draw, turn) },
   ];
-  plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34, idleShuffle(me.buggy, 5));
+  // a parked buggy flashes its lights
+  plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34, (draw) => [
+    {
+      label: 'Idle',
+      box: union(boxOf(me.buggy[0]), { l: 6, r: 6, u: 14, d: 6 }),
+      anim: true,
+      draw: (s, t) => {
+        draw(s, 0, 0, Math.PI / 4, t);
+        drawBuggyLights(s.c, 0, 0, 0, Math.PI / 4, t);
+      },
+    },
+  ]);
 
   // tanks: a hull and a turret that turns on its own
   for (const kind of ['light', 'heavy'] as const) {

@@ -3,7 +3,7 @@
 // ground) down to half a unit, which is the finest the renderer samples.
 import { RGB, hash2, hex, mix, shade } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
-import { Shape, StackSprite, inBox, renderDirs, renderStack } from './stack';
+import { Shape, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
 
 export { FACTIONS };
 export type { Faction };
@@ -255,6 +255,33 @@ function buggy(f: Faction): Shape {
     if (av > 3 && z > 2.6 && z < 3.3 && Math.abs(u) < 2.2) return WHITE; // side stripe
     return g(av > 3 ? f.dark : f.main, u, v, z);
   };
+}
+
+// A parked buggy flashing its lights: headlights and tail lights wig-wag
+// side to side, and the tip of the whip aerial blinks red. Drawn over the
+// buggy's sprite at (x, y, z) facing a, at time t; lamps on the far side of
+// the body are left out. Positions match the lamps in buggy() above.
+export function drawBuggyLights(c: CanvasRenderingContext2D, x: number, y: number, z: number, a: number, t: number): void {
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const at = (u: number, v: number, h: number) => toScreen(x + u * ca - v * sa, y + u * sa + v * ca, z + h);
+  // facing the viewer: the screen's down is world (+1, +1)
+  const shows = (u: number, v: number) => (Math.sign(u) * (ca + sa) + Math.sign(v) * 0.6 * (ca - sa)) / Math.SQRT2 > -0.25;
+  const glow = (sx: number, sy: number, core: string, halo: string) => {
+    const X = Math.round(sx);
+    const Y = Math.round(sy);
+    c.fillStyle = halo;
+    c.fillRect(X - 1, Y - 1, 3, 3);
+    c.fillStyle = core;
+    c.fillRect(X, Y, 1, 1);
+  };
+  const side = Math.floor(t * 3) % 2 ? 1 : -1;
+  for (const v of [-2.5, 2.5]) {
+    if (Math.sign(v) !== side) continue;
+    if (shows(1, v)) glow(...at(6.4, v, 3), '#fffbe0', 'rgba(255,240,170,0.45)');
+    if (shows(-1, v)) glow(...at(-6.4, v, 3.6), '#ffb347', 'rgba(255,150,50,0.4)');
+  }
+  if (t % 1 < 0.25) glow(...at(-5, -3, 9.3), '#ff6a5a', 'rgba(255,80,60,0.4)');
 }
 
 function hauler(f: Faction): Shape {
