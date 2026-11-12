@@ -6,6 +6,7 @@ import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
+import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './combat';
 import {
@@ -251,12 +252,13 @@ export class IsoGame implements GameLike {
   buildings: Building[] = [];
   props: Prop[] = [];
   particles: Particle[] = [];
-  markers: { x: number; y: number; z: number; t: number }[] = [];
+  // where you tapped an order: the move (or attack, foe) burst plays there
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private bStates = new Map<string, BuildingStates>();
-  // Mark where a move order goes. main.ts turns it off for the mouse, whose
-  // cursor shows the order instead.
+  // Mark where a move or attack order goes. main.ts turns it off for the
+  // mouse, whose cursor plays the burst instead.
   moveMarks = true;
   sparkles: { x: number; y: number; life: number }[] = [];
   sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
@@ -1905,7 +1907,7 @@ export class IsoGame implements GameLike {
     }
     this.sparks = this.sparks.filter((s) => s.life < 0.5);
     for (const m of this.markers) m.t += dt;
-    this.markers = this.markers.filter((m) => m.t < 0.7);
+    this.markers = this.markers.filter((m) => m.t < BURST_FRAME * burstFrames(m.foe ? 'attack' : 'move').length);
     for (const q of this.quakes) q.t += dt;
     this.quakes = this.quakes.filter((q) => q.t < QUAKE_S);
 
@@ -2126,6 +2128,10 @@ export class IsoGame implements GameLike {
       u.pace = undefined;
     }
     t.aimT = this.time;
+    if (this.moveMarks) {
+      const [mx, my] = this.fold(t.x, t.y);
+      this.markers.push({ x: mx, y: my, z: isB(t) ? 0 : t.z, t: 0, foe: true });
+    }
   }
 
   // One unit's fighting, each frame: pick a target if it is standing about,
@@ -2538,22 +2544,6 @@ export class IsoGame implements GameLike {
       if (n.amt >= 10) this.blit(this.oreArt.stain[n.v][n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0], n.x, n.y, 0);
     c.globalAlpha = 1;
 
-    // move markers: shrinking iso diamond
-    for (const m of this.markers) {
-      const k = m.t / 0.7;
-      const r = 9 - k * 6;
-      c.fillStyle = `rgba(120,255,120,${1 - k * 0.6})`;
-      for (const [ax, ay] of [
-        [r, 0],
-        [0, r],
-        [-r, 0],
-        [0, -r],
-      ]) {
-        const [sx, sy] = toScreen(m.x + ax, m.y + ay, m.z);
-        c.fillRect(Math.round(sx) - 1, Math.round(sy), 3, 1);
-      }
-    }
-
     const feet: [Rect, string][] = [];
     for (const u of this.units) {
       if (!u.sel || u.kind !== 'mcv' || u.f !== ME || u.deploy || !seen(u.x, u.y)) continue;
@@ -2648,6 +2638,15 @@ export class IsoGame implements GameLike {
       this.blit(this.buildingArt(gh.tech.building!, ME).spr, gh.x, gh.y, 0);
       c.globalAlpha = 1;
       this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
+    }
+
+    // order markers: the cursor's click burst, on top of everything
+    for (const m of this.markers) {
+      const frames = burstFrames(m.foe ? 'attack' : 'move');
+      const img = frames[Math.min(frames.length - 1, Math.floor(m.t / BURST_FRAME))];
+      const [sx, sy] = toScreen(m.x, m.y, m.z);
+      if (!inView(sx, sy)) continue;
+      c.drawImage(img, Math.round(sx) - BURST_CENTER, Math.round(sy) - BURST_CENTER);
     }
   }
 
