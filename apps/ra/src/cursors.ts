@@ -4,7 +4,8 @@
 //
 // The move cursor turns and plays a burst on click, and the corners cursor
 // (over a unit you can pick) and the attack cursor (over an enemy your units
-// can fire on) breathe: main.ts steps through their frames.
+// can fire on) breathe: main.ts steps through their frames. The attack cursor
+// plays a red burst on click, like the move cursor's.
 
 export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'rally' | 'blocked' | 'build';
 
@@ -302,26 +303,71 @@ function cornerRows(h: number): string[] {
 }
 
 // Over an enemy your units can fire on: a red gunsight, a broken ring of
-// radius r with four ticks pointing in at the target and a dot on it.
-function attackRows(r: number): string[] {
-  return drawn(17, (put) => {
-    const C = 8;
-    for (let y = 0; y < 17; y++)
-      for (let x = 0; x < 17; x++) {
-        const dx = x - C;
-        const dy = y - C;
-        if (Math.abs(Math.hypot(dx, dy) - r) < 0.55 && Math.abs(dx) > 1.5 && Math.abs(dy) > 1.5) put(x, y, 'r');
-      }
-    for (let i = 3; i <= Math.round(r) + 1; i++) {
-      const col = i > r - 1 ? 'R' : 'r';
-      put(C + i, C, col);
-      put(C - i, C, col);
-      put(C, C + i, col);
-      put(C, C - i, col);
+// radius r with four ticks pointing in at the target and a dot on it, centred
+// on (C, C).
+function sight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number): void {
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const dx = x - C;
+      const dy = y - C;
+      if (Math.abs(Math.hypot(dx, dy) - r) < 0.55 && Math.abs(dx) > 1.5 && Math.abs(dy) > 1.5) put(x, y, 'r');
     }
-    put(C, C, 'R');
+  for (let i = 3; i <= Math.round(r) + 1; i++) {
+    const col = i > r - 1 ? 'R' : 'r';
+    put(C + i, C, col);
+    put(C - i, C, col);
+    put(C, C + i, col);
+    put(C, C - i, col);
+  }
+  put(C, C, 'R');
+}
+
+function attackRows(r: number): string[] {
+  return drawn(17, (put) => sight(put, 17, 8, r));
+}
+
+// A click on an enemy plays ATTACK_CLICK, the move burst in red: the sight
+// snaps in to a white flash, a red ring bursts out from the target, and the
+// sight opens back up behind it. (r < 0: sight hidden)
+interface AttackFrame {
+  r: number;
+  flash?: number;
+  ring?: number;
+  dots?: boolean;
+}
+const ATTACK_CLICK: AttackFrame[] = [
+  { r: 4 },
+  { r: -1, flash: 1.5 },
+  { r: -1, flash: 2.5, ring: 3 },
+  { r: -1, ring: 5 },
+  { r: -1, ring: 7 },
+  { r: 3.5, ring: 9 },
+  { r: 4.5, ring: 11, dots: true },
+  { r: 5, ring: 12, dots: true },
+];
+export const ATTACK_CLICK_FRAMES = ATTACK_CLICK.length;
+
+function attackClickRows(f: AttackFrame): string[] {
+  return drawn(MS, (put) => {
+    for (let y = 0; y < MS; y++)
+      for (let x = 0; x < MS; x++) {
+        const vx = x - MC;
+        const vy = y - MC;
+        const r = Math.hypot(vx, vy);
+        if (f.ring && Math.abs(r - f.ring) < 0.55) {
+          const ang = Math.atan2(vy, vx);
+          if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : 'R');
+        }
+      }
+    if (f.r >= 0) sight(put, MS, MC, f.r);
+    if (f.flash)
+      for (let y = 0; y < MS; y++)
+        for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, y - MC) <= f.flash) put(x, y, 'w');
   });
 }
+
+// The attack cursor's click burst, one CSS value per frame.
+export const ATTACK_CLICK_CSS: string[] = [];
 
 export const CURSORS = {} as Record<CursorKind, string>;
 // The attack cursor through one breath.
@@ -333,6 +379,7 @@ export const CORNER_FRAMES: string[] = [];
 export function initCursors(): void {
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
   for (const r of [5, 5.5, 6, 5.5]) ATTACK_FRAMES.push(gridCss(attackRows(r), [8, 8], FALLBACK.attack));
+  for (const f of ATTACK_CLICK) ATTACK_CLICK_CSS.push(gridCss(attackClickRows(f), [MC, MC], FALLBACK.attack));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);

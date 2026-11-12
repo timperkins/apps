@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -655,7 +655,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (e.button === 2) {
     if (planet) spaceTap(e, true);
     else {
-      if (cursorKind === 'move') movedAt = performance.now();
+      clicked();
       game.order(p.x, p.y);
     }
     return;
@@ -727,7 +727,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
     if (planet) {
       if (!dragging) spaceTap(e);
     } else if (!dragging) {
-      if (e.pointerType === 'mouse' && cursorKind === 'move') movedAt = performance.now();
+      if (e.pointerType === 'mouse') clicked();
       game.click(down.x, down.y, add);
     } else if (!down.pan) game.boxSelect(down.x, down.y, p.x, p.y, add);
   }
@@ -746,8 +746,14 @@ canvas.addEventListener('pointerup', (e) => finish(e, false));
 let mouse: { x: number; y: number } | null = null;
 let cursor = '';
 let cursorKind: CursorKind = 'arrow';
-// when the last move order was clicked, for the move cursor's burst
+// when the last move or attack order was clicked, for the cursor's burst
 let movedAt = -Infinity;
+let attackedAt = -Infinity;
+// A click with the move or attack cursor showing: play its burst.
+function clicked(): void {
+  if (cursorKind === 'move') movedAt = performance.now();
+  else if (cursorKind === 'attack') attackedAt = performance.now();
+}
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
 });
@@ -764,11 +770,14 @@ function hoverNow(now: number): void {
   } else if (planet) k = 'grab';
   const burst = Math.floor((now - movedAt) / 55);
   if (burst >= 0 && burst < MOVE_CLICK_FRAMES && k !== 'grabbing') k = 'move';
+  const shot = Math.floor((now - attackedAt) / 55);
+  const shooting = shot >= 0 && shot < ATTACK_CLICK_FRAMES && k !== 'grabbing';
+  if (shooting) k = 'attack';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
-  else if (k === 'attack') css = ATTACK_FRAMES[Math.floor(now / 140) % ATTACK_FRAMES.length];
+  else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 140) % ATTACK_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;
