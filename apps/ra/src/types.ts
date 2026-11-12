@@ -81,6 +81,8 @@ export interface GameLike {
   // dropping one kind of them (on: add those in the rect; off: drop them all).
   unitTypes?(x0: number, y0: number, x1: number, y1: number): UnitType[];
   selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
+  // The kinds of unit of yours that are selected, wherever they are.
+  selectedTypes?(): UnitType[];
   deselect(): void;
   focus(): { x: number; y: number };
   // True if the game draws at ART pixels to the map pixel (see gfx.ts).

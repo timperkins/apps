@@ -274,6 +274,19 @@ body {
   display: contents;
 }
 
+/* a group you have given orders to: fixed until you clear it */
+#types.group {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px dashed #9dff9d;
+  background: rgba(157, 255, 157, 0.08);
+}
+
+#selBar button.type:disabled {
+  cursor: var(--cur-arrow);
+}
+
 #noTypes {
   padding: 0 6px;
   font-family: 'Silkscreen', ui-monospace, monospace;
@@ -402,6 +415,13 @@ body {
   cursor: var(--cur-hand);
   -webkit-tap-highlight-color: transparent;
   animation: pop 0.12s steps(3);
+}
+
+/* confirming an attack: red, inside the attack cursor's gunsight */
+#confirm.foe #okBtn {
+  color: #fff6ee;
+  background: #e8452f;
+  box-shadow: inset 2px 2px 0 #ff9c86, inset -2px -2px 0 #8a2414, 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 #okBtn svg {

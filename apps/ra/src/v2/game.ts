@@ -1624,6 +1624,22 @@ export class IsoGame implements GameLike {
     return [...by.values()].sort((a, b) => rank(a.kind) - rank(b.kind));
   }
 
+  // The kinds of unit of yours that are selected, wherever they are, and
+  // how many of each.
+  selectedTypes(): UnitType[] {
+    const by = new Map<Kind, UnitType>();
+    for (const u of this.units) {
+      if (!u.sel || u.f !== ME || u.dead) continue;
+      let t = by.get(u.kind);
+      if (!t) by.set(u.kind, (t = { kind: u.kind, name: UNIT[u.kind].name, icon: this.unitIcon(u.kind), count: 0, sel: 0 }));
+      t.count++;
+      t.sel++;
+    }
+    const order = TECH.map((t) => t.unit);
+    const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
+    return [...by.values()].sort((a, b) => rank(a.kind) - rank(b.kind));
+  }
+
   // Add every unit of yours of one kind inside a screen rect to the
   // selection, or (on false) take every one of that kind out of it.
   selectKind(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void {

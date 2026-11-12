@@ -407,6 +407,13 @@ export function moveRingFrames(): string[] {
   return ringFrames;
 }
 export const MOVE_RING_SIZE = MS;
+// The attack cursor's gunsight, opened wide round the confirm button for an
+// attack, through one breath.
+const sightFrames: string[] = [];
+export function attackRingFrames(): string[] {
+  if (!sightFrames.length) for (const r of [9.5, 10, 10.5, 10]) sightFrames.push(gridCanvas(drawn(MS, (put) => sight(put, MS, MC, r)), 1).toDataURL('image/png'));
+  return sightFrames;
+}
 
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
