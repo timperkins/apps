@@ -124,6 +124,26 @@ jobs:
             "$RUN" npx -y "$FIREBASE_TOOLS" hosting:sites:create "$site" --project "$FIREBASE_PROJECT" --non-interactive
           fi
 
+      # Optional fixed-preview site and domain from app.json (previewSite, previewDomain), e.g.
+      # trom-ra-preview at ra-preview.trom.dev. deploy-app.yml puts every preview build there.
+      - name: Preview site and domain
+        if: inputs.type == 'hosting'
+        run: |
+          app="apps/$NAME/app.json"
+          [ -f "$app" ] || exit 0
+          site=$(jq -r '.previewSite // empty' "$app"); domain=$(jq -r '.previewDomain // empty' "$app")
+          [ -n "$site" ] || { echo "No previewSite in app.json"; exit 0; }
+          if npx -y "$FIREBASE_TOOLS" hosting:sites:get "$site" --project "$FIREBASE_PROJECT" > /dev/null 2>&1; then
+            echo "Hosting site $site already exists"
+          else
+            "$RUN" npx -y "$FIREBASE_TOOLS" hosting:sites:create "$site" --project "$FIREBASE_PROJECT" --non-interactive
+          fi
+          "$RUN" node scripts/attach-domain.mjs --domain "$site.web.app" --authorize-only
+          if [ -n "$domain" ]; then
+            "$RUN" node scripts/attach-domain.mjs --domain "$domain" --hosting-site "$site"
+            echo "Preview: https://$domain (the certificate can take up to an hour)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: App Hosting backends
         if: inputs.type == 'apphosting'
         run: |
