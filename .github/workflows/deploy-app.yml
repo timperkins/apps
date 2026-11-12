@@ -258,6 +258,11 @@ jobs:
               -f state=success -f context='preview/${{ inputs.app }}' -f target_url="$URL" \
               -f description='Preview deployed' > /dev/null
           fi
+          if [ -n "$LATEST" ]; then
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
+              -f state=success -f context='preview/${{ inputs.app }} (fixed link)' -f target_url="$LATEST" \
+              -f description='Always the latest preview' > /dev/null
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
