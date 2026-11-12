@@ -528,7 +528,7 @@ function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: numb
 // health runs down (then starts again). spot() picks where each one lands.
 // knock: how far (world units) each round shoves it back, as in the game; it
 // creeps back to its spot between rounds.
-function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [number, number, number], round: 'bullet' | 'shell', bar: { x: number; y: number; w: number }, lit: number, every: number, knock = 0): Cell {
+function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [number, number, number], round: 'bullet' | 'shell', bar: { x: number; y: number; w: number }, lit: number, every: number, knock = 0, smokeAt?: [number, number]): Cell {
   let hp = 1;
   let cool = 0.3;
   let flash = -9;
@@ -570,6 +570,8 @@ function hitCell(box: Box, draw: (s: Scene, t: number) => void, spot: () => [num
       s.c.restore();
       s.lit = 0;
       healthBar(s.c, Math.round(bar.x - bar.w / 2), Math.round(bar.y), bar.w, hp);
+      // a vehicle smokes as its health runs down, as in the game
+      if (smokeAt) s.fx.damageSmoke(hp, smokeAt[0], smokeAt[1], dt);
     },
   };
 }
@@ -607,7 +609,7 @@ function combatCells(o: Fighter): Cell[] {
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
   cells.push(
     // (soldiers are knocked back by rifle fire; tanks by a heavy tank's 105mm shells)
-    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, z + mid + (Math.random() - 0.5) * 2], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8, knockback(o.soft ? WEAPON.inf! : WEAPON.heavy!, o.kind)),
+    hitCell(withBar, (s, t) => o.draw(s, 0, 0, A, A, t, false), () => [(Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, z + mid + (Math.random() - 0.5) * 2], o.soft ? 'bullet' : 'shell', bar, 0.45, o.soft ? 0.4 : 0.8, knockback(o.soft ? WEAPON.inf! : WEAPON.heavy!, o.kind), o.soft ? undefined : toScreen(0, 0, z + mid + 2)),
   );
   const r = BOOM[o.kind];
   const boomBox: Box = r ? { l: r * 1.3 + 2, r: r * 1.3 + 2, u: r * 1.6 + z + mid, d: r * 0.6 } : still;
@@ -644,6 +646,7 @@ function combatCells(o: Fighter): Cell[] {
         o.draw(s, 0, 0, A, A, t, false);
         s.lit = 0;
         healthBar(s.c, Math.round(bar.x - bar.w / 2), Math.round(bar.y), bar.w, 1 - n * 0.3);
+        if (!o.soft) s.fx.damageSmoke(1 - n * 0.3, ...toScreen(0, 0, z + mid + 2), dt);
         return;
       }
       if (!ev(1.4)) return;

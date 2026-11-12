@@ -427,6 +427,14 @@ export class Fx {
       });
   }
 
+  // Smoke off a damaged vehicle, each frame, from screen point (x, y) at its
+  // top: wisps from two thirds health, thickening to a dark column near the end.
+  damageSmoke(hp: number, x: number, y: number, dt: number): void {
+    if (hp >= 0.66) return;
+    const k = Math.min(1, (0.66 - hp) / 0.5); // 0 just hurt .. 1 nearly gone
+    if (Math.random() < dt * (4 + 18 * k)) this.smoke(x, y, k > 0.3 || Math.random() < 0.5, 1.2 + k * 1.8);
+  }
+
   // A unit is destroyed: it blows up, breaks into a few big chunks and leaves
   // a column of smoke (tanks cook off in a string of explosions, the turret
   // thrown high). parts are the sprites it is drawn with and the screen
@@ -441,7 +449,7 @@ export class Fx {
     });
     if (foot) {
       this.boom(ox, oy, 3);
-      this.billow(ox, oy, 3, 2, 5, 1.5);
+      this.billow(ox, oy, 4, 2, 9, 1.8);
       return;
     }
     this.boom(ox, oy, r);
@@ -460,8 +468,8 @@ export class Fx {
         this.p(ox, oy, i % 2 ? 'ember' : 'spark', { vx: Math.cos(a) * v, vy: Math.sin(a) * v, max: 0.6 + Math.random() * 0.7, g: 70 });
       }
     }
-    this.billow(ox, oy - r * 0.2, r * 1.4, r * 0.6, Math.round(r * 1.6), 2 + r * 0.2);
-    this.plume(ox, gy - 2, tank ? 7 : 4.5, tank ? 9 : 6, 1.6 + r * 0.12, r * 0.5);
+    this.billow(ox, oy - r * 0.2, r * 1.6, r * 0.7, Math.round(r * 3), 2.4 + r * 0.22);
+    this.plume(ox, gy - 2, tank ? 10 : 7, tank ? 16 : 11, 1.8 + r * 0.14, r * 0.6);
   }
 
   // A building's big bang: it breaks into a few big chunks over its ruin and
@@ -469,8 +477,8 @@ export class Fx {
   // (ox, oy) where the pieces fly out from, w by h its size on screen.
   collapse(spr: StackSprite, sx: number, sy: number, ox: number, oy: number, w: number, h: number): void {
     this.shatter(spr, sx, sy, ox, oy, sy, 10, 55, 40);
-    this.billow(ox, (oy + sy) / 2, w, h, Math.round(14 + w * 0.6), 3.5);
-    this.plume(ox, sy - 2, 9, 12, 3, w * 0.4);
+    this.billow(ox, (oy + sy) / 2, w, h, Math.round(24 + w), 3.8);
+    this.plume(ox, sy - 2, 12, 20, 3.2, w * 0.45);
   }
 
   smoke(x: number, y: number, dark = true, size = 1.5): void {

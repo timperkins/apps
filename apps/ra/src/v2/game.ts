@@ -1800,10 +1800,10 @@ export class IsoGame implements GameLike {
         const d = angDiff(u.turretGoal, u.turret);
         u.turret += Math.sign(d) * Math.min(Math.abs(d), (u.target ? 3.2 : 2.2) * dt);
       }
-      // badly damaged vehicles smoke
-      if (u.hp < 0.5 && !foot && Math.random() < dt * (u.hp < 0.25 ? 6 : 3)) {
+      // damaged vehicles smoke, more the worse they are
+      if (u.hp < 0.66 && !foot) {
         const [sx, sy] = toScreen(u.x, u.y, u.z + (u.kind === 'heli' ? HELI_ALT : 0) + MID[u.kind] + 2);
-        this.fx.smoke(sx, sy, true, 1);
+        this.fx.damageSmoke(u.hp, sx, sy, dt);
       }
       if (u.moving || u.deploy || u.job || u.target) {
         u.home = u.pace = u.look = u.face = undefined;
