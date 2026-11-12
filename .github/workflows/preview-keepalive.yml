@@ -29,6 +29,8 @@ jobs:
             [ "$(jq -r .type "$f")" = hosting ] || continue
             site=$(jq -r '.hostingSite // empty' "$f")
             [ -n "$site" ] || continue
+            # Apps with their own preview site (previewSite) don't use the latest channel.
+            [ -z "$(jq -r '.previewSite // empty' "$f")" ] || continue
             code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X PATCH \
               -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
               -H "x-goog-user-project: $FIREBASE_PROJECT" \

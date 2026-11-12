@@ -794,3 +794,53 @@ body.sheet-open #selBar {
 }
 
 
+
+#picker .stages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 10px;
+}
+
+#picker .stages[hidden] {
+  display: none;
+}
+
+#picker .stages .label {
+  font-size: 11px;
+}
+
+#picker .stages .seg {
+  display: flex;
+}
+
+#picker .stages .seg button {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#picker .stages .seg button + button {
+  margin-left: -1px;
+}
+
+#picker .stages .seg button[aria-checked='true'] {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #9dff9d;
+}
+
+#picker .stages .blurb {
+  flex: 1 1 200px;
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.85;
+}
