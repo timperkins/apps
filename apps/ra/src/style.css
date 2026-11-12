@@ -234,12 +234,210 @@ body {
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 16px);
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 6px;
 }
 
-#selBar[hidden] {
+#selBar[hidden],
+#selMenu[hidden],
+#acts[hidden],
+#noTypes[hidden],
+#confirm[hidden] {
   display: none;
+}
+
+#acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* the selection menu: a button per kind of unit on screen, then All, Clear */
+#selMenu {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+#types {
+  display: contents;
+}
+
+/* a group you have given orders to: fixed until you clear it */
+#types.group {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px dashed #9dff9d;
+  background: rgba(157, 255, 157, 0.08);
+}
+
+#selBar button.type:disabled {
+  cursor: var(--cur-arrow);
+}
+
+#noTypes {
+  padding: 0 6px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ink);
+  opacity: 0.75;
+}
+
+#selMenu button {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 42px;
+  height: 44px;
+  padding: 3px 4px 2px;
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5);
+}
+
+#selBar #selMenu button svg {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+#selBar button.type {
+  position: relative;
+  width: 42px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* the build-menu picture of the unit, cropped in close */
+#selBar button.type .pic {
+  width: 38px;
+  height: 40px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#selBar button.type img {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  margin-top: -6px;
+  image-rendering: pixelated;
+}
+
+#selBar button.type .count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  color: #10170d;
+  background: var(--ink);
+  border: 1px solid #10170d;
+}
+
+#selBar button.type[aria-pressed='true'] {
+  background: rgba(157, 255, 157, 0.28);
+  border-color: #9dff9d;
+}
+
+#selBar button.type[aria-pressed='true'] .count {
+  background: #9dff9d;
+}
+
+#selBar button.type.part {
+  border-color: #9dff9d;
+  border-style: dashed;
+}
+
+#clearBtn:disabled {
+  opacity: 0.5;
+  cursor: var(--cur-arrow);
+}
+
+/* confirming an order on a touch screen: a round check over the spot, with
+   the move cursor's arrowheads turning round it (main.ts sizes and steps them) */
+#confirm {
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+#okRing {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.35));
+}
+
+#okBtn {
+  position: absolute;
+  left: -18px;
+  top: -18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  color: #10170d;
+  background: #4fd84a;
+  border: 2px solid #10140c;
+  box-shadow: inset 2px 2px 0 #b8ff9c, inset -2px -2px 0 #2a8a2a, 0 2px 0 rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+  animation: pop 0.12s steps(3);
+}
+
+/* confirming an attack: red, inside the attack cursor's gunsight */
+#confirm.foe #okBtn {
+  color: #fff6ee;
+  background: #e8452f;
+  box-shadow: inset 2px 2px 0 #ff9c86, inset -2px -2px 0 #8a2414, 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+
+#okBtn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+#okBtn:active {
+  transform: translateY(1px);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+  }
 }
 
 #selBar button {
@@ -264,10 +462,6 @@ body {
   fill: currentColor;
 }
 
-#acts {
-  display: contents;
-}
-
 #selBar button.act {
   color: #10170d;
   background: #e0b83c;
@@ -280,12 +474,6 @@ body {
   border-color: var(--edge);
   opacity: 0.6;
   cursor: var(--cur-arrow);
-}
-
-#moreBtn[aria-pressed='true'] {
-  color: #10170d;
-  background: #9dff9d;
-  border-color: #d8ffd8;
 }
 
 /* ---------- Credits, build menu and messages ---------- */

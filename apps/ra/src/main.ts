@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_STEPS, initCursors, moveCursor, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -19,12 +19,17 @@ const versionEl = document.querySelector<HTMLSelectElement>('#version')!;
 const menuBtn = document.querySelector<HTMLButtonElement>('#menuBtn')!;
 const menu = document.querySelector<HTMLDivElement>('#menu')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
-const modeBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar [data-mode]')];
-const moreBtn = document.querySelector<HTMLButtonElement>('#moreBtn')!;
+const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
+const selMenu = document.querySelector<HTMLDivElement>('#selMenu')!;
+const typesEl = document.querySelector<HTMLSpanElement>('#types')!;
+const noTypes = document.querySelector<HTMLSpanElement>('#noTypes')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
-const actsEl = document.querySelector<HTMLSpanElement>('#acts')!;
+const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
+const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
+const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
+const okRing = document.querySelector<HTMLDivElement>('#okRing')!;
 const homeBtn = document.querySelector<HTMLButtonElement>('#homeBtn')!;
 const picker = document.querySelector<HTMLDivElement>('#picker')!;
 const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
@@ -78,32 +83,33 @@ document.addEventListener('pointerdown', (e) => {
   if (!menu.hidden && !menu.contains(e.target as Node) && !menuBtn.contains(e.target as Node)) setMenu(false);
 });
 
-// ---------- Toolbar: select / pan modes, additive selection, all, clear ----------
+// ---------- Toolbar and the selection menu ----------
+// Select opens the selection menu above the toolbar (so does tapping a unit):
+// a button for each kind of unit of yours on screen, with how many there are,
+// which adds them all to the selection or takes them out of it, then All and
+// Clear. A drag on a touch screen pans; with a mouse it draws a box.
 
-type Mode = 'select' | 'pan';
-let mode: Mode = 'select';
-let additive = false;
 let lastNames: string[] = [];
+let selOpen = false;
+// Once you order the selection somewhere it is locked as a group: the menu
+// shows just those units, and taps send them rather than pick others, until
+// you clear it.
+let locked = false;
+function lockGroup(): void {
+  if (!game || !game.selectedPoints().length || !game.selectedTypes) return;
+  locked = true;
+  typesKey = '';
+  if (!selOpen) setSelOpen(true);
+}
 
-function setMode(m: Mode): void {
-  mode = m;
-  for (const b of modeBtns) {
-    const on = b.dataset.mode === m;
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-pressed', String(on));
-  }
-  canvas.classList.toggle('panning', m === 'pan');
-  showSelection(lastNames);
+function setSelOpen(open: boolean): void {
+  selOpen = open;
+  selectBtn.setAttribute('aria-pressed', String(open));
+  typesKey = '';
+  updateSelBar();
 }
-for (const b of modeBtns) b.addEventListener('click', () => setMode(b.dataset.mode as Mode));
-// "More" and "Clear" only show while something is selected; when on, taps and
-// boxes add to the selection instead of replacing it.
-function setAdditive(on: boolean): void {
-  additive = on;
-  moreBtn.setAttribute('aria-pressed', String(on));
-}
-moreBtn.addEventListener('click', () => setAdditive(!additive));
-allBtn.addEventListener('click', () => selectView(additive));
+selectBtn.addEventListener('click', () => setSelOpen(!selOpen));
+allBtn.addEventListener('click', () => selectView(true));
 clearBtn.addEventListener('click', () => game?.deselect());
 
 // Commands for the selection (Deploy, Pack up...), drawn as buttons before
@@ -121,11 +127,60 @@ const ICONS: Record<string, string> = {
 };
 let actsKey = '';
 let hasActs = false;
-// The bar above the toolbar: commands, and More / Clear while something is selected.
+// The bar above the toolbar: commands for the selection, and the selection menu.
 function updateSelBar(): void {
-  selBar.hidden = lastNames.length === 0 && !hasActs;
-  moreBtn.hidden = lastNames.length === 0;
-  clearBtn.hidden = lastNames.length === 0;
+  const menuOn = selOpen && !placingNow();
+  selMenu.hidden = !menuOn;
+  actsEl.hidden = !hasActs;
+  selBar.hidden = !menuOn && !hasActs;
+}
+
+// The map rect that counts as on screen: the view, or from space the near
+// side of the world.
+function viewRect(): [number, number, number, number] {
+  if (planet) return [cen.x - built.w / 4, cen.y - built.h / 4, cen.x + built.w / 4, cen.y + built.h / 4];
+  return [camX(), camY(), camX() + view.w, camY() + view.h];
+}
+
+// The selection menu's buttons, checked every frame as units come and go
+// from the view, and only rebuilt when something about them changes.
+let typesKey = '';
+function refreshTypes(): void {
+  if (!selOpen || selMenu.hidden || !game) return;
+  const types = locked ? (game.selectedTypes?.() ?? []) : (game.unitTypes?.(...viewRect()) ?? []);
+  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), lastNames.length]);
+  if (key === typesKey) return;
+  typesKey = key;
+  typesEl.classList.toggle('group', locked);
+  noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
+  allBtn.hidden = locked || (types.length > 0 ? types.every((t) => t.sel === t.count) : !!game.unitTypes);
+  clearBtn.disabled = lastNames.length === 0;
+  typesEl.replaceChildren(
+    ...types.map((t) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'type';
+      const all = t.sel === t.count;
+      b.classList.toggle('part', t.sel > 0 && !all);
+      b.setAttribute('aria-pressed', String(all));
+      b.title = locked ? `${t.name}: ${t.count} in this group (Clear to pick again)` : `${t.name}: ${t.sel ? `${t.sel} of ${t.count} selected` : `${t.count} on screen`}`;
+      b.disabled = locked;
+      b.setAttribute('aria-label', b.title);
+      const img = document.createElement('img');
+      img.src = t.icon;
+      img.alt = '';
+      const n = document.createElement('span');
+      n.className = 'count';
+      n.textContent = t.sel && !all ? `${t.sel}/${t.count}` : String(t.count);
+      const pic = document.createElement('span');
+      pic.className = 'pic';
+      pic.append(img);
+      b.append(pic, n);
+      // a kind not all selected: add the rest; all selected: drop them
+      b.addEventListener('click', () => game.selectKind?.(t.kind, !all, ...viewRect()));
+      return b;
+    }),
+  );
 }
 function refreshActions(): void {
   const acts = (!planet && game?.actions?.()) || [];
@@ -152,15 +207,77 @@ function refreshActions(): void {
 // Everything on screen; from space, everything on the near side of the world.
 function selectView(add: boolean): void {
   if (!game) return;
-  if (planet) game.boxSelect(cen.x - built.w / 4, cen.y - built.h / 4, cen.x + built.w / 4, cen.y + built.h / 4, add);
-  else game.boxSelect(camX(), camY(), camX() + view.w, camY() + view.h, add);
+  game.boxSelect(...viewRect(), add);
 }
 
 function showSelection(names: string[]): void {
+  // picking something opens the menu, so you can add other kinds to it
+  if (names.length && !lastNames.length && !selOpen) setSelOpen(true);
   lastNames = names;
+  typesKey = '';
+  if (!names.length) {
+    setPending(null);
+    locked = false;
+  }
   updateSelBar();
-  if (!names.length) setAdditive(false);
 }
+
+// ---------- Confirming orders on a touch screen ----------
+// With units selected, a tap on the ground (or an enemy) doesn't send them
+// straight away: a round green check comes up where you tapped, with the move
+// cursor's arrowheads turning round it. The check sends them, another tap
+// moves it, and clearing the selection calls it off.
+// foe: the tap is on an enemy, so it is an attack (red, with a gunsight)
+let pending: { x: number; y: number; foe: boolean } | null = null;
+let ringFrame = -1;
+function setPending(p: { x: number; y: number; foe: boolean } | null): void {
+  pending = p;
+  confirmEl.hidden = !p;
+  confirmEl.classList.toggle('foe', !!p?.foe);
+  okBtn.title = p?.foe ? 'Attack it' : 'Send them here';
+  okBtn.setAttribute('aria-label', `${okBtn.title} (clear the selection to call it off)`);
+  ringFrame = -1;
+  if (p) placeConfirm();
+}
+// Keep the check over the map point as the camera moves.
+function placeConfirm(): void {
+  if (!pending) return;
+  if (planet) {
+    setPending(null);
+    return;
+  }
+  const r = canvas.getBoundingClientRect();
+  // the arrowheads at the game's pixel size, turning as the cursor does
+  const px = Math.max(3, Math.round(base) + 1);
+  const size = `${MOVE_RING_SIZE * px}px`;
+  if (okRing.style.width !== size) {
+    okRing.style.width = okRing.style.height = size;
+    okRing.style.backgroundSize = size;
+  }
+  const frames = pending.foe ? attackRingFrames() : moveRingFrames();
+  const i = Math.floor(performance.now() / (pending.foe ? 140 : 150)) % frames.length;
+  if (i !== ringFrame) {
+    ringFrame = i;
+    okRing.style.backgroundImage = `url(${frames[i]})`;
+  }
+  confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
+}
+okBtn.addEventListener('click', () => {
+  if (!pending || !game) return;
+  const p = pending;
+  setPending(null);
+  sendTo(p.x, p.y);
+});
+
+// Send the selection to map point (x, y) (or attack what is there) and lock
+// it as a group. A locked group goes onto its own units too, rather than
+// picking them.
+function sendTo(x: number, y: number): void {
+  if (locked && game.cursorAt?.(x, y) === 'pick') game.order(x, y);
+  else game.click(x, y, false);
+  lockGroup();
+}
+
 
 // Home: back to your base (the Foundry, or the vehicle that will become one),
 // on the copy of the world nearest the camera, down from space if need be.
@@ -532,9 +649,9 @@ function syncGhost(): void {
 let ghostDrag: { dx: number; dy: number } | null = null;
 
 // ---------- Pointer input ----------
-// Select mode: tap selects a unit or sends the selection, drag draws a box.
-// Pan mode: drag moves the camera, tap still selects or sends units.
-// The middle mouse button always pans. In space, a drag spins the world and a
+// A tap selects a unit or sends the selection (on a touch screen, once you
+// confirm it). A drag pans on a touch screen and draws a selection box with a
+// mouse; the middle mouse button pans. In space, a drag spins the world and a
 // tap sends the selection there the shortest way (or flies down if nothing is
 // selected).
 
@@ -657,10 +774,11 @@ canvas.addEventListener('pointerdown', (e) => {
     else {
       clicked();
       game.order(p.x, p.y);
+      lockGroup();
     }
     return;
   }
-  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || mode === 'pan' || e.button === 1 };
+  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || e.pointerType !== 'mouse' || e.button === 1 || locked };
   dragging = false;
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -699,12 +817,25 @@ function spaceTap(e: PointerEvent, orderOnly = false): void {
   const r = canvas.getBoundingClientRect();
   const p = globe.pick(spaceView(), (e.clientX - r.left) / scale, (e.clientY - r.top) / scale);
   if (!p) return;
-  if (game.selectedPoints().length) game.order(p.x, p.y, true);
+  if (game.selectedPoints().length) {
+    game.order(p.x, p.y, true);
+    lockGroup();
+  }
   else if (!orderOnly) {
     cen.x = p.x;
     cen.y = p.y;
     zoom = 1;
     applyScale();
+  }
+}
+
+// A tap on the map with a finger: orders wait for the check.
+function touchTap(x: number, y: number): void {
+  const what = game.cursorAt?.(x, y);
+  if (what === 'move' || what === 'attack' || (locked && what === 'pick')) setPending({ x, y, foe: what === 'attack' });
+  else {
+    setPending(null);
+    game.click(x, y, false);
   }
 }
 
@@ -717,7 +848,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   }
   if (!down || e.pointerId !== down.id) return;
   const p = toMap(e.clientX, e.clientY);
-  const add = additive || e.shiftKey || e.ctrlKey || e.metaKey;
+  const add = e.shiftKey || e.ctrlKey || e.metaKey;
   if (!cancel && placingNow()) {
     if (!dragging) {
       moveGhost(p.x, p.y);
@@ -727,9 +858,13 @@ const finish = (e: PointerEvent, cancel: boolean) => {
     if (planet) {
       if (!dragging) spaceTap(e);
     } else if (!dragging) {
-      if (e.pointerType === 'mouse') clicked();
-      game.click(down.x, down.y, add);
-    } else if (!down.pan) game.boxSelect(down.x, down.y, p.x, p.y, add);
+      if (e.pointerType === 'mouse') {
+        clicked();
+        const what = game.cursorAt?.(down.x, down.y);
+        if (what === 'move' || what === 'attack' || (locked && what === 'pick')) sendTo(down.x, down.y);
+        else game.click(down.x, down.y, add);
+      } else touchTap(down.x, down.y);
+    } else if (!down.pan && !locked) game.boxSelect(down.x, down.y, p.x, p.y, add);
   }
   box = null;
   down = null;
@@ -761,12 +896,11 @@ canvas.addEventListener('pointerleave', () => (mouse = null));
 function hoverNow(now: number): void {
   const m = mouse && toMap(mouse.x, mouse.y);
   let k: CursorKind = 'arrow';
-  if (down && (down.pan || ghostDrag) && (dragging || mode === 'pan' || planet)) k = 'grabbing';
+  if (down && (down.pan || ghostDrag) && (dragging || planet)) k = 'grabbing';
   else if (m && !planet && !(dragging && box) && picker.hidden) {
     const what = game.cursorAt?.(m.x, m.y);
-    if (what === 'pick') k = 'corners';
+    if (what === 'pick') k = locked ? 'move' : 'corners';
     else if (what) k = what;
-    else if (mode === 'pan') k = 'grab';
   } else if (planet) k = 'grab';
   const burst = Math.floor((now - movedAt) / 55);
   if (burst >= 0 && burst < MOVE_CLICK_FRAMES && k !== 'grabbing') k = 'move';
@@ -799,7 +933,7 @@ canvas.addEventListener(
 // Stop Safari's own page pinch from fighting ours.
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
-// ---------- Keyboard: WASD or the arrow keys pan, Q / P switch modes, +/- zoom, Esc clears ----------
+// ---------- Keyboard: WASD or the arrow keys pan, Q opens the selection menu, +/- zoom, Esc clears ----------
 
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
@@ -813,11 +947,12 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!menu.hidden) setMenu(false);
     else if (placingNow()) game.act?.('unplace');
-    else game.deselect();
+    else if (pending) setPending(null);
+    else if (lastNames.length) game.deselect();
+    else setSelOpen(false);
   }
   if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
-  if (e.key === 'q') setMode('select');
-  if (e.key === 'p') setMode('pan');
+  if (e.key === 'q') setSelOpen(!selOpen);
   if (e.key === 'f') game.act?.('deploy');
   if (e.key === 'h') goHome();
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);
@@ -825,7 +960,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '0') zoomTo(1, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    selectView(false);
+    if (!locked) selectView(false);
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -935,6 +1070,8 @@ function draw(now: number, first: boolean): void {
   }
   refreshActions();
   syncGhost();
+  refreshTypes();
+  placeConfirm();
   build.update(now);
   if (first) lastSnap = -Infinity;
   snapshot(now);

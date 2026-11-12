@@ -2,7 +2,7 @@
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import type { Action, BuildItem, BuildMenu, GameLike } from '../types';
+import type { Action, BuildItem, BuildMenu, GameLike, UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
@@ -119,6 +119,9 @@ interface Unit {
   // when you last ordered an attack on it: it blinks white so you can see which
   aimT?: number;
   dead?: boolean;
+  // where you last sent it (its own coordinates): while it is still on its
+  // way there, a faint line shows the way
+  dest?: [number, number];
   // being knocked back by a hit: how far it still has to slide (world units)
   knock?: [number, number];
   // the enemy's guards (Combat stage): which post it holds, and its spot there
@@ -665,9 +668,25 @@ export class IsoGame implements GameLike {
         const k = Math.min(W / spr.width, H / spr.height) * 1.15;
         c.imageSmoothingQuality = 'high';
         c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
-      } else {
-        // the unit itself, facing down and to the left, blown up in whole pixels
-        const kind = t.unit as Kind;
+      } else return this.unitIcon(t.unit as Kind);
+      url = cv.toDataURL();
+      this.icons.set(t.id, url);
+    }
+    return url;
+  }
+
+  // A unit kind's picture: the unit itself, facing down and to the left,
+  // blown up in whole pixels.
+  private unitIcon(kind: Kind): string {
+    let url = this.icons.get(`unit:${kind}`);
+    if (!url) {
+      const W = 64;
+      const H = 48;
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const c = cv.getContext('2d')!;
+      {
         const a = Math.PI * 0.62;
         const art = this.art[ME];
         const di = dirIndex(a, DIRS);
@@ -687,7 +706,7 @@ export class IsoGame implements GameLike {
         for (const s of layers) c.drawImage(s.img, -s.cx, -s.cy, s.w, s.h);
       }
       url = cv.toDataURL();
-      this.icons.set(t.id, url);
+      this.icons.set(`unit:${kind}`, url);
     }
     return url;
   }
@@ -1567,6 +1586,7 @@ export class IsoGame implements GameLike {
       const u = left.splice(bi, 1)[0];
       // the same move, in the unit's own (folded) coordinates
       [u.tx, u.ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
+      u.dest = [u.tx, u.ty];
       u.moving = true;
       // a move order calls off any fight
       u.target = undefined;
@@ -1574,18 +1594,78 @@ export class IsoGame implements GameLike {
     }
   }
 
-  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
+  // If your unit u is inside a screen rect, the copy of it there (as laps).
+  private inRect(u: Unit, x0: number, y0: number, x1: number, y1: number): [number, number] | null {
+    if (u.f !== ME || u.dead) return null;
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
     const maxy = Math.max(y0, y1);
+    const lap = this.copyNear(u, (minx + maxx) / 2, (miny + maxy) / 2);
+    const [ux, uy] = this.screenOf(u);
+    const sx = ux + lap[0] * this.w;
+    const sy = uy + lap[1] * this.h;
+    return sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3 ? lap : null;
+  }
+
+  // Your kinds of unit inside a screen rect (the view): how many of each,
+  // and how many of those are selected, in build-menu order.
+  unitTypes(x0: number, y0: number, x1: number, y1: number): UnitType[] {
+    const by = new Map<Kind, UnitType>();
     for (const u of this.units) {
-      const lap = this.copyNear(u, (minx + maxx) / 2, (miny + maxy) / 2);
-      const [ux, uy] = this.screenOf(u);
-      const sx = ux + lap[0] * this.w;
-      const sy = uy + lap[1] * this.h;
-      const hit = u.f === ME && sx >= minx - 3 && sx <= maxx + 3 && sy >= miny - 3 && sy <= maxy + 3;
-      if (hit) {
+      if (!this.inRect(u, x0, y0, x1, y1)) continue;
+      let t = by.get(u.kind);
+      if (!t) by.set(u.kind, (t = { kind: u.kind, name: UNIT[u.kind].name, icon: this.unitIcon(u.kind), count: 0, sel: 0 }));
+      t.count++;
+      if (u.sel) t.sel++;
+    }
+    const order = TECH.map((t) => t.unit);
+    const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
+    return [...by.values()].sort((a, b) => rank(a.kind) - rank(b.kind));
+  }
+
+  // The kinds of unit of yours that are selected, wherever they are, and
+  // how many of each.
+  selectedTypes(): UnitType[] {
+    const by = new Map<Kind, UnitType>();
+    for (const u of this.units) {
+      if (!u.sel || u.f !== ME || u.dead) continue;
+      let t = by.get(u.kind);
+      if (!t) by.set(u.kind, (t = { kind: u.kind, name: UNIT[u.kind].name, icon: this.unitIcon(u.kind), count: 0, sel: 0 }));
+      t.count++;
+      t.sel++;
+    }
+    const order = TECH.map((t) => t.unit);
+    const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : order.length);
+    return [...by.values()].sort((a, b) => rank(a.kind) - rank(b.kind));
+  }
+
+  // Add every unit of yours of one kind inside a screen rect to the
+  // selection, or (on false) take every one of that kind out of it.
+  selectKind(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void {
+    for (const b of this.buildings) b.sel = false;
+    for (const u of this.units) {
+      if (u.f !== ME) {
+        u.sel = false;
+        continue;
+      }
+      if (u.kind !== kind) continue;
+      if (!on) u.sel = false;
+      else {
+        const lap = this.inRect(u, x0, y0, x1, y1);
+        if (lap) {
+          u.sel = true;
+          [u.lap, u.lapY] = lap;
+        }
+      }
+    }
+    this.emit();
+  }
+
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void {
+    for (const u of this.units) {
+      const lap = this.inRect(u, x0, y0, x1, y1);
+      if (lap) {
         u.sel = true;
         [u.lap, u.lapY] = lap;
       } else if (!add || u.f !== ME) u.sel = false;
@@ -2639,6 +2719,26 @@ export class IsoGame implements GameLike {
       c.globalAlpha = 1;
       this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
     }
+
+    // faint lines out to where your units were sent, until they get there
+    c.save();
+    c.strokeStyle = 'rgba(157,255,157,0.3)';
+    c.fillStyle = 'rgba(157,255,157,0.6)';
+    c.lineWidth = 0.7;
+    c.beginPath();
+    const ends: [number, number][] = [];
+    for (const u of this.units) {
+      if (u.f !== ME || !u.moving || !u.dest || u.dest[0] !== u.tx || u.dest[1] !== u.ty || u.deploy) continue;
+      const [ax, ay] = this.screenOf(u);
+      const [bx, by] = toScreen(u.tx, u.ty, this.terrain.elev(u.tx, u.ty));
+      if (Math.max(ax, bx) < x0 - pad || Math.min(ax, bx) > x1 + pad || Math.max(ay, by) < y0 - pad || Math.min(ay, by) > y1 + pad) continue;
+      c.moveTo(ax, ay);
+      c.lineTo(bx, by);
+      ends.push([bx, by]);
+    }
+    c.stroke();
+    for (const [bx, by] of ends) c.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 2, 2);
+    c.restore();
 
     // order markers: the cursor's click burst, on top of everything
     for (const m of this.markers) {

@@ -18,6 +18,15 @@ export interface Action {
   title?: string;
 }
 
+// A kind of unit you have on screen, for the selection bar.
+export interface UnitType {
+  kind: string;
+  name: string;
+  icon: string; // image URL
+  count: number; // how many on screen
+  sel: number; // how many of those are selected
+}
+
 // One thing on the build menu.
 export interface BuildItem {
   id: string;
@@ -68,6 +77,12 @@ export interface GameLike {
   // Map positions of the selected units, for the globe views.
   selectedPoints(): [number, number][];
   boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
+  // Your kinds of unit inside a map rect (the view), and selecting or
+  // dropping one kind of them (on: add those in the rect; off: drop them all).
+  unitTypes?(x0: number, y0: number, x1: number, y1: number): UnitType[];
+  selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
+  // The kinds of unit of yours that are selected, wherever they are.
+  selectedTypes?(): UnitType[];
   deselect(): void;
   focus(): { x: number; y: number };
   // True if the game draws at ART pixels to the map pixel (see gfx.ts).
