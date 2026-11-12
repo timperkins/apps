@@ -257,31 +257,20 @@ function buggy(f: Faction): Shape {
   };
 }
 
-// A parked buggy flashing its lights: headlights and tail lights wig-wag
-// side to side, and the tip of the whip aerial blinks red. Drawn over the
-// buggy's sprite at (x, y, z) facing a, at time t; lamps on the far side of
-// the body are left out. Positions match the lamps in buggy() above.
+// A parked buggy: the red lamp on the tip of its whip aerial gives one short
+// flash every 8 seconds. Drawn over the buggy's sprite at (x, y, z) facing a,
+// at time t. The position matches the aerial in buggy() above.
 export function drawBuggyLights(c: CanvasRenderingContext2D, x: number, y: number, z: number, a: number, t: number): void {
+  if (t % 8 >= 0.3) return;
   const ca = Math.cos(a);
   const sa = Math.sin(a);
-  const at = (u: number, v: number, h: number) => toScreen(x + u * ca - v * sa, y + u * sa + v * ca, z + h);
-  // facing the viewer: the screen's down is world (+1, +1)
-  const shows = (u: number, v: number) => (Math.sign(u) * (ca + sa) + Math.sign(v) * 0.6 * (ca - sa)) / Math.SQRT2 > -0.25;
-  const glow = (sx: number, sy: number, core: string, halo: string) => {
-    const X = Math.round(sx);
-    const Y = Math.round(sy);
-    c.fillStyle = halo;
-    c.fillRect(X - 1, Y - 1, 3, 3);
-    c.fillStyle = core;
-    c.fillRect(X, Y, 1, 1);
-  };
-  const side = Math.floor(t * 3) % 2 ? 1 : -1;
-  for (const v of [-2.5, 2.5]) {
-    if (Math.sign(v) !== side) continue;
-    if (shows(1, v)) glow(...at(6.4, v, 3), '#fffbe0', 'rgba(255,240,170,0.45)');
-    if (shows(-1, v)) glow(...at(-6.4, v, 3.6), '#ffb347', 'rgba(255,150,50,0.4)');
-  }
-  if (t % 1 < 0.25) glow(...at(-5, -3, 9.3), '#ff6a5a', 'rgba(255,80,60,0.4)');
+  const [sx, sy] = toScreen(x - 5 * ca + 3 * sa, y - 5 * sa - 3 * ca, z + 9.3);
+  const X = Math.round(sx);
+  const Y = Math.round(sy);
+  c.fillStyle = 'rgba(255,80,60,0.4)';
+  c.fillRect(X - 1, Y - 1, 3, 3);
+  c.fillStyle = '#ff6a5a';
+  c.fillRect(X, Y, 1, 1);
 }
 
 function hauler(f: Faction): Shape {

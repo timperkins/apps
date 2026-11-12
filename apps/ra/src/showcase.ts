@@ -471,7 +471,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   const idleShuffle = (sprs: StackSprite[], turn: number) => (draw: Draw): Cell[] => [
     { label: 'Idle', box: union(...[-0.6, 0, 0.6].map((k) => boxOf(sprs[di(Math.PI / 4 + k)]))), anim: true, draw: shuffler(draw, turn) },
   ];
-  // a parked buggy flashes its lights
+  // a parked buggy blinks the red light on its aerial every 8 seconds
   plain('Scout buggy', 'buggy', (a) => a.buggy, 16, 34, (draw) => [
     {
       label: 'Idle',

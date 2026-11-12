@@ -94,7 +94,7 @@ interface Unit {
   slideT?: number;
   // standing about: soldiers pace round the spot they stopped on (home),
   // stepping to `pace`; artillery shifts on its wheels to `look` (a buggy
-  // flashes its lights instead: see drawUnit)
+  // blinks its aerial light instead: see drawUnit)
   home?: [number, number];
   pace?: [number, number];
   look?: number;
