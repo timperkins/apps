@@ -7,8 +7,10 @@ import { ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, bui
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { MAPS, mapDef, mapPreview } from './maps';
+import { BUILDING_DEF, CELL, DAMAGED, Fx, HELI_ALT, Shot, UNIT_DEF, VERSUS, WEAPON, WRECK_FADE, WRECK_S, Weapon, drawFlame, makeShot, muzzles } from './combat';
 import {
   BuildingKind,
+  BuildingStates,
   DIRS,
   FACTIONS,
   V2BuildingArt,
@@ -20,7 +22,10 @@ import {
   makeDish,
   makeOre,
   makeFactionArt,
+  makeBuildingStates,
+  makeWreckArt,
   OreArt,
+  WreckArt,
   makeRocks,
   makeTrees,
 } from './sprites';
@@ -99,6 +104,53 @@ interface Unit {
   pace?: [number, number];
   look?: number;
   face?: number; // the way it was left facing, which it shifts about
+  // fighting: what it is firing on, whether it was told to (and so chases
+  // it anywhere) or is chasing whoever hit it (and gives up past LEASH from
+  // `anchor`), its reload, when it last fired and when it was last hit
+  target?: Target;
+  forced?: boolean;
+  chase?: boolean;
+  anchor?: [number, number];
+  repath?: number;
+  scan?: number;
+  cool?: number;
+  fired?: number;
+  hitT?: number;
+  flashT?: number;
+  dead?: boolean;
+}
+
+type Target = Unit | Building;
+const isB = (t: Target): t is Building => 'pad' in t;
+// How far a unit chases whoever hit it before it gives up and goes back.
+const LEASH = 10 * CELL;
+// How close a friend has to be to come and help when one of its side is hit.
+const HELP = 7 * CELL;
+// The size of the explosion when each kind of vehicle is destroyed.
+const BOOM: Partial<Record<Kind, number>> = { buggy: 6, light: 8, heavy: 10, hauler: 10, arty: 7, mcv: 12, heli: 8, boat: 9 };
+
+// What is left of a destroyed unit: it lies there WRECK_S seconds, then fades.
+interface Wreck {
+  kind: Kind;
+  f: number;
+  x: number;
+  y: number;
+  z: number;
+  a: number;
+  tur: number;
+  t: number;
+  fall: number; // a copter's height as it comes down
+  vz: number;
+}
+
+// A destroyed building: rubble, for good (t < 0 while it is still blowing up).
+interface Ruin {
+  kind: BuildingKind;
+  f: number;
+  x: number;
+  y: number;
+  states: BuildingStates;
+  t: number;
 }
 
 interface OreNode {
@@ -126,6 +178,13 @@ interface Building {
   rally?: [number, number]; // where new units head (world, first copy)
   gift?: boolean; // a refinery's free hauler has been handed over
   primary?: boolean; // the one of its kind that makes the units
+  // a gun tower's target and reload, and for any building when it was last hit
+  target?: Target;
+  scan?: number;
+  cool?: number;
+  hitT?: number;
+  flashT?: number;
+  dead?: boolean;
 }
 
 interface Prop {
@@ -150,7 +209,7 @@ const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery'
 
 // Height of each unit's visual centre above the ground (for picking and brackets).
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
-const HELI_ALT = 20;
+
 
 export class IsoGame implements GameLike {
   readonly fine = true;
@@ -159,7 +218,12 @@ export class IsoGame implements GameLike {
   buildings: Building[] = [];
   props: Prop[] = [];
   particles: Particle[] = [];
-  markers: { x: number; y: number; z: number; t: number }[] = [];
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean }[] = [];
+  fx = new Fx();
+  wrecks: Wreck[] = [];
+  ruins: Ruin[] = [];
+  wArt: WreckArt[];
+  private bStates = new Map<string, BuildingStates>();
   // Mark where a move order goes. main.ts turns it off for the mouse, whose
   // cursor shows the order instead.
   moveMarks = true;
@@ -192,6 +256,18 @@ export class IsoGame implements GameLike {
     public seed: number,
   ) {
     this.art = FACTIONS.map(makeFactionArt);
+    this.wArt = FACTIONS.map(makeWreckArt);
+  }
+
+  // A building's damaged and ruined looks, drawn the first time they're needed.
+  private states(kind: BuildingKind, f: number): BuildingStates {
+    const key = `${kind}-${f}`;
+    let s = this.bStates.get(key);
+    if (!s) {
+      s = makeBuildingStates(kind, FACTIONS[f]);
+      this.bStates.set(key, s);
+    }
+    return s;
   }
 
   get w(): number {
@@ -236,6 +312,9 @@ export class IsoGame implements GameLike {
     this.markers = [];
     this.sparkles = [];
     this.sparks = [];
+    this.fx.clear();
+    this.wrecks = [];
+    this.ruins = [];
     this.lastTap = null;
     this.mapVersion++;
     this.credits = START_CREDITS;
@@ -467,7 +546,7 @@ export class IsoGame implements GameLike {
   private lastTap: { u: Unit; t: number } | null = null;
 
   private newUnit(kind: Kind, f: number, x: number, y: number, a: number): Unit {
-    const u: Unit = { kind, f, x, y, z: this.terrain.elev(x, y), a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: 0, hp: UNIT[kind].hp, idle: 2, trackAcc: 0, lap: 0, lapY: 0 };
+    const u: Unit = { kind, f, x, y, z: this.terrain.elev(x, y), a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: 0, hp: 1, idle: 2, trackAcc: 0, lap: 0, lapY: 0 };
     this.units.push(u);
     return u;
   }
@@ -1258,7 +1337,7 @@ export class IsoGame implements GameLike {
   }
 
   // What a tap at (x, y) would do, for the mouse cursor. Follows click().
-  cursorAt(x: number, y: number): 'pick' | 'move' | 'rally' | 'build' | 'blocked' | null {
+  cursorAt(x: number, y: number): 'pick' | 'move' | 'attack' | 'rally' | 'build' | 'blocked' | null {
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
     const hit = this.unitAt(x, y);
@@ -1270,6 +1349,9 @@ export class IsoGame implements GameLike {
     }
     const sel = mine.filter((u) => !u.deploy);
     if (!sel.length) return null;
+    // over an enemy that one of them can shoot at: attack it
+    const foe = this.enemyAt(x, y);
+    if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) return 'attack';
     // boats can't go onto land, nor anyone else into the water
     const [gx, gy] = this.fold(...this.groundAt(x, y));
     return sel.some((u) => this.okAt(u, gx, gy)) ? 'move' : 'blocked';
@@ -1359,6 +1441,12 @@ export class IsoGame implements GameLike {
   order(x: number, y: number, shortest = false): void {
     const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === ME);
     if (!sel.length) return;
+    // onto an enemy: everyone who can, attacks it
+    const foe = shortest ? null : this.enemyAt(x, y);
+    if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
+      this.attack(sel, foe);
+      return;
+    }
     // haulers sent onto ore dig there; sent anywhere else they stop work
     {
       const [gx, gy] = this.fold(...this.groundAt(x, y));
@@ -1412,6 +1500,9 @@ export class IsoGame implements GameLike {
       // the same move, in the unit's own (folded) coordinates
       [u.tx, u.ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
       u.moving = true;
+      // a move order calls off any fight
+      u.target = undefined;
+      u.forced = u.chase = false;
     }
   }
 
@@ -1477,6 +1568,7 @@ export class IsoGame implements GameLike {
     this.time += dt;
     this.updateBuild(dt);
     for (const u of this.units) if (u.job) this.haul(u, dt);
+    for (const u of [...this.units]) if (!u.dead) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
     for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
     for (const u of [...this.units]) {
@@ -1609,7 +1701,9 @@ export class IsoGame implements GameLike {
       if (Math.abs(gz - u.z) < 0.05) u.z = gz;
 
       if (u.kind === 'light' || u.kind === 'heavy') {
-        if (u.moving) u.turretGoal = u.a;
+        if (u.target) {
+          // (fight() aims it)
+        } else if (u.moving) u.turretGoal = u.a;
         else {
           u.idle -= dt;
           if (u.idle <= 0) {
@@ -1618,9 +1712,14 @@ export class IsoGame implements GameLike {
           }
         }
         const d = angDiff(u.turretGoal, u.turret);
-        u.turret += Math.sign(d) * Math.min(Math.abs(d), 2.2 * dt);
+        u.turret += Math.sign(d) * Math.min(Math.abs(d), (u.target ? 3.2 : 2.2) * dt);
       }
-      if (u.moving || u.deploy || u.job) {
+      // badly damaged vehicles smoke
+      if (u.hp < 0.5 && !foot && Math.random() < dt * (u.hp < 0.25 ? 6 : 3)) {
+        const [sx, sy] = toScreen(u.x, u.y, u.z + (u.kind === 'heli' ? HELI_ALT : 0) + MID[u.kind] + 2);
+        this.fx.smoke(sx, sy, true, 1);
+      }
+      if (u.moving || u.deploy || u.job || u.target) {
         u.home = u.pace = u.look = u.face = undefined;
       } else if (foot) this.paceAbout(u, dt);
       else if (u.kind === 'arty') {
@@ -1691,11 +1790,21 @@ export class IsoGame implements GameLike {
         emit(1, 'smoke', 0.8);
       }
       if (b.kind === 'tower') {
-        if (Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
+        this.towerFight(b, dt);
+        if (!b.target && Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
         const d = angDiff(b.gunGoal, b.gun);
-        b.gun += Math.sign(d) * Math.min(Math.abs(d), 1.4 * dt);
+        b.gun += Math.sign(d) * Math.min(Math.abs(d), (b.target ? 2.6 : 1.4) * dt);
       }
+      // a badly damaged building burns and smokes
+      if (b.hp <= DAMAGED)
+        for (const p of this.states(b.kind, b.f).damaged.fx)
+          if (Math.random() < dt * 2.5) {
+            const [sx, sy] = toScreen(b.x + p.x, b.y + p.y, p.z + 3);
+            this.fx.smoke(sx, sy, true, 1.5);
+          }
     }
+    this.updateWrecks(dt);
+    this.fx.step(dt);
 
     for (const p of this.particles) {
       p.life += dt;
@@ -1727,13 +1836,386 @@ export class IsoGame implements GameLike {
     this.sparkles = this.sparkles.filter((s) => s.life < 1.2);
   }
 
+  // ---------- Combat ----------
+
+  // The enemy unit or building under screen point (x, y), if any.
+  private enemyAt(x: number, y: number): Target | null {
+    const h = this.unitAt(x, y);
+    if (h && h.u.f !== ME) return h.u;
+    const b = this.buildingAt(x, y);
+    return b && b.f !== ME ? b : null;
+  }
+
+  private canHit(w: Weapon | undefined, t: Target): boolean {
+    if (!w || t.dead) return false;
+    return !isB(t) && t.kind === 'heli' ? w.air : w.ground;
+  }
+
+  // How far (x, y) is from target t: to a building's nearest wall.
+  private reach(x: number, y: number, t: Target): number {
+    const [tx, ty] = this.nearPoint(x, y, t.x, t.y);
+    if (!isB(t)) return Math.hypot(tx - x, ty - y);
+    return Math.hypot(Math.max(0, Math.abs(x - tx) - t.art.rx), Math.max(0, Math.abs(y - ty) - t.art.ry));
+  }
+
+  // Where to aim at t from (x, y): its middle, or the near side of a building.
+  private aimPoint(x: number, y: number, t: Target): [number, number, number] {
+    const [tx, ty] = this.nearPoint(x, y, t.x, t.y);
+    if (isB(t)) {
+      const cx = Math.max(tx - t.art.rx * 0.6, Math.min(tx + t.art.rx * 0.6, x));
+      const cy = Math.max(ty - t.art.ry * 0.6, Math.min(ty + t.art.ry * 0.6, y));
+      return [cx, cy, 6];
+    }
+    return [tx, ty, t.z + (t.kind === 'heli' ? HELI_ALT : 0) + MID[t.kind] * 0.7];
+  }
+
+  // The nearest enemy of side f within range of (x, y) that weapon w can hit:
+  // units first, then gun towers (other buildings only when told to).
+  private acquire(f: number, x: number, y: number, w: Weapon, range: number): Target | undefined {
+    let best: Target | undefined;
+    let bd = range;
+    for (const o of this.units) {
+      if (o.f === f || !this.canHit(w, o)) continue;
+      const d = this.reach(x, y, o);
+      if (d <= bd) {
+        bd = d;
+        best = o;
+      }
+    }
+    if (best) return best;
+    for (const b of this.buildings) {
+      if (b.f === f || b.kind !== 'tower' || b.rise < 1 || !this.canHit(w, b)) continue;
+      const d = this.reach(x, y, b);
+      if (d <= bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  // Your units go for t: all of them that can hit it.
+  private attack(sel: Unit[], t: Target): void {
+    for (const u of sel) {
+      if (!this.canHit(WEAPON[u.kind], t)) continue;
+      u.target = t;
+      u.forced = true;
+      u.chase = false;
+      u.anchor = undefined;
+      u.repath = 0;
+      u.pace = undefined;
+    }
+    const [mx, my] = this.fold(t.x, t.y);
+    this.markers.push({ x: mx, y: my, z: isB(t) ? 0 : t.z, t: 0, foe: true });
+  }
+
+  // One unit's fighting, each frame: pick a target if it is standing about,
+  // close in on one it was told to attack (or that hit it), turn its gun on
+  // it and fire when loaded.
+  private fight(u: Unit, dt: number): void {
+    const w = WEAPON[u.kind];
+    if (!w) return;
+    u.cool = Math.max(0, (u.cool ?? 0) - dt);
+    let t = u.target;
+    if (t && !this.canHit(w, t)) {
+      t = u.target = undefined;
+      u.forced = u.chase = false;
+    }
+    if (!t && !u.moving && !u.deploy) {
+      u.scan = (u.scan ?? Math.random() * 0.4) - dt;
+      if (u.scan <= 0) {
+        u.scan = 0.4 + Math.random() * 0.3;
+        t = u.target = this.acquire(u.f, u.x, u.y, w, w.range);
+      }
+    }
+    if (!t) return;
+    const d = this.reach(u.x, u.y, t);
+    if (d > w.range) {
+      if (u.chase && u.anchor && Math.hypot(u.x - u.anchor[0], u.y - u.anchor[1]) > LEASH) {
+        // too far from where it was: give up and go back
+        [u.tx, u.ty] = u.anchor;
+        u.moving = true;
+        u.target = u.anchor = undefined;
+        u.chase = false;
+        return;
+      }
+      if (!u.forced && !u.chase) {
+        u.target = undefined;
+        return;
+      }
+      if ((u.repath = (u.repath ?? 0) - dt) <= 0 || !u.moving) {
+        u.repath = 0.5;
+        const [ax, ay] = this.aimPoint(u.x, u.y, t);
+        u.tx = ax;
+        u.ty = ay;
+        u.moving = true;
+      }
+      return;
+    }
+    if (u.moving) {
+      if (!u.forced && !u.chase) return; // on its way somewhere: no stopping
+      u.moving = false;
+      u.tx = u.x;
+      u.ty = u.y;
+    }
+    const [ax, ay] = this.aimPoint(u.x, u.y, t);
+    const want = Math.atan2(ay - u.y, ax - u.x);
+    let off: number;
+    if (u.kind === 'light' || u.kind === 'heavy') {
+      u.turretGoal = want;
+      off = angDiff(want, u.turret);
+    } else {
+      // no turret: the whole thing turns to face it
+      const diff = angDiff(want, u.a);
+      const stepA = Math.min(UNIT[u.kind].turn, 6) * dt;
+      u.a = Math.abs(diff) <= stepA ? want : u.a + Math.sign(diff) * stepA;
+      off = angDiff(want, u.a);
+    }
+    if (Math.abs(off) > 0.12 || u.cool > 0) return;
+    u.cool = w.rof * (0.9 + Math.random() * 0.2);
+    u.fired = this.time;
+    const z = u.z + (u.kind === 'heli' ? HELI_ALT + Math.sin(u.anim * 2) * 1.2 : 0);
+    this.shoot(u, w, t, muzzles(u.kind, u.x, u.y, z, u.a, u.turret));
+  }
+
+  // A gun tower picks the nearest enemy unit in range, turns and fires.
+  private towerFight(b: Building, dt: number): void {
+    const w = WEAPON.tower!;
+    const p = b.art.fx[0];
+    const gx = b.x + p.x;
+    const gy = b.y + p.y;
+    b.cool = Math.max(0, (b.cool ?? 0) - dt);
+    let t = b.target;
+    if (t && (!this.canHit(w, t) || this.reach(gx, gy, t) > w.range)) t = b.target = undefined;
+    if (!t) {
+      b.scan = (b.scan ?? 0) - dt;
+      if (b.scan > 0) return;
+      b.scan = 0.4;
+      t = b.target = this.acquire(b.f, gx, gy, w, w.range);
+      if (!t) return;
+    }
+    const [ax, ay] = this.aimPoint(gx, gy, t);
+    const want = Math.atan2(ay - gy, ax - gx);
+    b.gunGoal = want;
+    if (Math.abs(angDiff(want, b.gun)) > 0.1 || b.cool > 0) return;
+    b.cool = w.rof * (0.9 + Math.random() * 0.2);
+    this.shoot(b, w, t, muzzles('tower', gx, gy, p.z, 0, b.gun));
+  }
+
+  // Rounds leave the muzzles (a flash at each) for t.
+  private shoot(src: Unit | Building, w: Weapon, t: Target, from: [number, number, number][]): void {
+    for (const m of from) {
+      const [sx, sy] = toScreen(...m);
+      this.fx.muzzle(sx, sy, w.shot !== 'bullet');
+      let aim = this.aimPoint(m[0], m[1], t);
+      let track: Shot['track'];
+      if (w.shot === 'arc') {
+        // a shell lobbed at where the target is now, landing near it
+        const sc = w.scatter ?? 0;
+        const ang = Math.random() * Math.PI * 2;
+        const r = Math.random() * sc;
+        const ax = aim[0] + Math.cos(ang) * r;
+        const ay = aim[1] + Math.sin(ang) * r;
+        aim = [ax, ay, isB(t) ? 2 : this.terrain.elev(ax, ay)];
+      } else track = () => (t.dead ? null : this.aimPoint(m[0], m[1], t));
+      this.fx.fire(makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track));
+    }
+  }
+
+  private impact(s: Shot, w: Weapon, t: Target, src: Unit | Building): void {
+    const [sx, sy] = toScreen(s.x, s.y, s.z);
+    if (w.splash) {
+      // a shell bursting: everything of the other side near it is hit, less further out
+      this.fx.boom(sx, sy, 6);
+      const R = w.splash;
+      for (const o of [...this.units]) {
+        if (o.f === src.f || o.kind === 'heli' || o.dead) continue;
+        const d = this.reach(s.x, s.y, o);
+        if (d < R) this.damage(o, w.dmg * VERSUS[w.wh][UNIT_DEF[o.kind].armor] * (1 - (d / R) * 0.6), src);
+      }
+      for (const b of [...this.buildings]) {
+        if (b.f === src.f || b.dead) continue;
+        const d = this.reach(s.x, s.y, b);
+        if (d < R) this.damage(b, w.dmg * VERSUS[w.wh][BUILDING_DEF[b.kind].armor] * (1 - (d / R) * 0.6), src);
+      }
+      return;
+    }
+    const soft = !isB(t) && UNIT_DEF[t.kind].armor === 'none';
+    if (w.shot === 'bullet') {
+      if (soft) this.fx.dust(sx, sy);
+      else this.fx.sparks(sx, sy, 4);
+    } else {
+      this.fx.boom(sx, sy, w.shot === 'rocket' ? 3.5 : 3);
+      this.fx.sparks(sx, sy, 6);
+    }
+    if (t.dead) return;
+    const arm = isB(t) ? BUILDING_DEF[t.kind].armor : UNIT_DEF[t.kind].armor;
+    this.damage(t, w.dmg * VERSUS[w.wh][arm], src);
+  }
+
+  private damage(t: Target, amt: number, src: Unit | Building): void {
+    if (t.dead) return;
+    const max = isB(t) ? BUILDING_DEF[t.kind].strength : UNIT_DEF[t.kind].strength;
+    t.hp = Math.max(0, t.hp - amt / max);
+    t.hitT = this.time;
+    // a flash of light where a big round lands (buildings shrug off bullets)
+    if (!isB(t) || amt >= 12) t.flashT = this.time;
+    if (t.hp <= 0) {
+      if (isB(t)) this.raze(t);
+      else this.kill(t);
+      return;
+    }
+    if (src.dead) return;
+    // it fights back, and its friends nearby come to help
+    if (!isB(t)) this.retaliate(t, src);
+    for (const o of this.units) if (o.f === t.f && o !== t && this.reach(o.x, o.y, t) < HELP) this.retaliate(o, src);
+  }
+
+  private retaliate(u: Unit, src: Unit | Building): void {
+    if (u.target || u.moving || u.deploy || u.job || !this.canHit(WEAPON[u.kind], src)) return;
+    u.target = src;
+    u.chase = true;
+    u.forced = false;
+    u.anchor = [u.x, u.y];
+    u.repath = 0;
+  }
+
+  // A unit is destroyed: vehicles blow up, soldiers fall, and the wreck or
+  // body is left lying for a while.
+  private kill(u: Unit): void {
+    u.dead = true;
+    this.units.splice(this.units.indexOf(u), 1);
+    if (this.lastTap?.u === u) this.lastTap = null;
+    const air = u.kind === 'heli' ? HELI_ALT : 0;
+    const r = BOOM[u.kind];
+    if (r) {
+      const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
+      this.fx.boom(sx, sy, r);
+      this.fx.boom(sx + (Math.random() - 0.5) * r, sy - r * 0.3, r * 0.6, 0.15);
+    }
+    this.wrecks.push({ kind: u.kind, f: u.f, x: u.x, y: u.y, z: u.z, a: u.a, tur: u.turret + (Math.random() - 0.5) * 0.8, t: 0, fall: air, vz: 0 });
+    if (u.sel) this.emit();
+  }
+
+  // A building is destroyed: it goes up in a string of explosions and leaves a ruin.
+  private raze(b: Building): void {
+    b.dead = true;
+    this.buildings.splice(this.buildings.indexOf(b), 1);
+    const { rx, ry } = b.art;
+    const n = 4 + Math.round((rx + ry) / 6);
+    for (let i = 0; i < n; i++) {
+      const [sx, sy] = toScreen(b.x + (Math.random() * 2 - 1) * rx * 0.8, b.y + (Math.random() * 2 - 1) * ry * 0.8, 2 + Math.random() * 12);
+      this.fx.boom(sx, sy, 5 + Math.random() * 5, i * 0.12);
+    }
+    const [cx, cy] = toScreen(b.x, b.y, 8);
+    this.fx.boom(cx, cy, (rx + ry) * 0.45, 0.4);
+    this.ruins.push({ kind: b.kind, f: b.f, x: b.x, y: b.y, states: this.states(b.kind, b.f), t: -0.45 });
+    if (b.own) this.notice(`${BNAME[b.kind]} destroyed`);
+    this.mapVersion++;
+    if (b.sel) this.emit();
+  }
+
+  private updateWrecks(dt: number): void {
+    for (const w of this.wrecks) {
+      w.t += dt;
+      if (w.fall > 0) {
+        // a copter comes down and blows up again where it lands
+        w.vz += 50 * dt;
+        w.fall = Math.max(0, w.fall - w.vz * dt);
+        w.a += dt * 4;
+        if (w.fall === 0) {
+          const [sx, sy] = toScreen(w.x, w.y, w.z + 3);
+          this.fx.boom(sx, sy, 7);
+        }
+      }
+      // burning out
+      if (w.kind !== 'inf' && w.kind !== 'rocket' && w.t < 7 && Math.random() < dt * (w.t < 3 ? 6 : 2)) {
+        const [sx, sy] = toScreen(w.x, w.y, w.z + w.fall + 6);
+        this.fx.smoke(sx, sy, true, 1.5);
+      }
+    }
+    this.wrecks = this.wrecks.filter((w) => w.t < WRECK_S + WRECK_FADE);
+    for (const r of this.ruins) {
+      r.t += dt;
+      // smoke pours off it for a while, then wisps
+      const rate = r.t < 20 ? 3 : 0.4;
+      if (r.t > 0)
+        for (const p of r.states.ruin.fx)
+          if (Math.random() < (dt * rate) / 2) {
+            const [sx, sy] = toScreen(r.x + p.x, r.y + p.y, p.z + 1);
+            this.fx.smoke(sx, sy, true, 2);
+          }
+    }
+  }
+
+  private drawWreck(w: Wreck): void {
+    const c = this.ctx;
+    const k = w.t < WRECK_S ? 1 : Math.max(0, 1 - (w.t - WRECK_S) / WRECK_FADE);
+    c.globalAlpha = k;
+    const art = this.wArt[w.f];
+    const di = dirIndex(w.a, DIRS);
+    const z = w.z + w.fall;
+    switch (w.kind) {
+      case 'inf':
+      case 'rocket': {
+        const frames = w.kind === 'inf' ? art.infantry : art.rocket;
+        this.blit(frames[w.t < 0.18 ? 0 : 1][dirIndex(w.a, 16)], w.x, w.y, z);
+        break;
+      }
+      case 'light':
+      case 'heavy': {
+        this.blit((w.kind === 'light' ? art.lightTank : art.heavyTank)[di], w.x, w.y, z);
+        this.blit((w.kind === 'light' ? art.lightTurret : art.heavyTurret)[dirIndex(w.tur, DIRS)], w.x - Math.cos(w.a) * 1.2, w.y - Math.sin(w.a) * 1.2, z - 0.5);
+        break;
+      }
+      case 'boat':
+        // it settles into the water as it burns
+        this.blit(art.boat[di], w.x, w.y, -Math.min(5, w.t * 0.5));
+        break;
+      default:
+        this.blit({ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli }[w.kind][di], w.x, w.y, z);
+    }
+    if (w.kind !== 'inf' && w.kind !== 'rocket' && w.t < 3.5 && w.fall === 0) {
+      const [sx, sy] = toScreen(w.x, w.y, z + MID[w.kind] + 1);
+      drawFlame(c, sx, sy, 3.5 * (1 - w.t / 4), this.time, 7);
+    }
+    c.globalAlpha = 1;
+  }
+
+  private drawRuin(r: Ruin): void {
+    if (r.t < 0) {
+      // still going up in smoke: the damaged building until the big bang
+      this.blit(r.states.damaged.spr, r.x, r.y, 0);
+      return;
+    }
+    this.blit(r.states.ruin.spr, r.x, r.y, 0);
+    if (r.t < 8)
+      for (const [i, p] of r.states.ruin.fx.entries()) {
+        const [sx, sy] = toScreen(r.x + p.x, r.y + p.y, p.z);
+        drawFlame(this.ctx, sx, sy, 4 * (1 - r.t / 9), this.time + i, i + 3);
+      }
+  }
+
   // ---------- Rendering ----------
 
   private blit(spr: StackSprite, wx: number, wy: number, z: number, shadowOnly = false): void {
     const [sx, sy] = toScreen(wx, wy, z);
     const c = shadowOnly ? spr.shadow : spr.img;
-    if (c) drawSprite(this.ctx, c, spr, sx, sy);
+    if (!c) return;
+    drawSprite(this.ctx, c, spr, sx, sy);
+    if (this.lit && !shadowOnly) {
+      // just hit: a flash of light over it
+      const ctx = this.ctx;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = this.lit;
+      drawSprite(ctx, c, spr, sx, sy);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
   }
+  // true while drawing something that has just been hit
+  private lit = 0;
+  private justHit = (t: { flashT?: number }) => this.time - (t.flashT ?? -9) < 0.07;
 
   // A tread mark at screen point (x, y), if that bit of ground is painted.
   private stamp(x: number, y: number, style: string): void {
@@ -1804,7 +2286,7 @@ export class IsoGame implements GameLike {
     for (const m of this.markers) {
       const k = m.t / 0.7;
       const r = 9 - k * 6;
-      c.fillStyle = `rgba(120,255,120,${1 - k * 0.6})`;
+      c.fillStyle = m.foe ? (Math.floor(m.t * 12) % 2 ? 'rgba(0,0,0,0)' : `rgba(255,96,72,${1 - k * 0.4})`) : `rgba(120,255,120,${1 - k * 0.6})`;
       for (const [ax, ay] of [
         [r, 0],
         [0, r],
@@ -1845,6 +2327,8 @@ export class IsoGame implements GameLike {
       }
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
+    for (const r of this.ruins) if (seen(r.x, r.y, 4)) items.push({ k: r.x + r.y + Math.min(r.states.ruin.rx, r.states.ruin.ry), draw: () => this.drawRuin(r) });
+    for (const w of this.wrecks) if (w.fall === 0 && seen(w.x, w.y, w.z)) items.push({ k: w.x + w.y + w.z * 2 - 0.5, draw: () => this.drawWreck(w) });
     const ore = this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5).filter((n) => n.amt >= 10);
     const oreSize = (n: OreNode) => (n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0);
     for (const n of ore) {
@@ -1875,7 +2359,10 @@ export class IsoGame implements GameLike {
       }
     }
 
+    this.fx.drawBelow(c);
     for (const u of this.units) if (u.kind === 'heli' && seen(u.x, u.y, u.z)) this.drawUnit(u);
+    for (const w of this.wrecks) if (w.fall > 0 && seen(w.x, w.y, w.z)) this.drawWreck(w);
+    this.fx.drawAbove(c);
 
     for (const s of this.sparks) {
       if (!inView(s.x, s.y)) continue;
@@ -1889,6 +2376,14 @@ export class IsoGame implements GameLike {
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
+    // anything hit lately shows its health for a moment
+    for (const u of this.units)
+      if (!u.sel && this.time - (u.hitT ?? -9) < 2.5 && seen(u.x, u.y, u.z)) {
+        const { x, y, rx, ry } = this.unitBox(u);
+        const bw = Math.max(8, rx * 2);
+        healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
+      }
+    for (const b of this.buildings) if (!b.sel && this.time - (b.hitT ?? -9) < 2.5 && seen(b.x, b.y, 10)) this.buildingBar(b);
 
     // the building being placed: a see-through ghost over its footprint
     const gh = this.ghost;
@@ -1972,7 +2467,13 @@ export class IsoGame implements GameLike {
         c.fillRect(Math.round(bx), Math.round(by), 1, 1);
       }
     }
-    // its health, over the top of the building
+    this.buildingBar(b);
+  }
+
+  // A building's health, over the top of it.
+  private buildingBar(b: Building): void {
+    const c = this.ctx;
+    const { rx, ry } = b.art;
     const spr = b.art.spr;
     const [sx, sy] = toScreen(b.x, b.y);
     const top = this.spriteTop(b);
@@ -2020,6 +2521,11 @@ export class IsoGame implements GameLike {
         const [fx, fy] = this.lapped(b.x, b.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
         this.blit(b.art.spr, fx, fy, 0);
       }
+      for (const r of this.ruins) {
+        const [sx, sy] = toScreen(r.x, r.y);
+        const [fx, fy] = this.lapped(r.x, r.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
+        this.blit(r.states.ruin.spr, fx, fy, 0);
+      }
     } finally {
       this.ctx = ctx;
     }
@@ -2035,8 +2541,19 @@ export class IsoGame implements GameLike {
   }
 
   private drawUnit(u: Unit): void {
+    this.lit = this.justHit(u) ? 0.45 : 0;
+    try {
+      this.drawUnitNow(u);
+    } finally {
+      this.lit = 0;
+    }
+  }
+
+  private drawUnitNow(u: Unit): void {
     const art = this.art[u.f];
     const di = dirIndex(u.a, DIRS);
+    // a gun kicks back as it fires
+    const kick = this.time - (u.fired ?? -9) < 0.1 ? 1 : 0;
     switch (u.kind) {
       case 'mcv':
         this.blit(art.mcv[di], u.x, u.y, u.z);
@@ -2053,7 +2570,7 @@ export class IsoGame implements GameLike {
         const hull = u.kind === 'light' ? art.lightTank : art.heavyTank;
         const tur = u.kind === 'light' ? art.lightTurret : art.heavyTurret;
         this.blit(hull[di], u.x, u.y, u.z);
-        this.blit(tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z);
+        this.blit(tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2 - Math.cos(u.turret) * kick, u.y - Math.sin(u.a) * 1.2 - Math.sin(u.turret) * kick, u.z);
         break;
       }
       case 'heli': {
@@ -2088,7 +2605,8 @@ export class IsoGame implements GameLike {
       }
       default: {
         const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'hauler' ? art.hauler : art.artillery;
-        this.blit(spr[di], u.x, u.y, u.z);
+        const back = u.kind === 'arty' ? kick : 0;
+        this.blit(spr[di], u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
         if (u.kind === 'buggy' && !u.moving) drawBuggyLights(this.ctx, u.x, u.y, u.z, u.a, u.anim);
       }
     }
@@ -2127,7 +2645,15 @@ export class IsoGame implements GameLike {
       if (H - top > 0) c.drawImage(spr.img, 0, top, W, H - top, x, y + top / ART, spr.w, (H - top) / ART);
       return;
     }
-    this.blit(b.art.spr, b.x, b.y, 0);
+    const hurt = b.hp <= DAMAGED ? this.states(b.kind, b.f).damaged : null;
+    this.lit = this.justHit(b) ? 0.22 : 0;
+    this.blit(hurt ? hurt.spr : b.art.spr, b.x, b.y, 0);
+    this.lit = 0;
+    if (hurt)
+      for (const [i, p] of hurt.fx.entries()) {
+        const [x, y] = toScreen(b.x + p.x, b.y + p.y, p.z);
+        drawFlame(c, x, y, b.hp < 0.25 ? 5 : 3.5, this.time + i * 0.37, i + 11);
+      }
     const f = FACTIONS[b.f];
     const fx = (i: number) => {
       const p = b.art.fx[i];
