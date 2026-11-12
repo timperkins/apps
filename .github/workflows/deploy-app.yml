@@ -132,6 +132,23 @@ jobs:
           url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/channel.json")
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
+      # The same build also goes to a fixed "latest" channel, so each app has one preview link that
+      # never changes and always shows the most recent preview push from any branch (last push wins).
+      # Channels last at most 30 days; every deploy resets that, and preview-keepalive.yml extends it weekly.
+      - name: Deploy fixed latest channel
+        id: hosting_latest
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
+        continue-on-error: true
+        run: |
+          npx -y "$FIREBASE_TOOLS" hosting:channel:deploy latest \
+            --project "$FIREBASE_PROJECT" --expires 30d --json > "$RUNNER_TEMP/latest.json" 2> "$RUNNER_TEMP/latest.err" || {
+            cat "$RUNNER_TEMP/latest.json" "$RUNNER_TEMP/latest.err"
+            echo "::warning title=latest channel::deploy to the fixed latest channel failed"
+            exit 1
+          }
+          url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/latest.json")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to prod
         id: hosting_prod
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'prod'
@@ -228,15 +245,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url }}
           NOTE: ${{ steps.apphosting.outputs.note }}
+          LATEST: ${{ steps.hosting_latest.outputs.url }}
         run: |
           echo "- **${{ inputs.app }}** (${{ inputs.target }}): ${URL:-$NOTE}" >> "$GITHUB_STEP_SUMMARY"
-          echo "${{ inputs.app }}: ${URL:-$NOTE}"
+          [ -z "$LATEST" ] || echo "  - fixed link (always the latest preview): $LATEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ inputs.app }}: ${URL:-$NOTE}${LATEST:+ (fixed: $LATEST)}"
           mkdir -p "$RUNNER_TEMP/link"
-          jq -n --arg app '${{ inputs.app }}' --arg url "$URL" --arg note "$NOTE" '{app: $app, url: $url, note: $note}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
+          jq -n --arg app '${{ inputs.app }}' --arg url "$URL" --arg note "$NOTE" --arg latest "$LATEST" \
+            '{app: $app, url: $url, note: $note, latest: $latest}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
           if [ '${{ inputs.target }}' = preview ] && [ -n "$URL" ]; then
             gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
               -f state=success -f context='preview/${{ inputs.app }}' -f target_url="$URL" \
               -f description='Preview deployed' > /dev/null
+          fi
+          if [ -n "$LATEST" ]; then
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
+              -f state=success -f context='preview/${{ inputs.app }} (fixed link)' -f target_url="$LATEST" \
+              -f description='Always the latest preview' > /dev/null
           fi
 
       - uses: actions/upload-artifact@v4

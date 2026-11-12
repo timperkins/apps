@@ -1,0 +1,42 @@
+name: preview-keepalive
+
+# Hosting preview channels expire after at most 30 days. Each app's fixed "latest" channel
+# (see deploy-app.yml) is extended here every week so its link keeps working between pushes.
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+env:
+  FIREBASE_PROJECT: apps-97595
+
+jobs:
+  extend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Extend latest channels
+        run: |
+          token=$(gcloud auth print-access-token)
+          for f in apps/*/app.json; do
+            [ "$(jq -r .type "$f")" = hosting ] || continue
+            site=$(jq -r '.hostingSite // empty' "$f")
+            [ -n "$site" ] || continue
+            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X PATCH \
+              -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+              -H "x-goog-user-project: $FIREBASE_PROJECT" \
+              "https://firebasehosting.googleapis.com/v1beta1/sites/$site/channels/latest?updateMask=ttl" \
+              -d '{"ttl":"2592000s"}')
+            case "$code" in
+              200) echo "$site: $(jq -r .url /tmp/out.json) extended to $(jq -r .expireTime /tmp/out.json)" ;;
+              404) echo "$site: no latest channel yet" ;;
+              *) echo "::warning title=$site::extend failed ($code): $(cat /tmp/out.json)" ;;
+            esac
+          done
