@@ -17,6 +17,11 @@ on:
         description: Branch, tag or commit to deploy (default the triggering commit)
         type: string
         required: false
+      latest_only:
+        description: Preview only. Deploy just the fixed latest channel (no branch channel). Used by prod.yml after a merge.
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       app:
@@ -31,6 +36,10 @@ on:
         description: "Branch, tag or commit to deploy (default: the branch you run this from). App Hosting previews need a branch."
         type: string
         required: false
+      latest_only:
+        description: Preview only. Deploy just the fixed latest channel
+        type: boolean
+        default: false
 
 env:
   FIREBASE_PROJECT: apps-97595
@@ -119,7 +128,7 @@ jobs:
 
       - name: Deploy preview channel
         id: hosting_preview
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && !inputs.latest_only
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
             --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" 2> "$RUNNER_TEMP/channel.err" || {
@@ -133,12 +142,13 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # The same build also goes to a fixed "latest" channel, so each app has one preview link that
-      # never changes and always shows the most recent preview push from any branch (last push wins).
+      # never changes and always shows the most recent preview push from any branch or merge to main
+      # (last one wins; prod.yml runs this with latest_only after each merge).
       # Channels last at most 30 days; every deploy resets that, and preview-keepalive.yml extends it weekly.
       - name: Deploy fixed latest channel
         id: hosting_latest
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview'
-        continue-on-error: true
+        continue-on-error: ${{ !inputs.latest_only }}
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy latest \
             --project "$FIREBASE_PROJECT" --expires 30d --json > "$RUNNER_TEMP/latest.json" 2> "$RUNNER_TEMP/latest.err" || {
@@ -164,7 +174,7 @@ jobs:
       # An App Hosting app without a previewBackend in app.json gets no preview.
       - name: Deploy Firestore rules (App Hosting)
         if: >-
-          steps.app.outputs.type == 'apphosting' && steps.app.outputs.own_database != ''
+          steps.app.outputs.type == 'apphosting' && steps.app.outputs.own_database != '' && !inputs.latest_only
           && (inputs.target == 'prod' || steps.app.outputs.preview_backend != '')
         run: |
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
@@ -175,10 +185,10 @@ jobs:
       # <app>-<name>-preview for previews, before the app rolls out so the app can start it.
       # One-time setup per app: scripts/setup-jobs.sh.
       - uses: google-github-actions/setup-gcloud@v2
-        if: steps.app.outputs.jobs != '[]'
+        if: steps.app.outputs.jobs != '[]' && !inputs.latest_only
 
       - name: Cloud Run jobs
-        if: steps.app.outputs.jobs != '[]'
+        if: steps.app.outputs.jobs != '[]' && !inputs.latest_only
         env:
           APP: ${{ inputs.app }}
           JOBS: ${{ steps.app.outputs.jobs }}
@@ -215,7 +225,7 @@ jobs:
 
       - name: Roll out App Hosting
         id: apphosting
-        if: steps.app.outputs.type == 'apphosting'
+        if: steps.app.outputs.type == 'apphosting' && !inputs.latest_only
         env:
           BRANCH: ${{ inputs.ref || github.ref_name }}
         run: |
@@ -243,7 +253,7 @@ jobs:
         id: report
         env:
           GH_TOKEN: ${{ github.token }}
-          URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url }}
+          URL: ${{ steps.hosting_preview.outputs.url || steps.hosting_prod.outputs.url || steps.apphosting.outputs.url || steps.hosting_latest.outputs.url }}
           NOTE: ${{ steps.apphosting.outputs.note }}
           LATEST: ${{ steps.hosting_latest.outputs.url }}
         run: |
@@ -253,7 +263,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/link"
           jq -n --arg app '${{ inputs.app }}' --arg url "$URL" --arg note "$NOTE" --arg latest "$LATEST" \
             '{app: $app, url: $url, note: $note, latest: $latest}' > "$RUNNER_TEMP/link/${{ inputs.app }}.json"
-          if [ '${{ inputs.target }}' = preview ] && [ -n "$URL" ]; then
+          if [ '${{ inputs.target }}' = preview ] && [ -n "$URL" ] && [ '${{ inputs.latest_only }}' != true ]; then
             gh api "repos/${{ github.repository }}/statuses/${{ steps.app.outputs.sha }}" \
               -f state=success -f context='preview/${{ inputs.app }}' -f target_url="$URL" \
               -f description='Preview deployed' > /dev/null
@@ -266,7 +276,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: link-${{ inputs.app }}
+          name: link-${{ inputs.app }}${{ inputs.latest_only && '-latest' || '' }}
           path: ${{ runner.temp }}/link/${{ inputs.app }}.json
           retention-days: 7
 
