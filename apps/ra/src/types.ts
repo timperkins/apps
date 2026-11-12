@@ -98,6 +98,10 @@ export interface GameLike {
   // the game then outlines. unhover() clears it.
   hover?(x: number, y: number): boolean;
   unhover?(): void;
+  // What a tap at map point (x, y) would do, for the mouse cursor: send the
+  // selection there, set a building's rally point, put the building being
+  // placed down, or nothing it can do ('blocked'). null: nothing to show.
+  cursorAt?(x: number, y: number): 'move' | 'rally' | 'build' | 'blocked' | null;
   // Where your home base is now, for the Home button.
   homeBase?(): { x: number; y: number };
 }

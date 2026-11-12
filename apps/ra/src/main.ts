@@ -6,6 +6,9 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
+import { CURSORS, initCursors, type CursorKind } from './cursors';
+
+initCursors();
 
 const canvas = document.querySelector<HTMLCanvasElement>('#c')!;
 const ctx = canvas.getContext('2d', { alpha: false })!;
@@ -706,21 +709,32 @@ const finish = (e: PointerEvent, cancel: boolean) => {
 };
 canvas.addEventListener('pointerup', (e) => finish(e, false));
 
-// With a mouse, a unit under the pointer gets a box round it in place of the
-// pointer, to show it can be picked. Checked every frame, as the units and
-// the camera move under a still mouse too.
+// With a mouse, a unit under the pointer gets a spinning ring round it in
+// place of the pointer, to show it can be picked; elsewhere the pointer shows
+// what a click would do (send units, set a rally point, place a building, or
+// can't). Checked every frame, as the units and the camera move under a still
+// mouse too.
 let mouse: { x: number; y: number } | null = null;
-let hovering = false;
+let cursor: CursorKind | '' = '';
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
 });
 canvas.addEventListener('pointerleave', () => (mouse = null));
 function hoverNow(): void {
-  const on = !!mouse && !planet && !placingNow() && !dragging && picker.hidden && !!game.hover?.(toMap(mouse.x, mouse.y).x, toMap(mouse.x, mouse.y).y);
+  const m = mouse && toMap(mouse.x, mouse.y);
+  const on = !!m && !planet && !placingNow() && !dragging && picker.hidden && !!game.hover?.(m.x, m.y);
   if (!on) game.unhover?.();
-  if (on !== hovering) {
-    hovering = on;
-    canvas.classList.toggle('hovering', on);
+  let k: CursorKind = 'arrow';
+  if (down && (down.pan || ghostDrag) && (dragging || mode === 'pan' || planet)) k = 'grabbing';
+  else if (on) k = 'none';
+  else if (m && !planet && !(dragging && box)) {
+    const what = game.cursorAt?.(m.x, m.y);
+    if (what) k = what;
+    else if (mode === 'pan') k = 'grab';
+  } else if (planet) k = 'grab';
+  if (k !== cursor) {
+    cursor = k;
+    canvas.style.cursor = CURSORS[k];
   }
 }
 canvas.addEventListener('pointercancel', (e) => finish(e, true));
