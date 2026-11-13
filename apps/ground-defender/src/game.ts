@@ -56,6 +56,7 @@ export const SURVIVAL = {
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
+  turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
   turretRange: 280,
   grabberCost: 3,       // stone for a grabber in the shop
   grabTime: 1,          // seconds for a grabber to move one stone
@@ -200,8 +201,8 @@ const RECIPES: Rec[] = [
   R('pack', 'parts', { copperPlate: 1, gear: 1 }, 5, 1, 'Red science. Labs use it for research.'),
   R('pack2', 'parts', { grab: 1, belt: 1 }, 6, 1, 'Green science. The later research needs it as well as red.', 'logsci'),
   // combat
-  R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
-  R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
+  R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners: 1 damage a shot, a shot every 0.2 s, using 16% of an ammo a shot. Load ammo with T, or feed it with belts and grabbers.'),
+  R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'A turret that reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
@@ -2120,8 +2121,9 @@ export class Survival {
         dmg = SURVIVAL.rapidDamage * mul; tu.ammo[k] = (tu.ammo[k] ?? 0) - SURVIVAL.rapidUse; tu.cd = SURVIVAL.rapidReload * cool;
         if (this.rapidSnd <= 0) { this.rapidSnd = .12; Sound.tone('square', 900, 600, .03, .03); }
       } else {
-        dmg = (k === 'ammo' ? ST.turretDamage : metalOf(k).dmg * mul) * (tu.kind === 'brick' ? 1.6 : 1); tu.ammo[k] = (tu.ammo[k] ?? 0) - 1; tu.cd = SURVIVAL.turretReload * cool;
-        Sound.turret();
+        // every turret shot does 1 damage (more with the heavy turret research), whatever the ammo, and uses 16% of an ammo
+        dmg = SURVIVAL.turretShot * mul; tu.ammo[k] = (tu.ammo[k] ?? 0) - SURVIVAL.turretUse; tu.cd = SURVIVAL.turretEvery * cool;
+        if (this.rapidSnd <= 0) { this.rapidSnd = .18; Sound.turret(); }
       }
       if ((tu.ammo[k] ?? 0) < 1e-6) delete tu.ammo[k];
       this.bolts.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: range + 80, dmg, target, stone: true, color: k === 'ammo' ? undefined : metalOf(k).color });
