@@ -454,3 +454,16 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .seg.mrecs button { display: flex; align-items: center; gap: 6px; padding: 8px 10px; font-size: 13px; border-radius: 10px; text-align: left; }
 .seg.mrecs button img, .seg.mrecs button canvas { width: 22px; height: 22px; flex: none; }
 .seg.mrecs button small { margin-left: auto; opacity: .7; font-size: 11px; }
+
+.drillinfo { margin-top: 6px; }
+.drillinfo .drow { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.drillinfo .drow img { width: 40px; height: 40px; flex: none; background: rgba(255, 245, 234, .07); border-radius: 8px; padding: 4px; }
+.drillinfo .drow > div { display: flex; flex-direction: column; gap: 2px; }
+.drillinfo .drow .fine { margin: 0; }
+.drillinfo dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 8px; font-size: 13px; }
+.drillinfo dt { color: var(--muted); }
+.drillinfo dd { margin: 0; }
+.drillinfo .ok { color: #7fd99a; }
+.drillinfo .warn, .drillinfo b.warn { color: #ff9a8a; }
+.drillinfo { text-align: left; }
+.drillinfo .drow b { font-size: 16px; }

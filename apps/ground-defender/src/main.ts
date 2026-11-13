@@ -136,6 +136,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
+    'Each bear you destroy gives you 5 stone, and each acid fish 1 iron ore.',
     'A bear swipes for 8% of your health. Bears never throw or shoot anything. Bears growl when they are close.'] },
   { icon: '🐟', title: 'Acid fish', lines: [
     `About 1 in 10 things a spawner makes (${(SURVIVAL.fishChance * 100).toFixed(2)}%) is a green <b>acid fish</b> instead of a bear. It keeps away from you and spits green acid slime from up to 10 tiles away.`,
@@ -153,6 +154,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
     'Anything you can place goes on the quickbar at the bottom left: tap it or press <kbd>1</kbd> to <kbd>0</kbd>, then tap the map. Drag to lay a line of belts. <kbd>R</kbd> turns things. Tap anything you placed to pick it back up, machines and mines too.'] },
   { icon: '🏭', title: 'Your factory', lines: [
+    'Tap a drill to see what it is digging, how fast, how much ore is left and whether it has power.',
     'Drills go on ore patches and dig by themselves, dropping ore in front onto a belt. Grabbers move things off belts into furnaces, assemblers, chests and turrets, and back out.',
     'Drills, assemblers and labs need power: a generator burning stone, and power poles (each one powers what is next to it and joins other poles up to 7 tiles away). A red lightning bolt means no power.',
     'A <b>crafting machine</b> costs 10 iron plates and 5 stone, no research needed. Tap one to set a recipe (like gears) and put in what it needs. It crafts 4 times slower than you, but keeps going until you change the recipe. Grabbers can feed it too.',

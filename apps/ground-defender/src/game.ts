@@ -108,6 +108,8 @@ export const SURVIVAL = {
   bearSpeed: 20,        // slow
   bearSpeedInside: 26,
   digEvery: 1,          // digging an ore patch by hand gives one ore a second
+  asmHold: 50,          // a crafting machine with a recipe holds up to 50 of each ingredient
+  bearDrop: 5, fishDrop: 1, // a bear leaves 5 stone, an acid fish 1 iron ore
   drillEvery: 2,        // a drill digs one ore every 2 seconds
   poleReach: 7,         // power poles connect up to 7 tiles apart (and to generators that close)
   poleSupply: 2,        // buildings up to 2 tiles from a pole get its power
@@ -1136,16 +1138,38 @@ export class Survival {
     const [c, r] = key.split(',').map(Number), near = dist(this.x, this.y, tileX(c), tileY(r)) < NEAR * 1.6;
     const rc = REC[b.recipe], power = this.hasPower(key);
     const items = this.invItems();
-    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done], items]);
+    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done], items, b.pi !== undefined ? this.patches[b.pi]?.left : 0, b.d]);
     if (sig === this.bldSig) return;
     this.bldSig = sig;
     const chip = (k: Kind, n: number, of?: number) => `<span class="chip"><img src="${this.icon(k)}" alt=""> ${n}${of !== undefined ? `/${of}` : ''} ${KIND_NAME[k]}</span>`;
     let h = `<h3>${BNAME[b.type]}</h3>`;
+    if (b.type === 'drill') {
+      // like a mining drill's info window: what it digs, how much is left, how fast, power, progress and what's waiting to come out
+      const pt = b.pi !== undefined ? this.patches[b.pi] : undefined, ore = pt?.ore, left = pt?.left ?? 0;
+      const full = b.out >= 5, runs = !!pt && left > 0 && power && !full;
+      const speed = ST.digMul / SURVIVAL.drillEvery, eta = runs ? (SURVIVAL.drillEvery - b.t) / ST.digMul : 0;
+      const status = !pt || left <= 0 ? '<b class="warn">The ore here has run out.</b> Pick it up and put it on another patch.' : !power ? '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.' : full ? '<b class="warn">Output full.</b> Put a belt, chest or furnace in front of it, or take the ore out.' : 'Working.';
+      h += `<div class="drillinfo">
+        <div class="drow"><img src="${ore ? this.icon(ore) : this.icon('drill')}" alt=""><div><b>${ore ? `Digging ${ore === 'stone' ? 'stone' : ONE_NAME[ore].toLowerCase()}` : 'Not on ore'}</b><span class="fine">${status}</span></div></div>
+        <dl>
+          <dt>Mining speed</dt><dd>${+speed.toFixed(2)} ore a second (1 every ${+(SURVIVAL.drillEvery / ST.digMul).toFixed(2)} s)</dd>
+          <dt>Ore left in patch</dt><dd>${fmt(left)}${pt ? ` of ${fmt(pt.max)}` : ''}${pt && runs ? ` · about ${clockLong(left / speed)} to dig out` : ''}</dd>
+          <dt>Power</dt><dd>${power ? '<span class="ok">Connected</span>' : '<span class="warn">None</span>'}</dd>
+          <dt>Output</dt><dd>${b.out && b.outK ? `${b.out}/5 ${KIND_NAME[b.outK]}` : 'empty'} · goes out the ${['right', 'bottom', 'left', 'top'][b.d] ?? 'front'} (R turns it)</dd>
+          <dt>Pollution</dt><dd>${runs ? `${SURVIVAL.pollution.drill} a second` : 'none while stopped'}</dd>
+        </dl>
+        <div class="bar"><span style="width:${runs ? Math.min(100, b.t / SURVIVAL.drillEvery * 100) : 0}%"></span></div>
+        <p class="fine">${runs ? `Next ore in ${eta.toFixed(1)} s` : 'Stopped'}</p>
+      </div>`;
+      h += `<div class="craftbtns"><button class="primary" data-bld="fill"${near && b.out ? '' : ' disabled'}>Take out${b.out ? ` ${b.out}` : ''}</button><button class="ghost" data-bld="pick"${near ? '' : ' disabled'}>Pick up</button><button class="ghost" data-bld="close">Close</button></div>`;
+      if (!near) h += '<p class="fine">Walk closer to take ore out or pick it up.</p>';
+      this.pad.querySelector('#svBld')!.innerHTML = h; return;
+    }
     if (b.type === 'asm') {
       h += `<p class="fine">${power ? 'Powered.' : '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.'} Pick what it makes; grabbers bring the parts in and take what it makes out the front.</p>`;
       h += '<div class="slots">' + RECIPES.filter(x => x.out && x.asm && this.unlocked(x)).map(x => `<button class="slot rec${x.id === b.recipe ? ' sel' : ''}" data-asm="${x.id}" title="${ONE_NAME[x.out!]}"><img src="${this.icon(x.out!)}" alt="">${x.n > 1 ? `<b>${x.n}</b>` : ''}</button>`).join('') + '</div>';
       if (rc) {
-        h += `<div class="recinfo"><b>Makes ${rc.n} ${rc.n === 1 ? ONE_NAME[rc.out!].toLowerCase() : KIND_NAME[rc.out!]} every ${+this.asmTime(rc).toFixed(2)} s, until you change the recipe</b><div class="chips">${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => chip(k, b.buf?.[k] ?? 0, q)).join('')}</div>`;
+        h += `<div class="recinfo"><b>Makes ${rc.n} ${rc.n === 1 ? ONE_NAME[rc.out!].toLowerCase() : KIND_NAME[rc.out!]} every ${+this.asmTime(rc).toFixed(2)} s, until you change the recipe</b><div class="chips">${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => chip(k, b.buf?.[k] ?? 0, q)).join('')}</div><p class="fine">Needs ${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => `${q} ${q === 1 ? ONE_NAME[k].toLowerCase() : KIND_NAME[k]}`).join(', ')} each time. Holds up to ${SURVIVAL.asmHold} of each.</p>`;
         h += `<div class="bar"><span style="width:${Math.min(100, b.t / this.asmTime(rc) * 100)}%"></span></div>${b.out ? `<div class="chips">Made: ${chip(b.outK!, b.out)}</div>` : ''}</div>`;
       }
     } else {
@@ -1261,7 +1285,7 @@ export class Survival {
       const r = REC[b.recipe]; if (!r) return false;
       const q = r.in[k]; if (!q) return false;
       b.buf ??= {};
-      if ((b.buf[k] ?? 0) >= q * 2) return false;
+      if ((b.buf[k] ?? 0) >= SURVIVAL.asmHold) return false;
       b.buf[k] = (b.buf[k] ?? 0) + 1; return true;
     }
     if (b.type === 'hub') { if (k !== 'robot') return false; return true; }
@@ -1528,7 +1552,7 @@ export class Survival {
       return;
     }
     const b = this.blds.get(u.key)!;
-    if (b.type === 'asm' || b.type === 'furnace') { this.openBld(u.key); return; }
+    if (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill') { this.openBld(u.key); return; }
     this.fillBld(u.key);
   }
   /** Takes out what a building made, then puts in what it can use from your pocket. */
@@ -1599,7 +1623,7 @@ export class Survival {
     if (b && b.type !== 'tunnel') {
       if (b.type === 'furnace') return !!SMELT[k] && b.inp < 10 && (!b.inp || b.inpK === k);
       if (b.type === 'gen') return k === 'stone' && b.inp < 10;
-      if (b.type === 'asm') { const q = REC[b.recipe]?.in[k]; return !!q && (b.buf?.[k] ?? 0) < q * 2; }
+      if (b.type === 'asm') { const q = REC[b.recipe]?.in[k]; return !!q && (b.buf?.[k] ?? 0) < SURVIVAL.asmHold; }
       if (b.type === 'hub') return k === 'robot';
       return false;
     }
@@ -1684,7 +1708,7 @@ export class Survival {
     if (mn) { this.pickUpBig(mn); return; }
     // furnaces and assemblers open their panel (which has Pick up)
     const b = t ? this.blds.get(key) : undefined;
-    if (b && (b.type === 'asm' || b.type === 'furnace')) { this.openBld(key); return; }
+    if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
     if (t) this.pickUp(t.c, t.r);
   }
   /** The bear or spawner under world point (x, y), if any. */
@@ -2390,6 +2414,9 @@ export class Survival {
     if (dmg >= 1) { this.bubble(b.x, b.y - 26, '-' + trim(dmg), 'dmg'); Sound.hitPlane(); }
     if (b.hp <= 1e-6) {
       b.state = 'dead'; b.dead = 0; this.kills++;
+      // a bear leaves stone, an acid fish iron ore, straight into your pocket
+      if (b.fish) { this.pocket('iron', SURVIVAL.fishDrop); this.bubble(b.x, b.y - 44, `+${SURVIVAL.fishDrop} iron ore`, 'info'); }
+      else { this.pocket('stone', SURVIVAL.bearDrop); this.bubble(b.x, b.y - 44, `+${SURVIVAL.bearDrop} stone`, 'info'); }
       if (this.kills === SURVIVAL.rushKills) {
         // the bears get impatient, and a mine and a machine pop up in the camp
         if (this.gateStage < 2) this.gateWait = SURVIVAL.gateWaitLater;
@@ -3621,6 +3648,7 @@ const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(bx -
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const trim = (n: number) => String(Math.round(n * 100) / 100);
+const clockLong = (t: number) => t >= 3600 ? `${Math.floor(t / 3600)} h ${Math.round(t % 3600 / 60)} min` : t >= 60 ? `${Math.round(t / 60)} min` : `${Math.ceil(t)} s`;
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 const easeInOut = (k: number) => k * k * (3 - 2 * k);
 function approachAngle(a: number, b: number, step: number) {
