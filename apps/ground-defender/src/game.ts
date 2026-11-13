@@ -80,6 +80,8 @@ export const SURVIVAL = {
   fishSpitEvery: 3, acidHit: 10000, acidBurn: 10000, acidBurnTime: 5, puddleTime: 10, puddleBurn: 20000, puddleR: 24,
   spawnerMin: 4, spawnerMax: 6,
   spawnerFar: 4,
+  spawnerDelay: 600,    // no spawners for the first 10 minutes
+  startStone: 10, startOre: 5, // you start on a 10 x 10 tile stone patch, with 5 x 5 iron and copper patches touching it
   spawnerBack: 30,      // a destroyed spawner comes back somewhere else after 30 seconds        // spawners are 4 times as far out as they first were
   spawnEvery: 12,       // each spawner makes a bear every 12 seconds
   spawnEarly: 100,      // ...but only one every 100 seconds for the first 15 minutes
@@ -374,7 +376,7 @@ interface Mine extends Spot { ore: 'stone' | Ore; }
  *  and its recipe for stone: stone ammo, or (once researched) a rocket from 10 stone. */
 interface Machine extends Spot { queue: Kind[]; batchT: number; out: Kind[]; recipe: MRec | null; }
 /** A patch of ore out in the woods: dig it by hand or put drills on it. It runs out. */
-interface Patch { x: number; y: number; r: number; ore: 'stone' | Ore; left: number; max: number; seed: number; }
+interface Patch { sq?: number; x: number; y: number; r: number; ore: 'stone' | Ore; left: number; max: number; seed: number; }
 /** Everything big in the camp (mines, machines), which belts can't go on. Kept up to date by the game. */
 let structs: Spot[] = [];
 
@@ -385,7 +387,7 @@ interface PWall { hp: number; gate: boolean; }
 interface Bear { fish?: boolean; gr?: number; wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
 /** A bear spawner in the woods: a den that makes bears. */
 /** respawn: seconds until a destroyed spawner comes back somewhere else. */
-interface Spawner { x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
+interface Spawner { pre?: boolean; x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
 type Target = Bear | Spawner;
 const isBear = (t: Target): t is Bear => 'state' in t;
 const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
@@ -576,7 +578,8 @@ export class Survival {
     this.spawners = [];
     for (let i = 0; i < n; i++) {
       const [x, y] = spawnerSpot(a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2);
-      this.spawners.push({ x, y, hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
+      // they only show up after the first 10 minutes
+      this.spawners.push({ x, y, hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: true, pre: true, respawn: SURVIVAL.spawnerDelay + i * .5 });
     }
     this.camX = this.x; this.camY = this.y;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
@@ -593,10 +596,10 @@ export class Survival {
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
-    this.patches = genPatches(this.spawners); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
+    this.patches = genPatches(this.spawners, startPatches(this.x, this.y)); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
-    this.say(`Bears are coming from ${n} spawners. Destroyed ones come back, so hold out as long as you can!`, 4);
+    this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
   }
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
@@ -2005,8 +2008,10 @@ export class Survival {
         if (sp.respawn <= 0) {
           let [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
           for (let i = 0; i < 20 && this.spawners.some(o => o !== sp && !o.dead && dist(o.x, o.y, x, y) < 600); i++) [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
-          Object.assign(sp, { x, y, hp: SURVIVAL.spawnerHp, t: SURVIVAL.spawnEvery, hurt: 0, dead: false, respawn: undefined });
-          this.say('A new bear spawner appeared!', 3); Sound.alarm();
+          const first = sp.pre;
+          Object.assign(sp, { x, y, hp: SURVIVAL.spawnerHp, t: first ? 5 : SURVIVAL.spawnEvery, hurt: 0, dead: false, respawn: undefined, pre: undefined });
+          if (!first) { this.say('A new bear spawner appeared!', 3); Sound.alarm(); }
+          else if (!this.spawners.some(o => o.pre)) { this.say(`${this.spawners.length} bear spawners have appeared in the woods! Bears are coming`, 5); Sound.alarm(); }
         }
         continue;
       }
@@ -2587,6 +2592,7 @@ export class Survival {
   /** A bear spawner: a dark den in a rocky mound, with a health bar once hit. */
   private drawSpawner(g: CanvasRenderingContext2D, sp: Spawner) {
     g.save(); g.translate(sp.x, sp.y);
+    if (sp.pre) { g.restore(); return; }
     if (sp.dead) {
       g.fillStyle = 'rgba(40,30,20,.5)'; g.beginPath(); g.ellipse(0, 4, 30, 20, 0, 0, 7); g.fill();
       g.fillStyle = '#5a5650'; for (const [x, y] of [[-14, 2], [8, -6], [12, 10], [-4, 12]]) { g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); }
@@ -2623,7 +2629,7 @@ export class Survival {
       g.fillStyle = L.ore; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill();
     }
     if (!NO_BASE) g.strokeStyle = '#c9a77a', g.lineWidth = 1.5, g.strokeRect(x0 + WALL.x0 * k, y0 + WALL.y0 * k, (WALL.x1 - WALL.x0) * k, (WALL.y1 - WALL.y0) * k);
-    for (const sp of this.spawners) { g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
+    for (const sp of this.spawners) { if (sp.pre) continue; g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
     g.fillStyle = '#e8c49a';
     for (const b of this.bears) if (b.state !== 'dead') g.fillRect(x0 + b.x * k - 1, y0 + b.y * k - 1, 2, 2);
     g.fillStyle = '#fff'; g.beginPath(); g.arc(x0 + this.x * k, y0 + this.y * k, 2.5, 0, 7); g.fill();
@@ -3091,8 +3097,19 @@ function around(x: number, y: number, tx: number, ty: number): [number, number] 
   return first[4] >= 0 ? pts[first[4]] : [tx, ty];
 }
 /** Ore patches round the camp: stone, iron and copper close in, gold further out, diamonds out by the spawners. */
-function genPatches(spawners: Spawner[]): Patch[] {
-  const out: Patch[] = [], big = EXPANSIONS[EXPANSIONS.length - 1];
+/** Where you start: a square stone patch under you, with a square iron patch touching its right side and a copper one its left, lined up with the tiles. */
+function startPatches(x: number, y: number): Patch[] {
+  const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE), S = SURVIVAL.startStone, O = SURVIVAL.startOre;
+  const amount = { stone: 2500, iron: 2200, copper: 2200 } as const, unit = Math.PI * 95 * 95;
+  const sq = (ore: 'stone' | 'iron' | 'copper', c0: number, r0: number, n: number): Patch => {
+    const h = n * TILE / 2, left = Math.round(amount[ore] * (2 * h) ** 2 / unit);
+    return { sq: h, x: GX0 + c0 * TILE + h, y: GY0 + r0 * TILE + h, r: h * Math.SQRT2, ore, left, max: left, seed: Math.floor(Math.random() * 1e9) + 1 };
+  };
+  const c0 = c - Math.floor(S / 2), r0 = r - Math.floor(S / 2), mid = r0 + Math.floor((S - O) / 2);
+  return [sq('stone', c0, r0, S), sq('iron', c0 + S, mid, O), sq('copper', c0 - O, mid, O)];
+}
+function genPatches(spawners: Spawner[], start: Patch[] = []): Patch[] {
+  const out: Patch[] = [...start], big = EXPANSIONS[EXPANSIONS.length - 1];
   const plan: ['stone' | Ore, number, number][] = [['stone', 420, 800], ['iron', 420, 800], ['copper', 420, 800], ['iron', 800, 1400], ['copper', 800, 1400], ['stone', 800, 1400],
     ['iron', 1300, 2000], ['copper', 1300, 2000], ['gold', 1100, 1800], ['gold', 1700, 2400], ['diamond', 2000, 2800], ['diamond', 2300, 3000], ['stone', 1600, 2600], ['iron', 2000, 2900], ['copper', 2000, 2900]];
   const amount = { stone: 2500, iron: 2200, copper: 2200, gold: 1400, diamond: 900 };
@@ -3348,6 +3365,7 @@ function paintNoPower(g: CanvasRenderingContext2D, x: number, y: number, t: numb
 /** An ore patch: a cluster of rocks in its colour, fewer as it runs out. */
 /** A patch's edge is a wobbly blob, not a circle: its radius at angle a (between about 0.72 and 1.08 of p.r). */
 function patchEdge(p: Patch, a: number) {
+  if (p.sq) return p.sq / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
   const s = p.seed || 1, f = (k: number) => ((s * (k * 7919 + 13)) % 1000) / 1000;
   return p.r * (.9 + .09 * Math.sin(2 * a + f(1) * 6.3) + .06 * Math.sin(3 * a + f(2) * 6.3) + .04 * Math.sin(5 * a + f(3) * 6.3));
 }

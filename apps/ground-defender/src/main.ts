@@ -132,6 +132,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'The rapid crossbow keeps firing with no ammo, but does no damage ("No Ammo").',
     'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
+    `You start on a 10 by 10 stone patch, with a 5 by 5 iron patch and a 5 by 5 copper patch touching it. There are no bear spawners for the first ${SURVIVAL.spawnerDelay / 60} minutes, so use the time to build.`,
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
