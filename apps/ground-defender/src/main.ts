@@ -3,6 +3,7 @@ import './style.css';
 import { Survival, AMMO, HATS, COLORS, SURVIVAL, drawPreview, type Loadout, type AmmoId, type HatId, type SurvivalResult, type SaveData } from './game';
 import { Sound } from './audio';
 import { randomName, cleanName } from './names';
+import { openRoom, joinRoom, cleanCode, type Host } from './net';
 
 type Mode = 'menu' | 'play' | 'paused';
 interface Settings { sound: boolean; music: boolean; vibration: boolean; }
@@ -87,7 +88,7 @@ const loadout: Loadout = {
   hat: isHat(savedLoad.hat) ? savedLoad.hat : 'none',
   ammo: isAmmo(savedLoad.ammo) ? savedLoad.ammo : 'normal',
 };
-const game = new Survival($<HTMLCanvasElement>('sv'), $('svPad'), { over: gameOver, pause });
+const game = new Survival($<HTMLCanvasElement>('sv'), $('svPad'), { over: gameOver, pause, netEnd });
 if (isComputer()) game.helpText = 'Arrow keys to walk';
 if (new URLSearchParams(location.search).has('debug')) (window as unknown as { __gd: unknown }).__gd = game;
 
@@ -170,6 +171,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Tapping a turret also opens a panel where you set the most ammo it will hold, from 0 to 10,000.',
     'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed.',
     'Double-tap anything you built to pick it up.',
+    '<b>Play together</b> (up to 4): tap Link on the start screen for a code; friends type it in and tap Join. Everyone has their own inventory. If you get knocked out, you drop your things and come back in 10 seconds.',
     'Blueprint (Ctrl+C): drag a box over what you built to save it, then put it down anywhere as light blue ghosts. Build on a ghost and it goes away.',
     'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.',
     'An <b>exploding rocket</b> costs 2 rockets. Fired from the rocket gun or a rocket launcher, it blows up everything in a 5 by 5 tile square.',
@@ -200,7 +202,45 @@ function start() {
   (document.activeElement as HTMLElement | null)?.blur?.();
   show(null);
   game.start({ ...loadout });
+  // you made a link: friends with the code join this game
+  if (room) { game.hostGame(room); room = null; netMsg(''); }
   mode = 'play'; last = performance.now();
+}
+/* ---------- playing together ---------- */
+let room: Host | null = null, joining = false;
+const netMsg = (html: string) => { $('svNetMsg').innerHTML = html; };
+$('svLink').addEventListener('click', async e => {
+  e.stopPropagation(); Sound.init(); Sound.ui();
+  if (room) return;
+  netMsg('Making a link…');
+  try {
+    room = await openRoom();
+    netMsg(`Your code: <b>${room.code}</b><br>Friends type it in and tap Join. Press Start to play.`);
+  } catch (err) { netMsg(`Could not make a link: ${(err as Error).message}`); }
+});
+async function join() {
+  const code = cleanCode($<HTMLInputElement>('svJoinCode').value);
+  if (!code) { netMsg('Type the code your friend got from Link'); return; }
+  if (joining) return;
+  joining = true; netMsg(`Joining ${code}…`);
+  try {
+    const link = await joinRoom(code);
+    netMsg('Linked! Waiting for the game…');
+    game.joinGame(link, { ...loadout }, () => {
+      joining = false; netMsg('');
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      show(null); mode = 'play'; last = performance.now();
+    });
+  } catch (err) { joining = false; netMsg((err as Error).message); }
+}
+$('svJoin').addEventListener('click', e => { e.stopPropagation(); Sound.init(); Sound.ui(); void join(); });
+$('svJoinCode').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') void join(); });
+$('svJoinCode').addEventListener('input', () => { const i = $<HTMLInputElement>('svJoinCode'), v = cleanCode(i.value); if (i.value !== v) i.value = v; });
+/** Playing in a friend's game ended (they left, or the link dropped). */
+function netEnd(why: string) {
+  joining = false;
+  openLoadout();
+  netMsg(why);
 }
 $('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('intro', false)) start(); else showIntro(start); });
 /** Cheat mode: the pause menu has Survival / Creative. */
@@ -218,6 +258,9 @@ function pause() {
   if (mode !== 'play') return;
   game.paused = true; mode = 'paused'; $('svSaved').textContent = ''; show('survPause'); pausedAt = performance.now();
   renderPauseMode();
+  const guest = game.net === 'guest';
+  $('svSave').hidden = guest; $('svLoadGame').hidden = guest;
+  if (guest) { $('svPauseMode').hidden = true; $('svPauseModeInfo').hidden = true; }
 }
 let pausedAt = 0;
 // Esc on the pause screen carries on
@@ -263,6 +306,7 @@ $('saveList').addEventListener('click', e => {
   Sound.init(); Sound.ui();
   show(null); $('svSaved').textContent = '';
   game.restore(s.data);
+  if (room) { game.hostGame(room); room = null; netMsg(''); }
   mode = 'play'; last = performance.now();
 });
 

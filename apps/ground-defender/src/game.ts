@@ -2,6 +2,7 @@
 // in a big map. Bears come out of bear spawners in the woods and gather at the gates; a bear that
 // has waited long enough at a gate comes in. A destroyed spawner comes back elsewhere 30 seconds later.
 import { Sound } from './audio';
+import { MAX_PLAYERS, type Host, type Link } from './net';
 
 /** Tim's numbers. Damage and healing are shares of max health. */
 export const SURVIVAL = {
@@ -58,6 +59,7 @@ export const SURVIVAL = {
   turretReload: 2,
   creativeStock: 9999,  // creative (cheat mode): how many of everything you have
   turretMaxAmmo: 10000, // you can set how much ammo each turret holds, from 0 to 10000 (it starts at the most)
+  respawn: 10, // playing together: a knocked-out player is back after this many seconds (if anyone on the team is still up)
   dblTapMs: 320, // two taps on the same thing this close together (ms) pick it up
   maxBlueprints: 30, // saved blueprints kept on this device
   turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
@@ -425,6 +427,10 @@ interface Blueprint { name: string; parts: BpPart[] }
 /** A light blue ghost from a placed blueprint: it does nothing, it only shows what goes there. */
 interface Ghost { p: Placeable; d: number }
 const BP_STORE = 'grounddef.blueprints';
+/** What each player starts with: a furnace, a few iron plates and some buildings, like a new settler. */
+function startBag(): Bag { const b = emptyBag(); Object.assign(b, { furnace: 1, ironPlate: 8, drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); return b; }
+/** What a player who was knocked out dropped. Anyone who walks over it picks it up. */
+interface Pile { x: number; y: number; bag: Partial<Record<Kind, number>>; }
 const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 function loadBps(): Blueprint[] { try { const v = JSON.parse(localStorage.getItem(BP_STORE) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
 function saveBps(b: Blueprint[]) { try { localStorage.setItem(BP_STORE, JSON.stringify(b)); } catch { /* private mode: they last until you close the game */ } }
@@ -436,16 +442,26 @@ const tileOk = (c: number, r: number) => !!tileAt(tileX(c), tileY(r));
 function turnBp(b: Blueprint): Blueprint { return { name: b.name, parts: b.parts.map(q => ({ dc: -q.dr, dr: q.dc, p: q.p, d: (q.d + 1) % 4 })) }; }
 /** A gate in the fence: which side, and where along it (0 to 1). */
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
-interface Bolt { from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
+interface Bolt { owner?: string; from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
 /** A rocket swirls round a loop, then homes in on its target. */
-interface Rocket { boom?: boolean; from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
+interface Rocket { owner?: string; boom?: boolean; from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info' | 'tiny'; }
 
 /** A saved run, as plain JSON. */
 export type SaveData = Record<string, unknown>;
 
-export interface SurvivalHooks { over(r: SurvivalResult): void; pause(): void; }
+export interface SurvivalHooks { over(r: SurvivalResult): void; pause(): void; netEnd?(why: string): void; }
+/** What belongs to each player's own guy (everything else, the bag included, is shared by the team). */
+const PERSONA = ['x', 'y', 'face', 'hp', 'reload', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'hand', 'fireHeld', 'rxT', 'noAmmoT', 'noTargetT', 'walk', 'hurtFlash', 'load', 'placeType', 'placeDir', 'healT', 'bpCur', 'bag', 'queue', 'madeFor', 'deadT'] as const;
+type Persona = Record<typeof PERSONA[number], unknown>;
+/** A friend's guy in the host's game. */
+interface Mate { id: string; link: Link; p: Persona; bub: Bubble[]; dig: number; digT: number; }
+/** Another player's guy, as drawn. */
+interface OtherGuy { down?: boolean; id: string; x: number; y: number; face: number; walk: number; load: Loadout; hp: number; w: Weapon | null; }
+/** What a friend's game may ask the host's game to do for its guy. */
+const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet'] as const;
+type Act = typeof ACTS[number];
 
 export class Survival {
   running = false;
@@ -515,6 +531,9 @@ export class Survival {
   /** The space game: on, where the platform's top-left tile is, what's in the chest, and whether its panel is open. */
   private space = false; private plat = { c0: 0, r0: 0 }; private platTiles = new Set<string>(); private cracks = new Map<string, number>();
   private asteroids: Asteroid[] = []; private floaters: Floater[] = []; private astT = 0; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
+  /** Playing together. host: the world runs here and friends' guys are mates; guest: this shows the host's world. */
+  net: 'solo' | 'host' | 'guest' = 'solo'; netCode = ''; private room: Host | null = null; private link: Link | null = null;
+  private mates = new Map<string, Mate>(); private others: OtherGuy[] = []; private netT = 0; private fullT = 0; private myId = ''; private nextMate = 1;
   private bps: Blueprint[] = loadBps(); private ghosts = new Map<string, Ghost>();
   private bpMode: 'select' | 'place' | null = null; private bpOpen = false; private bpSig = '';
   private bpCur: Blueprint | null = null; private bpBox: { id: number; c0: number; r0: number; c1: number; r1: number } | null = null; private bpAim: { id: number; c: number; r: number } | null = null;
@@ -664,8 +683,7 @@ export class Survival {
     this.mines = [{ ...FIRST_MINE, r: MINE_R, ore: 'stone' }]; this.machines = [{ ...FIRST_MACHINE, r: MACHINE_R, queue: [], batchT: 0, out: [], recipe: null }]; this.mineAt = null;
     this.expansion = 0; Object.assign(WALL, BASE_WALL); this.rebuildWalls(); this.updateStructs();
     // you start with a furnace and a few iron plates, like a new settler
-    this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
-    Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); this.closeRecipe();
+    this.bag = startBag(); this.closeRecipe(); this.deadT = 0; this.piles = [];
     this.weapons = ['xbow', null, null]; this.wSel = 0; this.ammoSlots = [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null]; this.aSel = 0;
     this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.smogT = SURVIVAL.smogCheck; this.armsSig = '';
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
@@ -681,6 +699,277 @@ export class Survival {
     this.canvas.hidden = false; this.pad.hidden = false;
     if (this.space) this.say('You are on a platform in space. Shoot the asteroids (Space) for stone, and make platform tiles from it (15 stone).', 6);
     else this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
+  }
+  /** Walking: arrow keys or the drag stick; belts carry you; you stay on the map (and on the platform in space). Returns how hard you're pushing. */
+  private walkGuy(dt: number) {
+    if (this.deadT > 0) return 0;
+    // walking: arrow keys or the drag stick
+    let mx = 0, my = 0;
+    if (this.keys.has('ArrowLeft')) mx -= 1;
+    if (this.keys.has('ArrowRight')) mx += 1;
+    if (this.keys.has('ArrowUp')) my -= 1;
+    if (this.keys.has('ArrowDown')) my += 1;
+    if (this.stick) { const m = Math.hypot(this.stick.dx, this.stick.dy); if (m > 6) { mx = this.stick.dx / 46; my = this.stick.dy / 46; } }
+    const m = Math.hypot(mx, my), x0 = this.x, y0 = this.y;
+    if (m > 0) {
+      if (m > 1) { mx /= m; my /= m; }
+      this.x += mx * SURVIVAL.guySpeed * dt; this.y += my * SURVIVAL.guySpeed * dt;
+      this.face = Math.atan2(my, mx);
+      this.walk += dt * 10 * Math.min(1, m);
+      this.stepT -= dt * Math.min(1, m); if (this.stepT <= 0) { this.stepT = .3; Sound.step(); }
+    }
+    // a belt under the guy carries him along
+    const under = tileAt(this.x, this.y), ud = under ? this.belts.get(under.c + ',' + under.r) : undefined;
+    if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
+    // the guy can walk out through any gate, but not through the fence, and stays on the map
+    this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
+    // space: you can't step off the platform
+    if (this.space) {
+      const ok = (x: number, y: number) => { const e = GUY_R * .5; return this.onPlatXY(x - e, y - e) && this.onPlatXY(x + e, y - e) && this.onPlatXY(x - e, y + e) && this.onPlatXY(x + e, y + e); };
+      if (!ok(this.x, this.y)) { if (ok(this.x, y0)) this.y = y0; else if (ok(x0, this.y)) this.x = x0; else { this.x = x0; this.y = y0; } }
+      // the tile under you broke off: hop to the nearest platform tile
+      if (!this.onPlatXY(this.x, this.y)) { let best = '', bd = Infinity; for (const k of this.platTiles) { const [c, r] = k.split(',').map(Number), d = dist(tileX(c), tileY(r), this.x, this.y); if (d < bd) { bd = d; best = k; } } if (best) { const [c, r] = best.split(',').map(Number); this.x = tileX(c); this.y = tileY(r); } }
+    }
+    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
+    return m;
+  }
+  /* ---------- playing together ---------- */
+  /** Host: this game runs the world and friends join with the code. */
+  hostGame(room: Host) {
+    this.net = 'host'; this.room = room; this.netCode = room.code; this.mates.clear();
+    room.onLink(link => this.addMate(link));
+  }
+  /** Stops playing together (leaving, or the game ended). */
+  leaveNet() {
+    for (const m of this.mates.values()) { m.link.send({ t: 'bye', why: 'The host left the game' }); m.link.close(); }
+    this.mates.clear(); this.room?.close(); this.room = null;
+    if (this.link) { const l = this.link; this.link = null; l.close(); }
+    this.net = 'solo'; this.netCode = ''; this.others = [];
+  }
+  get players() { return this.net === 'host' ? this.mates.size + 1 : this.net === 'guest' ? this.others.length + 1 : 1; }
+  private addMate(link: Link) {
+    if (this.mates.size >= MAX_PLAYERS - 1) { link.send({ t: 'bye', why: `The game is full (${MAX_PLAYERS} players)` }); setTimeout(() => link.close(), 500); return; }
+    const id = 'p' + this.nextMate++;
+    link.onMessage(raw => {
+      const msg = raw as { t: string; [k: string]: unknown };
+      if (msg.t === 'hello') {
+        if (this.mates.has(id) || !this.running) return;
+        const p = {} as Persona, me = this as unknown as Record<string, unknown>;
+        for (const k of PERSONA) if (k !== 'madeFor') p[k] = JSON.parse(JSON.stringify(me[k] ?? null));
+        Object.assign(p, { bag: startBag(), queue: [], madeFor: new Map(), deadT: 0, x: this.x + 30, y: this.y, hp: SURVIVAL.maxHp, reload: 0, weapons: ['xbow', null, null], wSel: 0, ammoSlots: [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null], aSel: 0, hand: null, fireHeld: false, walk: 0, hurtFlash: 0, bpCur: null, load: { ...(msg.load as Loadout) } });
+        const m: Mate = { id, link, p, bub: [], dig: -1, digT: 0 };
+        this.mates.set(id, m);
+        link.send({ t: 'welcome', id, code: this.netCode });
+        this.sendFull(m);
+        this.say(`${(p.load as Loadout).name} joined the team`, 3); Sound.pop();
+      } else this.fromMate(id, msg);
+    });
+    link.onClose(() => { const m = this.mates.get(id); if (!m) return; this.mates.delete(id); this.say(`${(m.p.load as Loadout).name} left`, 3); });
+  }
+  private fromMate(id: string, msg: { t: string; [k: string]: unknown }) {
+    const m = this.mates.get(id); if (!m || !this.running) return;
+    if (msg.t === 'pos') { const v = msg as unknown as { x: number; y: number; face: number; walk: number; fire: boolean }; Object.assign(m.p, { x: v.x, y: v.y, face: v.face, walk: v.walk, fireHeld: !!v.fire }); return; }
+    if (msg.t === 'act') {
+      const a = msg.a as Act, args = (msg.args as unknown[]) ?? [];
+      if (!(ACTS as readonly string[]).includes(a)) return;
+      if (msg.set) for (const [k, v] of Object.entries(msg.set as Record<string, unknown>)) if ((PERSONA as readonly string[]).includes(k)) (m.p as Record<string, unknown>)[k] = v;
+      this.withMate(m, () => (this[a] as (...x: unknown[]) => unknown)(...args));
+    }
+  }
+  /** Runs fn as if the mate's guy were yours: your own guy's things are swapped out and back. */
+  private withMate<T>(m: Mate, fn: () => T): T {
+    const me = this as unknown as Record<string, unknown>, mine: Record<string, unknown> = {}, nb = this.bubbles.length, was = this.net;
+    for (const k of PERSONA) { mine[k] = me[k]; me[k] = m.p[k]; }
+    this.net = 'solo'; this.actMate = m;
+    try { return fn(); }
+    finally {
+      this.net = was; this.actMate = null;
+      for (const k of PERSONA) { (m.p as Record<string, unknown>)[k] = me[k]; me[k] = mine[k]; }
+      // what popped up while acting for the mate is shown on their screen
+      if (this.bubbles.length > nb) m.bub.push(...this.bubbles.slice(nb));
+    }
+  }
+  private actMate: Mate | null = null;
+  /** Knocked out: seconds until you're back (0 when you're up). */
+  private deadT = 0; private piles: Pile[] = [];
+  /** Host: a friend starts digging ore patch i by hand (or stops, with -1). */
+  private digSet(i: number) { const m = this.actMate; if (m) { m.dig = i; m.digT = 0; } }
+  /** Host, every frame: friends' guys reload, heal and keep firing while they hold the button. */
+  private updateMates(dt: number) {
+    for (const m of this.mates.values()) this.withMate(m, () => {
+      if (this.creative) { this.topUp(); this.hp = SURVIVAL.maxHp; }
+      this.runQueue(dt);
+      if (this.deadT > 0) return;
+      if (this.hp <= 0) { this.knockOut(); m.dig = -1; return; }
+      this.reload = Math.max(0, this.reload - dt);
+      this.hurtFlash = Math.max(0, this.hurtFlash - dt);
+      this.holdFire(dt);
+      this.healT += dt;
+      while (this.healT >= 1) { this.healT -= 1; if (this.hp > 0) this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * ST.heal); }
+    });
+    // friends digging ore patches by hand
+    for (const m of this.mates.values()) {
+      const pt = this.patches[m.dig]; if (m.dig < 0 || (m.p.deadT as number) > 0) continue;
+      if (!pt || dist(m.p.x as number, m.p.y as number, pt.x, pt.y) > pt.r + 30) { m.dig = -1; continue; }
+      m.digT += dt * ST.digMul;
+      if (m.digT >= SURVIVAL.digEvery) { m.digT -= SURVIVAL.digEvery; this.withMate(m, () => { this.bag[pt.ore]++; this.bubble(this.x, this.y - 30, `+1 ${pt.ore === 'stone' ? 'stone' : ONE_NAME[pt.ore].toLowerCase()}`, 'info'); }); }
+    }
+    // knocked out: drop your things where you fell, and come back after 10 seconds next to someone still up
+    for (const m of this.mates.values()) {
+      if ((m.p.deadT as number) > 0) {
+        m.p.deadT = (m.p.deadT as number) - dt;
+        if ((m.p.deadT as number) <= 0) { const at = this.upSpot(m.id); if (!at) { m.p.deadT = .5; continue; } Object.assign(m.p, { deadT: 0, hp: SURVIVAL.maxHp, x: at.x, y: at.y }); m.link.send({ t: 'tp', x: at.x, y: at.y }); this.say(`${(m.p.load as Loadout).name} is back`, 2); }
+      }
+    }
+    if (this.deadT > 0) {
+      this.deadT -= dt;
+      if (this.deadT <= 0) { const at = this.upSpot('host'); if (!at) this.deadT = .5; else { this.deadT = 0; this.hp = SURVIVAL.maxHp; this.x = at.x; this.y = at.y; this.say('You are back!', 2); } }
+    }
+    // anyone who walks over a dropped pile picks it up
+    for (const pl of this.piles) {
+      const who = [...this.mates.values()].find(m => !(m.p.deadT as number > 0) && dist(m.p.x as number, m.p.y as number, pl.x, pl.y) < GUY_R + 12);
+      const meToo = !who && this.deadT <= 0 && dist(this.x, this.y, pl.x, pl.y) < GUY_R + 12;
+      if (!who && !meToo) continue;
+      const take = () => { let n = 0; for (const [k, v] of Object.entries(pl.bag) as [Kind, number][]) { this.bag[k] += v; n += v; } pl.bag = {}; this.bubble(pl.x, pl.y - 16, `Picked up ${fmt(n)} things`, 'info'); Sound.pop(); this.syncQuick(); };
+      if (who) this.withMate(who, take); else take();
+    }
+    this.piles = this.piles.filter(pl => Object.keys(pl.bag).length);
+    // everyone is down: game over
+    if (this.deadT > 0 && [...this.mates.values()].every(m => (m.p.deadT as number) > 0)) { this.deadT = 0; this.hp = 0; this.end(false); return; }
+    this.netT += dt; this.fullT += dt;
+    if (this.netT >= 1 / 15) { this.netT = 0; for (const m of this.mates.values()) this.sendFast(m); }
+    if (this.fullT >= 1) { this.fullT = 0; const base = this.save(); for (const m of this.mates.values()) this.sendFull(m, base); }
+  }
+  /** Knocked out (your guy, or a friend's while acting for them): what you carry drops in a pile here, and you wait to come back. */
+  private knockOut() {
+    const bag: Partial<Record<Kind, number>> = {};
+    for (const k of KINDS) if (this.bag[k] >= 1) { bag[k] = Math.floor(this.bag[k]); this.bag[k] -= bag[k]!; }
+    if (Object.keys(bag).length) this.piles.push({ x: this.x, y: this.y, bag });
+    this.hp = 0; this.deadT = SURVIVAL.respawn; this.fireHeld = false;
+    this.say(`${this.load.name} was knocked out! Back in ${SURVIVAL.respawn} seconds`, 3); Sound.boom(false);
+  }
+  /** Where a player comes back: next to someone on the team who is still up (not them). */
+  private upSpot(not: string) {
+    const up = this.guyList().filter(g => g.id !== not && !g.down);
+    const g = up[0]; return g ? { x: g.x + 44, y: g.y } : null;
+  }
+  /** Every guy on the team, as drawn (the host's first). */
+  private guyList(): OtherGuy[] {
+    const w = (p: Persona) => (p.weapons as (Weapon | null)[])[p.wSel as number] ?? null;
+    const me = this as unknown as Persona;
+    return [{ id: 'host', down: this.deadT > 0, x: this.x, y: this.y, face: this.face, walk: this.walk, load: this.load, hp: this.hp, w: w(me) }, ...[...this.mates.values()].map(m => ({ id: m.id, down: (m.p.deadT as number) > 0, x: m.p.x as number, y: m.p.y as number, face: m.p.face as number, walk: m.p.walk as number, load: m.p.load as Loadout, hp: m.p.hp as number, w: w(m.p) }))];
+  }
+  private mineOf(m: Mate) { return { hp: m.p.hp, reload: m.p.reload, weapons: m.p.weapons, wSel: m.p.wSel, ammoSlots: m.p.ammoSlots, aSel: m.p.aSel, bag: m.p.bag, queue: m.p.queue, deadT: m.p.deadT }; }
+  private sendFull(m: Mate, base = this.save()) { m.link.send({ t: 'full', s: base, me: this.mineOf(m) }); }
+  private sendFast(m: Mate) {
+    const strip = <T extends { target?: unknown }>(o: T) => ({ ...o, target: null });
+    m.link.send({
+      t: 'fast', time: this.t, pollution: this.pollution, me: this.mineOf(m), bub: m.bub.splice(0), piles: this.piles,
+      bears: this.bears.filter(b => b.state !== 'dead' || b.dead < 1).map(b => ({ ...b, gate: this.gates.indexOf(b.gate) })),
+      spawners: this.spawners, bolts: this.bolts.map(strip), rockets: this.rockets.map(strip), items: this.items, blasts: this.blasts, booms: this.booms, sparks: this.sparks,
+      asteroids: this.asteroids, floaters: this.floaters, guys: this.guyList(), researching: this.researching, progress: this.progress,
+      turrets: [...this.turrets].map(([k, tu]) => [k, tu.ammo, tu.face]), blds: [...this.blds].map(([k, b]) => [k, b.out, b.inp, b.on]),
+    });
+  }
+  /** Guest: join the host's game. The first full picture of the world comes with the welcome. */
+  joinGame(link: Link, load: Loadout, ready: () => void) {
+    this.link = link; this.net = 'guest'; this.others = [];
+    let started = false;
+    link.onMessage(raw => {
+      const msg = raw as { t: string; [k: string]: unknown };
+      if (msg.t === 'welcome') { this.myId = msg.id as string; this.netCode = msg.code as string; }
+      else if (msg.t === 'full') {
+        const st = msg.s as SaveData, hl = st.load as Loadout;
+        if (!started) { started = true; this.start({ ...load, space: hl.space, cheat: hl.cheat }); this.net = 'guest'; this.link = link; ready(); }
+        this.applyHost(st, msg.me as Record<string, unknown>);
+      } else if (msg.t === 'fast' && started) this.applyFast(msg);
+      else if (msg.t === 'tp') { this.x = msg.x as number; this.y = msg.y as number; this.say('You were knocked out! Back next to the host', 3); }
+      else if (msg.t === 'bye') { this.netEnded(msg.why as string); }
+      else if (msg.t === 'over') { this.netEnded('The host was defeated. Game over!'); }
+    });
+    link.onClose(() => { if (this.net === 'guest') this.netEnded('Lost the link to the host'); });
+    link.send({ t: 'hello', load });
+  }
+  private netEnded(why: string) {
+    if (this.net !== 'guest') return;
+    this.net = 'solo'; this.link = null; this.others = [];
+    this.hooks.netEnd?.(why);
+  }
+  private applyHost(st: SaveData, mine: Record<string, unknown>) {
+    const me = this as unknown as Record<string, unknown>, keep: Record<string, unknown> = {};
+    for (const k of ['x', 'y', 'face', 'walk', 'load', 'quick', 'camX', 'camY', 'placeDir', 'hand', 'hp', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'reload', 'bag', 'queue', 'deadT'] as const) keep[k] = me[k];
+    this.applyState(st);
+    for (const [k, v] of Object.entries(keep)) me[k] = v;
+    Object.assign(this, mine);
+    this.syncQuick(); this.armsSig = '';
+  }
+  private applyFast(f: Record<string, unknown>) {
+    this.t = f.time as number; this.pollution = f.pollution as number; this.piles = f.piles as Pile[];
+    const was = this.hp, deadWas = this.deadT; Object.assign(this, f.me as Record<string, unknown>); this.bag = { ...emptyBag(), ...this.bag }; if (this.hp < was - 1) this.hurtFlash = .4;
+    if (this.deadT > 0 && !(deadWas > 0)) { this.say(`You were knocked out and dropped your things. Back in ${SURVIVAL.respawn} seconds`, 3); this.digAt = null; }
+    for (const b of f.bub as Bubble[]) this.bubbles.push(b);
+    this.bears = (f.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
+    this.spawners = f.spawners as Spawner[]; this.bolts = f.bolts as Bolt[]; this.rockets = f.rockets as Rocket[]; this.items = f.items as Item[];
+    this.blasts = f.blasts as typeof this.blasts; this.booms = f.booms as typeof this.booms; this.sparks = f.sparks as typeof this.sparks;
+    this.asteroids = f.asteroids as Asteroid[]; this.floaters = f.floaters as Floater[];
+    this.researching = f.researching as typeof this.researching; this.progress = f.progress as typeof this.progress;
+    for (const [k, ammo, face] of f.turrets as [string, Turret['ammo'], number][]) { const tu = this.turrets.get(k); if (tu) { tu.ammo = ammo; tu.face = face; } }
+    for (const [k, out, inp, on] of f.blds as [string, number, number, boolean | undefined][]) { const b = this.blds.get(k); if (b) { b.out = out; b.inp = inp; b.on = on; } }
+    this.others = (f.guys as OtherGuy[]).filter(g => g.id !== this.myId);
+    this.syncQuick();
+  }
+  /** Guest: instead of doing it here, ask the host's game to do it for your guy. True when it was sent. */
+  private remote(a: Act, args: unknown[], set?: Record<string, unknown>) {
+    if (this.net !== 'guest') return false;
+    this.link?.send({ t: 'act', a, args, set });
+    return true;
+  }
+  /** Guest: things only the host can do for now. */
+  private hostOnly() { if (this.net !== 'guest') return false; this.bubble(this.x, this.y - 30, 'Only the host can do that for now', 'info'); Sound.denied(); return true; }
+  /** Guest, every frame: walk here (so it feels instant) and tell the host where you are. */
+  private updateGuest(dt: number) {
+    this.t += dt; this.hurtFlash = Math.max(0, this.hurtFlash - dt);
+    if (this.walkGuy(dt) > 0 && this.digAt) { this.digAt = null; this.remote('digSet', [-1]); }
+    this.swing = Math.max(0, this.swing - dt); if (this.digAt && this.swing <= 0) { this.swing = 1; Sound.click(); }
+    this.netT += dt;
+    if (this.netT >= 1 / 20) { this.netT = 0; this.link?.send({ t: 'pos', x: this.x, y: this.y, face: this.face, walk: this.walk, fire: this.fireHeld }); }
+    for (const bl of this.blasts) bl.t += dt;
+    for (const b of this.bubbles) b.t += dt;
+    this.bubbles = this.bubbles.filter(b => b.t < 1.6);
+  }
+  /** Host: tell friends the game is over. */
+  private netOver() { for (const m of this.mates.values()) m.link.send({ t: 'over' }); }
+  /** The other players' guys, with their names. */
+  private drawOthers(g: CanvasRenderingContext2D) {
+    const list = this.net === 'host' ? this.guyList().slice(1) : this.others;
+    for (const o of list) {
+      if (o.down) continue;
+      g.save(); g.translate(o.x, o.y);
+      g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
+      paintGuy(g, o.load, o.face, Math.sin(o.walk) * 2, 1, o.w === 'rxbow' ? '#ffe14a' : o.w === 'mgun' ? '#3a3f45' : o.w === 'rgun' ? '#d64545' : undefined, o.w === 'rgun', !o.w);
+      g.restore();
+      g.font = '500 10px Jost, sans-serif'; g.textAlign = 'center';
+      g.fillStyle = 'rgba(0,0,0,.5)'; g.fillText(o.load.name, o.x + 1, o.y - GUY_R - 13);
+      g.fillStyle = '#fff5ea'; g.fillText(o.load.name, o.x, o.y - GUY_R - 14);
+      const k = clamp(o.hp / SURVIVAL.maxHp, 0, 1);
+      if (k < 1) { g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(o.x - 12, o.y - GUY_R - 10, 24, 3); g.fillStyle = k > .4 ? '#6fe0a0' : '#ff6a5a'; g.fillRect(o.x - 12, o.y - GUY_R - 10, 24 * k, 3); }
+    }
+  }
+  /** The nearest guy on the team to (x, y): null for you, or a friend's. */
+  private nearestMate(x: number, y: number): Mate | null {
+    let best: Mate | null = null, bd = this.deadT > 0 ? Infinity : dist(x, y, this.x, this.y);
+    for (const m of this.mates.values()) { if ((m.p.deadT as number) > 0) continue; const d = dist(x, y, m.p.x as number, m.p.y as number); if (d < bd) { bd = d; best = m; } }
+    return best;
+  }
+  /** Host: a mine or ammo machine at (x, y) picked up for a friend. */
+  private pickBigAt(x: number, y: number) {
+    const s = this.mines.find(m => dist(m.x, m.y, x, y) < m.r + 4) ?? this.machines.find(m => dist(m.x, m.y, x, y) < m.r + 10);
+    if (s) this.pickUpBig(s);
+  }
+  private removeGhost(key: string) {
+    if (this.remote('removeGhost', [key])) { this.ghosts.delete(key); return; }
+    const [c, r] = key.split(',').map(Number);
+    if (this.ghosts.delete(key)) { this.bubble(tileX(c), tileY(r) - 14, 'Ghost removed', 'info'); Sound.click(); }
   }
   /* ---------- space ---------- */
   /** Space: no ground, no ore, no bears; a 10 by 10 platform with the chest in the middle, and you next to it. */
@@ -716,7 +1005,9 @@ export class Survival {
     for (const f of this.floaters) {
       f.t += dt;
       if (!f.landed) { f.x += f.vx * dt; f.y += f.vy * dt; if (this.onPlatXY(f.x, f.y)) f.landed = true; }
-      if (dist(f.x, f.y, this.x, this.y) < GUY_R + 8) { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); }
+      const mate = [...this.mates.values()].find(m => !((m.p.deadT as number) > 0) && dist(f.x, f.y, m.p.x as number, m.p.y as number) < GUY_R + 8);
+      const grab = () => { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); };
+      if (mate) this.withMate(mate, grab); else if (this.deadT <= 0 && dist(f.x, f.y, this.x, this.y) < GUY_R + 8) grab();
     }
     this.floaters = this.floaters.filter(f => f.t < 1e8 && (f.landed || f.t < SPACE.stoneLife));
   }
@@ -765,10 +1056,14 @@ export class Survival {
     e.stopPropagation();
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose]'); if (!el || !this.running || this.paused) return;
     if (el.dataset.chestclose !== undefined) { this.closeChest(); return; }
-    if (el.dataset.take !== undefined) {
-      const i = Number(el.dataset.take), st = this.spaceChest[i]; if (!st) return;
-      this.bag[st.k] += st.n; this.spaceChest.splice(i, 1); Sound.click();
-    } else if (el.dataset.put) {
+    if (this.net === 'guest') {
+      if (el.dataset.take !== undefined) this.remote('chestTake', [Number(el.dataset.take)]);
+      else if (el.dataset.put) this.remote('chestPut', [el.dataset.put, this.bag[el.dataset.put as Kind]]);
+      else if (el.dataset.putall !== undefined) for (const k of KINDS) if (this.bag[k] > 0) this.remote('chestPut', [k, this.bag[k]]);
+      Sound.click(); return;
+    }
+    if (el.dataset.take !== undefined) this.chestTake(Number(el.dataset.take));
+    else if (el.dataset.put) {
       const k = el.dataset.put as Kind, n = this.chestPut(k, this.bag[k]);
       if (!n) { this.say('The chest is full: 100 stacks', 2); Sound.denied(); } else Sound.thump();
     } else if (el.dataset.putall !== undefined) {
@@ -777,6 +1072,7 @@ export class Survival {
     }
     this.syncQuick(); this.chestSig = '';
   }
+  private chestTake(i: number) { const st = this.spaceChest[i]; if (!st) return; this.bag[st.k] += st.n; this.spaceChest.splice(i, 1); this.syncQuick(); this.chestSig = ''; Sound.click(); }
   private renderChest() {
     const el = this.pad.querySelector<HTMLElement>('#svSpace')!;
     if (!this.chestOpen) { if (!el.hidden) el.hidden = true; return; }
@@ -877,7 +1173,7 @@ export class Survival {
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
-    o.done = [...this.done]; o.spaceChest = this.spaceChest; o.platTiles = [...this.platTiles]; o.cracks = [...this.cracks];
+    o.done = [...this.done]; o.spaceChest = this.spaceChest; o.piles = this.piles; o.platTiles = [...this.platTiles]; o.cracks = [...this.cracks];
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
     for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls', 'ghosts'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
@@ -889,6 +1185,11 @@ export class Survival {
   restore(d: SaveData) {
     if ((d.v as number) < 2) d = migrateSave(d);
     this.start(d.load as Loadout);
+    this.applyState(d);
+    this.say('Game loaded', 2);
+  }
+  /** Sets the world from saved data (a save, or the host's game when playing together). */
+  private applyState(d: SaveData) {
     const me = this as unknown as Record<string, unknown>;
     for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
     this.bag = { ...emptyBag(), ...(d.bag as Bag) };
@@ -909,13 +1210,12 @@ export class Survival {
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
     this.ghosts = new Map((d.ghosts ?? []) as [string, Ghost][]);
-    this.spaceChest = (d.spaceChest ?? []) as Stack[];
+    this.spaceChest = (d.spaceChest ?? []) as Stack[]; this.piles = (d.piles ?? []) as Pile[];
     if (this.space && d.platTiles) { this.platTiles = new Set(d.platTiles as string[]); this.cracks = new Map((d.cracks ?? []) as [string, number][]); }
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
-    this.say('Game loaded', 2);
   }
-  stop() { this.running = false; this.paused = false; this.canvas.hidden = true; this.pad.hidden = true; this.keys.clear(); this.stick = null; }
+  stop() { this.leaveNet(); this.running = false; this.paused = false; this.canvas.hidden = true; this.pad.hidden = true; this.keys.clear(); this.stick = null; }
 
   /* ---------- input ---------- */
   private down(e: PointerEvent) {
@@ -1002,6 +1302,8 @@ export class Survival {
   }
   /** Space shoots at the nearest bear (or spawner) in range; Z shoots straight ahead with no target. Holding Space keeps firing. */
   private shoot(targeted: boolean) {
+    if (this.deadT > 0) return;
+    if (this.remote('shoot', [targeted])) return;
     const w = this.weapon();
     if (!w) { this.bubble(this.x, this.y - 30, 'No weapon: put one in a weapon slot', 'info'); Sound.denied(); return; }
     if (w === 'rxbow') return; // fires while Space is held (see update)
@@ -1024,7 +1326,7 @@ export class Survival {
       if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'Put rockets in an ammo slot', 'info'); this.noAmmoT = 1.5; } Sound.denied(); return; }
       const boom = this.ammoSlots[i]!.k === 'xrocket';
       this.useUp(i, SURVIVAL.ammoPoints); this.mining = false;
-      this.rockets.push({ boom, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+      this.rockets.push({ owner: this.actMate?.id, boom, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
       return;
@@ -1037,7 +1339,7 @@ export class Survival {
       else if (this.noAmmoT <= 0) { this.bubble(this.x + 18, this.y - 22, 'No Ammo', 'tiny'); this.noAmmoT = .8; }
       this.mining = false;
       const j = (Math.random() - .5) * .06;
-      this.bolts.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a + j) * 20, y: this.y + Math.sin(a + j) * 20, vx: Math.cos(a + j) * SURVIVAL.boltSpeed * 1.3, vy: Math.sin(a + j) * SURVIVAL.boltSpeed * 1.3, left: SURVIVAL.boltRange, dmg, target, stone: true, color: k && k !== 'ammo' ? metalOf(k).color : '#ffd27a' });
+      this.bolts.push({ owner: this.actMate?.id, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a + j) * 20, y: this.y + Math.sin(a + j) * 20, vx: Math.cos(a + j) * SURVIVAL.boltSpeed * 1.3, vy: Math.sin(a + j) * SURVIVAL.boltSpeed * 1.3, left: SURVIVAL.boltRange, dmg, target, stone: true, color: k && k !== 'ammo' ? metalOf(k).color : '#ffd27a' });
       this.reload = SURVIVAL.mgunEvery * ST.reloadMul; this.shots++;
       Sound.mgun();
       return;
@@ -1047,13 +1349,14 @@ export class Survival {
     const dmg = (use === 'ammo' ? AMMO.normal.damage * SURVIVAL.stoneDamage : use ? metalOf(use).dmg : ammo.damage) * ST.boltMul;
     if (use) this.useUp(i, SURVIVAL.ammoPoints);
     this.mining = false;
-    this.bolts.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone: !!use, color: use && use !== 'ammo' ? metalOf(use).color : undefined });
+    this.bolts.push({ owner: this.actMate?.id, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 20, y: this.y + Math.sin(a) * 20, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: SURVIVAL.boltRange, dmg, target, stone: !!use, color: use && use !== 'ammo' ? metalOf(use).color : undefined });
     this.reload = ammo.reload * ST.reloadMul;
     this.shots++;
     Sound.tone('triangle', 900, 260, .12, .14); Sound.noise(.08, 'highpass', 2400, .8, .1);
   }
   /** Holding fire: the rapid crossbow streams at the nearest bear in range, other weapons fire each time they're ready. */
   private holdFire(dt: number) {
+    if (this.deadT > 0) { this.firingAt = null; this.firingEnd = null; return; }
     this.firingAt = null; this.firingEnd = null; this.noAmmoT -= dt;
     if (!this.fireHeld) { this.rxT = 0; return; }
     const w = this.weapon();
@@ -1077,6 +1380,7 @@ export class Survival {
   }
   /** Tab: the next weapon slot with a weapon in it. */
   private switchWeapon() {
+    if (this.remote('switchWeapon', [])) return;
     const has = [0, 1, 2].filter(i => this.weapons[i]);
     if (!has.length) { Sound.denied(); return; }
     this.wSel = has[(has.indexOf(this.wSel) + 1) % has.length]; this.armsSig = '';
@@ -1087,14 +1391,19 @@ export class Survival {
     e.stopPropagation();
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-w],[data-a]');
     if (!el || !this.running || this.paused) return;
-    const h = this.hand && this.bag[this.hand] >= 1 ? this.hand : null;
-    if (el.dataset.w) {
-      const i = Number(el.dataset.w), cur = this.weapons[i];
+    this.armsSlot(el.dataset.w ? 'w' : 'a', Number(el.dataset.w ?? el.dataset.a), this.hand);
+  }
+  /** A tap on weapon slot ('w') or ammo slot ('a') i, holding hand. */
+  private armsSlot(kind: 'w' | 'a', i: number, hand: Kind | null) {
+    if (this.remote('armsSlot', [kind, i, hand])) { if (!(hand && (isWeapon(hand) || isShot(hand)))) { if (kind === 'w') this.wSel = i; else this.aSel = i; } return; }
+    const h = hand && this.bag[hand] >= 1 ? hand : null;
+    if (kind === 'w') {
+      const cur = this.weapons[i];
       if (isWeapon(h)) { if (cur) this.bag[cur]++; this.weapons[i] = h; this.bag[h]--; this.wSel = i; if (!this.bag[h]) this.hand = null; Sound.thump(); }
       else if (cur && i === this.wSel) { this.bag[cur]++; this.weapons[i] = null; this.bubble(this.x, this.y - 30, `${ONE_NAME[cur]} back in your inventory`, 'info'); Sound.click(); }
       else { this.wSel = i; Sound.click(); }
     } else {
-      const i = Number(el.dataset.a), cur = this.ammoSlots[i];
+      const cur = this.ammoSlots[i];
       if (isShot(h)) {
         if (cur && cur.k !== h) this.bag[cur.k] += Math.floor(cur.pts / SURVIVAL.ammoPoints);
         const n = Math.floor(this.bag[h]);
@@ -1109,6 +1418,7 @@ export class Survival {
   }
   /** D with ammo or a weapon in hand: one ammo goes into its ammo slot (or the first empty one); a weapon into the first empty weapon slot. */
   private armsPut(k: Kind) {
+    if (this.remote('armsPut', [k])) return true;
     if (isShot(k)) {
       let i = this.ammoSlots.findIndex(a => a?.k === k); if (i < 0) i = this.ammoSlots.indexOf(null);
       if (i < 0) { this.bubble(this.x, this.y - 30, 'The ammo slots are full of other ammo', 'info'); Sound.denied(); return true; }
@@ -1143,6 +1453,14 @@ export class Survival {
 
   /** M: start or stop digging at the mine or an ore patch, or use the ammo machine when next to it. */
   private action() {
+    if (this.net === 'guest') {
+      // a friend's game digs ore patches by hand (the host's game counts the ore)
+      const pt = this.nearPatch();
+      if (this.digAt) { this.digAt = null; this.remote('digSet', [-1]); Sound.ui(); }
+      else if (pt) { this.digAt = pt; this.face = Math.atan2(pt.y - this.y, pt.x - this.x); this.remote('digSet', [this.patches.indexOf(pt)]); Sound.ui(); }
+      else this.bubble(this.x, this.y - 30, 'Walk to an ore patch to dig', 'info');
+      return;
+    }
     const mine = this.mineOn ? near(this.mines, this.x, this.y) : null, mach = this.mineOn ? near(this.machines, this.x, this.y) : null, patch = this.nearPatch();
     if (this.mining || this.digAt) { this.mining = false; this.digAt = null; Sound.ui(); return; }
     if (mine) {
@@ -1194,6 +1512,7 @@ export class Survival {
   /** The recipes this machine can be set to (rockets once researched). */
   private mrecs() { return MRECS.filter(r => r !== 'rocket' || this.done.has('rocket')); }
   private openRecipe(m: Machine) {
+    if (this.hostOnly()) return;
     this.recipeFor = m; this.stick = null; this.keys.clear(); this.mining = false;
     this.renderRecipe();
     this.pad.querySelector<HTMLElement>('#svRecipe')!.hidden = false;
@@ -1271,6 +1590,7 @@ export class Survival {
   }
   /** Craft: special recipes happen at once; the rest go in the crafting queue (taking their things now). */
   private craft(id: string, n = 1) {
+    if (this.remote('craft', [id, n])) return;
     const r = REC[id];
     if (!r) return;
     this.invSel = id;
@@ -1310,6 +1630,7 @@ export class Survival {
   }
   /** Tap a job in the queue to cancel it: you get back what it took (and any parts it already made). */
   private cancelJob(job: number) {
+    if (this.remote('cancelJob', [job])) return;
     const steps = this.queue.filter(q => q.job === job);
     if (!steps.length) return;
     for (const st of steps) for (const [k, n] of Object.entries(st.raw) as [Kind, number][]) this.bag[k] += n;
@@ -1403,6 +1724,7 @@ export class Survival {
   }
   /* ---------- the panel for a furnace or an assembler ---------- */
   private openBld(key: string) {
+    if (this.hostOnly()) return;
     if (!this.blds.has(key)) return;
     this.bldOpen = key; this.stick = null; this.keys.clear(); this.mining = false; this.digAt = null; this.bldSig = '';
     this.renderBld();
@@ -1525,6 +1847,7 @@ export class Survival {
   /** D: put one of the thing in your hand (or being placed) into whatever is at the tile in front of you (or under the mouse):
    *  a furnace, assembler, generator, chest, turret, lab or ammo machine. A placeable thing on an empty tile gets put down; anything else lands on the ground. */
   private dropOne() {
+    if (this.hostOnly()) return;
     const k = this.placing ? this.placeType as Kind : this.hand;
     if (!k) { this.bubble(this.x, this.y - 30, 'Pick something in your inventory or quickbar first', 'info'); Sound.denied(); return; }
     if (this.bag[k] < 1) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[k]} left`, 'info'); Sound.denied(); return; }
@@ -1552,7 +1875,9 @@ export class Survival {
   }
   private newRobot(hk: string): Robot { const [c, r] = hk.split(',').map(Number); return { x: tileX(c), y: tileY(r), hub: hk, k: null, src: null, dst: null }; }
   /** Puts a thing in your pocket. */
-  private pocket(k: Kind, n = 1) { this.bag[k] += n; }
+  /** Whose shot is hitting right now (a friend's id), so what a bear drops goes to them. */
+  private hitBy: string | undefined;
+  private pocket(k: Kind, n = 1) { const m = this.hitBy ? this.mates.get(this.hitBy) : undefined; if (m) (m.p.bag as Bag)[k] += n; else this.bag[k] += n; }
   /** A belt, grabber or robot hands a building one thing. False if it can't take it. */
   private feedBld(b: Bld, k: Kind) {
     if (b.type === 'furnace') {
@@ -1757,6 +2082,7 @@ export class Survival {
   private craftMul() { return 1.25 ** (this.lv.craftspd ?? 0); }
   private furnMul() { return 1.25 ** (this.lv.furnspd ?? 0); }
   private pickResearch(id: ResId) {
+    if (this.remote('pickResearch', [id])) return;
     if (!this.canResearch(id)) { Sound.denied(); return; }
     this.researching = id; Sound.click(); this.renderLab();
   }
@@ -1820,6 +2146,7 @@ export class Survival {
   /** T: use the nearest thing: load a lab or turret, empty a chest, or fill and empty a furnace, generator, drill,
    *  robot hub or assembler. */
   private useNear() {
+    if (this.remote('useNear', [])) return;
     const u = this.nearUsable();
     if (!u) { const m = this.mineOn ? near(this.machines, this.x, this.y) : null; if (m) { this.feedMachine(m); return; } this.bubble(this.x, this.y - 30, 'Walk up to something to use it', 'info'); Sound.denied(); return; }
     if (u.kind === 'lab') { this.loadLab(this.labs.get(u.key)!); return; }
@@ -1988,6 +2315,7 @@ export class Survival {
   }
   /** Tap a placed thing to put it back in your inventory, with whatever was in it. */
   private pickUp(c: number, r: number) {
+    if (this.remote('pickUp', [c, r])) return;
     const key = c + ',' + r, x = tileX(c), y = tileY(r);
     // things lying on that spot go in your pocket
     const dropStone = () => { for (const it of this.items) { const t = tileAt(it.x, it.y); if (t && t.c === c && t.r === r) { it.gone = true; this.pocket(it.k); } } this.items = this.items.filter(it => !it.gone); };
@@ -2020,6 +2348,7 @@ export class Survival {
   }
   /** Picks up an ammo machine or a mine (a big round thing), with what's in it. */
   private pickUpBig(s: Machine | Mine) {
+    if (this.remote('pickBigAt', [s.x, s.y])) return;
     if ('queue' in s) {
       for (const k of [...s.queue, ...s.out]) this.bag[k]++;
       this.machines = this.machines.filter(m => m !== s); this.bag.machine++;
@@ -2066,7 +2395,7 @@ export class Survival {
     if (this.taken(t.c, t.r)) {
       this.dblTap('tile' + key, () => {
         const b = this.blds.get(key);
-        if (this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
+        if (this.turrets.has(key)) { if (this.hostOnly()) return; this.picked = key; Sound.click(); return; }
         this.picked = null;
         // furnaces, assemblers and drills open their panel (which has Pick up)
         if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
@@ -2078,7 +2407,7 @@ export class Survival {
     const gh = this.ghosts.get(key);
     if (gh) {
       this.dblTap('ghost' + key, () => { this.picked = null; this.bubble(tileX(t.c), tileY(t.r) - 14, `Build a ${ONE_NAME[gh.p].toLowerCase()} here, or double-tap to remove`, 'info'); Sound.click(); },
-        () => { this.picked = null; this.ghosts.delete(key); this.bubble(tileX(t.c), tileY(t.r) - 14, 'Ghost removed', 'info'); Sound.click(); });
+        () => { this.picked = null; this.removeGhost(key); });
       return;
     }
     this.dblTap('', () => { if (this.picked) { this.picked = null; Sound.click(); } }, () => { this.picked = null; });
@@ -2126,6 +2455,7 @@ export class Survival {
   private bpTurn() { if (!this.bpCur) return; this.bpCur = turnBp(this.bpCur); Sound.click(); }
   /** Puts the blueprint down with its middle on tile (c, r), as light blue ghosts. Spots where something is already built are skipped. */
   private placeBp(c: number, r: number) {
+    if (this.remote('placeBp', [c, r], { bpCur: this.bpCur })) return;
     const b = this.bpCur; if (!b) return;
     let n = 0;
     for (const q of b.parts) {
@@ -2156,6 +2486,7 @@ export class Survival {
   }
   /** Turns whatever is on a tile; false if nothing is there. */
   private turnTile(key: string) {
+    if (this.net === 'guest') { if (!this.partAt(...(key.split(',').map(Number) as [number, number]))) return false; this.remote('turnTile', [key]); return true; }
     if (this.belts.has(key)) { this.belts.set(key, (this.belts.get(key)! + 1) % 4); Sound.click(); return true; }
     const gr = this.grabbers.get(key);
     if (gr) { gr.d = (gr.d + 1) % 4; Sound.click(); return true; }
@@ -2183,6 +2514,7 @@ export class Survival {
   /** The ore patch under tile (c, r), if it has ore left. */
   private patchAt(c: number, r: number) { const x = tileX(c), y = tileY(r); const i = this.patches.findIndex(p => p.left > 0 && inPatch(p, x, y, 0)); return i; }
   private placeAt(c: number, r: number) {
+    if (this.remote('placeAt', [c, r], { placeType: this.placeType, placeDir: this.placeDir })) return;
     const key = c + ',' + r, type = this.placeType;
     if (!this.count(type)) { this.placing = false; return; }
     if (type === 'plat') { this.placePlat(c, r); return; }
@@ -2357,6 +2689,7 @@ export class Survival {
   }
   /** S: the next ammo slot with ammo in it. */
   private switchAmmo() {
+    if (this.remote('switchAmmo', [])) return;
     const has = [0, 1, 2].filter(i => this.ammoSlots[i]);
     if (!has.length) { this.bubble(this.x, this.y - 30, 'No ammo in your ammo slots', 'info'); Sound.denied(); return; }
     this.aSel = has[(has.indexOf(this.aSel) + 1) % has.length]; this.armsSig = '';
@@ -2366,50 +2699,26 @@ export class Survival {
 
   /* ---------- rules ---------- */
   update(dt: number) {
-    if (!this.running || this.paused || this.labOpen || this.recipeFor) return;
+    if (!this.running || this.paused) return;
+    if (this.net === 'guest') { this.updateGuest(dt); return; }
+    if (this.labOpen || this.recipeFor) return;
     this.t += dt;
     if (this.creative) { this.topUp(); this.hp = SURVIVAL.maxHp; }
     this.reload = Math.max(0, this.reload - dt);
     this.holdFire(dt);
+    if (this.net === 'host') this.updateMates(dt);
     this.runAcid(dt);
     this.noTargetT -= dt;
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
 
-    // walking: arrow keys or the drag stick
-    let mx = 0, my = 0;
-    if (this.keys.has('ArrowLeft')) mx -= 1;
-    if (this.keys.has('ArrowRight')) mx += 1;
-    if (this.keys.has('ArrowUp')) my -= 1;
-    if (this.keys.has('ArrowDown')) my += 1;
-    if (this.stick) { const m = Math.hypot(this.stick.dx, this.stick.dy); if (m > 6) { mx = this.stick.dx / 46; my = this.stick.dy / 46; } }
-    const m = Math.hypot(mx, my), x0 = this.x, y0 = this.y;
-    if (m > 0) {
-      if (m > 1) { mx /= m; my /= m; }
-      this.x += mx * SURVIVAL.guySpeed * dt; this.y += my * SURVIVAL.guySpeed * dt;
-      this.face = Math.atan2(my, mx);
-      this.walk += dt * 10 * Math.min(1, m);
-      this.stepT -= dt * Math.min(1, m); if (this.stepT <= 0) { this.stepT = .3; Sound.step(); }
-    }
-    // a belt under the guy carries him along
-    const under = tileAt(this.x, this.y), ud = under ? this.belts.get(under.c + ',' + under.r) : undefined;
-    if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
-    // the guy can walk out through any gate, but not through the fence, and stays on the map
-    this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
-    // space: you can't step off the platform
-    if (this.space) {
-      const ok = (x: number, y: number) => { const e = GUY_R * .5; return this.onPlatXY(x - e, y - e) && this.onPlatXY(x + e, y - e) && this.onPlatXY(x - e, y + e) && this.onPlatXY(x + e, y + e); };
-      if (!ok(this.x, this.y)) { if (ok(this.x, y0)) this.y = y0; else if (ok(x0, this.y)) this.x = x0; else { this.x = x0; this.y = y0; } }
-      // the tile under you broke off: hop to the nearest platform tile
-      if (!this.onPlatXY(this.x, this.y)) { let best = '', bd = Infinity; for (const k of this.platTiles) { const [c, r] = k.split(',').map(Number), d = dist(tileX(c), tileY(r), this.x, this.y); if (d < bd) { bd = d; best = k; } } if (best) { const [c, r] = best.split(',').map(Number); this.x = tileX(c); this.y = tileY(r); } }
-    }
-    const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
+    const m = this.walkGuy(dt);
     // walking over a furnace picks up what it has smelted
     { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
       if (fb && fb.type === 'furnace' && fb.out >= 1 && fb.outK) { const n = Math.floor(fb.out); this.bag[fb.outK] += n; fb.out -= n; this.bubble(this.x, this.y - 30, `+${n} ${n === 1 ? ONE_NAME[fb.outK].toLowerCase() : KIND_NAME[fb.outK]}`, 'info'); Sound.pop(); this.bldSig = ''; } }
 
     // healing: 1.2% of max health every second
     this.healT += dt;
-    while (this.healT >= 1) { this.healT -= 1; this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * ST.heal); }
+    while (this.healT >= 1) { this.healT -= 1; if (this.hp > 0) this.hp = Math.min(SURVIVAL.maxHp, this.hp + SURVIVAL.maxHp * ST.heal); }
 
     // mining: a stone every 4 seconds while next to the mine
     this.swing = Math.max(0, this.swing - dt);
@@ -2552,7 +2861,17 @@ export class Survival {
           Sound.tone('sawtooth', 160, 90, .5, .12);
         }
       } else {
-        // chasing: go for the guy (through a gate if the fence is in the way) and swipe every 5 seconds
+        // chasing: go for the nearest guy on the team (yours, or a friend's)
+        const mate = this.net === 'host' ? this.nearestMate(b.x, b.y) : null;
+        if (mate) this.withMate(mate, () => this.chase(b, dt)); else this.chase(b, dt);
+      }
+    }
+    for (const g of this.gates) g.open = clamp(g.open + (entering.has(g) ? dt : -dt) * 1.5, 0, 1);
+    this.afterBears(dt);
+  }
+  /** A chasing bear goes for the guy (through a gate if the fence is in the way) and swipes every 5 seconds. */
+  private chase(b: Bear, dt: number) {
+    {
         b.cd = Math.max(0, b.cd - dt);
         const d = Math.hypot(this.x - b.x, this.y - b.y), reach = GUY_R + BEAR_R + 6;
         if (b.fish) {
@@ -2561,15 +2880,15 @@ export class Survival {
           else b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 6);
           b.tc = Math.max(0, b.tc - dt);
           if (d <= SURVIVAL.fishRange && b.tc <= 0) this.spit(b);
-          continue;
+          return;
         }
         if (d > reach - 2) this.navTo(b, this.x, this.y, SURVIVAL.bearSpeedInside, dt, reach - 2);
         else b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 6);
         if (d <= reach && b.cd <= 0) this.bearHit(b);
         // bears don't throw rocks (only acid fish spit)
-      }
     }
-    for (const g of this.gates) g.open = clamp(g.open + (entering.has(g) ? dt : -dt) * 1.5, 0, 1);
+  }
+  private afterBears(dt: number) {
     // turrets shoot the bear or spawner you picked for them, or else the nearest one in range, while they have ammo
     this.rapidSnd -= dt;
     for (const [key, tu] of this.turrets) {
@@ -2621,7 +2940,7 @@ export class Survival {
       const wk = this.wallAt(bo.x, bo.y); if (wk && wk !== bo.from) { bo.left = 0; this.sparks.push({ x: bo.x, y: bo.y, t: 0 }); continue; }
       if (this.space && this.shootAsteroid(bo.x, bo.y)) { bo.left = 0; continue; }
       const hit = this.hitAt(bo.x, bo.y, 4);
-      if (hit) { this.damageTarget(hit, bo.dmg); bo.left = 0; }
+      if (hit) { this.hitBy = bo.owner; this.damageTarget(hit, bo.dmg); this.hitBy = undefined; bo.left = 0; }
     }
     if (this.space) this.updateSpace(dt);
     this.bolts = this.bolts.filter(b => b.left > 0);
@@ -2638,8 +2957,10 @@ export class Survival {
       const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { if (rk.boom) this.explode(rk.x, rk.y, null); else this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(!!rk.boom); rk.t = 99; continue; }
       const hit = this.hitAt(rk.x, rk.y, 6);
       if (hit && (hit === rk.target || rk.t > swirl)) {
+        this.hitBy = rk.owner;
         if (rk.boom) this.explode(hit.x, hit.y, hit);
         else { this.damageTarget(hit, SURVIVAL.rocketDamage); this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); }
+        this.hitBy = undefined;
         Sound.boom(!!rk.boom); rk.t = 99;
       }
     }
@@ -2659,7 +2980,11 @@ export class Survival {
     for (const u of this.bubbles) u.t += dt;
     this.bubbles = this.bubbles.filter(u => u.t < (u.kind === 'loss' ? 1.6 : 1.1));
 
-    if (this.hp <= 0) { this.hp = 0; this.end(false); }
+    if (this.hp <= 0 && this.deadT <= 0) {
+      // playing together: knocked out while a friend is still up, you come back in 10 seconds
+      if (this.net === 'host' && [...this.mates.values()].some(m => !((m.p.deadT as number) > 0))) this.knockOut();
+      else { this.hp = 0; this.end(false); }
+    }
 
   }
   /** How polluted it is: 0 is clean, 1 for every 100 pollution (up to 10). */
@@ -2667,6 +2992,7 @@ export class Survival {
   private rapidSnd = 0;
   private blasts: { x: number; y: number; t: number }[] = [];
   private end(won: boolean) {
+    if (this.net === 'host') this.netOver();
     this.running = false;
     Sound.boom(!won);
     this.mining = false;
@@ -3059,7 +3385,9 @@ export class Survival {
     }
     for (const b of this.bears) if (b.state === 'dead') this.drawBear(g, b);
     for (const b of this.bears) if (b.state !== 'dead') this.drawBear(g, b);
-    this.drawGuy(g);
+    this.drawOthers(g);
+    for (const pl of this.piles) if (this.seen(pl.x, pl.y)) paintPile(g, pl.x, pl.y);
+    if (this.deadT <= 0) this.drawGuy(g);
     // acid slime in flight
     for (const sl of this.slimes) {
       g.fillStyle = '#2f8a2a'; g.beginPath(); g.arc(sl.x, sl.y, 7, 0, 7); g.fill();
@@ -3432,6 +3760,10 @@ export class Survival {
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
     g.fillText(this.space ? 'Space' : NO_BASE ? `${inside} after you · ${waiting} at their bases` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    // knocked out: how long until you're back
+    if (this.deadT > 0) { g.textAlign = 'center'; g.font = '600 18px Jost, sans-serif'; g.fillStyle = 'rgba(0,0,0,.55)'; roundRect(g, cw / 2 - 150, this.canvas.clientHeight / 2 - 30, 300, 48, 12); g.fill(); g.fillStyle = '#ffb07a'; g.fillText(`Knocked out · back in ${Math.ceil(this.deadT)}`, cw / 2, this.canvas.clientHeight / 2); g.font = '500 13px Jost, sans-serif'; }
+    // playing together: the code friends type in, and how many are playing
+    if (this.net !== 'solo' && this.netCode) { g.textAlign = 'left'; g.fillStyle = '#9fdcff'; g.font = '500 12px Jost, sans-serif'; g.fillText(`Code ${this.netCode} · ${this.players}/${MAX_PLAYERS} players`, 14, y + h + 38); g.font = '500 13px Jost, sans-serif'; }
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;
@@ -3888,6 +4220,13 @@ function paintPlat(g: CanvasRenderingContext2D, x: number, y: number, crack: num
   g.strokeStyle = 'rgba(20,24,32,.6)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1);
   g.fillStyle = 'rgba(200,210,225,.5)'; for (const [a, b] of [[3, 3], [TILE - 4, 3], [3, TILE - 4], [TILE - 4, TILE - 4]]) g.fillRect(x + a - .75, y + b - .75, 1.5, 1.5);
   if (crack) { g.strokeStyle = 'rgba(15,15,20,.85)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(x + 4, y + 6); g.lineTo(x + 10, y + 11); g.lineTo(x + 8, y + 16); g.lineTo(x + 15, y + 20); g.moveTo(x + 10, y + 11); g.lineTo(x + 19, y + 8); g.stroke(); }
+}
+/** A dropped pile of someone's things: a brown sack. */
+function paintPile(g: CanvasRenderingContext2D, x: number, y: number) {
+  g.fillStyle = 'rgba(0,0,0,.3)'; g.beginPath(); g.ellipse(x + 2, y + 6, 11, 5, 0, 0, 7); g.fill();
+  g.fillStyle = '#8a5a32'; g.beginPath(); g.ellipse(x, y + 1, 10, 9, 0, 0, 7); g.fill();
+  g.fillStyle = '#6e4626'; g.fillRect(x - 4, y - 10, 8, 4);
+  g.strokeStyle = '#e0b43a'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x - 5, y - 6); g.lineTo(x + 5, y - 6); g.stroke();
 }
 /** A blueprint ghost: the thing's own picture, all in light blue. Made once for each thing and way it faces. */
 const ghostSprites = new Map<string, HTMLCanvasElement>();

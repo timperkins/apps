@@ -500,3 +500,9 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .svspace h3 { white-space: nowrap; }
 .svspace .fine { max-width: none; padding: 0; }
 .svspace .chestmine .fine { grid-column: 1 / -1; }
+
+/* playing together */
+.svtogether { display: flex; gap: 8px; width: 100%; }
+.svtogether input { flex: 1; min-width: 0; font: 600 16px var(--font-b); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); background: rgba(255, 245, 234, .08); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; -webkit-user-select: text; user-select: text; }
+#svNetMsg { margin: 0; text-align: left; min-height: 1em; }
+#svNetMsg b { color: #9fdcff; font-size: 18px; letter-spacing: .12em; }
