@@ -95,6 +95,7 @@ export const SURVIVAL = {
   rocketStone: 10,
   rgunReload: 1.5,
   ammoPoints: 100,      // each ammo (or rocket) has 100 usage points; a crossbow shot or a rocket uses all of them
+  mgunEvery: .2, mgunUse: .5, mgunDamage: { ammo: 1.4, copperAmmo: 1.5, ironAmmo: 1.8, goldAmmo: 2, diamondAmmo: 2.25 } as Record<string, number>, // the machine gun
   rxDamage: .3, rxEvery: .1, rxUse: 4.62, // rapid crossbow: 0.3 damage every 0.1 s, 4.62 usage points a second of firing
   furnaceMax: 50,       // ore a furnace holds
   wallHp: 150, gateHp: 200, // your own walls and gates: bears bite them
@@ -187,7 +188,7 @@ const RECIPES: Rec[] = [
   R('drill', 'production', { circuit: 3, gear: 5, ironPlate: 10 }, 2, 1, 'Put it on an ore patch and it digs by itself, dropping the ore in front. Needs power.'),
   R('furnace', 'production', { stone: 5 }, .5, 1, 'Smelts ore: iron and copper into plates, gold into bars, diamonds into cut diamonds, stone into bricks.'),
   R('machine', 'production', { gear: 10, circuit: 5, stone: 20 }, 3, 1, 'Makes ammo out of stone, plates, gold bars and cut diamonds (or rockets once researched).'),
-  R('asm', 'production', { circuit: 3, gear: 5, ironPlate: 9 }, .5, 1, 'Tap it to pick a recipe, then put the ingredients in (or let grabbers bring them). It keeps crafting that recipe, 4 times slower than by hand, until you change it. Needs power.'),
+  { ...R('asm', 'production', {}, .5, 1, 'Tap it to pick a recipe, then put the ingredients in (or let grabbers bring them). It keeps crafting that recipe, 4 times slower than by hand, until you change it. Needs power.'), in: { ironPlate: 10, stone: 5 } },
   R('gen', 'production', { gear: 8, ironPlate: 10, stone: 5 }, 2, 1, 'Burns stone for power, which poles carry to drills, assemblers and labs.'),
   R('lab', 'production', { circuit: 10, gear: 10, belt: 4 }, 2, 1, 'Uses science packs to research. Y picks what. Needs power.'),
   // parts
@@ -207,6 +208,7 @@ const RECIPES: Rec[] = [
   { ...R('copperAmmo', 'combat', { copperPlate: 1 }, 2, 7, 'Copper ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
   { ...R('goldAmmo', 'combat', { goldBar: 1 }, 2, 11, 'Gold ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
   { ...R('diamondAmmo', 'combat', { gem: 1 }, 2, 15, 'Diamond ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
+  { ...R('mgun', 'combat', {}, 6, 1, 'A machine gun you hold: while you hold Space it shoots every 0.2 s, using 0.5% of an ammo a shot. Damage a shot: 1.4 stone, 1.5 copper, 1.8 iron, 2 gold, 2.25 diamond. Put it in a weapon slot.', undefined, false), in: { stone: 1000, ironPlate: 500 } },
   R('rxbow', 'combat', { stone: 200, ironPlate: 20 }, 6, 1, 'A crossbow you hold that fires very fast while you hold Space: 0.3 damage every 0.1 s. It uses ammo slowly (4.62 of an ammo\'s 100 usage points a second). Put it in a weapon slot.', undefined, false),
   R('xbow', 'combat', { stone: 20 }, 2, 1, 'A plain crossbow you hold. One ammo a shot; with no ammo it fires your loadout bolts.', undefined, false),
   R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you hold: 70 damage a rocket. Put it in a weapon slot and rockets in an ammo slot.', 'rocket', false),
@@ -273,7 +275,7 @@ const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
-  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun', 'xbow', 'rxbow',
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun', 'xbow', 'rxbow', 'mgun',
   'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
@@ -303,8 +305,8 @@ const AMMO_NAME: Record<AmmoKind, string> = { ammo: 'Stone', ironAmmo: 'Iron', c
 const metalOf = (a: AmmoKind) => METAL[ORES.find(o => METAL[o].ammo === a)!];
 const isAmmoKind = (k: Kind): k is AmmoKind => (AMMO_KINDS as Kind[]).includes(k);
 /** Weapons you hold, and what they shoot. */
-type Weapon = 'xbow' | 'rxbow' | 'rgun';
-const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'rgun'];
+type Weapon = 'xbow' | 'rxbow' | 'rgun' | 'mgun';
+const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'mgun', 'rgun'];
 const isWeapon = (k: Kind | null): k is Weapon => !!k && (WEAPONS as Kind[]).includes(k);
 type Shot = AmmoKind | 'rocket';
 const isShot = (k: Kind | null): k is Shot => !!k && (k === 'rocket' || isAmmoKind(k));
@@ -323,14 +325,14 @@ const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
-  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
   belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
-  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
   belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
@@ -741,6 +743,19 @@ export class Survival {
       this.rockets.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
+      return;
+    }
+    // the machine gun: a small bolt every 0.2 s, 0.5 of an ammo's 100 usage points a shot; with no ammo it still fires, for no damage
+    if (w === 'mgun') {
+      const k = i >= 0 ? this.ammoSlots[i]!.k as AmmoKind : null;
+      const dmg = k ? SURVIVAL.mgunDamage[k] * ST.boltMul : 0;
+      if (i >= 0) this.useUp(i, SURVIVAL.mgunUse);
+      else if (this.noAmmoT <= 0) { this.bubble(this.x + 18, this.y - 22, 'No Ammo', 'tiny'); this.noAmmoT = .8; }
+      this.mining = false;
+      const j = (Math.random() - .5) * .06;
+      this.bolts.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a + j) * 20, y: this.y + Math.sin(a + j) * 20, vx: Math.cos(a + j) * SURVIVAL.boltSpeed * 1.3, vy: Math.sin(a + j) * SURVIVAL.boltSpeed * 1.3, left: SURVIVAL.boltRange, dmg, target, stone: true, color: k && k !== 'ammo' ? metalOf(k).color : '#ffd27a' });
+      this.reload = SURVIVAL.mgunEvery * ST.reloadMul; this.shots++;
+      Sound.mgun();
       return;
     }
     // the crossbow: stone ammo does 1.7x normal damage, metal ammo its own; one ammo a shot. With no ammo it fires loadout bolts.
@@ -2833,7 +2848,7 @@ export class Survival {
     g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
     if (this.hurtFlash > 0) { g.fillStyle = `rgba(255,60,50,${this.hurtFlash})`; g.beginPath(); g.arc(0, 0, GUY_R + 10, 0, 7); g.fill(); }
     if (this.acidT > 0) { g.fillStyle = `rgba(90,220,70,${.25 + .15 * Math.sin(this.t * 10)})`; g.beginPath(); g.arc(0, 0, GUY_R + 8, 0, 7); g.fill(); }
-    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 && this.weapon() !== 'rxbow' ? 0 : 1, this.weapon() === 'rxbow' ? '#ffe14a' : this.weapon() === 'rgun' ? '#d64545' : this.ammoTint(), this.weapon() === 'rgun', !this.weapon());
+    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 && this.weapon() !== 'rxbow' ? 0 : 1, this.weapon() === 'rxbow' ? '#ffe14a' : this.weapon() === 'mgun' ? '#3a3f45' : this.weapon() === 'rgun' ? '#d64545' : this.ammoTint(), this.weapon() === 'rgun', !this.weapon());
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
@@ -3215,6 +3230,20 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     g.strokeStyle = '#3a2a1a'; g.lineWidth = 2; g.beginPath(); g.moveTo(5, -7); g.quadraticCurveTo(9, 0, 5, 7); g.stroke();
     g.strokeStyle = '#e8e0d0'; g.lineWidth = .8; g.beginPath(); g.moveTo(5, -7); g.lineTo(0, 0); g.lineTo(5, 7); g.stroke();
     if (k === 'rxbow') { g.fillStyle = '#ffe14a'; g.fillRect(-5, -4.5, 6, 3); g.fillStyle = '#c9a020'; g.fillRect(-5, -2, 6, 1.2); }
+    g.restore(); return;
+  }
+  if (k === 'mgun') {
+    // a machine gun lying flat: stock, body, a box magazine, a barrel with a cooling sleeve and a front grip
+    g.save(); g.translate(x, y); g.rotate(-Math.PI / 6);
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -1, 20, 6);
+    g.fillStyle = '#5a3d22'; g.beginPath(); g.moveTo(-10, -2); g.lineTo(-4, -3); g.lineTo(-4, 2); g.lineTo(-10, 3); g.closePath(); g.fill();
+    g.fillStyle = '#3a3f45'; g.fillRect(-4, -3.2, 8, 5);
+    g.fillStyle = '#2a2d31'; g.fillRect(4, -2.4, 3.5, 3.4);
+    g.fillStyle = '#4c535b'; g.fillRect(7.5, -1.3, 4.5, 1.6);
+    g.fillStyle = '#1e2124'; for (let i = 0; i < 3; i++) g.fillRect(4.5 + i * 1.1, -2.4, .5, 3.4);
+    g.fillStyle = '#c9a43a'; g.fillRect(-2, 1.8, 3, 4);
+    g.fillStyle = '#2a2d31'; g.fillRect(3, 1.6, 1.6, 3);
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(-4, -3.2, 8, 1);
     g.restore(); return;
   }
   if (k === 'rgun') {
