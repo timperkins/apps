@@ -352,7 +352,7 @@ const ELECTRIC: BType[] = ['drill', 'asm'];
 const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', split: 'X', tunnel: 'Q', chest: 'C', pole: 'O', drill: 'N', furnace: 'F', machine: 'K', asm: 'A', lab: 'L', gen: 'V', pump: 'W', pipe: 'I', turret: 'U', bturret: 'J' };
 /** A one-tile building. inp/inpK: what's waiting to go in (one kind at a time), out/outK: what it made.
  *  buf: an assembler's ingredients. recipe: what an assembler makes. pi: the ore patch a drill sits on. */
-interface Bld { type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
+interface Bld { on?: boolean; type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
 /** A flying robot that carries one thing from a chest to whatever needs it. */
 interface Robot { x: number; y: number; hub: string; k: Kind | null; src: { x: number; y: number; take: () => boolean; kind?: Kind } | null; dst: { x: number; y: number; give: () => boolean; id: string } | null; }
 const KIND_DOT: Record<Kind, string> = Object.fromEntries(KINDS.map(k => [k, '#d0ccc2'])) as Record<Kind, string>;
@@ -1307,8 +1307,9 @@ export class Survival {
       if (b.out > 0 && b.outK && this.deliver(c + dx, r + dy, b.outK)) { b.out--; if (!b.out) b.outK = undefined; }
       if (b.type === 'drill') {
         const p = b.pi !== undefined ? this.patches[b.pi] : undefined;
+        b.on = false;
         if (!p || p.left <= 0 || b.out >= 5 || !this.hasPower(key)) continue;
-        b.t += dt * ST.digMul;
+        b.on = true; b.t += dt * ST.digMul;
         this.pollution += P.drill * dt;
         if (b.t < SURVIVAL.drillEvery) continue;
         b.t = 0; p.left--; b.out++; b.outK = p.ore;
@@ -3415,26 +3416,7 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
     g.fillStyle = '#c9a24a'; g.beginPath(); g.arc(-6.5, -10, 1.6, 0, 7); g.arc(6.5, -10, 1.6, 0, 7); g.fill();
     g.restore(); return;
   }
-  if (b.type === 'drill') {
-    // a mining drill: a steel frame with rivets, a spinning cutter head and an output chute
-    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -7, 22, 20);
-    // the chute where ore comes out
-    g.fillStyle = '#3d4248'; g.beginPath(); g.moveTo(dx * 13 - dy * 5, dy * 13 - dx * 5); g.lineTo(dx * 13 + dy * 5, dy * 13 + dx * 5); g.lineTo(dx * 7 + dy * 6, dy * 7 + dx * 6); g.lineTo(dx * 7 - dy * 6, dy * 7 - dx * 6); g.closePath(); g.fill();
-    const steel = g.createLinearGradient(-11, -11, 11, 11); steel.addColorStop(0, '#8d949c'); steel.addColorStop(1, '#4b5158');
-    g.fillStyle = steel; g.fillRect(-11, -11, 22, 22);
-    g.strokeStyle = '#2a2e33'; g.lineWidth = 1.5; g.strokeRect(-11, -11, 22, 22);
-    // hazard corners
-    g.fillStyle = '#d9a52b'; for (const [cx, cy] of [[-11, -11], [7, -11], [-11, 7], [7, 7]]) g.fillRect(cx, cy, 4, 4);
-    g.fillStyle = '#20242a'; for (const [cx, cy] of [[-8.5, -8.5], [8.5, -8.5], [-8.5, 8.5], [8.5, 8.5]]) { g.beginPath(); g.arc(cx, cy, 1, 0, 7); g.fill(); }
-    // the cutter head in a dark well
-    g.fillStyle = '#25282c'; g.beginPath(); g.arc(0, 0, 8, 0, 7); g.fill();
-    g.save(); g.rotate(t * 6);
-    g.fillStyle = '#b9bfc6';
-    for (let i = 0; i < 3; i++) { g.rotate(Math.PI * 2 / 3); g.beginPath(); g.moveTo(0, 0); g.lineTo(7, -2.5); g.lineTo(6, 2.5); g.closePath(); g.fill(); }
-    g.fillStyle = '#d9a52b'; g.beginPath(); g.arc(0, 0, 2.4, 0, 7); g.fill();
-    g.restore();
-    g.restore(); return;
-  }
+  if (b.type === 'drill') { paintDrill(g, dx, dy, b.on === false ? 0 : t, b.on !== false && t > 0); g.restore(); return; }
   if (b.type === 'tunnel') {
     g.fillStyle = '#3a3330'; g.fillRect(-11, -11, 22, 22);
     g.fillStyle = '#15110f'; g.beginPath(); g.arc(dx * 3, dy * 3, 7, 0, 7); g.fill();
@@ -3475,6 +3457,61 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
   }
   if (b.type === 'furnace' || b.type === 'asm') { g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(dx * 12, dy * 12); g.lineTo(dx * 8 - dy * 4, dy * 8 - dx * 4); g.lineTo(dx * 8 + dy * 4, dy * 8 + dx * 4); g.fill(); }
   g.restore();
+}
+/** A mining drill, drawn at the origin facing (dx, dy): a heavy weathered housing with bolted corners, two pumping
+ *  pistons, a spiral cutter turning in a dark well, an output chute with hazard stripes, and dust while it digs. */
+function paintDrill(g: CanvasRenderingContext2D, dx: number, dy: number, t: number, on: boolean) {
+  const S = 12, cut = 3.5;
+  const oct = (r: number, c: number) => { g.beginPath(); g.moveTo(-r + c, -r); g.lineTo(r - c, -r); g.lineTo(r, -r + c); g.lineTo(r, r - c); g.lineTo(r - c, r); g.lineTo(-r + c, r); g.lineTo(-r, r - c); g.lineTo(-r, -r + c); g.closePath(); };
+  // shadow
+  g.fillStyle = 'rgba(0,0,0,.32)'; g.save(); g.translate(2.5, 3); oct(S, cut); g.fill(); g.restore();
+  // the chute, under the housing, pointing out the front
+  g.save(); g.rotate(Math.atan2(dy, dx));
+  g.fillStyle = '#3b3a35'; g.beginPath(); g.moveTo(8, -6); g.lineTo(15, -4.5); g.lineTo(15, 4.5); g.lineTo(8, 6); g.closePath(); g.fill();
+  g.save(); g.beginPath(); g.rect(12, -4.5, 3, 9); g.clip();
+  for (let i = -3; i < 4; i++) { g.fillStyle = i % 2 ? '#e2b12f' : '#1c1b18'; g.beginPath(); g.moveTo(12, i * 2.6); g.lineTo(15, i * 2.6 - 2); g.lineTo(15, i * 2.6 + .6); g.lineTo(12, i * 2.6 + 2.6); g.fill(); }
+  g.restore();
+  g.fillStyle = '#16150f'; g.fillRect(14.2, -3, .8, 6);
+  // pistons on both sides, pumping while it digs
+  const pump = on ? Math.sin(t * 9) * 1.4 : 0;
+  for (const sd of [-1, 1]) {
+    g.fillStyle = '#2d2c28'; g.fillRect(-7, sd * 11 - 2.2, 12, 4.4);
+    g.fillStyle = '#b9b6a8'; g.fillRect(-4 + pump * sd, sd * 11 - 1.1, 7, 2.2);
+    g.fillStyle = '#5c5a50'; g.fillRect(-8, sd * 11 - 2.6, 3, 5.2);
+  }
+  g.restore();
+  // the housing: weathered metal plate with chamfered corners
+  const hg = g.createLinearGradient(-S, -S, S, S); hg.addColorStop(0, '#8e8b78'); hg.addColorStop(.55, '#6f6c5c'); hg.addColorStop(1, '#4c4a3f');
+  g.fillStyle = hg; oct(S - 1, cut); g.fill();
+  g.strokeStyle = '#26251f'; g.lineWidth = 1.4; g.stroke();
+  // panel seams and a lighter top edge
+  g.strokeStyle = 'rgba(30,28,22,.45)'; g.lineWidth = .8;
+  g.beginPath(); g.moveTo(-S + 1, -4); g.lineTo(-7.5, -4); g.moveTo(7.5, -4); g.lineTo(S - 1, -4); g.moveTo(-S + 1, 4); g.lineTo(-7.5, 4); g.moveTo(7.5, 4); g.lineTo(S - 1, 4); g.stroke();
+  g.strokeStyle = 'rgba(255,255,240,.18)'; g.beginPath(); g.moveTo(-S + cut, -S + 1.6); g.lineTo(S - cut, -S + 1.6); g.stroke();
+  // rust and wear
+  g.fillStyle = 'rgba(150,80,30,.28)'; g.beginPath(); g.ellipse(-7, 7.5, 2.6, 1.4, .5, 0, 7); g.ellipse(8, -8, 1.8, 1, -.4, 0, 7); g.ellipse(7.5, 8.5, 1.2, .8, 0, 0, 7); g.fill();
+  // corner bolts
+  for (const [bx, by] of [[-8, -8], [8, -8], [-8, 8], [8, 8]]) {
+    g.fillStyle = '#2a2924'; g.beginPath(); g.arc(bx, by, 1.6, 0, 7); g.fill();
+    g.fillStyle = '#b3af9c'; g.beginPath(); g.arc(bx - .4, by - .4, .8, 0, 7); g.fill();
+  }
+  // the well with a ring of teeth and the turning spiral cutter
+  g.fillStyle = '#1b1a16'; g.beginPath(); g.arc(0, 0, 7.4, 0, 7); g.fill();
+  g.strokeStyle = '#3e3c34'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 7.4, 0, 7); g.stroke();
+  g.save(); g.rotate(t * 5);
+  for (let i = 0; i < 3; i++) {
+    g.rotate(Math.PI * 2 / 3);
+    g.fillStyle = '#a7a493'; g.beginPath(); g.moveTo(1.2, -1); g.quadraticCurveTo(4.5, -4.2, 6.6, -1.2); g.lineTo(6.2, .6); g.quadraticCurveTo(4, -1.6, 1.2, 1.2); g.closePath(); g.fill();
+    g.fillStyle = '#d8d4c0'; g.beginPath(); g.arc(6.4, -.4, .9, 0, 7); g.fill();
+  }
+  g.fillStyle = '#e2b12f'; g.beginPath(); g.arc(0, 0, 2.3, 0, 7); g.fill();
+  g.fillStyle = '#5a4510'; g.beginPath(); g.arc(0, 0, .9, 0, 7); g.fill();
+  g.restore();
+  // dust kicked up at the ore while it digs
+  if (on) for (let i = 0; i < 6; i++) {
+    const ph = (t * 1.6 + i / 6) % 1, a = i * 2.1 + t * .7, r = 4 + ph * 9;
+    g.fillStyle = `rgba(170,150,115,${.45 * (1 - ph)})`; g.beginPath(); g.arc(Math.cos(a) * r, Math.sin(a) * r, 1 + ph * 1.8, 0, 7); g.fill();
+  }
 }
 /** A chest: a wooden box with a metal band. */
 function paintChest(g: CanvasRenderingContext2D, x: number, y: number) {
