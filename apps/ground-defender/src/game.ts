@@ -29,7 +29,7 @@ export const SURVIVAL = {
   splitterCost: 4,      // stone for a splitter
   splitTime: .3,        // seconds between stones out of a splitter
   chestCost: 10,        // stone for a chest
-  chestSize: 200,       // a chest holds 200 stone
+  chestStacks: 20, chestStack: 100, // a chest holds 20 stacks of up to 100 of one thing
   packCost: 5,          // stone for a science pack
   labCost: 20,          // stone for a lab
   labSize: 40,          // packs a lab holds
@@ -191,7 +191,7 @@ const RECIPES: Rec[] = [
   R('grab', 'logistics', { circuit: 1, gear: 1, ironPlate: 1 }, .5, 1, 'Moves things from the tile behind it to the tile in front: off belts, into furnaces, out of chests.'),
   R('split', 'logistics', { circuit: 5, ironPlate: 5, belt: 4 }, 1, 1, 'Sends things left and right in turn, half each way.'),
   R('tunnel', 'logistics', { ironPlate: 10, belt: 5 }, 1, 2, 'Things go in one and come out the next one ahead, up to 6 tiles, under anything.'),
-  R('chest', 'logistics', { stone: 8 }, .5, 1, 'Holds 200 things. T takes them out, or a grabber.'),
+  R('chest', 'logistics', { stone: 8 }, .5, 1, 'Holds 20 stacks of up to 100. Tap it to open it and put things in or take them out; grabbers work too. Double-tap picks it up.'),
   R('pole', 'logistics', { stone: 1, wire: 2 }, .5, 2, 'Carries power from a generator. Buildings next to a pole get power; poles connect up to 7 tiles apart.'),
   R('pipe', 'logistics', { ironPlate: 1 }, .5, 1, 'Carries water from a pump to turrets.', 'cooling'),
   R('pump', 'logistics', { circuit: 2, gear: 1, pipe: 1 }, 2, 1, 'Pumps water into pipes. A turret touching wet pipes shoots twice as fast.', 'cooling'),
@@ -351,6 +351,12 @@ type Bag = Record<Kind, number>;
 const emptyBag = (): Bag => Object.fromEntries(KINDS.map(k => [k, 0])) as Bag;
 type Chest = Bag;
 const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
+/** How many stacks (of up to 100) the things in a chest take up. */
+const chestStacks = (ch: Bag) => KINDS.reduce((a, k) => a + Math.ceil((ch[k] || 0) / SURVIVAL.chestStack), 0);
+/** One more k fits in the chest: a stack of k with room, or a free stack. */
+const chestFits = (ch: Bag, k: Kind) => (ch[k] || 0) % SURVIVAL.chestStack !== 0 || chestStacks(ch) < SURVIVAL.chestStacks;
+/** A chest's things as stacks of up to 100, in inventory order. */
+const chestList = (ch: Bag) => KINDS.flatMap(k => { const out: Stack[] = []; let n = Math.floor(ch[k] || 0); while (n > 0) { const m = Math.min(n, SURVIVAL.chestStack); out.push({ k, n: m }); n -= m; } return out; });
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
@@ -460,7 +466,7 @@ interface Mate { id: string; link: Link; p: Persona; bub: Bubble[]; dig: number;
 /** Another player's guy, as drawn. */
 interface OtherGuy { down?: boolean; id: string; x: number; y: number; face: number; walk: number; load: Loadout; hp: number; w: Weapon | null; }
 /** What a friend's game may ask the host's game to do for its guy. */
-const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet'] as const;
+const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet', 'boxPut', 'boxTake'] as const;
 type Act = typeof ACTS[number];
 
 export class Survival {
@@ -1044,7 +1050,22 @@ export class Survival {
   private chestBox() { const c0 = this.plat.c0 + (SPACE.plat - SPACE.chest) / 2, r0 = this.plat.r0 + (SPACE.plat - SPACE.chest) / 2; return { c0, r0, x: GX0 + (c0 + 1) * TILE, y: GY0 + (r0 + 1) * TILE }; }
   private chestTile(c: number, r: number) { if (!this.space) return false; const b = this.chestBox(); return c >= b.c0 && c < b.c0 + SPACE.chest && r >= b.r0 && r < b.r0 + SPACE.chest; }
   private openChest() { this.chestOpen = true; this.chestSig = ''; this.picked = null; this.closeBld(); this.bpOpen = false; this.placing = false; this.stick = null; Sound.click(); }
-  private closeChest() { this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
+  /** A chest you built: tap it to open it (20 stacks). */
+  private boxKey: string | null = null;
+  private openBox(key: string) { this.openChest(); this.boxKey = key; }
+  /** Puts up to n of k into the chest at key; returns how many went in. */
+  private boxPut(key: string, k: Kind, n: number) {
+    const ch = this.chests.get(key); if (!ch) return 0;
+    let put = 0; const want = Math.min(n, Math.floor(this.bag[k]));
+    while (put < want && chestFits(ch, k)) { const room = SURVIVAL.chestStack - (ch[k] % SURVIVAL.chestStack || 0), m = Math.min(want - put, room || SURVIVAL.chestStack); ch[k] += m; put += m; }
+    this.bag[k] -= put; this.syncQuick(); this.chestSig = ''; return put;
+  }
+  /** Takes up to n of k out of the chest at key. */
+  private boxTake(key: string, k: Kind, n: number) {
+    const ch = this.chests.get(key); if (!ch) return;
+    const m = Math.min(n, ch[k]); ch[k] -= m; this.bag[k] += m; this.syncQuick(); this.chestSig = ''; Sound.click();
+  }
+  private closeChest() { this.boxKey = null; this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
   /** Puts up to n of k in the chest: tops up stacks of k first, then starts new ones while there's room. Returns how many went in. */
   private chestPut(k: Kind, n: number) {
     let left = Math.min(n, this.bag[k]);
@@ -1056,6 +1077,18 @@ export class Survival {
     e.stopPropagation();
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose]'); if (!el || !this.running || this.paused) return;
     if (el.dataset.chestclose !== undefined) { this.closeChest(); return; }
+    const box = this.boxKey;
+    if (box !== null) {
+      const ch = this.chests.get(box); if (!ch) { this.closeChest(); return; }
+      const full = () => { this.say(`The chest is full: ${SURVIVAL.chestStacks} stacks`, 2); Sound.denied(); };
+      if (el.dataset.take !== undefined) { const k = el.dataset.k as Kind, n = Number(el.dataset.n); if (!this.remote('boxTake', [box, k, n])) this.boxTake(box, k, n); }
+      else if (el.dataset.put) { const k = el.dataset.put as Kind; if (!this.remote('boxPut', [box, k, this.bag[k]])) { if (this.boxPut(box, k, this.bag[k])) Sound.thump(); else full(); } }
+      else if (el.dataset.putall !== undefined) {
+        let n = 0; for (const k of KINDS) if (this.bag[k] >= 1) { if (!this.remote('boxPut', [box, k, this.bag[k]])) n += this.boxPut(box, k, this.bag[k]); else n++; }
+        if (n) Sound.thump(); else if (chestStacks(ch) >= SURVIVAL.chestStacks) full(); else { this.say('Nothing to put in', 2); Sound.denied(); }
+      }
+      this.chestSig = ''; return;
+    }
     if (this.net === 'guest') {
       if (el.dataset.take !== undefined) this.remote('chestTake', [Number(el.dataset.take)]);
       else if (el.dataset.put) this.remote('chestPut', [el.dataset.put, this.bag[el.dataset.put as Kind]]);
@@ -1077,6 +1110,23 @@ export class Survival {
     const el = this.pad.querySelector<HTMLElement>('#svSpace')!;
     if (!this.chestOpen) { if (!el.hidden) el.hidden = true; return; }
     const have = KINDS.filter(k => this.bag[k] > 0);
+    if (this.boxKey !== null) {
+      const ch = this.chests.get(this.boxKey); if (!ch) { this.closeChest(); return; }
+      const list = chestList(ch), sig = JSON.stringify(['box', this.boxKey, list, have.map(k => this.bag[k])]);
+      if (sig !== this.chestSig) {
+        this.chestSig = sig;
+        const slots = Array.from({ length: SURVIVAL.chestStacks }, (_, i) => { const st = list[i]; return st ? `<button class="slot" data-take data-k="${st.k}" data-n="${st.n}" title="Take ${st.n} ${escHtml(KIND_NAME[st.k])}"><img src="${this.icon(st.k)}" alt=""><b>${st.n}</b></button>` : '<div class="slot empty"></div>'; }).join('');
+        const items = have.map(k => `<button class="slot" data-put="${k}" title="Put in ${escHtml(KIND_NAME[k])}"><img src="${this.icon(k)}" alt=""><b>${fmt(Math.floor(this.bag[k]))}</b></button>`).join('');
+        el.innerHTML = `<div class="trow"><h3>Chest</h3><span class="fine">${list.length} / ${SURVIVAL.chestStacks} stacks</span></div>
+          <p class="fine">Each stack holds up to ${SURVIVAL.chestStack}. Tap a stack to take it out.</p>
+          <div class="chestgrid">${slots}</div>
+          <div class="trow"><b>Your things</b><button class="ghost small" data-putall>Put everything in</button></div>
+          <p class="fine">Tap something to put all of it in.</p>
+          <div class="chestmine">${items || '<p class="fine">Your pockets are empty.</p>'}</div>
+          <button class="ghost small" data-chestclose>Close (Esc)</button>`;
+      }
+      el.hidden = false; return;
+    }
     const sig = JSON.stringify([this.spaceChest, have.map(k => this.bag[k])]);
     if (sig !== this.chestSig) {
       this.chestSig = sig;
@@ -1863,7 +1913,7 @@ export class Survival {
       return b.type !== 'hub' && this.feedBld(b, k) ? ok(BNAME[b.type].toLowerCase()) : no(BNAME[b.type].toLowerCase());
     }
     const ch = this.chests.get(key);
-    if (ch) { if (chestN(ch) >= SURVIVAL.chestSize) { this.bubble(x, y - 18, 'The chest is full', 'info'); Sound.denied(); return; } ch[k]++; return ok('chest'); }
+    if (ch) { if (!chestFits(ch, k)) { this.bubble(x, y - 18, 'The chest is full', 'info'); Sound.denied(); return; } ch[k]++; return ok('chest'); }
     const tu = this.turrets.get(key); if (tu) return this.feedTurret(tu, k) ? ok(ONE_NAME[T_ITEM[tu.kind]].toLowerCase()) : no(ONE_NAME[T_ITEM[tu.kind]].toLowerCase());
     const lb = this.labs.get(key); if (lb) return this.feedLab(lb, k) ? ok('lab') : no('lab');
     const mc = this.machines.find(m => dist(x, y, m.x, m.y) < m.r + 14);
@@ -2281,7 +2331,7 @@ export class Survival {
     const bd = this.blds.get(key);
     if (bd && bd.type === 'hub' && k === 'robot') { bd.robots++; this.robots.push(this.newRobot(key)); return true; }
     if (bd && bd.type !== 'tunnel') return this.feedBld(bd, k);
-    const ch = this.chests.get(key); if (ch) { if (chestN(ch) >= SURVIVAL.chestSize) return false; ch[k]++; return true; }
+    const ch = this.chests.get(key); if (ch) { if (!chestFits(ch, k)) return false; ch[k]++; return true; }
     const sp = this.splitters.get(key); if (sp) { if (sp.buf.length >= 4) return false; sp.buf.push(k); return true; }
     if (this.isBelt(key)) { if (this.items.some(o => !o.gone && dist(o.x, o.y, x, y) < 10)) return false; this.items.push({ x, y, k }); return true; }
     return false;
@@ -2300,7 +2350,7 @@ export class Survival {
       if (b.type === 'hub') return k === 'robot';
       return false;
     }
-    const ch = this.chests.get(key); if (ch) return chestN(ch) < SURVIVAL.chestSize;
+    const ch = this.chests.get(key); if (ch) return chestFits(ch, k);
     return true;
   }
   /** The tile at (c, r) is the machine's side, where belts and grabbers meet it. */
@@ -2397,6 +2447,7 @@ export class Survival {
         const b = this.blds.get(key);
         if (this.turrets.has(key)) { if (this.hostOnly()) return; this.picked = key; Sound.click(); return; }
         this.picked = null;
+        if (this.chests.has(key)) { this.openBox(key); return; }
         // furnaces, assemblers and drills open their panel (which has Pick up)
         if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
         hint(tileX(t.c), tileY(t.r) - 14);
@@ -3529,9 +3580,9 @@ export class Survival {
     for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number); paintGrabber(g, tileX(c), tileY(r), gr); }
     for (const [key, sp] of this.splitters) { const [c, r] = key.split(',').map(Number); paintSplitter(g, tileX(c), tileY(r), sp.d); }
     for (const [key, ch] of this.chests) {
-      const [c, r] = key.split(',').map(Number), n = chestN(ch); paintChest(g, tileX(c), tileY(r));
-      g.fillStyle = n >= SURVIVAL.chestSize ? '#ff8a7a' : '#fff5ea'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
-      g.fillText(`${n}/${SURVIVAL.chestSize}`, tileX(c), tileY(r) + 21);
+      const [c, r] = key.split(',').map(Number), n = chestStacks(ch); paintChest(g, tileX(c), tileY(r));
+      g.fillStyle = n >= SURVIVAL.chestStacks ? '#ff8a7a' : '#fff5ea'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center';
+      g.fillText(`${n}/${SURVIVAL.chestStacks}`, tileX(c), tileY(r) + 21);
     }
     for (const [key, b] of this.blds) {
       const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
