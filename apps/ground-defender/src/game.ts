@@ -636,6 +636,8 @@ export class Survival {
     const me = this as unknown as Record<string, unknown>;
     for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
     this.bag = { ...emptyBag(), ...(d.bag as Bag) };
+    // ore patches never run out now, so ones a save had dug down come back full
+    for (const p of this.patches) p.left = p.max;
     this.quick = ((d.quick as (Kind | null)[]) ?? Array(10).fill(null)).slice(0, 10); this.syncQuick();
     this.gates = d.gates as Gate[];
     this.bears = (d.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
@@ -1150,15 +1152,15 @@ export class Survival {
     let h = `<h3>${BNAME[b.type]}</h3>`;
     if (b.type === 'drill') {
       // like a mining drill's info window: what it digs, how much is left, how fast, power, progress and what's waiting to come out
-      const pt = b.pi !== undefined ? this.patches[b.pi] : undefined, ore = pt?.ore, left = pt?.left ?? 0;
-      const full = b.out >= 5, runs = !!pt && left > 0 && power && !full;
+      const pt = b.pi !== undefined ? this.patches[b.pi] : undefined, ore = pt?.ore;
+      const full = b.out >= 5, runs = !!pt && power && !full;
       const speed = ST.digMul / SURVIVAL.drillEvery, eta = runs ? (SURVIVAL.drillEvery - b.t) / ST.digMul : 0;
-      const status = !pt || left <= 0 ? '<b class="warn">The ore here has run out.</b> Pick it up and put it on another patch.' : !power ? '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.' : full ? '<b class="warn">Output full.</b> Put a belt, chest or furnace in front of it, or take the ore out.' : 'Working.';
+      const status = !pt ? '<b class="warn">Not on an ore patch.</b>' : !power ? '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.' : full ? '<b class="warn">Output full.</b> Put a belt, chest or furnace in front of it, or take the ore out.' : 'Working.';
       h += `<div class="drillinfo">
         <div class="drow"><img src="${ore ? this.icon(ore) : this.icon('drill')}" alt=""><div><b>${ore ? `Digging ${ore === 'stone' ? 'stone' : ONE_NAME[ore].toLowerCase()}` : 'Not on ore'}</b><span class="fine">${status}</span></div></div>
         <dl>
           <dt>Mining speed</dt><dd>${+speed.toFixed(2)} ore a second (1 every ${+(SURVIVAL.drillEvery / ST.digMul).toFixed(2)} s)</dd>
-          <dt>Ore left in patch</dt><dd>${fmt(left)}${pt ? ` of ${fmt(pt.max)}` : ''}${pt && runs ? ` · about ${clockLong(left / speed)} to dig out` : ''}</dd>
+          <dt>Ore in patch</dt><dd>${pt ? 'Never runs out' : 'none'}</dd>
           <dt>Power</dt><dd>${power ? '<span class="ok">Connected</span>' : '<span class="warn">None</span>'}</dd>
           <dt>Output</dt><dd>${b.out && b.outK ? `${b.out}/5 ${KIND_NAME[b.outK]}` : 'empty'} · goes out the ${['right', 'bottom', 'left', 'top'][b.d] ?? 'front'} (R turns it)</dd>
           <dt>Pollution</dt><dd>${runs ? `${SURVIVAL.pollution.drill} a second` : 'none while stopped'}</dd>
@@ -1342,7 +1344,7 @@ export class Survival {
     if (this.powerT <= 0) { this.powerT = .5; this.updatePower(); }
     const P = SURVIVAL.pollution;
     for (const [key, b] of this.blds) {
-      const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r), [dx, dy] = DIRS[b.d];
+      const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[b.d];
       if (b.type === 'gen') {
         const rate = this.genLoad.get(key) ?? 0;
         if (!rate) continue;
@@ -1360,8 +1362,8 @@ export class Survival {
         b.on = true; b.t += dt * ST.digMul;
         this.pollution += P.drill * dt;
         if (b.t < SURVIVAL.drillEvery) continue;
-        b.t = 0; p.left--; b.out++; b.outK = p.ore;
-        if (p.left <= 0) this.bubble(x, y - 20, 'This ore patch has run out', 'info');
+        // ore patches never run out
+        b.t = 0; b.out++; b.outK = p.ore;
         continue;
       }
       if (b.type === 'furnace') {
@@ -2020,7 +2022,7 @@ export class Survival {
         this.face = Math.atan2(dg.y - this.y, dg.x - this.x);
         if (this.swing <= 0) { this.swing = 1; Sound.click(); }
         this.mineT += dt * ST.digMul;
-        if (this.mineT >= SURVIVAL.digEvery) { this.mineT -= SURVIVAL.digEvery; dg.left--; this.bag[dg.ore]++; this.bubble(this.x, this.y - 30, `+1 ${dg.ore === 'stone' ? 'stone' : ONE_NAME[dg.ore].toLowerCase()}`, 'info'); Sound.dink(); }
+        if (this.mineT >= SURVIVAL.digEvery) { this.mineT -= SURVIVAL.digEvery; this.bag[dg.ore]++; this.bubble(this.x, this.y - 30, `+1 ${dg.ore === 'stone' ? 'stone' : ONE_NAME[dg.ore].toLowerCase()}`, 'info'); Sound.dink(); }
       }
     }
     this.runQueue(dt);
@@ -3687,7 +3689,6 @@ const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(bx -
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const trim = (n: number) => String(Math.round(n * 100) / 100);
-const clockLong = (t: number) => t >= 3600 ? `${Math.floor(t / 3600)} h ${Math.round(t % 3600 / 60)} min` : t >= 60 ? `${Math.round(t / 60)} min` : `${Math.ceil(t)} s`;
 const clock = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
 const easeInOut = (k: number) => k * k * (3 - 2 * k);
 function approachAngle(a: number, b: number, step: number) {

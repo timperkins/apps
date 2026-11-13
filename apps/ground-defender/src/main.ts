@@ -146,7 +146,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
     'You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates.'] },
   { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
-    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> (or the Mine button) to dig by hand.',
+    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). They never run out. Stand on one and press <kbd>M</kbd> (or the Mine button) to dig by hand.',
     'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. ',
     'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. Tap the ammo machine and pick a recipe first, then put in stone, plates, bars or cut diamonds: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). You can also craft ammo by hand in the Combat tab, but you get 1 less. Put ammo in your ammo slots to shoot it.'] },
   { icon: '⚙️', title: 'Crafting', lines: [
@@ -154,7 +154,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
     'Anything you can place goes on the quickbar at the bottom left: tap it or press <kbd>1</kbd> to <kbd>0</kbd>, then tap the map. Drag to lay a line of belts. <kbd>R</kbd> turns things. Tap anything you placed to pick it back up, machines and mines too.'] },
   { icon: '🏭', title: 'Your factory', lines: [
-    'Tap a drill to see what it is digging, how fast, how much ore is left and whether it has power.',
+    'Tap a drill to see what it is digging, how fast, and whether it has power.',
     'Drills go on ore patches and dig by themselves, dropping ore in front onto a belt. Grabbers move things off belts into furnaces, assemblers, chests and turrets, and back out.',
     'Drills, assemblers and labs need power: a generator burning stone, and power poles (each one powers what is next to it and joins other poles up to 7 tiles away). A red lightning bolt means no power.',
     'A <b>crafting machine</b> costs 10 iron plates and 5 stone, no research needed. Tap one to set a recipe (like gears) and put in what it needs. It crafts 4 times slower than you, but keeps going until you change the recipe. Grabbers can feed it too.',
