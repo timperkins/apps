@@ -101,6 +101,7 @@ export const SURVIVAL = {
   rocketCost: { stone: 40, iron: 20 } as Cost,    // a rocket launcher
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
   rocketStone: 10,
+  xrocketTiles: 5, // an exploding rocket hurts everything in a square this many tiles across
   rgunReload: 1.5,
   ammoPoints: 100,      // each ammo (or rocket) has 100 usage points; a crossbow shot or a rocket uses all of them
   mgunEvery: .2, mgunUse: .5, mgunDamage: { ammo: 1.4, copperAmmo: 1.5, ironAmmo: 1.8, goldAmmo: 2, diamondAmmo: 2.25 } as Record<string, number>, // the machine gun
@@ -222,6 +223,7 @@ const RECIPES: Rec[] = [
   R('rxbow', 'combat', { stone: 200, ironPlate: 20 }, 6, 1, 'A crossbow you hold that fires very fast while you hold Space: 0.3 damage every 0.1 s. It uses ammo slowly (4.62 of an ammo\'s 100 usage points a second). Put it in a weapon slot.', undefined, false),
   R('xbow', 'combat', { stone: 20 }, 2, 1, 'A plain crossbow you hold. One ammo a shot; with no ammo it fires your loadout bolts.', undefined, false),
   R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you hold: 70 damage a rocket. Put it in a weapon slot and rockets in an ammo slot.', 'rocket', false),
+  { ...R('xrocket', 'combat', {}, 2, 1, 'A rocket that explodes when it hits, hurting every bear and spawner in a 5 by 5 tile area. Fires from the rocket gun and rocket launchers.', 'rocket'), in: { rocket: 2 } },
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
   { id: 'expand', cat: 'combat', n: 1, time: 0, in: { stone: 40 }, unlock: 'walls', asm: false, desc: 'Moves your walls out for more room.' },
@@ -285,7 +287,7 @@ const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
-  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun', 'xbow', 'rxbow', 'mgun',
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'xrocket', 'rgun', 'xbow', 'rxbow', 'mgun',
   'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
@@ -318,9 +320,13 @@ const isAmmoKind = (k: Kind): k is AmmoKind => (AMMO_KINDS as Kind[]).includes(k
 type Weapon = 'xbow' | 'rxbow' | 'rgun' | 'mgun';
 const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'mgun', 'rgun'];
 const isWeapon = (k: Kind | null): k is Weapon => !!k && (WEAPONS as Kind[]).includes(k);
-type Shot = AmmoKind | 'rocket';
-const isShot = (k: Kind | null): k is Shot => !!k && (k === 'rocket' || isAmmoKind(k));
-const fits = (w: Weapon, k: Shot) => (w === 'rgun') === (k === 'rocket');
+type RocketKind = 'rocket' | 'xrocket';
+/** Exploding rockets first: rocket guns and launchers use them before plain ones. */
+const ROCKETS: RocketKind[] = ['xrocket', 'rocket'];
+const isRocket = (k: Kind | null): k is RocketKind => k === 'rocket' || k === 'xrocket';
+type Shot = AmmoKind | RocketKind;
+const isShot = (k: Kind | null): k is Shot => !!k && (isRocket(k) || isAmmoKind(k));
+const fits = (w: Weapon, k: Shot) => (w === 'rgun') === isRocket(k);
 /** An ammo slot: one kind of ammo, as usage points (100 for each ammo in it). */
 interface AmmoSlot { k: Shot; pts: number; }
 type Cost = Partial<Record<Kind, number>>;
@@ -335,14 +341,14 @@ const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
-  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', xrocket: 'exploding rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
   belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
-  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', xrocket: 'Exploding rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
   belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
@@ -350,7 +356,7 @@ interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
 /** A turret shoots the nearest bear or spawner in range (or the one you picked), one ammo a shot.
  *  kind: a plain turret, a brick turret, a rapid crossbow or a rocket launcher (which only takes rockets). */
 type TKind = 'turret' | 'brick' | 'rapid' | 'rocket';
-interface Turret { max?: number; ammo: Partial<Record<AmmoKind | 'rocket', number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
+interface Turret { max?: number; ammo: Partial<Record<Shot, number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
 const T_ITEM: Record<TKind, Placeable> = { turret: 'turret', brick: 'bturret', rapid: 'rapid', rocket: 'launcher' };
 const ITEM_T: Partial<Record<Placeable, TKind>> = { turret: 'turret', bturret: 'brick', rapid: 'rapid', launcher: 'rocket' };
 const tAmmo = (tu: Turret) => Object.values(tu.ammo).reduce((a, n) => a + (n ?? 0), 0);
@@ -368,7 +374,7 @@ interface Bld { on?: boolean; type: BType; d: number; inp: number; inpK?: Kind; 
 /** A flying robot that carries one thing from a chest to whatever needs it. */
 interface Robot { x: number; y: number; hub: string; k: Kind | null; src: { x: number; y: number; take: () => boolean; kind?: Kind } | null; dst: { x: number; y: number; give: () => boolean; id: string } | null; }
 const KIND_DOT: Record<Kind, string> = Object.fromEntries(KINDS.map(k => [k, '#d0ccc2'])) as Record<Kind, string>;
-Object.assign(KIND_DOT, { ammo: '#7fc8ff', brick: '#d97a5a', pack: '#e0524a', pack2: '#5fbf86', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironPlate: METAL.iron.color, copperPlate: METAL.copper.color, goldBar: METAL.gold.color, gem: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a', gear: '#9aa0a6', wire: '#e08a4a', circuit: '#4caf50' });
+Object.assign(KIND_DOT, { ammo: '#7fc8ff', brick: '#d97a5a', pack: '#e0524a', pack2: '#5fbf86', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironPlate: METAL.iron.color, copperPlate: METAL.copper.color, goldBar: METAL.gold.color, gem: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a', xrocket: '#ffb020', gear: '#9aa0a6', wire: '#e08a4a', circuit: '#4caf50' });
 /** A lab and the science packs in it. */
 interface Lab { packs: number; packs2?: number; t: number; }
 /** A splitter takes things in and sends them out to its left and right in turn. */
@@ -421,7 +427,7 @@ function turnBp(b: Blueprint): Blueprint { return { name: b.name, parts: b.parts
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
 interface Bolt { from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
 /** A rocket swirls round a loop, then homes in on its target. */
-interface Rocket { from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
+interface Rocket { boom?: boolean; from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info' | 'tiny'; }
 
@@ -788,7 +794,7 @@ export class Survival {
   private useUp(i: number, pts: number) {
     const a = this.ammoSlots[i]; if (!a) return;
     a.pts -= pts;
-    if (a.pts <= 1e-6) { this.ammoSlots[i] = null; this.bubble(this.x, this.y - 30, `Out of ${a.k === 'rocket' ? 'rockets' : AMMO_NAME[a.k].toLowerCase() + ' ammo'}`, 'info'); }
+    if (a.pts <= 1e-6) { this.ammoSlots[i] = null; this.bubble(this.x, this.y - 30, `Out of ${isRocket(a.k) ? KIND_NAME[a.k] : AMMO_NAME[a.k].toLowerCase() + ' ammo'}`, 'info'); }
   }
   /** Space shoots at the nearest bear (or spawner) in range; Z shoots straight ahead with no target. Holding Space keeps firing. */
   private shoot(targeted: boolean) {
@@ -809,8 +815,9 @@ export class Survival {
     // the rocket gun: one rocket a shot, it swirls and then homes in like a launcher's
     if (w === 'rgun') {
       if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'Put rockets in an ammo slot', 'info'); this.noAmmoT = 1.5; } Sound.denied(); return; }
+      const boom = this.ammoSlots[i]!.k === 'xrocket';
       this.useUp(i, SURVIVAL.ammoPoints); this.mining = false;
-      this.rockets.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+      this.rockets.push({ boom, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
       return;
@@ -912,7 +919,7 @@ export class Survival {
   }
   private armsSig = '';
   /** The colour of the bolt on the crossbow: the ammo it will shoot. */
-  private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && k !== 'rocket' ? metalOf(k).color : undefined; }
+  private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && !isRocket(k) ? metalOf(k).color : undefined; }
   /** Draws the weapon and ammo slots (only when they change). */
   private renderArms() {
     const sig = JSON.stringify([this.weapons, this.wSel, this.ammoSlots.map(a => a && [a.k, Math.ceil(a.pts / 5)]), this.aSel]);
@@ -1483,7 +1490,7 @@ export class Survival {
   private robotJob(busy: Set<string | undefined>): { src: NonNullable<Robot['src']>; dst: NonNullable<Robot['dst']> } | null {
     // what needs something, and what kind
     const needs: { id: string; x: number; y: number; kinds: Kind[]; give: (k: Kind) => boolean }[] = [];
-    for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? ['rocket'] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
+    for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? [...ROCKETS] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
     for (const [key, lb] of this.labs) if (lb.packs < 10 || (lb.packs2 ?? 0) < 10) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'l' + key, x: tileX(c), y: tileY(r), kinds: [...(lb.packs < 10 ? ['pack'] : []), ...((lb.packs2 ?? 0) < 10 ? ['pack2'] : [])] as Kind[], give: k => this.feedLab(lb, k) }); }
     this.machines.forEach((m, i) => { if (m.recipe && m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: MACHINE_IN.filter(k => this.machineTakes(m, k)), give: k => { if (!this.machineTakes(m, k)) return false; m.queue.push(k); return true; } }); });
     for (const [key, b] of this.blds) { const kinds = this.bldWants(b); if (kinds.length) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'b' + key, x: tileX(c), y: tileY(r), kinds, give: k => this.feedBld(b, k) }); } }
@@ -1505,7 +1512,7 @@ export class Survival {
   private feedTurret(tu: Turret, k: Kind) {
     // it never takes more than the most you set for it
     if (tAmmo(tu) + 1 > (tu.max ?? SURVIVAL.turretMaxAmmo) + 1e-9) return false;
-    if (tu.kind === 'rocket') { if (k !== 'rocket') return false; tu.ammo.rocket = (tu.ammo.rocket ?? 0) + 1; return true; }
+    if (tu.kind === 'rocket') { if (!isRocket(k)) return false; tu.ammo[k] = (tu.ammo[k] ?? 0) + 1; return true; }
     const a: AmmoKind | null = k === 'stone' ? 'ammo' : isAmmoKind(k) ? k : null;
     if (!a) return false;
     tu.ammo[a] = (tu.ammo[a] ?? 0) + 1; return true;
@@ -1650,7 +1657,7 @@ export class Survival {
   }
   /** What you could load into this turret (or any turret): rockets for a rocket launcher, ammo for the rest. */
   private loadable(tu: Turret | null = this.nearTurret()) {
-    if (tu?.kind === 'rocket') return this.bag.rocket;
+    if (tu?.kind === 'rocket') return this.bag.rocket + this.bag.xrocket;
     return AMMO_KINDS.reduce((a, k) => a + this.bag[k], 0);
   }
   /** T next to a turret: put all your ammo in it (all your rockets in a rocket launcher). */
@@ -1723,7 +1730,7 @@ export class Survival {
     const best = this.nearTurret();
     if (!best) { this.bubble(this.x, this.y - 30, 'Walk to a turret to load it', 'info'); Sound.denied(); return; }
     if (!this.loadable(best)) { this.bubble(this.x, this.y - 30, best.kind === 'rocket' ? 'No rockets. Make them in an ammo machine (rocket recipe)' : 'No ammo to load. Make some in the ammo machine', 'info'); Sound.denied(); return; }
-    const kinds: Kind[] = best.kind === 'rocket' ? ['rocket'] : AMMO_KINDS;
+    const kinds: Kind[] = best.kind === 'rocket' ? ROCKETS : AMMO_KINDS;
     let n = 0;
     for (const k of kinds) { while (this.bag[k] > 0 && this.feedTurret(best, k)) { this.bag[k]--; n++; } }
     this.bubble(this.x, this.y - 30, `Loaded ${n} ${best.kind === 'rocket' ? 'rocket' : 'ammo'}${best.kind === 'rocket' && n > 1 ? 's' : ''}`, 'info');
@@ -1749,7 +1756,7 @@ export class Survival {
   private canTake(c: number, r: number, k: Kind) {
     const key = c + ',' + r;
     const m = this.isMachine(c, r); if (m) return this.machineTakes(m, k);
-    const tu = this.turrets.get(key); if (tu) return tu.kind === 'rocket' ? k === 'rocket' : k === 'stone' || isAmmoKind(k);
+    const tu = this.turrets.get(key); if (tu) return tu.kind === 'rocket' ? isRocket(k) : k === 'stone' || isAmmoKind(k);
     const lb = this.labs.get(key); if (lb) return (k === 'pack' && lb.packs < SURVIVAL.labSize) || (k === 'pack2' && (lb.packs2 ?? 0) < SURVIVAL.labSize);
     const b = this.blds.get(key);
     if (b && b.type !== 'tunnel') {
@@ -1795,7 +1802,7 @@ export class Survival {
     else if (this.labs.has(key)) { const lb = this.labs.get(key)!; this.bag.pack += lb.packs; this.bag.pack2 += lb.packs2 ?? 0; extra = lb.packs + (lb.packs2 ?? 0); this.labs.delete(key); got = 'lab'; }
     else if (this.turrets.has(key)) {
       const tu = this.turrets.get(key)!; extra = Math.floor(tAmmo(tu));
-      for (const [k, v] of Object.entries(tu.ammo) as [AmmoKind | 'rocket', number][]) this.bag[k] += Math.floor(v);
+      for (const [k, v] of Object.entries(tu.ammo) as [Shot, number][]) this.bag[k] += Math.floor(v);
       this.turrets.delete(key); if (this.picked === key) this.picked = null;
       got = T_ITEM[tu.kind];
     }
@@ -2143,7 +2150,7 @@ export class Survival {
     this.aSel = has[(has.indexOf(this.aSel) + 1) % has.length]; this.armsSig = '';
     this.bubble(this.x, this.y - 30, ONE_NAME[this.ammoSlots[this.aSel]!.k], 'info'); Sound.click();
   }
-  private ammoName() { const w = this.weapon(), i = w ? this.ammoSlot(w) : -1, a = i >= 0 ? this.ammoSlots[i]! : null; return a ? `${a.k === 'rocket' ? 'Rockets' : AMMO_NAME[a.k]} (${Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9)})` : w === 'xbow' ? AMMO[this.load.ammo].name : 'none'; }
+  private ammoName() { const w = this.weapon(), i = w ? this.ammoSlot(w) : -1, a = i >= 0 ? this.ammoSlots[i]! : null; return a ? `${a.k === 'rocket' ? 'Rockets' : a.k === 'xrocket' ? 'Exploding rockets' : AMMO_NAME[a.k]} (${Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9)})` : w === 'xbow' ? AMMO[this.load.ammo].name : 'none'; }
 
   /* ---------- rules ---------- */
   update(dt: number) {
@@ -2359,8 +2366,9 @@ export class Survival {
       const a = Math.atan2(target.y - y, target.x - x), cool = tu.cool ? .5 : 1;
       tu.face = a;
       if (tu.kind === 'rocket') {
-        tu.ammo.rocket = (tu.ammo.rocket ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
-        this.rockets.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+        const rk = ROCKETS.find(k => (tu.ammo[k] ?? 0) > 1e-6) ?? 'rocket';
+        tu.ammo[rk] = (tu.ammo[rk] ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
+        this.rockets.push({ boom: rk === 'xrocket', from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
         Sound.rocket();
         continue;
       }
@@ -2406,16 +2414,17 @@ export class Survival {
       const sp = SURVIVAL.rocketSpeed * (rk.t < swirl ? .55 : 1 + (rk.t - swirl) * .8);
       rk.x += Math.cos(rk.a) * sp * dt; rk.y += Math.sin(rk.a) * sp * dt;
       rk.trail.push({ x: rk.x, y: rk.y }); if (rk.trail.length > 18) rk.trail.shift();
-      const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(false); rk.t = 99; continue; }
+      const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { if (rk.boom) this.explode(rk.x, rk.y, null); else this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(!!rk.boom); rk.t = 99; continue; }
       const hit = this.hitAt(rk.x, rk.y, 6);
       if (hit && (hit === rk.target || rk.t > swirl)) {
-        this.damageTarget(hit, SURVIVAL.rocketDamage);
-        this.blasts.push({ x: rk.x, y: rk.y, t: 0 });
-        Sound.boom(false); rk.t = 99;
+        if (rk.boom) this.explode(hit.x, hit.y, hit);
+        else { this.damageTarget(hit, SURVIVAL.rocketDamage); this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); }
+        Sound.boom(!!rk.boom); rk.t = 99;
       }
     }
     this.rockets = this.rockets.filter(r => r.t < 8);
     for (const bl of this.blasts) bl.t += dt;
+    for (const bm of this.booms) bm.t += dt; this.booms = this.booms.filter(b => b.t < .6);
     for (const sp of this.sparks) sp.t += dt;
     this.sparks = this.sparks.filter(s => s.t < .25);
     this.blasts = this.blasts.filter(b => b.t < .5);
@@ -2466,6 +2475,19 @@ export class Survival {
     for (const b of this.bears) if (b.home === home && (b.state === 'walk' || b.state === 'wait')) { b.state = 'chase'; b.cd = .6; b.tc = 2; n++; }
     if (!was) { this.say(why === 'hurt' ? `You made a bear base angry! ${n ? `${n} bear${n === 1 ? ' is' : 's are'} coming` : 'Its bears will come for you'}` : `The pollution made a bear base angry! ${n} bear${n === 1 ? ' is' : 's are'} coming`, 3); Sound.alarm(); }
   }
+  /** An exploding rocket goes off at (x, y): every bear and spawner in the 5 by 5 tiles round it takes rocket damage (the one it hit too). */
+  private explode(x: number, y: number, hit: Target | null) {
+    const h = SURVIVAL.xrocketTiles * TILE / 2, inside = (tx: number, ty: number, r: number) => Math.abs(tx - x) <= h + r && Math.abs(ty - y) <= h + r;
+    const hits: Target[] = [];
+    for (const b of this.bears) if (b.state !== 'dead' && inside(b.x, b.y, BEAR_R * .5)) hits.push(b);
+    for (const sp of this.spawners) if (!sp.dead && !sp.pre && inside(sp.x, sp.y, SPAWNER_R * .5)) hits.push(sp);
+    if (hit && !hits.includes(hit)) hits.push(hit);
+    for (const t of hits) if (alive(t)) this.damageTarget(t, SURVIVAL.rocketDamage);
+    this.booms.push({ x, y, t: 0 });
+    for (let i = 0; i < 5; i++) this.blasts.push({ x: x + (Math.random() - .5) * h * 1.6, y: y + (Math.random() - .5) * h * 1.6, t: -Math.random() * .15 });
+  }
+  /** Exploding rocket blasts: a 5 by 5 tile flash. */
+  private booms: { x: number; y: number; t: number }[] = [];
   private damageTarget(t: Target, dmg: number) {
     if (isBear(t)) { const sp = t.home !== undefined ? this.spawners[t.home] : undefined; if (sp) this.provoke(sp, 'hurt'); this.boltHit(t, dmg); return; }
     this.provoke(t, 'hurt');
@@ -2849,12 +2871,19 @@ export class Survival {
     // rockets: a smoke trail, then the rocket
     for (const rk of this.rockets) {
       for (let i = 0; i < rk.trail.length; i++) { const p = rk.trail[i], k = i / rk.trail.length; g.fillStyle = `rgba(220,220,220,${k * .45})`; g.beginPath(); g.arc(p.x, p.y, 2 + k * 3, 0, 7); g.fill(); }
-      paintRocket(g, rk.x, rk.y, rk.a, 1);
+      paintRocket(g, rk.x, rk.y, rk.a, 1, rk.boom);
     }
     for (const bl of this.blasts) {
       const k = bl.t / .5;
       g.fillStyle = `rgba(255,170,60,${1 - k})`; g.beginPath(); g.arc(bl.x, bl.y, 10 + k * 34, 0, 7); g.fill();
       g.fillStyle = `rgba(255,240,180,${1 - k})`; g.beginPath(); g.arc(bl.x, bl.y, 6 + k * 14, 0, 7); g.fill();
+    }
+    // exploding rockets: the 5 by 5 tile square they hit lights up
+    for (const bm of this.booms) {
+      const k = bm.t / .6, h = SURVIVAL.xrocketTiles * TILE / 2 * Math.min(1, .5 + k * 2);
+      g.fillStyle = `rgba(255,150,40,${.45 * (1 - k)})`; g.fillRect(bm.x - h, bm.y - h, h * 2, h * 2);
+      g.strokeStyle = `rgba(255,230,150,${1 - k})`; g.lineWidth = 2; g.strokeRect(bm.x - h, bm.y - h, h * 2, h * 2);
+      g.fillStyle = `rgba(255,245,200,${1 - k})`; g.beginPath(); g.arc(bm.x, bm.y, 14 + k * 30, 0, 7); g.fill();
     }
     // the turret you picked: its range, and a line to its target; other turrets' targets get a faint line
     for (const [key, tu] of this.turrets) {
@@ -3531,7 +3560,7 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     g.fillStyle = k === 'ammo' ? '#7fc8ff' : '#3a3a3a'; g.fillRect(x - 3, y - 3, 2.5, 6);
     return;
   }
-  if (k === 'rocket') { paintRocket(g, x, y, 0, .8); return; }
+  if (k === 'rocket' || k === 'xrocket') { paintRocket(g, x, y, 0, .8, k === 'xrocket'); return; }
   if (k === 'xbow' || k === 'rxbow') {
     // a crossbow lying flat: stock, bow and string (the rapid one has a yellow magazine on top)
     g.save(); g.translate(x, y); g.rotate(-Math.PI / 4);
@@ -3573,10 +3602,12 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
   g.fillStyle = '#d0ccc2'; g.beginPath(); g.arc(x - 1.5, y - 1.5, 2, 0, 7); g.fill();
 }
 /** A small rocket pointing along angle a, with a flame. */
-function paintRocket(g: CanvasRenderingContext2D, x: number, y: number, a: number, k: number) {
+function paintRocket(g: CanvasRenderingContext2D, x: number, y: number, a: number, k: number, boom = false) {
   g.save(); g.translate(x, y); g.rotate(a); g.scale(k, k);
   g.fillStyle = '#ffb347'; g.beginPath(); g.moveTo(-7, -2.5); g.lineTo(-13 - Math.random() * 3, 0); g.lineTo(-7, 2.5); g.fill();
   g.fillStyle = '#e8e2d6'; g.fillRect(-7, -3, 11, 6);
+  // an exploding rocket: yellow and black warning stripes
+  if (boom) { g.fillStyle = '#ffc61a'; g.fillRect(-7, -3, 11, 6); g.fillStyle = '#2a2420'; g.fillRect(-4, -3, 2, 6); g.fillRect(0, -3, 2, 6); }
   g.fillStyle = '#d64545'; g.beginPath(); g.moveTo(4, -3); g.lineTo(9, 0); g.lineTo(4, 3); g.fill();
   g.fillStyle = '#d64545'; g.beginPath(); g.moveTo(-7, -3); g.lineTo(-9, -6); g.lineTo(-4, -3); g.moveTo(-7, 3); g.lineTo(-9, 6); g.lineTo(-4, 3); g.fill();
   g.restore();

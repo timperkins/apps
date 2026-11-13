@@ -170,6 +170,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Double-tap anything you built to pick it up.',
     'Blueprint (Ctrl+C): drag a box over what you built to save it, then put it down anywhere as light blue ghosts. Build on a ghost and it goes away.',
     'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.',
+    'An <b>exploding rocket</b> costs 2 rockets. Fired from the rocket gun or a rocket launcher, it blows up everything in a 5 by 5 tile square.',
     '<b>Crafting speed</b> and <b>Furnace speed</b> can be researched again and again: each level makes it 1.25 times faster. The first level costs 30 packs and each one after costs 20 more, up to 980.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
