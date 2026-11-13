@@ -6,7 +6,7 @@ import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { initBuild } from './build-ui';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -122,7 +122,6 @@ const ICONS: Record<string, string> = {
   ok: '<rect x="1" y="5" width="2" height="2"/><rect x="3" y="7" width="2" height="2"/><rect x="5" y="5" width="2" height="2"/><rect x="7" y="3" width="2" height="2"/><rect x="9" y="1" width="1" height="2"/>',
   x: '<rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/>',
   star: '<rect x="5" y="0" width="1" height="3"/><rect x="4" y="3" width="3" height="1"/><rect x="0" y="4" width="11" height="1"/><rect x="2" y="5" width="7" height="1"/><rect x="3" y="6" width="5" height="1"/><rect x="2" y="7" width="7" height="2"/><rect x="1" y="9" width="2" height="2"/><rect x="8" y="9" width="2" height="2"/>',
-  ore: '<rect x="2" y="5" width="2" height="5"/><rect x="5" y="2" width="2" height="8"/><rect x="8" y="4" width="2" height="6"/><rect x="3" y="4" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="0" y="10" width="11" height="1"/>',
   pack: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="2" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="8" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="2" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="8" y="4" width="1" height="3"/>',
 };
 let actsKey = '';
@@ -211,7 +210,8 @@ function refreshActions(): void {
 // Everything on screen; from space, everything on the near side of the world.
 function selectView(add: boolean): void {
   if (!game) return;
-  game.boxSelect(...viewRect(), add);
+  if (game.selectAll) game.selectAll(...viewRect(), add);
+  else game.boxSelect(...viewRect(), add);
 }
 
 function showSelection(names: string[]): void {
@@ -231,14 +231,17 @@ function showSelection(names: string[]): void {
 // straight away: a round green check comes up where you tapped, with the move
 // cursor's arrowheads turning round it. The check sends them, another tap
 // moves it, and clearing the selection calls it off.
-// foe: the tap is on an enemy, so it is an attack (red, with a gunsight)
-let pending: { x: number; y: number; foe: boolean } | null = null;
+// kind: attack is a tap on an enemy (red, with a gunsight), harvest a tap on
+// ore with an ore hauler selected (gold, inside the harvest cursor's diamond)
+type Order = 'move' | 'attack' | 'harvest';
+let pending: { x: number; y: number; kind: Order } | null = null;
 let ringFrame = -1;
-function setPending(p: { x: number; y: number; foe: boolean } | null): void {
+function setPending(p: { x: number; y: number; kind: Order } | null): void {
   pending = p;
   confirmEl.hidden = !p;
-  confirmEl.classList.toggle('foe', !!p?.foe);
-  okBtn.title = p?.foe ? 'Attack it' : 'Send them here';
+  confirmEl.classList.toggle('foe', p?.kind === 'attack');
+  confirmEl.classList.toggle('ore', p?.kind === 'harvest');
+  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : 'Send them here';
   okBtn.setAttribute('aria-label', `${okBtn.title} (clear the selection to call it off)`);
   ringFrame = -1;
   if (p) placeConfirm();
@@ -258,8 +261,8 @@ function placeConfirm(): void {
     okRing.style.width = okRing.style.height = size;
     okRing.style.backgroundSize = size;
   }
-  const frames = pending.foe ? attackRingFrames() : moveRingFrames();
-  const i = Math.floor(performance.now() / (pending.foe ? 140 : 150)) % frames.length;
+  const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : moveRingFrames();
+  const i = Math.floor(performance.now() / (pending.kind === 'move' ? 150 : 140)) % frames.length;
   if (i !== ringFrame) {
     ringFrame = i;
     okRing.style.backgroundImage = `url(${frames[i]})`;
@@ -836,7 +839,7 @@ function spaceTap(e: PointerEvent, orderOnly = false): void {
 // A tap on the map with a finger: orders wait for the check.
 function touchTap(x: number, y: number): void {
   const what = game.cursorAt?.(x, y);
-  if (what === 'move' || what === 'attack' || (locked && what === 'pick')) setPending({ x, y, foe: what === 'attack' });
+  if (what === 'move' || what === 'attack' || what === 'harvest' || (locked && what === 'pick')) setPending({ x, y, kind: what === 'pick' ? 'move' : what });
   else {
     setPending(null);
     game.click(x, y, false);
@@ -865,7 +868,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
       if (e.pointerType === 'mouse') {
         clicked();
         const what = game.cursorAt?.(down.x, down.y);
-        if (what === 'move' || what === 'attack' || (locked && what === 'pick')) sendTo(down.x, down.y);
+        if (what === 'move' || what === 'attack' || what === 'harvest' || (locked && what === 'pick')) sendTo(down.x, down.y);
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);
     } else if (!down.pan && !locked) game.boxSelect(down.x, down.y, p.x, p.y, add);
@@ -888,10 +891,12 @@ let cursorKind: CursorKind = 'arrow';
 // when the last move or attack order was clicked, for the cursor's burst
 let movedAt = -Infinity;
 let attackedAt = -Infinity;
-// A click with the move or attack cursor showing: play its burst.
+let dugAt = -Infinity;
+// A click with the move, attack or harvest cursor showing: play its burst.
 function clicked(): void {
   if (cursorKind === 'move') movedAt = performance.now();
   else if (cursorKind === 'attack') attackedAt = performance.now();
+  else if (cursorKind === 'harvest') dugAt = performance.now();
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
@@ -911,11 +916,15 @@ function hoverNow(now: number): void {
   const shot = Math.floor((now - attackedAt) / 55);
   const shooting = shot >= 0 && shot < ATTACK_CLICK_FRAMES && k !== 'grabbing';
   if (shooting) k = 'attack';
+  const dig = Math.floor((now - dugAt) / 55);
+  const digging = dig >= 0 && dig < ATTACK_CLICK_FRAMES && k !== 'grabbing';
+  if (digging) k = 'harvest';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
   else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 140) % ATTACK_FRAMES.length];
+  else if (k === 'harvest') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 140) % HARVEST_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;

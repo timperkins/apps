@@ -19,6 +19,10 @@ export interface Action {
 }
 
 // A kind of unit you have on screen, for the selection bar.
+// What a tap at a map point would do, for the mouse cursor (harvest: send
+// the selected ore haulers to dig there).
+export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'rally' | 'build' | 'blocked' | null;
+
 export interface UnitType {
   kind: string;
   name: string;
@@ -80,6 +84,9 @@ export interface GameLike {
   // Your kinds of unit inside a map rect (the view), and selecting or
   // dropping one kind of them (on: add those in the rect; off: drop them all).
   unitTypes?(x0: number, y0: number, x1: number, y1: number): UnitType[];
+  // Select everything of yours in a screen rect except kinds that are
+  // only picked by hand (ore haulers), unless that is all there is.
+  selectAll?(x0: number, y0: number, x1: number, y1: number, add: boolean): void;
   selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
   // The kinds of unit of yours that are selected, wherever they are.
   selectedTypes?(): UnitType[];
@@ -118,7 +125,7 @@ export interface GameLike {
   // What a tap at map point (x, y) would do, for the mouse cursor: pick a
   // unit, send the selection there, attack an enemy, set a building's rally point, put the building being
   // placed down, or nothing it can do ('blocked'). null: nothing to show.
-  cursorAt?(x: number, y: number): 'pick' | 'move' | 'attack' | 'rally' | 'build' | 'blocked' | null;
+  cursorAt?(x: number, y: number): CursorAt;
   // How far to shake the view this frame (map pixels), when something big
   // has just been destroyed near the middle of it.
   shake?(): [number, number];

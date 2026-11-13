@@ -273,7 +273,8 @@ export function drawBuggyLights(c: CanvasRenderingContext2D, x: number, y: numbe
   c.fillRect(X, Y, 1, 1);
 }
 
-function hauler(f: Faction): Shape {
+// fill: how much ore is in the bed, 0 empty, 1 partly full, 2 full.
+function hauler(f: Faction, fill = 2): Shape {
   const ore = hex('#c09443');
   const oreL = hex('#f2d06a');
   return (u, v, z) => {
@@ -316,7 +317,12 @@ function hauler(f: Faction): Shape {
       if (z < 2.2) return f.dark;
       return g(mod(along, 3) < 0.6 ? METAL_D : z < 3 ? shade(METAL, -0.12) : METAL, u, v, z, 0.08);
     }
-    const heap = 5.6 + 2.2 * Math.cos((u + 3.5) / 7) * Math.cos(v / 4) + (hash2(Math.floor(u * 1.2), Math.floor(v * 1.2), 3) - 0.5) * 1.2;
+    // the floor of the bed, ribbed across, seen when it is empty
+    if (z <= 2.6) return mod(u, 2.4) < 0.5 ? METAL_D : g(shade(METAL, -0.22), u, v, z, 0.06);
+    if (!fill) return null;
+    const lumpy = (hash2(Math.floor(u * 1.2), Math.floor(v * 1.2), 3) - 0.5) * 1.2;
+    // partly full: a low heap slumped to the back of the bed
+    const heap = fill === 2 ? 5.6 + 2.2 * Math.cos((u + 3.5) / 7) * Math.cos(v / 4) + lumpy : 3.4 + 2.4 * Math.max(0, Math.cos((u + 6) / 5)) * Math.cos(v / 4.5) + lumpy * 0.8;
     if (z <= heap) {
       const n = hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 77, 9);
       return n > 0.9 ? oreL : shade(ore, (n - 0.5) * 0.55);
@@ -570,7 +576,8 @@ export interface V2FactionArt {
   heavyTank: StackSprite[];
   heavyTurret: StackSprite[];
   buggy: StackSprite[];
-  hauler: StackSprite[];
+  hauler: StackSprite[]; // empty
+  haulerLoad: StackSprite[][]; // [fill][dir]: empty, partly full, full
   artillery: StackSprite[];
   boat: StackSprite[];
   heli: StackSprite[];
@@ -580,6 +587,7 @@ export interface V2FactionArt {
 }
 
 export function makeFactionArt(f: Faction): V2FactionArt {
+  const haulerLoad = [0, 1, 2].map((fill) => renderDirs(hauler(f, fill), DIRS, { r: 13, zmax: 11, bakeShadow: true }));
   const inf = (rocket: boolean) => [0, 1, 2].map((fr) => renderDirs(soldier(f, rocket, fr), 16, { r: 4, zmax: 9, step: 0.5, bakeShadow: true }));
   return {
     mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }),
@@ -588,7 +596,8 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     heavyTank: renderDirs(tankHull(f, 20, 15, true), DIRS, { r: 13, zmax: 8, bakeShadow: true }),
     heavyTurret: renderDirs(turretShape(f, 4.8, 6, 2, 13), DIRS, { r: 13.5, zmax: 16 }),
     buggy: renderDirs(buggy(f), DIRS, { r: 8, zmax: 10, bakeShadow: true }),
-    hauler: renderDirs(hauler(f), DIRS, { r: 13, zmax: 11, bakeShadow: true }),
+    hauler: haulerLoad[0],
+    haulerLoad,
     artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }),
     boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }),
     heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }),
