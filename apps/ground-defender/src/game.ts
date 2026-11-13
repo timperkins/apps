@@ -94,7 +94,7 @@ export const SURVIVAL = {
   maxBears: 14,         // ...while there are fewer than 14 bears on the map (huge waves come on top)
   chaseRange: 130,
   angryTime: 60,        // a spawner you hurt (or whose bear you hurt) sends its bears for 60 s after the last hit
-  smogLow: 50, smogHigh: 100, smogCheck: 30, // pollution: at 50 a base might attack, more likely as it rises, and at 100 one surely does (checked every 30 s)      // a bear outside goes for you when you walk this close
+  smogAttack: 1000, smogCheck: 30, // pollution: at 1000 or more a base attacks (checked every 30 s); below that, never      // a bear outside goes for you when you walk this close
   oreMineCost: { iron: { stone: 100 }, copper: { stone: 100, iron: 75 }, gold: { stone: 125, iron: 100, copper: 50 }, diamond: { stone: 150, iron: 100, copper: 75, gold: 50 } } as Record<Ore, Cost>,
   rapidCost: { stone: 50, iron: 10 } as Cost, // a rapid crossbow
   rapidDamage: .75, rapidReload: .05, rapidUse: .008, // 0.8% of one ammo a shot
@@ -2300,9 +2300,8 @@ export class Survival {
       this.smogT -= dt;
       if (this.smogT <= 0) {
         this.smogT = SURVIVAL.smogCheck;
-        const chance = clamp((this.pollution - SURVIVAL.smogLow) / (SURVIVAL.smogHigh - SURVIVAL.smogLow), 0, 1);
         const live = this.spawners.filter(sp => !sp.dead && !sp.pre);
-        if (chance > 0 && live.length && Math.random() < chance) this.provoke(live[Math.floor(Math.random() * live.length)], 'pollution');
+        if (this.pollution >= SURVIVAL.smogAttack && live.length) this.provoke(live[Math.floor(Math.random() * live.length)], 'pollution');
       }
     }
     for (const b of this.bears) {
