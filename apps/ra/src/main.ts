@@ -270,7 +270,7 @@ function placeConfirm(): void {
     okRing.style.backgroundSize = size;
   }
   const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : moveRingFrames();
-  const i = Math.floor(performance.now() / (pending.kind === 'move' ? 150 : 140)) % frames.length;
+  const i = Math.floor(performance.now() / 150) % frames.length;
   if (i !== ringFrame) {
     ringFrame = i;
     okRing.style.backgroundImage = `url(${frames[i]})`;
@@ -931,8 +931,8 @@ function hoverNow(now: number): void {
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
-  else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 140) % ATTACK_FRAMES.length];
-  else if (k === 'harvest') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 140) % HARVEST_FRAMES.length];
+  else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 150) % ATTACK_FRAMES.length];
+  else if (k === 'harvest') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 150) % HARVEST_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;

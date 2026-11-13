@@ -93,6 +93,10 @@ export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, light: 9.5, h
 // Tracked armour: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'mcv', 'hauler']);
 
+// How long a destroyed vehicle's wreck burns, and a destroyed building's ruin (seconds).
+export const BURN_WRECK = 10;
+export const BURN_RUIN = 20;
+
 // How hard the screen shakes (in map pixels) when something big is
 // destroyed nearby: tanks and the like, and every building, by its size.
 export const QUAKE: Partial<Record<UnitKind, number>> = { light: 1.5, heavy: 2, mcv: 2, hauler: 1.6, boat: 1.2 };
@@ -205,6 +209,7 @@ interface P {
   kind: PKind;
   size: number;
   g: number; // gravity
+  v: number; // which puff texture
 }
 interface Boom {
   x: number;
@@ -328,6 +333,82 @@ export function drawFlame(c: CanvasRenderingContext2D, x: number, y: number, h: 
   }
 }
 
+// ---------- Soft puffs of smoke ----------
+// Smoke is drawn as soft, lumpy blobs rather than squares: a few textures of
+// a cloudy puff (soft edge, mottled middle), one set per colour, drawn
+// smoothly at whatever size the puff has grown to. Overlapping puffs blend
+// into a cloud.
+const PUFF_N = 4;
+const PUFF_PX = 32;
+const puffTex = new Map<string, HTMLCanvasElement[]>();
+function puffs(col: RGB): HTMLCanvasElement[] {
+  const key = col.join(',');
+  let out = puffTex.get(key);
+  if (!out) {
+    out = [];
+    for (let v = 0; v < PUFF_N; v++) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = PUFF_PX;
+      const g = cv.getContext('2d')!;
+      const img = g.createImageData(PUFF_PX, PUFF_PX);
+      const d = img.data;
+      const h = PUFF_PX / 2;
+      for (let y = 0; y < PUFF_PX; y++)
+        for (let x = 0; x < PUFF_PX; x++) {
+          const dx = (x + 0.5 - h) / h;
+          const dy = (y + 0.5 - h) / h;
+          // a lumpy edge and a mottled body, lighter towards the top
+          const n = vnoise(x / 5 + v * 17, y / 5, 91 + v) * 0.6 + vnoise(x / 2.5, y / 2.5 + v * 9, 37 + v) * 0.4;
+          const r = Math.hypot(dx, dy) + (n - 0.5) * 0.45;
+          const a = Math.max(0, Math.min(1, (1 - r) * 1.8)) * (0.7 + 0.3 * n);
+          const lit = 1 + (0.5 - (dy + 1) / 2) * 0.18 + (n - 0.5) * 0.14;
+          const i = (y * PUFF_PX + x) * 4;
+          d[i] = Math.min(255, col[0] * lit);
+          d[i + 1] = Math.min(255, col[1] * lit);
+          d[i + 2] = Math.min(255, col[2] * lit);
+          d[i + 3] = a * 255;
+        }
+      g.putImageData(img, 0, 0);
+      out.push(cv);
+    }
+    puffTex.set(key, out);
+  }
+  return out;
+}
+
+// Colours of smoke: pale, sooty (which greys as it rises and thins) and dust.
+const SMOKE: RGB = [218, 216, 208];
+const SOOT: RGB = [44, 40, 37];
+const SOOT_OLD: RGB = [112, 108, 102];
+const DUST: RGB = [168, 148, 108];
+
+// A puff of smoke `d` map pixels across at (x, y), at strength a. kind picks
+// the colour; age (0..1) greys soot as it rises; v picks one of the puff
+// textures (any whole number).
+export function drawPuff(c: CanvasRenderingContext2D, kind: 'smoke' | 'soot' | 'dust', x: number, y: number, d: number, a: number, age: number, v: number): void {
+  if (a <= 0.01 || d <= 0) return;
+  const i = ((v % PUFF_N) + PUFF_N) % PUFF_N;
+  const smooth = c.imageSmoothingEnabled;
+  c.imageSmoothingEnabled = true;
+  const was = c.globalAlpha;
+  if (kind === 'soot') {
+    // dark smoke greying with age: the dark puff fading into the grey one
+    c.globalAlpha = was * a * (1 - age * 0.7);
+    c.drawImage(puffs(SOOT)[i], x - d / 2, y - d / 2, d, d);
+    c.globalAlpha = was * a * age * 0.6;
+    c.drawImage(puffs(SOOT_OLD)[i], x - d / 2, y - d / 2, d, d);
+  } else {
+    c.globalAlpha = was * a;
+    c.drawImage(puffs(kind === 'smoke' ? SMOKE : DUST)[i], x - d / 2, y - d / 2, d, d);
+  }
+  c.globalAlpha = was;
+  c.imageSmoothingEnabled = smooth;
+}
+
+// How strong a puff is through its life k (0..1): it swells in quickly, then
+// thins away.
+export const puffAlpha = (k: number) => Math.min(1, k * 7) * (1 - k) ** 1.3;
+
 // Everything that flies about in a fight: shots, explosions, muzzle flashes,
 // sparks, embers, debris and smoke. Screen coordinates, except the shots,
 // which are in world coordinates and drawn through toScreen.
@@ -353,7 +434,7 @@ export class Fx {
   }
 
   private p(x: number, y: number, kind: PKind, o: Partial<P>): void {
-    this.ps.push({ x, y, vx: 0, vy: 0, life: 0, max: 1, kind, size: 1, g: 0, ...o });
+    this.ps.push({ x, y, vx: 0, vy: 0, life: 0, max: 1, kind, size: 1, g: 0, v: (Math.random() * 64) | 0, ...o });
   }
 
   fire(s: Shot): void {
@@ -495,16 +576,27 @@ export class Fx {
       }
     }
     this.billow(ox, oy - r * 0.2, r * 1.6, r * 0.7, Math.round(r * 3), 2.4 + r * 0.22);
-    this.plume(ox, gy - 2, tank ? 10 : 7, tank ? 16 : 11, 1.8 + r * 0.14, r * 0.6);
+    this.plume(ox, gy - 2, BURN_WRECK, tank ? 16 : 11, 1.8 + r * 0.14, r * 0.6);
   }
 
   // A building's big bang: it breaks into a few big chunks over its ruin and
   // smoke rolls up over the whole of it. (sx, sy) is where its sprite is drawn,
   // (ox, oy) where the pieces fly out from, w by h its size on screen.
-  collapse(spr: StackSprite, sx: number, sy: number, ox: number, oy: number, w: number, h: number): void {
-    this.shatter(spr, sx, sy, ox, oy, sy, 10, 55, 40);
-    this.billow(ox, (oy + sy) / 2, w, h, Math.round(24 + w), 3.8);
-    this.plume(ox, sy - 2, 12, 20, 3.2, w * 0.45);
+  // It breaks into small chunks; `big` scales the blast (a power plant's is
+  // far bigger than anything else's).
+  collapse(spr: StackSprite, sx: number, sy: number, ox: number, oy: number, w: number, h: number, big = 1): void {
+    this.shatter(spr, sx, sy, ox, oy, sy, 3, 48 * Math.sqrt(big), Math.round(110 * big));
+    // a cloud of smoke rolling up over all of it, and a second, darker one higher up
+    this.billow(ox, (oy + sy) / 2, w * 1.2, h * 1.2, Math.round((40 + w * 1.5) * big), 4.5 + big);
+    this.billow(ox, oy - h * 0.6, w * 0.9, h, Math.round((20 + w) * big), 6 + big * 1.5);
+    // a hot fountain of embers and sparks
+    for (let i = 0; i < 30 * big; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2;
+      const v = (35 + Math.random() * 55) * Math.sqrt(big);
+      this.p(ox + (Math.random() - 0.5) * w * 0.5, oy, i % 2 ? 'ember' : 'spark', { vx: Math.cos(a) * v, vy: Math.sin(a) * v, max: 0.7 + Math.random() * 0.9, g: 70 });
+    }
+    // smoke keeps pouring off the burning ruin while it burns (BURN_RUIN seconds)
+    this.plume(ox, sy - 2, BURN_RUIN, 26 * big, 3.6 + big * 0.6, w * 0.5);
   }
 
   smoke(x: number, y: number, dark = true, size = 1.5): void {
@@ -579,7 +671,11 @@ export class Fx {
       p.vy += p.g * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      if (p.kind === 'smoke' || p.kind === 'soot') p.size += dt * 2;
+      if (p.kind === 'smoke' || p.kind === 'soot') {
+        p.size += dt * 2.4;
+        // it slows as it rises and spreads
+        p.vy *= 1 - dt * 0.35;
+      }
       if (p.kind === 'debris' || p.kind === 'spark') {
         p.vx *= 1 - dt * 1.5;
       }
@@ -611,15 +707,7 @@ export class Fx {
     for (const p of this.ps) {
       if (p.kind !== 'smoke' && p.kind !== 'soot' && p.kind !== 'dust') continue;
       const k = p.life / p.max;
-      const s = Math.max(1, Math.round(p.size));
-      c.fillStyle = p.kind === 'smoke' ? `rgba(214,212,204,${0.55 * (1 - k)})` : p.kind === 'soot' ? `rgba(48,44,40,${0.6 * (1 - k)})` : `rgba(160,140,100,${0.55 * (1 - k)})`;
-      const X = Math.round(p.x - s / 2);
-      const Y = Math.round(p.y - s / 2);
-      if (s > 1) {
-        c.fillRect(X + 0.5, Y, s - 1, s);
-        c.fillRect(X, Y + 0.5, 0.5, s - 1);
-        c.fillRect(X + s - 0.5, Y + 0.5, 0.5, s - 1);
-      } else c.fillRect(X, Y, s, s);
+      drawPuff(c, p.kind, p.x, p.y, p.size * 1.8, (p.kind === 'smoke' ? 0.6 : p.kind === 'soot' ? 0.8 : 0.6) * puffAlpha(k), k, p.v);
     }
   }
 
