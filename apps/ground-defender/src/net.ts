@@ -65,8 +65,11 @@ export async function openRoom(want?: string): Promise<Host> {
     peer.once('error', err => { peer.destroy(); reject(err); });
   });
   let peer: Peer | null = null, code = '';
-  for (let i = 0; i < 5 && !peer; i++) {
-    code = i === 0 && want ? want : randomCode();
+  // the code asked for (the one you had last game) can take the server a moment to let go of, so try it a few times
+  const wantTries = want ? 3 : 0;
+  for (let i = 0; i < wantTries + 5 && !peer; i++) {
+    code = i < wantTries ? want! : randomCode();
+    if (i > 0 && i < wantTries) await new Promise(r => setTimeout(r, 1500));
     try { peer = await withTimeout(tryOpen(code), OPEN_TIMEOUT, 'Making the link'); }
     catch (err) { if ((err as { type?: string }).type !== 'unavailable-id') throw err; }
   }
