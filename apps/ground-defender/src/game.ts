@@ -56,6 +56,11 @@ export const SURVIVAL = {
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
+  creativeStock: 9999,  // creative (cheat mode): how many of everything you have
+  turretMaxAmmo: 10000, // you can set how much ammo each turret holds, from 0 to 10000 (it starts at the most)
+  dblTapMs: 320, // two taps on the same thing this close together (ms) pick it up
+  maxBlueprints: 30, // saved blueprints kept on this device
+  turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
   turretRange: 280,
   grabberCost: 3,       // stone for a grabber in the shop
   grabTime: 1,          // seconds for a grabber to move one stone
@@ -80,21 +85,26 @@ export const SURVIVAL = {
   fishSpitEvery: 3, acidHit: 10000, acidBurn: 10000, acidBurnTime: 5, puddleTime: 10, puddleBurn: 20000, puddleR: 24,
   spawnerMin: 4, spawnerMax: 6,
   spawnerFar: 4,
+  spawnerDelay: 600,    // no spawners for the first 10 minutes
+  startStone: 10, startOre: 5, // you start on a 10 x 10 tile stone patch, with 5 x 5 iron and copper patches touching it
   spawnerBack: 30,      // a destroyed spawner comes back somewhere else after 30 seconds        // spawners are 4 times as far out as they first were
   spawnEvery: 12,       // each spawner makes a bear every 12 seconds
   spawnEarly: 100,      // ...but only one every 100 seconds for the first 15 minutes
   earlyTime: 900,
   maxBears: 14,         // ...while there are fewer than 14 bears on the map (huge waves come on top)
-  groupMin: 6, groupMax: 10, // bears gather by their spawners until there are 6 to 10 of them, then all attack together
-  chaseRange: 130,      // a bear outside goes for you when you walk this close
+  chaseRange: 130,
+  angryTime: 60,        // a spawner you hurt (or whose bear you hurt) sends its bears for 60 s after the last hit
+  smogAttack: 1000, smogCheck: 30, // pollution: at 1000 or more a base attacks (checked every 30 s); below that, never      // a bear outside goes for you when you walk this close
   oreMineCost: { iron: { stone: 100 }, copper: { stone: 100, iron: 75 }, gold: { stone: 125, iron: 100, copper: 50 }, diamond: { stone: 150, iron: 100, copper: 75, gold: 50 } } as Record<Ore, Cost>,
   rapidCost: { stone: 50, iron: 10 } as Cost, // a rapid crossbow
   rapidDamage: .75, rapidReload: .05, rapidUse: .008, // 0.8% of one ammo a shot
   rocketCost: { stone: 40, iron: 20 } as Cost,    // a rocket launcher
   rocketDamage: 70, rocketReload: 3, rocketRange: 620, rocketSpeed: 300,
   rocketStone: 10,
+  xrocketTiles: 5, // an exploding rocket hurts everything in a square this many tiles across
   rgunReload: 1.5,
   ammoPoints: 100,      // each ammo (or rocket) has 100 usage points; a crossbow shot or a rocket uses all of them
+  mgunEvery: .2, mgunUse: .5, mgunDamage: { ammo: 1.4, copperAmmo: 1.5, ironAmmo: 1.8, goldAmmo: 2, diamondAmmo: 2.25 } as Record<string, number>, // the machine gun
   rxDamage: .3, rxEvery: .1, rxUse: 4.62, // rapid crossbow: 0.3 damage every 0.1 s, 4.62 usage points a second of firing
   furnaceMax: 50,       // ore a furnace holds
   wallHp: 150, gateHp: 200, // your own walls and gates: bears bite them
@@ -104,6 +114,8 @@ export const SURVIVAL = {
   bearSpeed: 20,        // slow
   bearSpeedInside: 26,
   digEvery: 1,          // digging an ore patch by hand gives one ore a second
+  asmHold: 50,          // a crafting machine with a recipe holds up to 50 of each ingredient
+  bearDrop: 5, fishDrop: 1, // a bear leaves 5 stone, an acid fish 1 iron ore
   drillEvery: 2,        // a drill digs one ore every 2 seconds
   poleReach: 7,         // power poles connect up to 7 tiles apart (and to generators that close)
   poleSupply: 2,        // buildings up to 2 tiles from a pole get its power
@@ -187,7 +199,7 @@ const RECIPES: Rec[] = [
   R('drill', 'production', { circuit: 3, gear: 5, ironPlate: 10 }, 2, 1, 'Put it on an ore patch and it digs by itself, dropping the ore in front. Needs power.'),
   R('furnace', 'production', { stone: 5 }, .5, 1, 'Smelts ore: iron and copper into plates, gold into bars, diamonds into cut diamonds, stone into bricks.'),
   R('machine', 'production', { gear: 10, circuit: 5, stone: 20 }, 3, 1, 'Makes ammo out of stone, plates, gold bars and cut diamonds (or rockets once researched).'),
-  R('asm', 'production', { circuit: 3, gear: 5, ironPlate: 9 }, .5, 1, 'Tap it to pick a recipe, then put the ingredients in (or let grabbers bring them). It keeps crafting that recipe, 4 times slower than by hand, until you change it. Needs power.'),
+  { ...R('asm', 'production', {}, .5, 1, 'Tap it to pick a recipe, then put the ingredients in (or let grabbers bring them). It keeps crafting that recipe, 4 times slower than by hand, until you change it. Needs power.'), in: { ironPlate: 10, stone: 5 } },
   R('gen', 'production', { gear: 8, ironPlate: 10, stone: 5 }, 2, 1, 'Burns stone for power, which poles carry to drills, assemblers and labs.'),
   R('lab', 'production', { circuit: 10, gear: 10, belt: 4 }, 2, 1, 'Uses science packs to research. Y picks what. Needs power.'),
   // parts
@@ -197,9 +209,10 @@ const RECIPES: Rec[] = [
   R('pack', 'parts', { copperPlate: 1, gear: 1 }, 5, 1, 'Red science. Labs use it for research.'),
   R('pack2', 'parts', { grab: 1, belt: 1 }, 6, 1, 'Green science. The later research needs it as well as red.', 'logsci'),
   // combat
-  R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners. Load ammo with T, or feed it with belts and grabbers.'),
-  R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'Does 60% more damage and reaches farther.', 'bricks'),
+  R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners: 1 damage a shot, a shot every 0.2 s, using 16% of an ammo a shot. Load ammo with T, or feed it with belts and grabbers.'),
+  R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'A turret that reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
+  { ...R('plat', 'logistics', {}, 1, 1, 'Space only: one more tile of platform. Put it next to the platform to make it bigger.', undefined, false), in: { stone: 15 } },
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
   { ...R('ammo', 'combat', { stone: 1 }, 2, SURVIVAL.batchAmmo - 1, 'Stone ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
@@ -207,9 +220,11 @@ const RECIPES: Rec[] = [
   { ...R('copperAmmo', 'combat', { copperPlate: 1 }, 2, 7, 'Copper ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
   { ...R('goldAmmo', 'combat', { goldBar: 1 }, 2, 11, 'Gold ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
   { ...R('diamondAmmo', 'combat', { gem: 1 }, 2, 15, 'Diamond ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
+  { ...R('mgun', 'combat', {}, 6, 1, 'A machine gun you hold: while you hold Space it shoots every 0.2 s, using 0.5% of an ammo a shot. Damage a shot: 1.4 stone, 1.5 copper, 1.8 iron, 2 gold, 2.25 diamond. Put it in a weapon slot.', undefined, false), in: { stone: 1000, ironPlate: 500 } },
   R('rxbow', 'combat', { stone: 200, ironPlate: 20 }, 6, 1, 'A crossbow you hold that fires very fast while you hold Space: 0.3 damage every 0.1 s. It uses ammo slowly (4.62 of an ammo\'s 100 usage points a second). Put it in a weapon slot.', undefined, false),
   R('xbow', 'combat', { stone: 20 }, 2, 1, 'A plain crossbow you hold. One ammo a shot; with no ammo it fires your loadout bolts.', undefined, false),
   R('rgun', 'combat', { ironPlate: 10, gear: 5, circuit: 3 }, 4, 1, 'A rocket launcher you hold: 70 damage a rocket. Put it in a weapon slot and rockets in an ammo slot.', 'rocket', false),
+  { ...R('xrocket', 'combat', {}, 2, 1, 'A rocket that explodes when it hits, hurting every bear and spawner in a 5 by 5 tile area. Fires from the rocket gun and rocket launchers.', 'rocket'), in: { rocket: 2 } },
   R('launcher', 'combat', { ironPlate: 20, stone: 40 }, 4, 1, 'Fires swirling rockets for 70 damage, far enough to reach spawners. Load rockets with T.', 'rocket'),
   { id: 'gate', cat: 'combat', n: 1, time: 0, in: { brick: 30 }, unlock: 'bricks', asm: false, desc: 'Bears wait 10 seconds longer at the gates.' },
   { id: 'expand', cat: 'combat', n: 1, time: 0, in: { stone: 40 }, unlock: 'walls', asm: false, desc: 'Moves your walls out for more room.' },
@@ -227,7 +242,7 @@ export const AMMO: Record<AmmoId, { name: string; reload: number; damage: number
 export type HatId = 'none' | 'cap' | 'helmet' | 'crown';
 export const HATS: Record<HatId, string> = { none: 'No hat', cap: 'Cap', helmet: 'Helmet', crown: 'Crown' };
 export const COLORS = ['#3f7fd6', '#d64545', '#3ea860', '#e0a32e', '#8e5bd6', '#e06aa8', '#30b8b0', '#f2f2f2'];
-export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; }
+export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; cheat?: boolean; space?: boolean; }
 export interface SurvivalResult { time: number; kills: number; shots: number; hits: number; damage: number; won: boolean; spawners: number; }
 
 // world layout (world units). The map is much bigger than the screen; the camera follows the guy.
@@ -236,6 +251,16 @@ const W = 6600, H = 6600;
 const CX = W / 2, CY = H / 2, OFF = CX - 900;
 /** How much of the map the screen shows at once (it is scaled to fit). */
 const VIEW_W = 640, VIEW_H = 800;
+/** Space: a square platform of tiles floating in space, with a big chest in the middle. */
+const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100,
+  astEvery: 2.5, astSpeed: [40, 75], astR: [7, 11], astFrom: 560, // small asteroids: one every 2.5 s, from this far out
+  astHit: .05, astDrop: 3, // one that hits you takes 5% of your health; a shot one drops 3 stone
+  crackHits: 2, // a platform tile breaks on its second asteroid hit (the first cracks it)
+  stoneLife: 25 }; // stone drifting in space is gone after this many seconds
+interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; }
+interface Floater { x: number; y: number; vx: number; vy: number; t: number; landed: boolean; }
+/** A stack in the space chest: up to 100 of one thing. */
+interface Stack { k: Kind; n: number; }
 /** The base's walls. They move out when the base is expanded, so this object changes during a run. */
 const BASE_WALL = { x0: 710 + OFF, x1: 1090 + OFF, y0: 670 + OFF, y1: 1130 + OFF };
 const EXPANSIONS = [BASE_WALL, { x0: 665 + OFF, x1: 1135 + OFF, y0: 670 + OFF, y1: 1153 + OFF }, { x0: 620 + OFF, x1: 1180 + OFF, y0: 670 + OFF, y1: 1176 + OFF }];
@@ -273,12 +298,12 @@ const ORES: Ore[] = ['iron', 'copper', 'gold', 'diamond'];
 type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
-  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'rgun', 'xbow', 'rxbow',
-  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
+  'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'xrocket', 'rgun', 'xbow', 'rxbow', 'mgun',
+  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
-type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate';
-const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'];
+type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate' | 'plat';
+const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'];
 const isPlaceable = (k: string): k is Placeable => (PLACEABLES as string[]).includes(k);
 /** Each metal: its smelted form, and how much ammo one of those makes in a machine (and its damage). Diamonds are our own guess. */
 export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; plate: Kind; name: string; color: string }> = {
@@ -303,12 +328,16 @@ const AMMO_NAME: Record<AmmoKind, string> = { ammo: 'Stone', ironAmmo: 'Iron', c
 const metalOf = (a: AmmoKind) => METAL[ORES.find(o => METAL[o].ammo === a)!];
 const isAmmoKind = (k: Kind): k is AmmoKind => (AMMO_KINDS as Kind[]).includes(k);
 /** Weapons you hold, and what they shoot. */
-type Weapon = 'xbow' | 'rxbow' | 'rgun';
-const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'rgun'];
+type Weapon = 'xbow' | 'rxbow' | 'rgun' | 'mgun';
+const WEAPONS: Weapon[] = ['xbow', 'rxbow', 'mgun', 'rgun'];
 const isWeapon = (k: Kind | null): k is Weapon => !!k && (WEAPONS as Kind[]).includes(k);
-type Shot = AmmoKind | 'rocket';
-const isShot = (k: Kind | null): k is Shot => !!k && (k === 'rocket' || isAmmoKind(k));
-const fits = (w: Weapon, k: Shot) => (w === 'rgun') === (k === 'rocket');
+type RocketKind = 'rocket' | 'xrocket';
+/** Exploding rockets first: rocket guns and launchers use them before plain ones. */
+const ROCKETS: RocketKind[] = ['xrocket', 'rocket'];
+const isRocket = (k: Kind | null): k is RocketKind => k === 'rocket' || k === 'xrocket';
+type Shot = AmmoKind | RocketKind;
+const isShot = (k: Kind | null): k is Shot => !!k && (isRocket(k) || isAmmoKind(k));
+const fits = (w: Weapon, k: Shot) => (w === 'rgun') === isRocket(k);
 /** An ammo slot: one kind of ammo, as usage points (100 for each ammo in it). */
 interface AmmoSlot { k: Shot; pts: number; }
 type Cost = Partial<Record<Kind, number>>;
@@ -323,22 +352,22 @@ const chestN = (ch: Bag) => KINDS.reduce((a, k) => a + (ch[k] || 0), 0);
 const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
-  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows',
-  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
+  ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', xrocket: 'exploding rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates', plat: 'platform tiles',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
-  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow',
-  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
+  ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', xrocket: 'Exploding rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate', plat: 'Platform tile',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
 /** A turret shoots the nearest bear or spawner in range (or the one you picked), one ammo a shot.
  *  kind: a plain turret, a brick turret, a rapid crossbow or a rocket launcher (which only takes rockets). */
 type TKind = 'turret' | 'brick' | 'rapid' | 'rocket';
-interface Turret { ammo: Partial<Record<AmmoKind | 'rocket', number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
+interface Turret { max?: number; ammo: Partial<Record<Shot, number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
 const T_ITEM: Record<TKind, Placeable> = { turret: 'turret', brick: 'bturret', rapid: 'rapid', rocket: 'launcher' };
 const ITEM_T: Partial<Record<Placeable, TKind>> = { turret: 'turret', bturret: 'brick', rapid: 'rapid', launcher: 'rocket' };
 const tAmmo = (tu: Turret) => Object.values(tu.ammo).reduce((a, n) => a + (n ?? 0), 0);
@@ -352,11 +381,11 @@ const ELECTRIC: BType[] = ['drill', 'asm'];
 const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', split: 'X', tunnel: 'Q', chest: 'C', pole: 'O', drill: 'N', furnace: 'F', machine: 'K', asm: 'A', lab: 'L', gen: 'V', pump: 'W', pipe: 'I', turret: 'U', bturret: 'J' };
 /** A one-tile building. inp/inpK: what's waiting to go in (one kind at a time), out/outK: what it made.
  *  buf: an assembler's ingredients. recipe: what an assembler makes. pi: the ore patch a drill sits on. */
-interface Bld { type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
+interface Bld { on?: boolean; type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
 /** A flying robot that carries one thing from a chest to whatever needs it. */
 interface Robot { x: number; y: number; hub: string; k: Kind | null; src: { x: number; y: number; take: () => boolean; kind?: Kind } | null; dst: { x: number; y: number; give: () => boolean; id: string } | null; }
 const KIND_DOT: Record<Kind, string> = Object.fromEntries(KINDS.map(k => [k, '#d0ccc2'])) as Record<Kind, string>;
-Object.assign(KIND_DOT, { ammo: '#7fc8ff', brick: '#d97a5a', pack: '#e0524a', pack2: '#5fbf86', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironPlate: METAL.iron.color, copperPlate: METAL.copper.color, goldBar: METAL.gold.color, gem: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a', gear: '#9aa0a6', wire: '#e08a4a', circuit: '#4caf50' });
+Object.assign(KIND_DOT, { ammo: '#7fc8ff', brick: '#d97a5a', pack: '#e0524a', pack2: '#5fbf86', iron: METAL.iron.color, copper: METAL.copper.color, gold: METAL.gold.color, diamond: METAL.diamond.color, ironPlate: METAL.iron.color, copperPlate: METAL.copper.color, goldBar: METAL.gold.color, gem: METAL.diamond.color, ironAmmo: METAL.iron.color, copperAmmo: METAL.copper.color, goldAmmo: METAL.gold.color, diamondAmmo: METAL.diamond.color, rocket: '#ff6a4a', xrocket: '#ffb020', gear: '#9aa0a6', wire: '#e08a4a', circuit: '#4caf50' });
 /** A lab and the science packs in it. */
 interface Lab { packs: number; packs2?: number; t: number; }
 /** A splitter takes things in and sends them out to its left and right in turn. */
@@ -372,7 +401,7 @@ interface Mine extends Spot { ore: 'stone' | Ore; }
  *  and its recipe for stone: stone ammo, or (once researched) a rocket from 10 stone. */
 interface Machine extends Spot { queue: Kind[]; batchT: number; out: Kind[]; recipe: MRec | null; }
 /** A patch of ore out in the woods: dig it by hand or put drills on it. It runs out. */
-interface Patch { x: number; y: number; r: number; ore: 'stone' | Ore; left: number; max: number; seed: number; }
+interface Patch { sq?: number; x: number; y: number; r: number; ore: 'stone' | Ore; left: number; max: number; seed: number; }
 /** Everything big in the camp (mines, machines), which belts can't go on. Kept up to date by the game. */
 let structs: Spot[] = [];
 
@@ -380,21 +409,36 @@ let structs: Spot[] = [];
 type BearState = 'walk' | 'wait' | 'enter' | 'chase' | 'dead';
 /** A wall or gate you built on a tile: bears can't pass either, you can pass a gate. */
 interface PWall { hp: number; gate: boolean; }
-interface Bear { fish?: boolean; gr?: number; wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
+interface Bear { home?: number; fish?: boolean; gr?: number; wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
 /** A bear spawner in the woods: a den that makes bears. */
 /** respawn: seconds until a destroyed spawner comes back somewhere else. */
-interface Spawner { x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
+interface Spawner { angry?: number; pre?: boolean; x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
 type Target = Bear | Spawner;
 const isBear = (t: Target): t is Bear => 'state' in t;
 const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
 const SPAWNER_R = 26;
 /** Things that take up a big round spot (mines and machines), not a tile. */
 const isBig = (p: Placeable) => p === 'mine' || p === 'machine';
+/** One thing in a blueprint: what it is, which way it faces, and where it sits from the blueprint's middle tile. */
+interface BpPart { dc: number; dr: number; p: Placeable; d: number }
+interface Blueprint { name: string; parts: BpPart[] }
+/** A light blue ghost from a placed blueprint: it does nothing, it only shows what goes there. */
+interface Ghost { p: Placeable; d: number }
+const BP_STORE = 'grounddef.blueprints';
+const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+function loadBps(): Blueprint[] { try { const v = JSON.parse(localStorage.getItem(BP_STORE) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
+function saveBps(b: Blueprint[]) { try { localStorage.setItem(BP_STORE, JSON.stringify(b)); } catch { /* private mode: they last until you close the game */ } }
+/** A blueprint turned a quarter turn clockwise. */
+/** Things that face a way (R turns them). */
+const TURNS: Placeable[] = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'];
+/** Tile (c, r) is on the map and off the fence. */
+const tileOk = (c: number, r: number) => !!tileAt(tileX(c), tileY(r));
+function turnBp(b: Blueprint): Blueprint { return { name: b.name, parts: b.parts.map(q => ({ dc: -q.dr, dr: q.dc, p: q.p, d: (q.d + 1) % 4 })) }; }
 /** A gate in the fence: which side, and where along it (0 to 1). */
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
 interface Bolt { from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
 /** A rocket swirls round a loop, then homes in on its target. */
-interface Rocket { from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
+interface Rocket { boom?: boolean; from?: string; x: number; y: number; a: number; t: number; spin: number; target: Target | null; trail: { x: number; y: number }[]; }
 interface Rock { x: number; y: number; vx: number; vy: number; left: number; spin: number; }
 interface Bubble { x: number; y: number; text: string; t: number; kind: 'loss' | 'dmg' | 'info' | 'tiny'; }
 
@@ -429,7 +473,7 @@ export class Survival {
   private fireHeld = false; private rxT = 0; private firingAt: Target | null = null; private firingEnd: { x: number; y: number } | null = null;
   private sparks: { x: number; y: number; t: number }[] = []; private noAmmoT = 0;
   /** How many bears gather before they all attack. */
-  private groupSize = 8;
+  private smogT = 0;
   /** Acid: slime in the air, puddles on the ground, and the burn you have (damage a second, seconds left). */
   private slimes: { x: number; y: number; tx: number; ty: number; t: number }[] = [];
   private puddles: { x: number; y: number; t: number }[] = [];
@@ -465,6 +509,15 @@ export class Survival {
   /** The building whose panel is open (an assembler or a furnace). */
   private bldOpen: string | null = null;
   private dragPlace: { id: number; last: string } | null = null;
+  /** A first tap waiting to see if a second one makes it a double-tap (which picks the thing up). */
+  private tapWait: { id: string; t: number; timer: ReturnType<typeof setTimeout>; single: () => void } | null = null;
+  /** Blueprints: saved ones, the light blue ghosts on the map, and what the blueprint tool is doing. */
+  /** The space game: on, where the platform's top-left tile is, what's in the chest, and whether its panel is open. */
+  private space = false; private plat = { c0: 0, r0: 0 }; private platTiles = new Set<string>(); private cracks = new Map<string, number>();
+  private asteroids: Asteroid[] = []; private floaters: Floater[] = []; private astT = 0; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
+  private bps: Blueprint[] = loadBps(); private ghosts = new Map<string, Ghost>();
+  private bpMode: 'select' | 'place' | null = null; private bpOpen = false; private bpSig = '';
+  private bpCur: Blueprint | null = null; private bpBox: { id: number; c0: number; r0: number; c1: number; r1: number } | null = null; private bpAim: { id: number; c: number; r: number } | null = null;
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miners: number[] = []; private popT = 0;
 
@@ -487,10 +540,12 @@ export class Survival {
     const up = (e: PointerEvent) => {
       if (this.stick && this.stick.id === e.pointerId) this.stick = null;
       if (this.dragPlace && this.dragPlace.id === e.pointerId) this.dragPlace = null;
-      // a quick tap (not a drag): on a turret it picks the turret (tap a bear or spawner next to aim it,
-      // or the turret again to pick it up); on a belt, grabber or anything else you placed, picks it up
+      // the blueprint tool: let go to finish the box, or to put the blueprint down where your finger is
+      if (this.bpBox && this.bpBox.id === e.pointerId) { const b = this.bpBox; this.bpBox = null; if (e.type === 'pointerup') this.copyBox(b); return; }
+      if (this.bpAim && this.bpAim.id === e.pointerId) { const a = this.bpAim; this.bpAim = null; if (e.type === 'pointerup') this.placeBp(a.c, a.r); return; }
+      // a quick tap (not a drag): opens a building's panel or picks a turret; a quick double-tap picks the thing up
       const tp = this.tap; this.tap = null;
-      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen && !this.recipeFor) {
+      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen && !this.recipeFor && !this.chestOpen) {
         this.tapAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
       }
     };
@@ -517,14 +572,33 @@ export class Survival {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-job]'); e.preventDefault(); e.stopPropagation();
       if (el && this.running && !this.paused) this.cancelJob(Number(el.dataset.job));
     });
+    const spc = pad.querySelector<HTMLElement>('#svSpace')!;
+    spc.addEventListener('click', e => this.chestClick(e as MouseEvent));
+    for (const ev of ['pointerdown', 'pointerup']) spc.addEventListener(ev, e => e.stopPropagation());
     pad.querySelector('#svBld')!.addEventListener('click', e => this.bldClick(e as MouseEvent));
     pad.querySelector('#svBld')!.addEventListener('pointerdown', e => e.stopPropagation());
+    const tp = pad.querySelector<HTMLElement>('#svTurret')!;
+    for (const ev of ['pointerdown', 'pointerup', 'click', 'keydown']) tp.addEventListener(ev, e => e.stopPropagation());
+    tp.addEventListener('input', e => this.turretMaxInput(e));
+    tp.addEventListener('click', e => { const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tmax]'); if (el) { this.setTurretMax(Number(el.dataset.tmax)); Sound.click(); } });
     pad.querySelector('#svRecSeg')!.addEventListener('click', e => { e.stopPropagation(); const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mrec]'); if (b) this.setRecipe(b.dataset.mrec as MRec); });
     pad.querySelector('#svRecPut')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (m) this.useMachine(m); });
     pad.querySelector('#svRecPick')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (!m) return; if (dist(this.x, this.y, m.x, m.y) > NEAR * 1.6) { this.bubble(m.x, m.y - 36, 'Walk to the machine to pick it up', 'info'); Sound.denied(); return; } this.pickUpBig(m); });
     pad.querySelector('#svRecClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeRecipe(); });
     btn('#svLabBtn', () => this.openLab());
-    btn('#svRotate', () => this.rotate());
+    btn('#svRotate', () => { if (this.bpMode === 'place') this.bpTurn(); else this.rotate(); });
+    btn('#svBpBtn', () => this.bpButton());
+    const bpp = pad.querySelector<HTMLElement>('#svBp')!;
+    for (const ev of ['pointerdown', 'pointerup', 'click']) bpp.addEventListener(ev, e => e.stopPropagation());
+    bpp.addEventListener('click', e => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-bp]'); if (!el || !this.running || this.paused) return;
+      const i = Number(el.dataset.i), a = el.dataset.bp;
+      if (a === 'new') this.bpSelect();
+      else if (a === 'use') this.bpUse(i);
+      else if (a === 'del') { this.bps.splice(i, 1); saveBps(this.bps); this.bpSig = ''; Sound.click(); }
+      else if (a === 'clear') { this.ghosts.clear(); this.bpSig = ''; Sound.click(); }
+      else if (a === 'close') { this.bpOpen = false; Sound.click(); }
+    });
     pad.querySelector('#svLabClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeLab(); });
     pad.querySelector('#svResList')!.addEventListener('click', e => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-res]'); if (b) { e.stopPropagation(); this.pickResearch(b.dataset.res as ResId); } });
     pad.querySelector('#svShopClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeShop(); });
@@ -533,10 +607,15 @@ export class Survival {
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (this.chestOpen) { if (k === 'Escape' || k === 't') this.closeChest(); return; }
       if (this.labOpen) { if (k === 'y' || k === 'Escape') this.closeLab(); return; }
       if (this.bldOpen) { if (k === 't' || k === 'Escape') this.closeBld(); return; }
       if (this.recipeFor) { const n = '123456'.indexOf(k); if (k === 'm' || k === 'Escape') this.closeRecipe(); else if (n >= 0 && this.mrecs()[n]) this.setRecipe(this.mrecs()[n]); return; }
       if (this.shopOpen) { if ((k === 'Shift' || k === 'b' || k === 'Escape') && !e.repeat) this.closeShop(); else if (k === 'Enter' && !e.repeat) this.craft(this.invSel); return; }
+      // blueprints: Ctrl+C drags a box to copy, Ctrl+V puts the last one down; R turns it, Esc stops
+      if ((e.ctrlKey || e.metaKey) && (k === 'c' || k === 'v')) { e.preventDefault(); if (!e.repeat) { if (k === 'c') this.bpSelect(); else if (this.bps.length) this.bpUse(this.bps.length - 1); else { this.bubble(this.x, this.y - 30, 'No blueprints yet. Ctrl+C and drag a box first', 'info'); Sound.denied(); } } return; }
+      if (this.bpMode) { if (k === 'Escape') { this.bpStop(); return; } if (k === 'r') { if (!e.repeat) this.bpTurn(); return; } }
+      if (this.bpOpen && k === 'Escape') { this.bpOpen = false; return; }
       if (k === 'Shift' || k === 'b') { if (!e.repeat) this.openShop(); return; }
       const qn = '1234567890'.indexOf(k);
       if (qn >= 0) { if (!e.repeat) this.useQuick(qn); return; }
@@ -574,7 +653,8 @@ export class Survival {
     this.spawners = [];
     for (let i = 0; i < n; i++) {
       const [x, y] = spawnerSpot(a0 + (i + (Math.random() - .5) * .5) / n * Math.PI * 2);
-      this.spawners.push({ x, y, hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: false });
+      // they only show up after the first 10 minutes
+      this.spawners.push({ x, y, hp: SURVIVAL.spawnerHp, t: 1 + i * 1.3, hurt: 0, dead: true, pre: true, respawn: SURVIVAL.spawnerDelay + i * .5 });
     }
     this.camX = this.x; this.camY = this.y;
     this.rocks = []; this.gateWait = SURVIVAL.gateWait;
@@ -587,30 +667,219 @@ export class Survival {
     this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
     Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); this.closeRecipe();
     this.weapons = ['xbow', null, null]; this.wSel = 0; this.ammoSlots = [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null]; this.aSel = 0;
-    this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.groupSize = this.newGroup(); this.armsSig = '';
+    this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.smogT = SURVIVAL.smogCheck; this.armsSig = '';
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
-    this.patches = genPatches(this.spawners); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
+    this.patches = genPatches(this.spawners, startPatches(this.x, this.y)); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
+    this.creative = false; this.survivalBag = null;
+    this.ghosts.clear(); this.bpStop(); this.bpOpen = false; this.bps = loadBps();
+    this.space = !!load.space; this.spaceChest = []; this.chestOpen = false; this.chestSig = '';
+    if (this.space) this.startSpace();
+    if (this.tapWait) { clearTimeout(this.tapWait.timer); this.tapWait = null; }
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
-    this.say(`Bears are coming from ${n} spawners. Destroyed ones come back, so hold out as long as you can!`, 4);
+    if (this.space) this.say('You are on a platform in space. Shoot the asteroids (Space) for stone, and make platform tiles from it (15 stone).', 6);
+    else this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
+  }
+  /* ---------- space ---------- */
+  /** Space: no ground, no ore, no bears; a 10 by 10 platform with the chest in the middle, and you next to it. */
+  private startSpace() {
+    const t = tileAt(CX, CY)!, h = SPACE.plat / 2;
+    this.plat = { c0: t.c - h, r0: t.r - h }; this.platTiles.clear(); this.cracks.clear(); this.asteroids = []; this.floaters = []; this.astT = 4;
+    for (let c = 0; c < SPACE.plat; c++) for (let r = 0; r < SPACE.plat; r++) this.platTiles.add((this.plat.c0 + c) + ',' + (this.plat.r0 + r));
+    this.spawners = []; this.patches = []; this.mines = []; this.machines = []; this.mineAt = null; this.updateStructs();
+    this.x = tileX(t.c) - TILE / 2; this.y = tileY(t.r + 2); this.camX = this.x; this.camY = this.y;
+  }
+  /** Tile (c, r) is on the space platform. */
+  private onPlat(c: number, r: number) { return this.platTiles.has(c + ',' + r); }
+  private onPlatXY(x: number, y: number) { const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE); return this.onPlat(c, r); }
+  /** Asteroids fly in from all round; you shoot them for stone, and the ones that get through crack the platform or hit you. */
+  private updateSpace(dt: number) {
+    const b = this.chestBox();
+    this.astT -= dt;
+    if (this.astT <= 0) {
+      this.astT = SPACE.astEvery * (.6 + Math.random() * .8);
+      const ang = Math.random() * Math.PI * 2, x = b.x + Math.cos(ang) * SPACE.astFrom, y = b.y + Math.sin(ang) * SPACE.astFrom;
+      const tx = b.x + (Math.random() - .5) * TILE * (SPACE.plat + 6), ty = b.y + (Math.random() - .5) * TILE * (SPACE.plat + 6);
+      const sp = SPACE.astSpeed[0] + Math.random() * (SPACE.astSpeed[1] - SPACE.astSpeed[0]), d = Math.hypot(tx - x, ty - y);
+      this.asteroids.push({ x, y, vx: (tx - x) / d * sp, vy: (ty - y) / d * sp, r: SPACE.astR[0] + Math.random() * (SPACE.astR[1] - SPACE.astR[0]), a: 0, spin: (Math.random() - .5) * 3, pts: Array.from({ length: 8 }, () => .75 + Math.random() * .35) });
+    }
+    for (const as of this.asteroids) {
+      as.x += as.vx * dt; as.y += as.vy * dt; as.a += as.spin * dt;
+      if (dist(as.x, as.y, this.x, this.y) < as.r + GUY_R) { this.hurt(SPACE.astHit); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; continue; }
+      const c = Math.floor((as.x - GX0) / TILE), r = Math.floor((as.y - GY0) / TILE);
+      if (this.onPlat(c, r) && Math.abs(as.x - tileX(c)) < TILE * .35 && Math.abs(as.y - tileY(r)) < TILE * .35) { this.crackPlat(c, r); this.blasts.push({ x: as.x, y: as.y, t: 0 }); Sound.boom(false); as.r = 0; }
+    }
+    this.asteroids = this.asteroids.filter(as => as.r > 0 && dist(as.x, as.y, b.x, b.y) < SPACE.astFrom + 200);
+    // stone from shot asteroids drifts; on the platform it stops, and you pick it up by walking over it
+    for (const f of this.floaters) {
+      f.t += dt;
+      if (!f.landed) { f.x += f.vx * dt; f.y += f.vy * dt; if (this.onPlatXY(f.x, f.y)) f.landed = true; }
+      if (dist(f.x, f.y, this.x, this.y) < GUY_R + 8) { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); }
+    }
+    this.floaters = this.floaters.filter(f => f.t < 1e8 && (f.landed || f.t < SPACE.stoneLife));
+  }
+  /** A bolt at (x, y) hits an asteroid: it breaks up into stone. */
+  private shootAsteroid(x: number, y: number) {
+    const as = this.asteroids.find(a => a.r > 0 && dist(a.x, a.y, x, y) < a.r + 5); if (!as) return false;
+    for (let i = 0; i < SPACE.astDrop; i++) { const a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 30; this.floaters.push({ x: as.x, y: as.y, vx: as.vx * .35 + Math.cos(a) * sp, vy: as.vy * .35 + Math.sin(a) * sp, t: 0, landed: false }); }
+    this.sparks.push({ x: as.x, y: as.y, t: 0 }); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; this.hits++;
+    Sound.noise(.2, 'lowpass', 1200, .5, .3);
+    return true;
+  }
+  /** An asteroid hits platform tile (c, r): it cracks, and a cracked one breaks off with whatever was on it. The chest's tiles hold. */
+  private crackPlat(c: number, r: number) {
+    const key = c + ',' + r;
+    if (this.chestTile(c, r)) return;
+    const n = (this.cracks.get(key) ?? 0) + 1;
+    if (n < SPACE.crackHits) { this.cracks.set(key, n); return; }
+    this.cracks.delete(key); this.platTiles.delete(key); this.ghosts.delete(key);
+    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs, this.blds, this.pwalls] as Map<string, unknown>[]) m.delete(key);
+    if (this.picked === key) this.picked = null; if (this.bldOpen === key) this.closeBld();
+    this.wallRects = null; this.powerT = 0;
+    this.bubble(tileX(c), tileY(r) - 14, 'A platform tile broke off!', 'loss');
+  }
+  /** Space: a platform tile goes next to the platform. */
+  private placePlat(c: number, r: number) {
+    const x = tileX(c), y = tileY(r), no = (t: string) => { this.bubble(x, y - 16, t, 'info'); Sound.denied(); };
+    if (!this.space) return no('Platform tiles are for space');
+    if (this.onPlat(c, r)) return no('That is platform already');
+    if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => this.onPlat(c + dc, r + dr))) return no('Put it next to the platform');
+    this.platTiles.add(c + ',' + r); this.cracks.delete(c + ',' + r); this.bag.plat--; this.ghosts.delete(c + ',' + r); Sound.thump();
+    if (!this.count('plat')) this.placing = false;
+  }
+  /** The space chest's 4 tiles, its middle, and whether tile (c, r) is one of them. */
+  private chestBox() { const c0 = this.plat.c0 + (SPACE.plat - SPACE.chest) / 2, r0 = this.plat.r0 + (SPACE.plat - SPACE.chest) / 2; return { c0, r0, x: GX0 + (c0 + 1) * TILE, y: GY0 + (r0 + 1) * TILE }; }
+  private chestTile(c: number, r: number) { if (!this.space) return false; const b = this.chestBox(); return c >= b.c0 && c < b.c0 + SPACE.chest && r >= b.r0 && r < b.r0 + SPACE.chest; }
+  private openChest() { this.chestOpen = true; this.chestSig = ''; this.picked = null; this.closeBld(); this.bpOpen = false; this.placing = false; this.stick = null; Sound.click(); }
+  private closeChest() { this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
+  /** Puts up to n of k in the chest: tops up stacks of k first, then starts new ones while there's room. Returns how many went in. */
+  private chestPut(k: Kind, n: number) {
+    let left = Math.min(n, this.bag[k]);
+    for (const st of this.spaceChest) if (st.k === k && st.n < SPACE.stack) { const m = Math.min(left, SPACE.stack - st.n); st.n += m; left -= m; }
+    while (left > 0 && this.spaceChest.length < SPACE.stacks) { const m = Math.min(left, SPACE.stack); this.spaceChest.push({ k, n: m }); left -= m; }
+    const put = Math.min(n, this.bag[k]) - left; this.bag[k] -= put; return put;
+  }
+  private chestClick(e: MouseEvent) {
+    e.stopPropagation();
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose]'); if (!el || !this.running || this.paused) return;
+    if (el.dataset.chestclose !== undefined) { this.closeChest(); return; }
+    if (el.dataset.take !== undefined) {
+      const i = Number(el.dataset.take), st = this.spaceChest[i]; if (!st) return;
+      this.bag[st.k] += st.n; this.spaceChest.splice(i, 1); Sound.click();
+    } else if (el.dataset.put) {
+      const k = el.dataset.put as Kind, n = this.chestPut(k, this.bag[k]);
+      if (!n) { this.say('The chest is full: 100 stacks', 2); Sound.denied(); } else Sound.thump();
+    } else if (el.dataset.putall !== undefined) {
+      let n = 0; for (const k of KINDS) if (this.bag[k] > 0) n += this.chestPut(k, this.bag[k]);
+      if (!n) { this.say(this.spaceChest.length >= SPACE.stacks ? 'The chest is full: 100 stacks' : 'Nothing to put in', 2); Sound.denied(); } else Sound.thump();
+    }
+    this.syncQuick(); this.chestSig = '';
+  }
+  private renderChest() {
+    const el = this.pad.querySelector<HTMLElement>('#svSpace')!;
+    if (!this.chestOpen) { if (!el.hidden) el.hidden = true; return; }
+    const have = KINDS.filter(k => this.bag[k] > 0);
+    const sig = JSON.stringify([this.spaceChest, have.map(k => this.bag[k])]);
+    if (sig !== this.chestSig) {
+      this.chestSig = sig;
+      const slots = Array.from({ length: SPACE.stacks }, (_, i) => { const st = this.spaceChest[i]; return st ? `<button class="slot" data-take="${i}" title="Take ${st.n} ${escHtml(KIND_NAME[st.k])}"><img src="${this.icon(st.k)}" alt=""><b>${st.n}</b></button>` : '<div class="slot empty"></div>'; }).join('');
+      const items = have.map(k => `<button class="slot" data-put="${k}" title="Put in ${escHtml(KIND_NAME[k])}"><img src="${this.icon(k)}" alt=""><b>${fmt(Math.floor(this.bag[k]))}</b></button>`).join('');
+      el.innerHTML = `<div class="trow"><h3>Space chest</h3><span class="fine">${this.spaceChest.length} / ${SPACE.stacks} stacks</span></div>
+        <p class="fine">Each stack holds up to ${SPACE.stack}. Tap a stack to take it out.</p>
+        <div class="chestgrid">${slots}</div>
+        <div class="trow"><b>Your things</b><button class="ghost small" data-putall>Put everything in</button></div>
+        <p class="fine">Tap something to put all of it in.</p>
+        <div class="chestmine">${items || '<p class="fine">Your pockets are empty.</p>'}</div>
+        <button class="ghost small" data-chestclose>Close (Esc)</button>`;
+    }
+    el.hidden = false;
+  }
+  /** Space: black sky with stars, and the platform's metal plates. */
+  private drawSpace(g: CanvasRenderingContext2D) {
+    const v = this.view;
+    g.fillStyle = '#05060f'; g.fillRect(v.x0 - 200, v.y0 - 200, v.x1 - v.x0 + 400, v.y1 - v.y0 + 400);
+    // stars: the same ones every frame, in cells of 120 so only the ones in view are drawn
+    const cell = 120;
+    for (let cx = Math.floor(v.x0 / cell) - 1; cx <= Math.ceil(v.x1 / cell); cx++) for (let cy = Math.floor(v.y0 / cell) - 1; cy <= Math.ceil(v.y1 / cell); cy++) {
+      let h = (cx * 73856093) ^ (cy * 19349663);
+      for (let i = 0; i < 3; i++) {
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const sx = cx * cell + (h % cell);
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const sy = cy * cell + (h % cell);
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const b = (h % 100) / 100;
+        g.fillStyle = b > .9 ? '#ffe9c4' : b > .75 ? '#bcd6ff' : 'rgba(255,255,255,.7)';
+        const r = b > .9 ? 1.6 : .8 + b * .6, tw = .6 + .4 * Math.sin(this.t * (1 + b * 2) + h);
+        g.globalAlpha = tw; g.fillRect(sx - r / 2, sy - r / 2, r, r);
+      }
+    }
+    g.globalAlpha = 1;
+    // a distant planet
+    const px = CX + 900, py = CY - 700;
+    if (this.seen(px, py, 260)) {
+      const gr = g.createRadialGradient(px - 60, py - 60, 20, px, py, 220); gr.addColorStop(0, '#6f5bd6'); gr.addColorStop(1, '#1b1440');
+      g.fillStyle = gr; g.beginPath(); g.arc(px, py, 220, 0, 7); g.fill();
+    }
+    // the platform: a shadow, steel plates with rivets, and a yellow edge
+    const tiles = [...this.platTiles].map(k => k.split(',').map(Number));
+    g.fillStyle = 'rgba(0,0,0,.5)'; for (const [c, r] of tiles) g.fillRect(GX0 + c * TILE + 8, GY0 + r * TILE + 10, TILE, TILE);
+    for (const [c, r] of tiles) paintPlat(g, GX0 + c * TILE, GY0 + r * TILE, this.cracks.get(c + ',' + r) ?? 0, (c + r) % 2 === 1);
+    // a yellow edge where the platform ends
+    g.strokeStyle = '#e0b43a'; g.lineWidth = 2;
+    g.beginPath();
+    for (const [c, r] of tiles) {
+      const x = GX0 + c * TILE, y = GY0 + r * TILE;
+      if (!this.onPlat(c, r - 1)) { g.moveTo(x, y + 1); g.lineTo(x + TILE, y + 1); }
+      if (!this.onPlat(c, r + 1)) { g.moveTo(x, y + TILE - 1); g.lineTo(x + TILE, y + TILE - 1); }
+      if (!this.onPlat(c - 1, r)) { g.moveTo(x + 1, y); g.lineTo(x + 1, y + TILE); }
+      if (!this.onPlat(c + 1, r)) { g.moveTo(x + TILE - 1, y); g.lineTo(x + TILE - 1, y + TILE); }
+    }
+    g.stroke();
+  }
+  /** Asteroids and the stone floating off them. */
+  private drawRocks(g: CanvasRenderingContext2D) {
+    for (const f of this.floaters) { g.globalAlpha = f.landed ? 1 : Math.max(0, Math.min(1, (SPACE.stoneLife - f.t) / 4)); paintItem(g, f.x, f.y, 'stone'); }
+    g.globalAlpha = 1;
+    for (const as of this.asteroids) {
+      if (!this.seen(as.x, as.y)) continue;
+      g.save(); g.translate(as.x, as.y); g.rotate(as.a);
+      g.fillStyle = '#7a6f66'; g.beginPath();
+      as.pts.forEach((k, i) => { const a = i / as.pts.length * Math.PI * 2; g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * as.r * k, Math.sin(a) * as.r * k); });
+      g.closePath(); g.fill(); g.strokeStyle = '#3e3832'; g.lineWidth = 1.2; g.stroke();
+      g.fillStyle = 'rgba(40,34,30,.55)'; g.beginPath(); g.arc(as.r * .25, -as.r * .2, as.r * .25, 0, 7); g.arc(-as.r * .3, as.r * .25, as.r * .18, 0, 7); g.fill();
+      g.restore();
+    }
+  }
+  /** The big chest in the middle of the platform. */
+  private drawSpaceChest(g: CanvasRenderingContext2D) {
+    const b = this.chestBox(), s = SPACE.chest * TILE, x = b.x - s / 2, y = b.y - s / 2;
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(x + 3, y + 5, s, s);
+    g.fillStyle = '#3d4a5c'; g.fillRect(x + 2, y + 2, s - 4, s - 4);
+    g.fillStyle = '#56677e'; g.fillRect(x + 2, y + 2, s - 4, 14);
+    g.strokeStyle = '#1e2633'; g.lineWidth = 2; g.strokeRect(x + 2, y + 2, s - 4, s - 4);
+    g.fillStyle = '#8fd3ff'; g.fillRect(b.x - 7, y + 20, 14, 4);
+    g.fillStyle = '#e0b43a'; g.fillRect(b.x - 4, y + 12, 8, 7);
+    const n = this.spaceChest.length;
+    g.fillStyle = '#9aa8ba'; g.fillRect(x + 8, y + s - 12, s - 16, 4);
+    g.fillStyle = n >= SPACE.stacks ? '#ff6a5a' : '#6fe0a0'; g.fillRect(x + 8, y + s - 12, (s - 16) * n / SPACE.stacks, 4);
   }
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
   private static SAVED = ['hp', 'x', 'y', 'face', 'reload', 't', 'healT', 'waveT', 'waveN', 'waveLeft', 'waveGap', 'waveWarned', 'nextId', 'kills', 'shots', 'hits', 'damage',
-    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'groupSize', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
+    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
     'machines', 'expansion', 'researching', 'progress', 'lv', 'brickGate', 'robotT', 'miners', 'popT', 'load', 'patches', 'queue', 'jobN', 'quick', 'pollution'] as const;
   /** Everything needed to carry on this run later, as plain JSON. */
   save(): SaveData {
     const me = this as unknown as Record<string, unknown>, o: Record<string, unknown> = { v: 2 };
     for (const k of Survival.SAVED) o[k] = me[k];
+    // a save made in creative keeps what you had in survival
+    if (this.creative && this.survivalBag) o.bag = { ...this.survivalBag };
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
-    o.done = [...this.done];
+    o.done = [...this.done]; o.spaceChest = this.spaceChest; o.platTiles = [...this.platTiles]; o.cracks = [...this.cracks];
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
-    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls'] as const) o[k] = [...this[k]];
+    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls', 'ghosts'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
     o.robots = this.robots.map(r => ({ x: r.x, y: r.y, hub: r.hub, k: null, src: null, dst: null }));
     for (const r of this.robots) if (r.k) (o.bag as Bag)[r.k]++;
@@ -623,6 +892,8 @@ export class Survival {
     const me = this as unknown as Record<string, unknown>;
     for (const k of Survival.SAVED) if (k in d) me[k] = d[k];
     this.bag = { ...emptyBag(), ...(d.bag as Bag) };
+    // ore patches never run out now, so ones a save had dug down come back full
+    for (const p of this.patches) p.left = p.max;
     this.quick = ((d.quick as (Kind | null)[]) ?? Array(10).fill(null)).slice(0, 10); this.syncQuick();
     this.gates = d.gates as Gate[];
     this.bears = (d.bears as (Omit<Bear, 'gate'> & { gate: number })[]).map(b => ({ ...b, gate: this.gates[b.gate] ?? this.gates[0] }));
@@ -637,6 +908,9 @@ export class Survival {
     this.belts = new Map(d.belts as [string, number][]); this.splitters = new Map(d.splitters as [string, Splitter][]);
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
+    this.ghosts = new Map((d.ghosts ?? []) as [string, Ghost][]);
+    this.spaceChest = (d.spaceChest ?? []) as Stack[];
+    if (this.space && d.platTiles) { this.platTiles = new Set(d.platTiles as string[]); this.cracks = new Map((d.cracks ?? []) as [string, number][]); }
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
@@ -646,8 +920,14 @@ export class Survival {
   /* ---------- input ---------- */
   private down(e: PointerEvent) {
     e.preventDefault();
-    if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor) return;
+    if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor || this.chestOpen) return;
     const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
+    // the blueprint tool: drag a box, or hold and let go where the blueprint goes
+    if (this.bpMode) {
+      const t = tileAt(wx, wy);
+      if (t && this.bpMode === 'select') { this.bpBox = { id: e.pointerId, c0: t.c, r0: t.r, c1: t.c, r1: t.r }; return; }
+      if (t && this.bpMode === 'place') { this.bpAim = { id: e.pointerId, ...t }; return; }
+    }
     // placing a belt: tap the spot
     if (this.placing) {
       const t = tileAt(wx, wy);
@@ -658,16 +938,18 @@ export class Survival {
         return;
       }
     }
-    // a tap on the machine uses it
-    if (this.mineOn) {
-      const tm = this.machines.find(m => Math.hypot(wx - m.x, wy - m.y) < m.r + 10);
-      if (tm) { this.openRecipe(tm); return; }
-    }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
     this.tap = { id: e.pointerId, x: e.offsetX, y: e.offsetY, t: e.timeStamp };
   }
   private move(e: PointerEvent) {
+    const bt = this.bpBox ?? this.bpAim;
+    if (bt && bt.id === e.pointerId) {
+      const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
+      if (t && this.bpBox) { this.bpBox.c1 = t.c; this.bpBox.r1 = t.r; }
+      if (t && this.bpAim) { this.bpAim.c = t.c; this.bpAim.r = t.r; }
+      return;
+    }
     const dp = this.dragPlace;
     if (dp && dp.id === e.pointerId && this.placing && !isBig(this.placeType)) {
       const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
@@ -686,7 +968,7 @@ export class Survival {
       return;
     }
     // with a mouse, the belt being placed follows the pointer
-    if (this.placing && e.pointerType === 'mouse') {
+    if ((this.placing || this.bpMode) && e.pointerType === 'mouse') {
       const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
       this.hover = t ? { ...t, t: performance.now() } : null;
     }
@@ -716,7 +998,7 @@ export class Survival {
   private useUp(i: number, pts: number) {
     const a = this.ammoSlots[i]; if (!a) return;
     a.pts -= pts;
-    if (a.pts <= 1e-6) { this.ammoSlots[i] = null; this.bubble(this.x, this.y - 30, `Out of ${a.k === 'rocket' ? 'rockets' : AMMO_NAME[a.k].toLowerCase() + ' ammo'}`, 'info'); }
+    if (a.pts <= 1e-6) { this.ammoSlots[i] = null; this.bubble(this.x, this.y - 30, `Out of ${isRocket(a.k) ? KIND_NAME[a.k] : AMMO_NAME[a.k].toLowerCase() + ' ammo'}`, 'info'); }
   }
   /** Space shoots at the nearest bear (or spawner) in range; Z shoots straight ahead with no target. Holding Space keeps firing. */
   private shoot(targeted: boolean) {
@@ -727,20 +1009,37 @@ export class Survival {
     let target: Target | null = null;
     if (targeted) {
       target = this.nearestTarget(this.x, this.y, w === 'rgun' ? SURVIVAL.rocketRange : SURVIVAL.targetRange);
-      if (!target) {
-        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; if (!this.fireHeld) Sound.denied(); }
+      // space: aim at the nearest asteroid, a little ahead of where it's going
+      const as = !target && this.space ? this.asteroids.filter(a => a.r > 0 && dist(a.x, a.y, this.x, this.y) < SURVIVAL.targetRange).sort((a, b) => dist(a.x, a.y, this.x, this.y) - dist(b.x, b.y, this.x, this.y))[0] : undefined;
+      if (as) { const lt = dist(as.x, as.y, this.x, this.y) / SURVIVAL.boltSpeed; this.face = Math.atan2(as.y + as.vy * lt - this.y, as.x + as.vx * lt - this.x); }
+      else if (!target) {
+        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, this.space ? 'No asteroid in range' : 'No bear in range', 'info'); this.noTargetT = 1.2; if (!this.fireHeld) Sound.denied(); }
         return;
       }
-      this.face = Math.atan2(target.y - this.y, target.x - this.x);
+      else this.face = Math.atan2(target.y - this.y, target.x - this.x);
     }
     const a = this.face, ammo = AMMO[this.load.ammo], i = this.ammoSlot(w);
     // the rocket gun: one rocket a shot, it swirls and then homes in like a launcher's
     if (w === 'rgun') {
       if (i < 0) { if (this.noAmmoT <= 0) { this.bubble(this.x, this.y - 30, 'Put rockets in an ammo slot', 'info'); this.noAmmoT = 1.5; } Sound.denied(); return; }
+      const boom = this.ammoSlots[i]!.k === 'xrocket';
       this.useUp(i, SURVIVAL.ammoPoints); this.mining = false;
-      this.rockets.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+      this.rockets.push({ boom, from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a) * 22, y: this.y + Math.sin(a) * 22, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
       this.reload = SURVIVAL.rgunReload * ST.reloadMul; this.shots++;
       Sound.rocket();
+      return;
+    }
+    // the machine gun: a small bolt every 0.2 s, 0.5 of an ammo's 100 usage points a shot; with no ammo it still fires, for no damage
+    if (w === 'mgun') {
+      const k = i >= 0 ? this.ammoSlots[i]!.k as AmmoKind : null;
+      const dmg = k ? SURVIVAL.mgunDamage[k] * ST.boltMul : 0;
+      if (i >= 0) this.useUp(i, SURVIVAL.mgunUse);
+      else if (this.noAmmoT <= 0) { this.bubble(this.x + 18, this.y - 22, 'No Ammo', 'tiny'); this.noAmmoT = .8; }
+      this.mining = false;
+      const j = (Math.random() - .5) * .06;
+      this.bolts.push({ from: this.wallAt(this.x, this.y) ?? undefined, x: this.x + Math.cos(a + j) * 20, y: this.y + Math.sin(a + j) * 20, vx: Math.cos(a + j) * SURVIVAL.boltSpeed * 1.3, vy: Math.sin(a + j) * SURVIVAL.boltSpeed * 1.3, left: SURVIVAL.boltRange, dmg, target, stone: true, color: k && k !== 'ammo' ? metalOf(k).color : '#ffd27a' });
+      this.reload = SURVIVAL.mgunEvery * ST.reloadMul; this.shots++;
+      Sound.mgun();
       return;
     }
     // the crossbow: stone ammo does 1.7x normal damage, metal ammo its own; one ammo a shot. With no ammo it fires loadout bolts.
@@ -826,9 +1125,8 @@ export class Survival {
     return false;
   }
   private armsSig = '';
-  private newGroup() { return SURVIVAL.groupMin + Math.floor(Math.random() * (SURVIVAL.groupMax - SURVIVAL.groupMin + 1)); }
   /** The colour of the bolt on the crossbow: the ammo it will shoot. */
-  private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && k !== 'rocket' ? metalOf(k).color : undefined; }
+  private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && !isRocket(k) ? metalOf(k).color : undefined; }
   /** Draws the weapon and ammo slots (only when they change). */
   private renderArms() {
     const sig = JSON.stringify([this.weapons, this.wSel, this.ammoSlots.map(a => a && [a.k, Math.ceil(a.pts / 5)]), this.aSel]);
@@ -982,6 +1280,8 @@ export class Survival {
       else if (id === 'gate') { for (const [k, q] of Object.entries(r.in) as [Kind, number][]) this.bag[k] -= q; this.brickGate = true; this.say('Brick gate built: bears wait 10 seconds longer'); Sound.pop(); }
       this.renderShop(); return;
     }
+    // creative: anything, right away, for free
+    if (this.creative) { this.bag[r.out] += r.n * n; this.bubble(this.x, this.y - 30, `+${r.n * n} ${r.n * n === 1 ? ONE_NAME[r.out] : KIND_NAME[r.out]}`, 'info'); Sound.pop(); this.syncQuick(); this.renderShop(); return; }
     let made = 0;
     for (let i = 0; i < n; i++) {
       if (this.queue.length >= SURVIVAL.queueMax) { this.bubble(this.x, this.y - 30, 'The crafting queue is full', 'info'); break; }
@@ -1117,16 +1417,38 @@ export class Survival {
     const [c, r] = key.split(',').map(Number), near = dist(this.x, this.y, tileX(c), tileY(r)) < NEAR * 1.6;
     const rc = REC[b.recipe], power = this.hasPower(key);
     const items = this.invItems();
-    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done], items]);
+    const sig = JSON.stringify([key, b.recipe, b.inp, b.inpK, b.out, b.outK, b.buf, power, near, Math.floor(b.t * 4), [...this.done], items, b.pi !== undefined ? this.patches[b.pi]?.left : 0, b.d]);
     if (sig === this.bldSig) return;
     this.bldSig = sig;
     const chip = (k: Kind, n: number, of?: number) => `<span class="chip"><img src="${this.icon(k)}" alt=""> ${n}${of !== undefined ? `/${of}` : ''} ${KIND_NAME[k]}</span>`;
     let h = `<h3>${BNAME[b.type]}</h3>`;
+    if (b.type === 'drill') {
+      // like a mining drill's info window: what it digs, how much is left, how fast, power, progress and what's waiting to come out
+      const pt = b.pi !== undefined ? this.patches[b.pi] : undefined, ore = pt?.ore;
+      const full = b.out >= 5, runs = !!pt && power && !full;
+      const speed = ST.digMul / SURVIVAL.drillEvery, eta = runs ? (SURVIVAL.drillEvery - b.t) / ST.digMul : 0;
+      const status = !pt ? '<b class="warn">Not on an ore patch.</b>' : !power ? '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.' : full ? '<b class="warn">Output full.</b> Put a belt, chest or furnace in front of it, or take the ore out.' : 'Working.';
+      h += `<div class="drillinfo">
+        <div class="drow"><img src="${ore ? this.icon(ore) : this.icon('drill')}" alt=""><div><b>${ore ? `Digging ${ore === 'stone' ? 'stone' : ONE_NAME[ore].toLowerCase()}` : 'Not on ore'}</b><span class="fine">${status}</span></div></div>
+        <dl>
+          <dt>Mining speed</dt><dd>${+speed.toFixed(2)} ore a second (1 every ${+(SURVIVAL.drillEvery / ST.digMul).toFixed(2)} s)</dd>
+          <dt>Ore in patch</dt><dd>${pt ? 'Never runs out' : 'none'}</dd>
+          <dt>Power</dt><dd>${power ? '<span class="ok">Connected</span>' : '<span class="warn">None</span>'}</dd>
+          <dt>Output</dt><dd>${b.out && b.outK ? `${b.out}/5 ${KIND_NAME[b.outK]}` : 'empty'} · goes out the ${['right', 'bottom', 'left', 'top'][b.d] ?? 'front'} (R turns it)</dd>
+          <dt>Pollution</dt><dd>${runs ? `${SURVIVAL.pollution.drill} a second` : 'none while stopped'}</dd>
+        </dl>
+        <div class="bar"><span style="width:${runs ? Math.min(100, b.t / SURVIVAL.drillEvery * 100) : 0}%"></span></div>
+        <p class="fine">${runs ? `Next ore in ${eta.toFixed(1)} s` : 'Stopped'}</p>
+      </div>`;
+      h += `<div class="craftbtns"><button class="primary" data-bld="fill"${near && b.out ? '' : ' disabled'}>Take out${b.out ? ` ${b.out}` : ''}</button><button class="ghost" data-bld="pick"${near ? '' : ' disabled'}>Pick up</button><button class="ghost" data-bld="close">Close</button></div>`;
+      if (!near) h += '<p class="fine">Walk closer to take ore out or pick it up.</p>';
+      this.pad.querySelector('#svBld')!.innerHTML = h; return;
+    }
     if (b.type === 'asm') {
       h += `<p class="fine">${power ? 'Powered.' : '<b class="warn">No power.</b> Put a power pole next to it, joined to a generator with stone in it.'} Pick what it makes; grabbers bring the parts in and take what it makes out the front.</p>`;
       h += '<div class="slots">' + RECIPES.filter(x => x.out && x.asm && this.unlocked(x)).map(x => `<button class="slot rec${x.id === b.recipe ? ' sel' : ''}" data-asm="${x.id}" title="${ONE_NAME[x.out!]}"><img src="${this.icon(x.out!)}" alt="">${x.n > 1 ? `<b>${x.n}</b>` : ''}</button>`).join('') + '</div>';
       if (rc) {
-        h += `<div class="recinfo"><b>Makes ${rc.n} ${rc.n === 1 ? ONE_NAME[rc.out!].toLowerCase() : KIND_NAME[rc.out!]} every ${+this.asmTime(rc).toFixed(2)} s, until you change the recipe</b><div class="chips">${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => chip(k, b.buf?.[k] ?? 0, q)).join('')}</div>`;
+        h += `<div class="recinfo"><b>Makes ${rc.n} ${rc.n === 1 ? ONE_NAME[rc.out!].toLowerCase() : KIND_NAME[rc.out!]} every ${+this.asmTime(rc).toFixed(2)} s, until you change the recipe</b><div class="chips">${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => chip(k, b.buf?.[k] ?? 0, q)).join('')}</div><p class="fine">Needs ${(Object.entries(rc.in) as [Kind, number][]).map(([k, q]) => `${q} ${q === 1 ? ONE_NAME[k].toLowerCase() : KIND_NAME[k]}`).join(', ')} each time. Holds up to ${SURVIVAL.asmHold} of each.</p>`;
         h += `<div class="bar"><span style="width:${Math.min(100, b.t / this.asmTime(rc) * 100)}%"></span></div>${b.out ? `<div class="chips">Made: ${chip(b.outK!, b.out)}</div>` : ''}</div>`;
       }
     } else {
@@ -1242,7 +1564,7 @@ export class Survival {
       const r = REC[b.recipe]; if (!r) return false;
       const q = r.in[k]; if (!q) return false;
       b.buf ??= {};
-      if ((b.buf[k] ?? 0) >= q * 2) return false;
+      if ((b.buf[k] ?? 0) >= SURVIVAL.asmHold) return false;
       b.buf[k] = (b.buf[k] ?? 0) + 1; return true;
     }
     if (b.type === 'hub') { if (k !== 'robot') return false; return true; }
@@ -1294,7 +1616,7 @@ export class Survival {
     if (this.powerT <= 0) { this.powerT = .5; this.updatePower(); }
     const P = SURVIVAL.pollution;
     for (const [key, b] of this.blds) {
-      const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r), [dx, dy] = DIRS[b.d];
+      const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[b.d];
       if (b.type === 'gen') {
         const rate = this.genLoad.get(key) ?? 0;
         if (!rate) continue;
@@ -1307,12 +1629,13 @@ export class Survival {
       if (b.out > 0 && b.outK && this.deliver(c + dx, r + dy, b.outK)) { b.out--; if (!b.out) b.outK = undefined; }
       if (b.type === 'drill') {
         const p = b.pi !== undefined ? this.patches[b.pi] : undefined;
+        b.on = false;
         if (!p || p.left <= 0 || b.out >= 5 || !this.hasPower(key)) continue;
-        b.t += dt * ST.digMul;
+        b.on = true; b.t += dt * ST.digMul;
         this.pollution += P.drill * dt;
         if (b.t < SURVIVAL.drillEvery) continue;
-        b.t = 0; p.left--; b.out++; b.outK = p.ore;
-        if (p.left <= 0) this.bubble(x, y - 20, 'This ore patch has run out', 'info');
+        // ore patches never run out
+        b.t = 0; b.out++; b.outK = p.ore;
         continue;
       }
       if (b.type === 'furnace') {
@@ -1374,7 +1697,7 @@ export class Survival {
   private robotJob(busy: Set<string | undefined>): { src: NonNullable<Robot['src']>; dst: NonNullable<Robot['dst']> } | null {
     // what needs something, and what kind
     const needs: { id: string; x: number; y: number; kinds: Kind[]; give: (k: Kind) => boolean }[] = [];
-    for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? ['rocket'] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
+    for (const [key, tu] of this.turrets) if (tAmmo(tu) < (tu.kind === 'rocket' ? 3 : 10)) { const [c, r] = key.split(',').map(Number); needs.push({ id: 't' + key, x: tileX(c), y: tileY(r), kinds: tu.kind === 'rocket' ? [...ROCKETS] : [...AMMO_KINDS, 'stone'], give: k => this.feedTurret(tu, k) }); }
     for (const [key, lb] of this.labs) if (lb.packs < 10 || (lb.packs2 ?? 0) < 10) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'l' + key, x: tileX(c), y: tileY(r), kinds: [...(lb.packs < 10 ? ['pack'] : []), ...((lb.packs2 ?? 0) < 10 ? ['pack2'] : [])] as Kind[], give: k => this.feedLab(lb, k) }); }
     this.machines.forEach((m, i) => { if (m.recipe && m.queue.length < 3) needs.push({ id: 'm' + i, x: m.x, y: m.y, kinds: MACHINE_IN.filter(k => this.machineTakes(m, k)), give: k => { if (!this.machineTakes(m, k)) return false; m.queue.push(k); return true; } }); });
     for (const [key, b] of this.blds) { const kinds = this.bldWants(b); if (kinds.length) { const [c, r] = key.split(',').map(Number); needs.push({ id: 'b' + key, x: tileX(c), y: tileY(r), kinds, give: k => this.feedBld(b, k) }); } }
@@ -1394,7 +1717,9 @@ export class Survival {
   }
   /** A turret takes ammo (raw stone counts as stone ammo); a rocket launcher only takes rockets. */
   private feedTurret(tu: Turret, k: Kind) {
-    if (tu.kind === 'rocket') { if (k !== 'rocket') return false; tu.ammo.rocket = (tu.ammo.rocket ?? 0) + 1; return true; }
+    // it never takes more than the most you set for it
+    if (tAmmo(tu) + 1 > (tu.max ?? SURVIVAL.turretMaxAmmo) + 1e-9) return false;
+    if (tu.kind === 'rocket') { if (!isRocket(k)) return false; tu.ammo[k] = (tu.ammo[k] ?? 0) + 1; return true; }
     const a: AmmoKind | null = k === 'stone' ? 'ammo' : isAmmoKind(k) ? k : null;
     if (!a) return false;
     tu.ammo[a] = (tu.ammo[a] ?? 0) + 1; return true;
@@ -1508,7 +1833,7 @@ export class Survival {
       return;
     }
     const b = this.blds.get(u.key)!;
-    if (b.type === 'asm' || b.type === 'furnace') { this.openBld(u.key); return; }
+    if (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill') { this.openBld(u.key); return; }
     this.fillBld(u.key);
   }
   /** Takes out what a building made, then puts in what it can use from your pocket. */
@@ -1539,15 +1864,80 @@ export class Survival {
   }
   /** What you could load into this turret (or any turret): rockets for a rocket launcher, ammo for the rest. */
   private loadable(tu: Turret | null = this.nearTurret()) {
-    if (tu?.kind === 'rocket') return this.bag.rocket;
+    if (tu?.kind === 'rocket') return this.bag.rocket + this.bag.xrocket;
     return AMMO_KINDS.reduce((a, k) => a + this.bag[k], 0);
   }
   /** T next to a turret: put all your ammo in it (all your rockets in a rocket launcher). */
+  /** Cheat mode only: creative gives you plenty of everything, instant free crafting and no damage; survival gives back what you had. */
+  private creative = false; private survivalBag: Bag | null = null;
+  /** Cheat mode: is it on for this run, and are you in creative right now. The pause menu (Esc) switches it. */
+  get cheat() { return !!this.load.cheat; }
+  get isCreative() { return this.creative; }
+  setCreative(on: boolean) { if (on !== this.creative) this.toggleCreative(); }
+  private toggleCreative() {
+    if (!this.load.cheat) return;
+    this.creative = !this.creative;
+    if (this.creative) { this.survivalBag = { ...this.bag }; this.topUp(); this.queue = []; this.say('Creative: everything is free and nothing hurts you', 3); }
+    else { if (this.survivalBag) this.bag = { ...emptyBag(), ...this.survivalBag }; this.survivalBag = null; this.say('Survival: back to what you had', 3); }
+    this.syncQuick(); this.invSig = ''; this.quickSig = ''; this.bldSig = ''; Sound.click();
+  }
+  private topUp() { for (const k of KINDS) if (this.bag[k] < SURVIVAL.creativeStock) this.bag[k] = SURVIVAL.creativeStock; }
+  /** The picked turret's small panel: how much ammo it has, and the most it may hold (0 to 10000). */
+  private turretKey = '';
+  private renderTurretPanel() {
+    const el = this.pad.querySelector<HTMLElement>('#svTurret')!, tu = this.picked ? this.turrets.get(this.picked) : undefined;
+    const help = this.pad.querySelector<HTMLElement>('#svHelp');
+    if (!tu || !this.picked) { if (!el.hidden) { el.hidden = true; this.turretKey = ''; if (help) help.style.visibility = ''; } return; }
+    if (help) help.style.visibility = 'hidden';
+    const cap = tu.max ?? SURVIVAL.turretMaxAmmo, what = tu.kind === 'rocket' ? 'rockets' : 'ammo';
+    if (this.turretKey !== this.picked) {
+      this.turretKey = this.picked;
+      el.innerHTML = `<div class="trow"><b>${ONE_NAME[T_ITEM[tu.kind]]}</b><span class="fine" data-tnow></span></div>
+        <label class="fine" for="svTMax">Most ${what} it holds</label>
+        <div class="trow"><input type="range" id="svTMaxR" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" aria-label="Most ${what} it holds"><input type="number" id="svTMax" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" inputmode="numeric"></div>
+        <div class="trow quick">${[0, 10, 50, 100, 500, 1000, SURVIVAL.turretMaxAmmo].map(n => `<button class="ghost small" data-tmax="${n}">${fmt(n)}</button>`).join('')}</div>
+        <p class="fine">Tap a bear or spawner for it to shoot. Double-tap the turret to pick it up.</p>`;
+    }
+    const now = el.querySelector<HTMLElement>('[data-tnow]')!, txt = `${fmt(Math.floor(tAmmo(tu)))} / ${fmt(cap)} ${what}`;
+    if (now.textContent !== txt) now.textContent = txt;
+    el.hidden = false;
+  }
+  /** The blueprint list: make a new one, put a saved one down, or delete it. */
+  private renderBpPanel() {
+    const el = this.pad.querySelector<HTMLElement>('#svBp')!, bb = this.pad.querySelector<HTMLElement>('#svBpBtn')!;
+    const on = !!this.bpMode, lab = on ? 'Done' : 'Blueprint', sm = on ? 'Esc' : 'Ctrl+C';
+    if (bb.firstElementChild!.textContent !== lab) { bb.firstElementChild!.textContent = lab; bb.lastElementChild!.textContent = sm; }
+    bb.classList.toggle('on', on || this.bpOpen); bb.hidden = this.shopOpen;
+    const show = this.bpOpen && !this.bpMode && !this.picked;
+    if (!show) { if (!el.hidden) el.hidden = true; return; }
+    const sig = JSON.stringify([this.bps.map(b => [b.name, b.parts.length]), this.ghosts.size]);
+    if (sig !== this.bpSig) {
+      this.bpSig = sig;
+      el.innerHTML = `<div class="trow"><b>Blueprints</b><button class="ghost small" data-bp="close">Close</button></div>
+        <button class="primary" data-bp="new">New: drag a box over things</button>
+        ${this.bps.length ? `<div class="bplist">${this.bps.map((b, i) => `<div class="bprow"><span>${escHtml(b.name)} <small>${b.parts.length} thing${b.parts.length > 1 ? 's' : ''}</small></span><button class="ghost small" data-bp="use" data-i="${i}">Place</button><button class="ghost small" data-bp="del" data-i="${i}" aria-label="Delete ${escHtml(b.name)}">✕</button></div>`).join('')}</div>`
+          : '<p class="fine">No blueprints yet.</p>'}
+        ${this.ghosts.size ? `<button class="ghost small" data-bp="clear">Remove all ghosts (${this.ghosts.size})</button>` : ''}
+        <p class="fine">A placed blueprint shows light blue ghosts that do nothing. Build on a ghost and it goes away. Ctrl+C copies, Ctrl+V puts the last one down.</p>`;
+    }
+    el.hidden = false;
+  }
+  private turretMaxInput(e: Event) {
+    const inp = e.target as HTMLInputElement; if (inp.id !== 'svTMax' && inp.id !== 'svTMaxR') return;
+    const v = Number(inp.value); if (!Number.isFinite(v) || inp.value === '') return;
+    this.setTurretMax(v, inp.id);
+  }
+  private setTurretMax(v: number, from = '') {
+    const tu = this.picked ? this.turrets.get(this.picked) : undefined; if (!tu) return;
+    tu.max = clamp(Math.round(v), 0, SURVIVAL.turretMaxAmmo);
+    const el = this.pad.querySelector<HTMLElement>('#svTurret')!;
+    for (const id of ['svTMax', 'svTMaxR']) if (id !== from) { const i = el.querySelector<HTMLInputElement>('#' + id); if (i) i.value = String(tu.max); }
+  }
   private loadTurret() {
     const best = this.nearTurret();
     if (!best) { this.bubble(this.x, this.y - 30, 'Walk to a turret to load it', 'info'); Sound.denied(); return; }
     if (!this.loadable(best)) { this.bubble(this.x, this.y - 30, best.kind === 'rocket' ? 'No rockets. Make them in an ammo machine (rocket recipe)' : 'No ammo to load. Make some in the ammo machine', 'info'); Sound.denied(); return; }
-    const kinds: Kind[] = best.kind === 'rocket' ? ['rocket'] : AMMO_KINDS;
+    const kinds: Kind[] = best.kind === 'rocket' ? ROCKETS : AMMO_KINDS;
     let n = 0;
     for (const k of kinds) { while (this.bag[k] > 0 && this.feedTurret(best, k)) { this.bag[k]--; n++; } }
     this.bubble(this.x, this.y - 30, `Loaded ${n} ${best.kind === 'rocket' ? 'rocket' : 'ammo'}${best.kind === 'rocket' && n > 1 ? 's' : ''}`, 'info');
@@ -1573,13 +1963,13 @@ export class Survival {
   private canTake(c: number, r: number, k: Kind) {
     const key = c + ',' + r;
     const m = this.isMachine(c, r); if (m) return this.machineTakes(m, k);
-    const tu = this.turrets.get(key); if (tu) return tu.kind === 'rocket' ? k === 'rocket' : k === 'stone' || isAmmoKind(k);
+    const tu = this.turrets.get(key); if (tu) return tu.kind === 'rocket' ? isRocket(k) : k === 'stone' || isAmmoKind(k);
     const lb = this.labs.get(key); if (lb) return (k === 'pack' && lb.packs < SURVIVAL.labSize) || (k === 'pack2' && (lb.packs2 ?? 0) < SURVIVAL.labSize);
     const b = this.blds.get(key);
     if (b && b.type !== 'tunnel') {
       if (b.type === 'furnace') return !!SMELT[k] && b.inp < 10 && (!b.inp || b.inpK === k);
       if (b.type === 'gen') return k === 'stone' && b.inp < 10;
-      if (b.type === 'asm') { const q = REC[b.recipe]?.in[k]; return !!q && (b.buf?.[k] ?? 0) < q * 2; }
+      if (b.type === 'asm') { const q = REC[b.recipe]?.in[k]; return !!q && (b.buf?.[k] ?? 0) < SURVIVAL.asmHold; }
       if (b.type === 'hub') return k === 'robot';
       return false;
     }
@@ -1619,7 +2009,7 @@ export class Survival {
     else if (this.labs.has(key)) { const lb = this.labs.get(key)!; this.bag.pack += lb.packs; this.bag.pack2 += lb.packs2 ?? 0; extra = lb.packs + (lb.packs2 ?? 0); this.labs.delete(key); got = 'lab'; }
     else if (this.turrets.has(key)) {
       const tu = this.turrets.get(key)!; extra = Math.floor(tAmmo(tu));
-      for (const [k, v] of Object.entries(tu.ammo) as [AmmoKind | 'rocket', number][]) this.bag[k] += Math.floor(v);
+      for (const [k, v] of Object.entries(tu.ammo) as [Shot, number][]) this.bag[k] += Math.floor(v);
       this.turrets.delete(key); if (this.picked === key) this.picked = null;
       got = T_ITEM[tu.kind];
     }
@@ -1642,30 +2032,112 @@ export class Survival {
     this.updateStructs(); this.syncQuick();
     this.bubble(s.x, s.y - 30, `+1 ${'queue' in s ? 'ammo machine' : s.ore === 'stone' ? 'stone mine' : 'drill'}`, 'info'); Sound.click();
   }
-  /** A quick tap on the map at world point (x, y). */
+  /** A tap that might be the first half of a double-tap: single() waits a moment, and a second tap on the same thing runs double() instead. */
+  private dblTap(id: string, single: () => void, double: () => void) {
+    const now = performance.now(), w = this.tapWait;
+    if (w) {
+      clearTimeout(w.timer); this.tapWait = null;
+      if (w.id === id && now - w.t < SURVIVAL.dblTapMs) { double(); return; }
+      w.single();
+    }
+    const timer = setTimeout(() => { if (this.tapWait?.timer !== timer) return; this.tapWait = null; if (this.running && !this.paused) single(); }, SURVIVAL.dblTapMs);
+    this.tapWait = { id, t: now, timer, single };
+  }
+  /** A quick tap on the map at world point (x, y). One tap opens a panel or picks a turret; a double-tap picks the thing up. */
   private tapAt(x: number, y: number) {
     const t = tileAt(x, y), key = t ? t.c + ',' + t.r : '';
+    // a turret is picked: tap a bear or spawner and that's its target until it is destroyed
     if (this.picked) {
-      const tu = this.turrets.get(this.picked);
-      // tap the picked turret again: pick it up
-      if (key === this.picked) { this.picked = null; if (t) this.pickUp(t.c, t.r); return; }
-      // tap a bear or spawner: that's the turret's target until it is destroyed
-      const hit = this.targetAt(x, y);
+      const tu = this.turrets.get(this.picked), hit = this.targetAt(x, y);
       if (tu && hit) { tu.target = hit; this.picked = null; this.bubble(hit.x, hit.y - 34, 'Target!', 'info'); Sound.locked(); return; }
-      this.picked = null;
-      if (!this.turrets.has(key)) { Sound.click(); return; }
     }
-    if (t && this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
     // tap a spawner: it makes a bear right away
     const sp = this.spawners.find(s => !s.dead && dist(s.x, s.y, x, y) < SPAWNER_R + 12);
     if (sp) { this.spawnBear(sp, false); this.bubble(sp.x, sp.y - 40, 'A bear!', 'info'); Sound.tone('sawtooth', 160, 90, .3, .1); return; }
-    // a mine: pick it up
+    // space: tap the chest to open it
+    if (this.space && t && this.chestTile(t.c, t.r)) { this.dblTap('chest', () => this.openChest(), () => this.openChest()); return; }
+    const hint = (hx: number, hy: number) => { this.bubble(hx, hy, 'Double-tap to pick it up', 'info'); Sound.click(); };
+    // the big round things: a mine, or the ammo machine (one tap opens its recipes)
     const mn = this.mines.find(m => dist(m.x, m.y, x, y) < m.r + 4);
-    if (mn) { this.pickUpBig(mn); return; }
-    // furnaces and assemblers open their panel (which has Pick up)
-    const b = t ? this.blds.get(key) : undefined;
-    if (b && (b.type === 'asm' || b.type === 'furnace')) { this.openBld(key); return; }
-    if (t) this.pickUp(t.c, t.r);
+    if (mn) { this.dblTap('mine' + this.mines.indexOf(mn), () => { this.picked = null; hint(mn.x, mn.y - 30); }, () => { this.picked = null; if (this.mines.includes(mn)) this.pickUpBig(mn); }); return; }
+    const mc = this.mineOn ? this.machines.find(m => dist(m.x, m.y, x, y) < m.r + 10) : undefined;
+    if (mc) { this.dblTap('mach' + this.machines.indexOf(mc), () => { this.picked = null; if (this.machines.includes(mc)) this.openRecipe(mc); }, () => { this.picked = null; if (this.machines.includes(mc)) this.pickUpBig(mc); }); return; }
+    if (!t) return;
+    if (this.taken(t.c, t.r)) {
+      this.dblTap('tile' + key, () => {
+        const b = this.blds.get(key);
+        if (this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
+        this.picked = null;
+        // furnaces, assemblers and drills open their panel (which has Pick up)
+        if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
+        hint(tileX(t.c), tileY(t.r) - 14);
+      }, () => { this.picked = null; if (this.bldOpen === key) this.closeBld(); this.pickUp(t.c, t.r); });
+      return;
+    }
+    // a light blue ghost from a blueprint: double-tap it to get rid of it
+    const gh = this.ghosts.get(key);
+    if (gh) {
+      this.dblTap('ghost' + key, () => { this.picked = null; this.bubble(tileX(t.c), tileY(t.r) - 14, `Build a ${ONE_NAME[gh.p].toLowerCase()} here, or double-tap to remove`, 'info'); Sound.click(); },
+        () => { this.picked = null; this.ghosts.delete(key); this.bubble(tileX(t.c), tileY(t.r) - 14, 'Ghost removed', 'info'); Sound.click(); });
+      return;
+    }
+    this.dblTap('', () => { if (this.picked) { this.picked = null; Sound.click(); } }, () => { this.picked = null; });
+  }
+  /* ---------- blueprints ---------- */
+  /** What's on tile (c, r) as a blueprint part (big round things count on their middle tile). */
+  private partAt(c: number, r: number): Ghost | null {
+    const key = c + ',' + r;
+    if (this.belts.has(key)) return { p: 'belt', d: this.belts.get(key)! };
+    const gr = this.grabbers.get(key); if (gr) return { p: 'grab', d: gr.d };
+    const sp = this.splitters.get(key); if (sp) return { p: 'split', d: sp.d };
+    if (this.chests.has(key)) return { p: 'chest', d: 0 };
+    const pw = this.pwalls.get(key); if (pw) return { p: pw.gate ? 'pgate' : 'wall', d: 0 };
+    if (this.labs.has(key)) return { p: 'lab', d: 0 };
+    const tu = this.turrets.get(key); if (tu) return { p: T_ITEM[tu.kind], d: 0 };
+    const b = this.blds.get(key); if (b) return { p: b.type, d: b.d };
+    const x = tileX(c), y = tileY(r);
+    if (this.machines.some(m => m.x === x && m.y === y)) return { p: 'machine', d: 0 };
+    if (this.mines.some(m => m.x === x && m.y === y && m.ore === 'stone')) return { p: 'mine', d: 0 };
+    return null;
+  }
+  /** The blueprint button: starts the tool, or stops it if it's on. */
+  private bpButton() {
+    if (this.bpMode) { this.bpStop(); Sound.click(); return; }
+    this.bpOpen = !this.bpOpen; this.bpSig = ''; if (this.bpOpen) { this.picked = null; this.closeBld(); } Sound.click();
+  }
+  private bpStop() { this.bpMode = null; this.bpCur = null; this.bpBox = null; this.bpAim = null; this.hover = null; }
+  private bpSelect() { this.bpOpen = false; this.placing = false; this.picked = null; this.closeBld(); this.bpCur = null; this.bpMode = 'select'; this.hover = null; Sound.click(); }
+  private bpUse(i: number) {
+    const b = this.bps[i]; if (!b) return;
+    this.bpOpen = false; this.placing = false; this.picked = null; this.closeBld(); this.bpCur = b; this.bpMode = 'place'; this.hover = null; Sound.click();
+  }
+  /** Saves everything inside the box you dragged as a new blueprint, then lets you put it down. */
+  private copyBox(b: { c0: number; r0: number; c1: number; r1: number }) {
+    const c0 = Math.min(b.c0, b.c1), c1 = Math.max(b.c0, b.c1), r0 = Math.min(b.r0, b.r1), r1 = Math.max(b.r0, b.r1);
+    const mc = Math.round((c0 + c1) / 2), mr = Math.round((r0 + r1) / 2), parts: BpPart[] = [];
+    for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) { const q = this.partAt(c, r); if (q) parts.push({ dc: c - mc, dr: r - mr, ...q }); }
+    if (!parts.length) { this.bubble(tileX(mc), tileY(mr) - 16, 'Nothing in that box. Drag over things you built', 'info'); Sound.denied(); return; }
+    let n = this.bps.length + 1; while (this.bps.some(x => x.name === `Blueprint ${n}`)) n++;
+    const bp: Blueprint = { name: `Blueprint ${n}`, parts };
+    this.bps.push(bp); if (this.bps.length > SURVIVAL.maxBlueprints) this.bps.shift(); saveBps(this.bps);
+    this.bubble(tileX(mc), tileY(mr) - 16, `Saved ${bp.name} (${parts.length} thing${parts.length > 1 ? 's' : ''})`, 'info'); Sound.locked();
+    this.bpCur = bp; this.bpMode = 'place'; this.bpSig = '';
+  }
+  private bpTurn() { if (!this.bpCur) return; this.bpCur = turnBp(this.bpCur); Sound.click(); }
+  /** Puts the blueprint down with its middle on tile (c, r), as light blue ghosts. Spots where something is already built are skipped. */
+  private placeBp(c: number, r: number) {
+    const b = this.bpCur; if (!b) return;
+    let n = 0;
+    for (const q of b.parts) {
+      const cc = c + q.dc, rr = r + q.dr, key = cc + ',' + rr;
+      if (!tileOk(cc, rr) || blockedTile(cc, rr) || (this.space && !this.onPlat(cc, rr))) continue;
+      const have = this.partAt(cc, rr);
+      if (have && have.p === q.p && (have.d === q.d || !TURNS.includes(q.p))) continue;
+      if (!isBig(q.p) && this.taken(cc, rr)) continue;
+      this.ghosts.set(key, { p: q.p, d: q.d }); n++;
+    }
+    this.bubble(tileX(c), tileY(r) - 20, n ? `${b.name} placed: build on the light blue ghosts` : 'It is all built there already', 'info');
+    if (n) Sound.thump(); else Sound.denied();
   }
   /** The bear or spawner under world point (x, y), if any. */
   private targetAt(x: number, y: number): Target | null {
@@ -1674,9 +2146,10 @@ export class Survival {
     for (const sp of this.spawners) { if (sp.dead) continue; const d = dist(sp.x, sp.y, x, y); if (d < SPAWNER_R + 14 && d < bd) { bd = d; best = sp; } }
     return best;
   }
-  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
+  private taken(c: number, r: number) { const k = c + ',' + r; return this.chestTile(c, r) || this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
+    this.bpStop(); this.bpOpen = false;
     if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[type]}. Craft them in your inventory (Shift)`, 'info'); Sound.denied(); return; }
     this.placing = true; this.placeType = type; this.hover = null; this.closeBld();
     Sound.click();
@@ -1712,8 +2185,20 @@ export class Survival {
   private placeAt(c: number, r: number) {
     const key = c + ',' + r, type = this.placeType;
     if (!this.count(type)) { this.placing = false; return; }
+    if (type === 'plat') { this.placePlat(c, r); return; }
+    // building on a blueprint ghost of the same thing faces it the ghost's way
+    const gh = this.ghosts.get(key), dir = this.placeDir;
+    if (gh && gh.p === type && !this.taken(c, r)) this.placeDir = gh.d;
+    const n0 = this.bag[type];
+    this.placeOn(c, r, key, type);
+    if (gh && gh.p === type) this.placeDir = dir;
+    // something got built there: the ghost goes away
+    if (this.bag[type] < n0) this.ghosts.delete(key);
+  }
+  private placeOn(c: number, r: number, key: string, type: Placeable) {
     if (isBig(type)) {
       const rr = type === 'machine' ? MACHINE_R : MINE_R;
+      if (this.space && !this.onPlat(c, r)) { this.bubble(tileX(c), tileY(r) - 30, 'Only on the platform', 'info'); Sound.denied(); return; }
       if (!this.bigFits(c, r, rr)) { this.bubble(tileX(c), tileY(r) - 30, 'Not enough room there', 'info'); Sound.denied(); return; }
       if (type === 'mine') this.mines.push({ x: tileX(c), y: tileY(r), r: rr, ore: 'stone' });
       else this.machines.push({ x: tileX(c), y: tileY(r), r: rr, queue: [], batchT: 0, out: [], recipe: null });
@@ -1724,6 +2209,7 @@ export class Survival {
     if (this.turnTile(key)) return;
     if (this.taken(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
     if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put that there", 'info'); Sound.denied(); return; }
+    if (this.space && !this.onPlat(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Only on the platform', 'info'); Sound.denied(); return; }
     if (type === 'drill' && this.patchAt(c, r) < 0) { this.bubble(tileX(c), tileY(r) - 16, 'Put drills on an ore patch', 'info'); Sound.denied(); return; }
     const tk = ITEM_T[type];
     if (type === 'belt') this.belts.set(key, this.placeDir);
@@ -1876,12 +2362,13 @@ export class Survival {
     this.aSel = has[(has.indexOf(this.aSel) + 1) % has.length]; this.armsSig = '';
     this.bubble(this.x, this.y - 30, ONE_NAME[this.ammoSlots[this.aSel]!.k], 'info'); Sound.click();
   }
-  private ammoName() { const w = this.weapon(), i = w ? this.ammoSlot(w) : -1, a = i >= 0 ? this.ammoSlots[i]! : null; return a ? `${a.k === 'rocket' ? 'Rockets' : AMMO_NAME[a.k]} (${Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9)})` : w === 'xbow' ? AMMO[this.load.ammo].name : 'none'; }
+  private ammoName() { const w = this.weapon(), i = w ? this.ammoSlot(w) : -1, a = i >= 0 ? this.ammoSlots[i]! : null; return a ? `${a.k === 'rocket' ? 'Rockets' : a.k === 'xrocket' ? 'Exploding rockets' : AMMO_NAME[a.k]} (${Math.ceil(a.pts / SURVIVAL.ammoPoints - 1e-9)})` : w === 'xbow' ? AMMO[this.load.ammo].name : 'none'; }
 
   /* ---------- rules ---------- */
   update(dt: number) {
     if (!this.running || this.paused || this.labOpen || this.recipeFor) return;
     this.t += dt;
+    if (this.creative) { this.topUp(); this.hp = SURVIVAL.maxHp; }
     this.reload = Math.max(0, this.reload - dt);
     this.holdFire(dt);
     this.runAcid(dt);
@@ -1895,7 +2382,7 @@ export class Survival {
     if (this.keys.has('ArrowUp')) my -= 1;
     if (this.keys.has('ArrowDown')) my += 1;
     if (this.stick) { const m = Math.hypot(this.stick.dx, this.stick.dy); if (m > 6) { mx = this.stick.dx / 46; my = this.stick.dy / 46; } }
-    const m = Math.hypot(mx, my);
+    const m = Math.hypot(mx, my), x0 = this.x, y0 = this.y;
     if (m > 0) {
       if (m > 1) { mx /= m; my /= m; }
       this.x += mx * SURVIVAL.guySpeed * dt; this.y += my * SURVIVAL.guySpeed * dt;
@@ -1908,6 +2395,13 @@ export class Survival {
     if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
+    // space: you can't step off the platform
+    if (this.space) {
+      const ok = (x: number, y: number) => { const e = GUY_R * .5; return this.onPlatXY(x - e, y - e) && this.onPlatXY(x + e, y - e) && this.onPlatXY(x - e, y + e) && this.onPlatXY(x + e, y + e); };
+      if (!ok(this.x, this.y)) { if (ok(this.x, y0)) this.y = y0; else if (ok(x0, this.y)) this.x = x0; else { this.x = x0; this.y = y0; } }
+      // the tile under you broke off: hop to the nearest platform tile
+      if (!this.onPlatXY(this.x, this.y)) { let best = '', bd = Infinity; for (const k of this.platTiles) { const [c, r] = k.split(',').map(Number), d = dist(tileX(c), tileY(r), this.x, this.y); if (d < bd) { bd = d; best = k; } } if (best) { const [c, r] = best.split(',').map(Number); this.x = tileX(c); this.y = tileY(r); } }
+    }
     const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
     // walking over a furnace picks up what it has smelted
     { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
@@ -1938,7 +2432,7 @@ export class Survival {
         this.face = Math.atan2(dg.y - this.y, dg.x - this.x);
         if (this.swing <= 0) { this.swing = 1; Sound.click(); }
         this.mineT += dt * ST.digMul;
-        if (this.mineT >= SURVIVAL.digEvery) { this.mineT -= SURVIVAL.digEvery; dg.left--; this.bag[dg.ore]++; this.bubble(this.x, this.y - 30, `+1 ${dg.ore === 'stone' ? 'stone' : ONE_NAME[dg.ore].toLowerCase()}`, 'info'); Sound.dink(); }
+        if (this.mineT >= SURVIVAL.digEvery) { this.mineT -= SURVIVAL.digEvery; this.bag[dg.ore]++; this.bubble(this.x, this.y - 30, `+1 ${dg.ore === 'stone' ? 'stone' : ONE_NAME[dg.ore].toLowerCase()}`, 'info'); Sound.dink(); }
       }
     }
     this.runQueue(dt);
@@ -1989,8 +2483,10 @@ export class Survival {
         if (sp.respawn <= 0) {
           let [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
           for (let i = 0; i < 20 && this.spawners.some(o => o !== sp && !o.dead && dist(o.x, o.y, x, y) < 600); i++) [x, y] = spawnerSpot(Math.random() * Math.PI * 2);
-          Object.assign(sp, { x, y, hp: SURVIVAL.spawnerHp, t: SURVIVAL.spawnEvery, hurt: 0, dead: false, respawn: undefined });
-          this.say('A new bear spawner appeared!', 3); Sound.alarm();
+          const first = sp.pre;
+          Object.assign(sp, { x, y, hp: SURVIVAL.spawnerHp, t: first ? 5 : SURVIVAL.spawnEvery, hurt: 0, dead: false, respawn: undefined, pre: undefined });
+          if (!first) { this.say('A new bear spawner appeared!', 3); Sound.alarm(); }
+          else if (!this.spawners.some(o => o.pre)) { this.say(`${this.spawners.length} bear spawners have appeared in the woods! Bears are coming`, 5); Sound.alarm(); }
         }
         continue;
       }
@@ -2002,7 +2498,8 @@ export class Survival {
     }
     // huge waves at 12, 20 and 28 minutes (then every 8 minutes), out of the spawners, on top of the steady bears
     this.waveT -= dt;
-    if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say('A huge wave of bears is coming!', 4); Sound.boom(false); }
+    if (this.space) this.waveT = SURVIVAL.waveEvery;
+    if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say(NO_BASE ? 'A huge wave of bears is about to fill the spawners!' : 'A huge wave of bears is coming!', 4); Sound.boom(false); }
     if (this.waveT <= 0) {
       this.waveLeft += SURVIVAL.waveSize + this.waveN * SURVIVAL.waveGrow; this.waveN++;
       this.waveT = SURVIVAL.waveEvery; this.waveWarned = false;
@@ -2018,11 +2515,13 @@ export class Survival {
     const guyOut = !insideBase(this.x, this.y);
     // no camp: bears gather by their spawners, and once there are enough of them they all come at once
     if (NO_BASE) {
-      const gathering = this.bears.filter(b => b.state === 'walk' || b.state === 'wait');
-      if (gathering.length >= this.groupSize) {
-        for (const b of gathering) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
-        this.say(`${gathering.length} bears are coming for you!`, 3); Sound.alarm();
-        this.groupSize = this.newGroup();
+      // bears stay by their spawner unless provoked: a base you hurt attacks, and so might one when pollution is high
+      for (const sp of this.spawners) if (sp.angry) { sp.angry = Math.max(0, sp.angry - dt); if (sp.dead) sp.angry = 0; }
+      this.smogT -= dt;
+      if (this.smogT <= 0) {
+        this.smogT = SURVIVAL.smogCheck;
+        const live = this.spawners.filter(sp => !sp.dead && !sp.pre);
+        if (this.pollution >= SURVIVAL.smogAttack && live.length) this.provoke(live[Math.floor(Math.random() * live.length)], 'pollution');
       }
     }
     for (const b of this.bears) {
@@ -2032,11 +2531,11 @@ export class Survival {
       b.gr = (b.gr ?? Math.random() * 3) - dt;
       if (!b.fish && b.gr <= 0 && dist(b.x, b.y, this.x, this.y) < 260) { b.gr = 4 + Math.random() * 4; Sound.growl(clamp((b.x - this.x) / 260, -1, 1)); }
       // a bear outside goes for you if you come close
-      if ((b.state === 'walk' || b.state === 'wait') && guyOut && dist(b.x, b.y, this.x, this.y) < SURVIVAL.chaseRange) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
+      if (!NO_BASE && (b.state === 'walk' || b.state === 'wait') && guyOut && dist(b.x, b.y, this.x, this.y) < SURVIVAL.chaseRange) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
       if (b.state === 'walk') {
         if (this.navTo(b, b.tx, b.ty, SURVIVAL.bearSpeed, dt, 12)) b.state = 'wait';
       } else if (b.state === 'wait' && NO_BASE) {
-        // gathering by its spawner: it looks your way until the group is big enough
+        // waiting by its spawner: it looks your way, and only comes if its base is provoked
         b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 1.5);
       } else if (b.state === 'wait') {
         b.wait += dt;
@@ -2067,9 +2566,7 @@ export class Survival {
         if (d > reach - 2) this.navTo(b, this.x, this.y, SURVIVAL.bearSpeedInside, dt, reach - 2);
         else b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 6);
         if (d <= reach && b.cd <= 0) this.bearHit(b);
-        // from further off it throws a rock, every 5 seconds
-        b.tc = Math.max(0, b.tc - dt);
-        if (d > reach + 20 && d < 420 && b.tc <= 0) this.throwRock(b);
+        // bears don't throw rocks (only acid fish spit)
       }
     }
     for (const g of this.gates) g.open = clamp(g.open + (entering.has(g) ? dt : -dt) * 1.5, 0, 1);
@@ -2088,8 +2585,9 @@ export class Survival {
       const a = Math.atan2(target.y - y, target.x - x), cool = tu.cool ? .5 : 1;
       tu.face = a;
       if (tu.kind === 'rocket') {
-        tu.ammo.rocket = (tu.ammo.rocket ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
-        this.rockets.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+        const rk = ROCKETS.find(k => (tu.ammo[k] ?? 0) > 1e-6) ?? 'rocket';
+        tu.ammo[rk] = (tu.ammo[rk] ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
+        this.rockets.push({ boom: rk === 'xrocket', from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
         Sound.rocket();
         continue;
       }
@@ -2101,8 +2599,9 @@ export class Survival {
         dmg = SURVIVAL.rapidDamage * mul; tu.ammo[k] = (tu.ammo[k] ?? 0) - SURVIVAL.rapidUse; tu.cd = SURVIVAL.rapidReload * cool;
         if (this.rapidSnd <= 0) { this.rapidSnd = .12; Sound.tone('square', 900, 600, .03, .03); }
       } else {
-        dmg = (k === 'ammo' ? ST.turretDamage : metalOf(k).dmg * mul) * (tu.kind === 'brick' ? 1.6 : 1); tu.ammo[k] = (tu.ammo[k] ?? 0) - 1; tu.cd = SURVIVAL.turretReload * cool;
-        Sound.turret();
+        // every turret shot does 1 damage (more with the heavy turret research), whatever the ammo, and uses 16% of an ammo
+        dmg = SURVIVAL.turretShot * mul; tu.ammo[k] = (tu.ammo[k] ?? 0) - SURVIVAL.turretUse; tu.cd = SURVIVAL.turretEvery * cool;
+        if (this.rapidSnd <= 0) { this.rapidSnd = .18; Sound.turret(); }
       }
       if ((tu.ammo[k] ?? 0) < 1e-6) delete tu.ammo[k];
       this.bolts.push({ from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, vx: Math.cos(a) * SURVIVAL.boltSpeed, vy: Math.sin(a) * SURVIVAL.boltSpeed, left: range + 80, dmg, target, stone: true, color: k === 'ammo' ? undefined : metalOf(k).color });
@@ -2120,9 +2619,11 @@ export class Survival {
       bo.x += bo.vx * dt; bo.y += bo.vy * dt; bo.left -= SURVIVAL.boltSpeed * dt;
       // your walls and gates stop bolts (the tile it was shot from doesn't count); the wall takes no damage
       const wk = this.wallAt(bo.x, bo.y); if (wk && wk !== bo.from) { bo.left = 0; this.sparks.push({ x: bo.x, y: bo.y, t: 0 }); continue; }
+      if (this.space && this.shootAsteroid(bo.x, bo.y)) { bo.left = 0; continue; }
       const hit = this.hitAt(bo.x, bo.y, 4);
       if (hit) { this.damageTarget(hit, bo.dmg); bo.left = 0; }
     }
+    if (this.space) this.updateSpace(dt);
     this.bolts = this.bolts.filter(b => b.left > 0);
     // rockets: a swirl (one loop), then they home in on the bear or spawner
     for (const rk of this.rockets) {
@@ -2134,16 +2635,17 @@ export class Survival {
       const sp = SURVIVAL.rocketSpeed * (rk.t < swirl ? .55 : 1 + (rk.t - swirl) * .8);
       rk.x += Math.cos(rk.a) * sp * dt; rk.y += Math.sin(rk.a) * sp * dt;
       rk.trail.push({ x: rk.x, y: rk.y }); if (rk.trail.length > 18) rk.trail.shift();
-      const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(false); rk.t = 99; continue; }
+      const rw = this.wallAt(rk.x, rk.y); if (rw && rw !== rk.from) { if (rk.boom) this.explode(rk.x, rk.y, null); else this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); Sound.boom(!!rk.boom); rk.t = 99; continue; }
       const hit = this.hitAt(rk.x, rk.y, 6);
       if (hit && (hit === rk.target || rk.t > swirl)) {
-        this.damageTarget(hit, SURVIVAL.rocketDamage);
-        this.blasts.push({ x: rk.x, y: rk.y, t: 0 });
-        Sound.boom(false); rk.t = 99;
+        if (rk.boom) this.explode(hit.x, hit.y, hit);
+        else { this.damageTarget(hit, SURVIVAL.rocketDamage); this.blasts.push({ x: rk.x, y: rk.y, t: 0 }); }
+        Sound.boom(!!rk.boom); rk.t = 99;
       }
     }
     this.rockets = this.rockets.filter(r => r.t < 8);
     for (const bl of this.blasts) bl.t += dt;
+    for (const bm of this.booms) bm.t += dt; this.booms = this.booms.filter(b => b.t < .6);
     for (const sp of this.sparks) sp.t += dt;
     this.sparks = this.sparks.filter(s => s.t < .25);
     this.blasts = this.blasts.filter(b => b.t < .5);
@@ -2184,8 +2686,32 @@ export class Survival {
     for (const sp of this.spawners) if (!sp.dead && dist(sp.x, sp.y, x, y) < SPAWNER_R + pad) return sp;
     return null;
   }
+  /** A base attacks: every bear from that spawner comes for you, and new ones come straight away, for a minute after the last time. */
+  private provoke(sp: Spawner, why: 'hurt' | 'pollution') {
+    if (sp.dead || sp.pre) return;
+    const was = (sp.angry ?? 0) > 0;
+    sp.angry = SURVIVAL.angryTime;
+    const home = this.spawners.indexOf(sp);
+    let n = 0;
+    for (const b of this.bears) if (b.home === home && (b.state === 'walk' || b.state === 'wait')) { b.state = 'chase'; b.cd = .6; b.tc = 2; n++; }
+    if (!was) { this.say(why === 'hurt' ? `You made a bear base angry! ${n ? `${n} bear${n === 1 ? ' is' : 's are'} coming` : 'Its bears will come for you'}` : `The pollution made a bear base angry! ${n} bear${n === 1 ? ' is' : 's are'} coming`, 3); Sound.alarm(); }
+  }
+  /** An exploding rocket goes off at (x, y): every bear and spawner in the 5 by 5 tiles round it takes rocket damage (the one it hit too). */
+  private explode(x: number, y: number, hit: Target | null) {
+    const h = SURVIVAL.xrocketTiles * TILE / 2, inside = (tx: number, ty: number, r: number) => Math.abs(tx - x) <= h + r && Math.abs(ty - y) <= h + r;
+    const hits: Target[] = [];
+    for (const b of this.bears) if (b.state !== 'dead' && inside(b.x, b.y, BEAR_R * .5)) hits.push(b);
+    for (const sp of this.spawners) if (!sp.dead && !sp.pre && inside(sp.x, sp.y, SPAWNER_R * .5)) hits.push(sp);
+    if (hit && !hits.includes(hit)) hits.push(hit);
+    for (const t of hits) if (alive(t)) this.damageTarget(t, SURVIVAL.rocketDamage);
+    this.booms.push({ x, y, t: 0 });
+    for (let i = 0; i < 5; i++) this.blasts.push({ x: x + (Math.random() - .5) * h * 1.6, y: y + (Math.random() - .5) * h * 1.6, t: -Math.random() * .15 });
+  }
+  /** Exploding rocket blasts: a 5 by 5 tile flash. */
+  private booms: { x: number; y: number; t: number }[] = [];
   private damageTarget(t: Target, dmg: number) {
-    if (isBear(t)) { this.boltHit(t, dmg); return; }
+    if (isBear(t)) { const sp = t.home !== undefined ? this.spawners[t.home] : undefined; if (sp) this.provoke(sp, 'hurt'); this.boltHit(t, dmg); return; }
+    this.provoke(t, 'hurt');
     t.hp -= dmg; t.hurt = .25;
     this.hits++; this.damage += Math.min(dmg, t.hp + dmg);
     if (dmg >= 1) { this.bubble(t.x, t.y - 34, '-' + trim(dmg), 'dmg'); Sound.hitPlane(); }
@@ -2212,7 +2738,8 @@ export class Survival {
     for (let i = 0; i < 40 && nearFence(tx, ty, BEAR_R + 12); i++) { tx += G.nx * 10; ty += G.ny * 10; }
     if (NO_BASE) { const ga = Math.random() * Math.PI * 2, gr = SPAWNER_R + 40 + Math.random() * 70; tx = clamp(sp.x + Math.cos(ga) * gr, 40, W - 40); ty = clamp(sp.y + Math.sin(ga) * gr, 40, H - 40); }
     const x = sp.x + (Math.random() - .5) * 20, y = sp.y + (Math.random() - .5) * 20;
-    this.bears.push({ fish: Math.random() < SURVIVAL.fishChance || undefined, tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE && wave ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
+    const home = this.spawners.indexOf(sp), mad = (sp.angry ?? 0) > 0;
+    this.bears.push({ home, fish: Math.random() < SURVIVAL.fishChance || undefined, tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE ? (mad ? 'chase' : 'walk') : wave ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -2308,6 +2835,7 @@ export class Survival {
   }
   /** Damage in health points (not a share of your health), shown as a number. */
   private hurtAbs(dmg: number, quiet = false) {
+    if (this.creative) return;
     dmg *= ST.armor; this.hp -= dmg;
     if (quiet) { this.acidShown += dmg; return; }
     this.hurtFlash = .4;
@@ -2346,13 +2874,7 @@ export class Survival {
     this.acidShowT -= dt;
     if (this.acidShown > 0 && this.acidShowT <= 0) { this.bubble(this.x + (Math.random() - .5) * 16, this.y - 24, '-' + fmt(this.acidShown), 'loss'); this.acidShown = 0; this.acidShowT = .5; this.hurtFlash = .25; }
   }
-  private throwRock(b: Bear) {
-    b.tc = SURVIVAL.throwCooldown; b.swipe = .25;
-    const a = Math.atan2(this.y - b.y, this.x - b.x);
-    b.face = a;
-    this.rocks.push({ x: b.x + Math.cos(a) * 24, y: b.y + Math.sin(a) * 24, vx: Math.cos(a) * SURVIVAL.throwSpeed, vy: Math.sin(a) * SURVIVAL.throwSpeed, left: 520, spin: 0 });
-    Sound.tone('sine', 300, 160, .15, .1);
-  }
+
 
   private bearHit(b: Bear) {
     b.cd = SURVIVAL.bearCooldown; b.swipe = .35;
@@ -2360,6 +2882,7 @@ export class Survival {
   }
 
   private hurt(share: number) {
+    if (this.creative) return;
     const dmg = SURVIVAL.maxHp * share * ST.armor;
     this.hp -= dmg;
     this.hurtFlash = .4;
@@ -2375,6 +2898,9 @@ export class Survival {
     if (dmg >= 1) { this.bubble(b.x, b.y - 26, '-' + trim(dmg), 'dmg'); Sound.hitPlane(); }
     if (b.hp <= 1e-6) {
       b.state = 'dead'; b.dead = 0; this.kills++;
+      // a bear leaves stone, an acid fish iron ore, straight into your pocket
+      if (b.fish) { this.pocket('iron', SURVIVAL.fishDrop); this.bubble(b.x, b.y - 44, `+${SURVIVAL.fishDrop} iron ore`, 'info'); }
+      else { this.pocket('stone', SURVIVAL.bearDrop); this.bubble(b.x, b.y - 44, `+${SURVIVAL.bearDrop} stone`, 'info'); }
       if (this.kills === SURVIVAL.rushKills) {
         // the bears get impatient, and a mine and a machine pop up in the camp
         if (this.gateStage < 2) this.gateWait = SURVIVAL.gateWaitLater;
@@ -2406,18 +2932,49 @@ export class Survival {
     this.camX = clamp(this.camX, Math.min(hw, W / 2), Math.max(W - hw, W / 2)); this.camY = clamp(this.camY, Math.min(hh, H / 2), Math.max(H - hh, H / 2));
     this.ox = cw / 2 - this.camX * this.scale; this.oy = top + avail / 2 - this.camY * this.scale;
     this.view = { x0: this.camX - hw - 40, x1: this.camX + hw + 40, y0: this.camY - hh - top / this.scale - 40, y1: this.camY + hh + bottom / this.scale + 40 };
-    g.fillStyle = '#2f4426'; g.fillRect(0, 0, cw, ch);
+    g.fillStyle = this.space ? '#05060f' : '#2f4426'; g.fillRect(0, 0, cw, ch);
     g.save();
     g.translate(this.ox, this.oy); g.scale(this.scale, this.scale);
     this.drawWorld(g);
     g.restore();
     this.drawHud(g, dt);
-    this.drawMap(g, cw, top);
+    if (!this.space) this.drawMap(g, cw, top);
   }
 
   private view = { x0: 0, x1: W, y0: 0, y1: H };
+  /** The blueprint tool: the box being dragged, or the blueprint about to go down. */
+  private drawBpTool(g: CanvasRenderingContext2D) {
+    if (this.bpMode === 'select') {
+      const hv = this.hover && performance.now() - this.hover.t < 4000 ? this.hover : null;
+      const b = this.bpBox ?? (hv ? { c0: hv.c, r0: hv.r, c1: hv.c, r1: hv.r } : null);
+      if (!b) return;
+      const c0 = Math.min(b.c0, b.c1), c1 = Math.max(b.c0, b.c1), r0 = Math.min(b.r0, b.r1), r1 = Math.max(b.r0, b.r1);
+      const x = GX0 + c0 * TILE, y = GY0 + r0 * TILE, w = (c1 - c0 + 1) * TILE, h = (r1 - r0 + 1) * TILE;
+      g.fillStyle = 'rgba(120,200,255,.16)'; g.fillRect(x, y, w, h);
+      for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) if (this.partAt(c, r)) { g.fillStyle = 'rgba(140,210,255,.32)'; g.fillRect(GX0 + c * TILE, GY0 + r * TILE, TILE, TILE); }
+      g.strokeStyle = '#9fdcff'; g.lineWidth = 2; g.setLineDash([6, 5]); g.strokeRect(x + 1, y + 1, w - 2, h - 2); g.setLineDash([]);
+      return;
+    }
+    if (this.bpMode !== 'place' || !this.bpCur) return;
+    const hv = this.hover && performance.now() - this.hover.t < 4000 ? this.hover : null;
+    const at = this.bpAim ?? hv; if (!at) return;
+    for (const q of this.bpCur.parts) {
+      const c = at.c + q.dc, r = at.r + q.dr;
+      if (!tileOk(c, r)) continue;
+      const have = this.partAt(c, r), same = !!have && have.p === q.p;
+      paintGhost(g, c, r, q, same ? .25 : .8, !same && (blockedTile(c, r) || (!isBig(q.p) && this.taken(c, r))));
+    }
+  }
   private seen(x: number, y: number, r = 40) { const v = this.view; return x > v.x0 - r && x < v.x1 + r && y > v.y0 - r && y < v.y1 + r; }
   private drawWorld(g: CanvasRenderingContext2D) {
+    if (this.space) this.drawSpace(g); else this.drawGround(g);
+    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r * 1.15)) paintPatch(g, p, this.t);
+    for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
+    if (this.space) this.drawSpaceChest(g);
+    this.drawThings(g);
+    if (this.space) this.drawRocks(g);
+  }
+  private drawGround(g: CanvasRenderingContext2D) {
     // ground
     g.fillStyle = '#4b6b37'; g.fillRect(0, 0, W, H);
     // the edge of the map
@@ -2452,14 +3009,17 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
-    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r * 1.15)) paintPatch(g, p, this.t);
-    for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
+  }
+  private drawThings(g: CanvasRenderingContext2D) {
     this.drawBelts(g);
     if (this.mineOn) { this.drawMineAndMachine(g); }
     // power lines between poles
     g.strokeStyle = 'rgba(40,30,20,.75)'; g.lineWidth = 1.2;
     for (const [a, b] of this.poleLinks) { const [ac, ar] = a.split(',').map(Number), [bc, br] = b.split(',').map(Number); g.beginPath(); g.moveTo(tileX(ac), tileY(ar) - 9); g.quadraticCurveTo((tileX(ac) + tileX(bc)) / 2, (tileY(ar) + tileY(br)) / 2 - 3, tileX(bc), tileY(br) - 9); g.stroke(); }
+    // blueprint ghosts: light blue, under the things on the belts
+    for (const [key, q] of this.ghosts) { const [c, r] = key.split(',').map(Number); if (this.seen(tileX(c), tileY(r))) paintGhost(g, c, r, q, .62); }
     for (const it of this.items) paintItem(g, it.x, it.y, it.k);
+    this.drawBpTool(g);
     if (this.placing) {
       const t = this.ghost();
       if (t) {
@@ -2540,12 +3100,19 @@ export class Survival {
     // rockets: a smoke trail, then the rocket
     for (const rk of this.rockets) {
       for (let i = 0; i < rk.trail.length; i++) { const p = rk.trail[i], k = i / rk.trail.length; g.fillStyle = `rgba(220,220,220,${k * .45})`; g.beginPath(); g.arc(p.x, p.y, 2 + k * 3, 0, 7); g.fill(); }
-      paintRocket(g, rk.x, rk.y, rk.a, 1);
+      paintRocket(g, rk.x, rk.y, rk.a, 1, rk.boom);
     }
     for (const bl of this.blasts) {
       const k = bl.t / .5;
       g.fillStyle = `rgba(255,170,60,${1 - k})`; g.beginPath(); g.arc(bl.x, bl.y, 10 + k * 34, 0, 7); g.fill();
       g.fillStyle = `rgba(255,240,180,${1 - k})`; g.beginPath(); g.arc(bl.x, bl.y, 6 + k * 14, 0, 7); g.fill();
+    }
+    // exploding rockets: the 5 by 5 tile square they hit lights up
+    for (const bm of this.booms) {
+      const k = bm.t / .6, h = SURVIVAL.xrocketTiles * TILE / 2 * Math.min(1, .5 + k * 2);
+      g.fillStyle = `rgba(255,150,40,${.45 * (1 - k)})`; g.fillRect(bm.x - h, bm.y - h, h * 2, h * 2);
+      g.strokeStyle = `rgba(255,230,150,${1 - k})`; g.lineWidth = 2; g.strokeRect(bm.x - h, bm.y - h, h * 2, h * 2);
+      g.fillStyle = `rgba(255,245,200,${1 - k})`; g.beginPath(); g.arc(bm.x, bm.y, 14 + k * 30, 0, 7); g.fill();
     }
     // the turret you picked: its range, and a line to its target; other turrets' targets get a faint line
     for (const [key, tu] of this.turrets) {
@@ -2571,6 +3138,7 @@ export class Survival {
   /** A bear spawner: a dark den in a rocky mound, with a health bar once hit. */
   private drawSpawner(g: CanvasRenderingContext2D, sp: Spawner) {
     g.save(); g.translate(sp.x, sp.y);
+    if (sp.pre) { g.restore(); return; }
     if (sp.dead) {
       g.fillStyle = 'rgba(40,30,20,.5)'; g.beginPath(); g.ellipse(0, 4, 30, 20, 0, 0, 7); g.fill();
       g.fillStyle = '#5a5650'; for (const [x, y] of [[-14, 2], [8, -6], [12, 10], [-4, 12]]) { g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); }
@@ -2607,7 +3175,7 @@ export class Survival {
       g.fillStyle = L.ore; g.beginPath(); g.arc(px, py, r, 0, 7); g.fill();
     }
     if (!NO_BASE) g.strokeStyle = '#c9a77a', g.lineWidth = 1.5, g.strokeRect(x0 + WALL.x0 * k, y0 + WALL.y0 * k, (WALL.x1 - WALL.x0) * k, (WALL.y1 - WALL.y0) * k);
-    for (const sp of this.spawners) { g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
+    for (const sp of this.spawners) { if (sp.pre) continue; g.fillStyle = sp.dead ? '#5a5650' : '#ff6a5a'; g.fillRect(x0 + sp.x * k - 3, y0 + sp.y * k - 3, 6, 6); }
     g.fillStyle = '#e8c49a';
     for (const b of this.bears) if (b.state !== 'dead') g.fillRect(x0 + b.x * k - 1, y0 + b.y * k - 1, 2, 2);
     g.fillStyle = '#fff'; g.beginPath(); g.arc(x0 + this.x * k, y0 + this.y * k, 2.5, 0, 7); g.fill();
@@ -2832,7 +3400,7 @@ export class Survival {
     g.fillStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(2, 4, GUY_R + 2, GUY_R, 0, 0, 7); g.fill();
     if (this.hurtFlash > 0) { g.fillStyle = `rgba(255,60,50,${this.hurtFlash})`; g.beginPath(); g.arc(0, 0, GUY_R + 10, 0, 7); g.fill(); }
     if (this.acidT > 0) { g.fillStyle = `rgba(90,220,70,${.25 + .15 * Math.sin(this.t * 10)})`; g.beginPath(); g.arc(0, 0, GUY_R + 8, 0, 7); g.fill(); }
-    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 && this.weapon() !== 'rxbow' ? 0 : 1, this.weapon() === 'rxbow' ? '#ffe14a' : this.weapon() === 'rgun' ? '#d64545' : this.ammoTint(), this.weapon() === 'rgun', !this.weapon());
+    paintGuy(g, L, a + (this.mining ? Math.sin(this.swing * Math.PI) * .5 : 0), bob, this.reload > 0 && this.weapon() !== 'rxbow' ? 0 : 1, this.weapon() === 'rxbow' ? '#ffe14a' : this.weapon() === 'mgun' ? '#3a3f45' : this.weapon() === 'rgun' ? '#d64545' : this.ammoTint(), this.weapon() === 'rgun', !this.weapon());
     g.restore();
     // reload ring around the guy
     if (this.reload > 0) {
@@ -2863,7 +3431,7 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
-    g.fillText(NO_BASE ? `${inside} after you · ${waiting}/${this.groupSize} gathering` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    g.fillText(this.space ? 'Space' : NO_BASE ? `${inside} after you · ${waiting} at their bases` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;
@@ -2941,6 +3509,11 @@ export class Survival {
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
+    this.renderTurretPanel();
+    this.renderBpPanel();
+    this.renderChest();
+    const tb = this.pad.querySelector<HTMLElement>('#svTarget')!.firstElementChild!, tl = this.space ? 'Shoot asteroid' : 'Shoot bear';
+    if (tb.textContent !== tl) tb.textContent = tl;
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
@@ -2951,9 +3524,11 @@ export class Survival {
     if (this.labOpen) this.renderLab();
     if (lb.firstElementChild!.textContent !== ll) lb.firstElementChild!.textContent = ll;
     const standing = tileAt(this.x, this.y);
-    this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const pt = this.placeType, turns = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'].includes(pt);
-    const help = this.picked ? 'Tap a bear or spawner for this turret to shoot. Tap the turret again to pick it up.'
+    this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && this.bpMode !== 'place' && !(standing && this.belts.has(standing.c + ',' + standing.r));
+    const pt = this.placeType, turns = TURNS.includes(pt);
+    const help = this.bpMode === 'select' ? 'Drag a box over what you built to save it as a blueprint. Done (or Esc) stops.'
+      : this.bpMode === 'place' ? `Hold and let go where ${this.bpCur?.name ?? 'the blueprint'} goes: it shows as light blue ghosts. R turns it. Done (or Esc) stops.`
+      : this.picked ? 'Tap a bear or spawner for this turret to shoot. Double-tap the turret to pick it up.'
       : this.placing ? `Tap to place the ${ONE_NAME[pt].toLowerCase()} (${this.bag[pt]} left)${pt === 'belt' || pt === 'pole' || pt === 'pipe' ? ', or drag to lay a line' : ''}.${turns ? ' R turns it.' : ''}${pt === 'drill' ? ' Drills go on ore patches.' : ''}`
       : this.digAt ? `Digging ${this.digAt.ore === 'stone' ? 'stone' : ONE_NAME[this.digAt.ore].toLowerCase()} (${this.digAt.left} left). Walk away to stop.` : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
@@ -3075,8 +3650,19 @@ function around(x: number, y: number, tx: number, ty: number): [number, number] 
   return first[4] >= 0 ? pts[first[4]] : [tx, ty];
 }
 /** Ore patches round the camp: stone, iron and copper close in, gold further out, diamonds out by the spawners. */
-function genPatches(spawners: Spawner[]): Patch[] {
-  const out: Patch[] = [], big = EXPANSIONS[EXPANSIONS.length - 1];
+/** Where you start: a square stone patch under you, with a square iron patch touching its right side and a copper one its left, lined up with the tiles. */
+function startPatches(x: number, y: number): Patch[] {
+  const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE), S = SURVIVAL.startStone, O = SURVIVAL.startOre;
+  const amount = { stone: 2500, iron: 2200, copper: 2200 } as const, unit = Math.PI * 95 * 95;
+  const sq = (ore: 'stone' | 'iron' | 'copper', c0: number, r0: number, n: number): Patch => {
+    const h = n * TILE / 2, left = Math.round(amount[ore] * (2 * h) ** 2 / unit);
+    return { sq: h, x: GX0 + c0 * TILE + h, y: GY0 + r0 * TILE + h, r: h * Math.SQRT2, ore, left, max: left, seed: Math.floor(Math.random() * 1e9) + 1 };
+  };
+  const c0 = c - Math.floor(S / 2), r0 = r - Math.floor(S / 2), mid = r0 + Math.floor((S - O) / 2);
+  return [sq('stone', c0, r0, S), sq('iron', c0 + S, mid, O), sq('copper', c0 - O, mid, O)];
+}
+function genPatches(spawners: Spawner[], start: Patch[] = []): Patch[] {
+  const out: Patch[] = [...start], big = EXPANSIONS[EXPANSIONS.length - 1];
   const plan: ['stone' | Ore, number, number][] = [['stone', 420, 800], ['iron', 420, 800], ['copper', 420, 800], ['iron', 800, 1400], ['copper', 800, 1400], ['stone', 800, 1400],
     ['iron', 1300, 2000], ['copper', 1300, 2000], ['gold', 1100, 1800], ['gold', 1700, 2400], ['diamond', 2000, 2800], ['diamond', 2300, 3000], ['stone', 1600, 2600], ['iron', 2000, 2900], ['copper', 2000, 2900]];
   const amount = { stone: 2500, iron: 2200, copper: 2200, gold: 1400, diamond: 900 };
@@ -3206,7 +3792,7 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     g.fillStyle = k === 'ammo' ? '#7fc8ff' : '#3a3a3a'; g.fillRect(x - 3, y - 3, 2.5, 6);
     return;
   }
-  if (k === 'rocket') { paintRocket(g, x, y, 0, .8); return; }
+  if (k === 'rocket' || k === 'xrocket') { paintRocket(g, x, y, 0, .8, k === 'xrocket'); return; }
   if (k === 'xbow' || k === 'rxbow') {
     // a crossbow lying flat: stock, bow and string (the rapid one has a yellow magazine on top)
     g.save(); g.translate(x, y); g.rotate(-Math.PI / 4);
@@ -3214,6 +3800,20 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
     g.strokeStyle = '#3a2a1a'; g.lineWidth = 2; g.beginPath(); g.moveTo(5, -7); g.quadraticCurveTo(9, 0, 5, 7); g.stroke();
     g.strokeStyle = '#e8e0d0'; g.lineWidth = .8; g.beginPath(); g.moveTo(5, -7); g.lineTo(0, 0); g.lineTo(5, 7); g.stroke();
     if (k === 'rxbow') { g.fillStyle = '#ffe14a'; g.fillRect(-5, -4.5, 6, 3); g.fillStyle = '#c9a020'; g.fillRect(-5, -2, 6, 1.2); }
+    g.restore(); return;
+  }
+  if (k === 'mgun') {
+    // a machine gun lying flat: stock, body, a box magazine, a barrel with a cooling sleeve and a front grip
+    g.save(); g.translate(x, y); g.rotate(-Math.PI / 6);
+    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -1, 20, 6);
+    g.fillStyle = '#5a3d22'; g.beginPath(); g.moveTo(-10, -2); g.lineTo(-4, -3); g.lineTo(-4, 2); g.lineTo(-10, 3); g.closePath(); g.fill();
+    g.fillStyle = '#3a3f45'; g.fillRect(-4, -3.2, 8, 5);
+    g.fillStyle = '#2a2d31'; g.fillRect(4, -2.4, 3.5, 3.4);
+    g.fillStyle = '#4c535b'; g.fillRect(7.5, -1.3, 4.5, 1.6);
+    g.fillStyle = '#1e2124'; for (let i = 0; i < 3; i++) g.fillRect(4.5 + i * 1.1, -2.4, .5, 3.4);
+    g.fillStyle = '#c9a43a'; g.fillRect(-2, 1.8, 3, 4);
+    g.fillStyle = '#2a2d31'; g.fillRect(3, 1.6, 1.6, 3);
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(-4, -3.2, 8, 1);
     g.restore(); return;
   }
   if (k === 'rgun') {
@@ -3234,10 +3834,12 @@ function paintItem(g: CanvasRenderingContext2D, x: number, y: number, k: Kind) {
   g.fillStyle = '#d0ccc2'; g.beginPath(); g.arc(x - 1.5, y - 1.5, 2, 0, 7); g.fill();
 }
 /** A small rocket pointing along angle a, with a flame. */
-function paintRocket(g: CanvasRenderingContext2D, x: number, y: number, a: number, k: number) {
+function paintRocket(g: CanvasRenderingContext2D, x: number, y: number, a: number, k: number, boom = false) {
   g.save(); g.translate(x, y); g.rotate(a); g.scale(k, k);
   g.fillStyle = '#ffb347'; g.beginPath(); g.moveTo(-7, -2.5); g.lineTo(-13 - Math.random() * 3, 0); g.lineTo(-7, 2.5); g.fill();
   g.fillStyle = '#e8e2d6'; g.fillRect(-7, -3, 11, 6);
+  // an exploding rocket: yellow and black warning stripes
+  if (boom) { g.fillStyle = '#ffc61a'; g.fillRect(-7, -3, 11, 6); g.fillStyle = '#2a2420'; g.fillRect(-4, -3, 2, 6); g.fillRect(0, -3, 2, 6); }
   g.fillStyle = '#d64545'; g.beginPath(); g.moveTo(4, -3); g.lineTo(9, 0); g.lineTo(4, 3); g.fill();
   g.fillStyle = '#d64545'; g.beginPath(); g.moveTo(-7, -3); g.lineTo(-9, -6); g.lineTo(-4, -3); g.moveTo(-7, 3); g.lineTo(-9, 6); g.lineTo(-4, 3); g.fill();
   g.restore();
@@ -3280,7 +3882,37 @@ function paintRobot(g: CanvasRenderingContext2D, x: number, y: number, bob: numb
   if (k) { g.fillStyle = KIND_DOT[k]; g.beginPath(); g.arc(x, y + 7 + bob, 3, 0, 7); g.fill(); }
 }
 /** Any one-tile thing you can place, facing direction d (for the ghost while placing, and for icons). */
+/** One tile of space platform, top-left at (x, y); crack 1 shows a crack. */
+function paintPlat(g: CanvasRenderingContext2D, x: number, y: number, crack: number, odd = false) {
+  g.fillStyle = odd ? '#5a6370' : '#636d7b'; g.fillRect(x, y, TILE, TILE);
+  g.strokeStyle = 'rgba(20,24,32,.6)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1);
+  g.fillStyle = 'rgba(200,210,225,.5)'; for (const [a, b] of [[3, 3], [TILE - 4, 3], [3, TILE - 4], [TILE - 4, TILE - 4]]) g.fillRect(x + a - .75, y + b - .75, 1.5, 1.5);
+  if (crack) { g.strokeStyle = 'rgba(15,15,20,.85)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(x + 4, y + 6); g.lineTo(x + 10, y + 11); g.lineTo(x + 8, y + 16); g.lineTo(x + 15, y + 20); g.moveTo(x + 10, y + 11); g.lineTo(x + 19, y + 8); g.stroke(); }
+}
+/** A blueprint ghost: the thing's own picture, all in light blue. Made once for each thing and way it faces. */
+const ghostSprites = new Map<string, HTMLCanvasElement>();
+const GHOST_S = 72;
+function ghostSprite(p: Placeable, d: number) {
+  const id = p + d; let cv = ghostSprites.get(id);
+  if (cv) return cv;
+  cv = document.createElement('canvas'); cv.width = cv.height = GHOST_S * 2;
+  const g = cv.getContext('2d')!; g.scale(2, 2);
+  const m = GHOST_S / 2;
+  if (isBig(p)) { g.fillStyle = '#000'; g.beginPath(); g.arc(m, m, p === 'machine' ? MACHINE_R : MINE_R, 0, 7); g.fill(); }
+  else paintPlaceable(g, m, m, p, d, 0);
+  // keep the shading, but tint it all light blue
+  g.globalCompositeOperation = 'source-atop'; g.fillStyle = 'rgba(140,210,255,.8)'; g.fillRect(0, 0, GHOST_S, GHOST_S);
+  if (isBig(p)) { g.globalCompositeOperation = 'source-over'; g.fillStyle = '#eaf7ff'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(ONE_NAME[p], m, m + 4); }
+  ghostSprites.set(id, cv); return cv;
+}
+function paintGhost(g: CanvasRenderingContext2D, c: number, r: number, q: Ghost, a: number, bad = false) {
+  const x = tileX(c), y = tileY(r);
+  g.globalAlpha = a; g.drawImage(ghostSprite(q.p, q.d), x - GHOST_S / 2, y - GHOST_S / 2, GHOST_S, GHOST_S); g.globalAlpha = 1;
+  g.strokeStyle = bad ? 'rgba(255,110,95,.85)' : 'rgba(160,220,255,.75)'; g.lineWidth = 1;
+  if (!isBig(q.p)) g.strokeRect(GX0 + c * TILE + 1.5, GY0 + r * TILE + 1.5, TILE - 3, TILE - 3);
+}
 function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Placeable, d: number, t: number) {
+  if (p === 'plat') { paintPlat(g, x - TILE / 2, y - TILE / 2, 0); return; }
   if (p === 'belt') paintBelt(g, x, y, d, t);
   else if (p === 'grab') paintGrabber(g, x, y, { d, t: 0, carry: false, k: 'stone' });
   else if (p === 'split') paintSplitter(g, x, y, d);
@@ -3318,6 +3950,7 @@ function paintNoPower(g: CanvasRenderingContext2D, x: number, y: number, t: numb
 /** An ore patch: a cluster of rocks in its colour, fewer as it runs out. */
 /** A patch's edge is a wobbly blob, not a circle: its radius at angle a (between about 0.72 and 1.08 of p.r). */
 function patchEdge(p: Patch, a: number) {
+  if (p.sq) return p.sq / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
   const s = p.seed || 1, f = (k: number) => ((s * (k * 7919 + 13)) % 1000) / 1000;
   return p.r * (.9 + .09 * Math.sin(2 * a + f(1) * 6.3) + .06 * Math.sin(3 * a + f(2) * 6.3) + .04 * Math.sin(5 * a + f(3) * 6.3));
 }
@@ -3415,26 +4048,7 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
     g.fillStyle = '#c9a24a'; g.beginPath(); g.arc(-6.5, -10, 1.6, 0, 7); g.arc(6.5, -10, 1.6, 0, 7); g.fill();
     g.restore(); return;
   }
-  if (b.type === 'drill') {
-    // a mining drill: a steel frame with rivets, a spinning cutter head and an output chute
-    g.fillStyle = 'rgba(0,0,0,.3)'; g.fillRect(-9, -7, 22, 20);
-    // the chute where ore comes out
-    g.fillStyle = '#3d4248'; g.beginPath(); g.moveTo(dx * 13 - dy * 5, dy * 13 - dx * 5); g.lineTo(dx * 13 + dy * 5, dy * 13 + dx * 5); g.lineTo(dx * 7 + dy * 6, dy * 7 + dx * 6); g.lineTo(dx * 7 - dy * 6, dy * 7 - dx * 6); g.closePath(); g.fill();
-    const steel = g.createLinearGradient(-11, -11, 11, 11); steel.addColorStop(0, '#8d949c'); steel.addColorStop(1, '#4b5158');
-    g.fillStyle = steel; g.fillRect(-11, -11, 22, 22);
-    g.strokeStyle = '#2a2e33'; g.lineWidth = 1.5; g.strokeRect(-11, -11, 22, 22);
-    // hazard corners
-    g.fillStyle = '#d9a52b'; for (const [cx, cy] of [[-11, -11], [7, -11], [-11, 7], [7, 7]]) g.fillRect(cx, cy, 4, 4);
-    g.fillStyle = '#20242a'; for (const [cx, cy] of [[-8.5, -8.5], [8.5, -8.5], [-8.5, 8.5], [8.5, 8.5]]) { g.beginPath(); g.arc(cx, cy, 1, 0, 7); g.fill(); }
-    // the cutter head in a dark well
-    g.fillStyle = '#25282c'; g.beginPath(); g.arc(0, 0, 8, 0, 7); g.fill();
-    g.save(); g.rotate(t * 6);
-    g.fillStyle = '#b9bfc6';
-    for (let i = 0; i < 3; i++) { g.rotate(Math.PI * 2 / 3); g.beginPath(); g.moveTo(0, 0); g.lineTo(7, -2.5); g.lineTo(6, 2.5); g.closePath(); g.fill(); }
-    g.fillStyle = '#d9a52b'; g.beginPath(); g.arc(0, 0, 2.4, 0, 7); g.fill();
-    g.restore();
-    g.restore(); return;
-  }
+  if (b.type === 'drill') { paintDrill(g, dx, dy, b.on === false ? 0 : t, b.on !== false && t > 0); g.restore(); return; }
   if (b.type === 'tunnel') {
     g.fillStyle = '#3a3330'; g.fillRect(-11, -11, 22, 22);
     g.fillStyle = '#15110f'; g.beginPath(); g.arc(dx * 3, dy * 3, 7, 0, 7); g.fill();
@@ -3475,6 +4089,61 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
   }
   if (b.type === 'furnace' || b.type === 'asm') { g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(dx * 12, dy * 12); g.lineTo(dx * 8 - dy * 4, dy * 8 - dx * 4); g.lineTo(dx * 8 + dy * 4, dy * 8 + dx * 4); g.fill(); }
   g.restore();
+}
+/** A mining drill, drawn at the origin facing (dx, dy): a heavy weathered housing with bolted corners, two pumping
+ *  pistons, a spiral cutter turning in a dark well, an output chute with hazard stripes, and dust while it digs. */
+function paintDrill(g: CanvasRenderingContext2D, dx: number, dy: number, t: number, on: boolean) {
+  const S = 12, cut = 3.5;
+  const oct = (r: number, c: number) => { g.beginPath(); g.moveTo(-r + c, -r); g.lineTo(r - c, -r); g.lineTo(r, -r + c); g.lineTo(r, r - c); g.lineTo(r - c, r); g.lineTo(-r + c, r); g.lineTo(-r, r - c); g.lineTo(-r, -r + c); g.closePath(); };
+  // shadow
+  g.fillStyle = 'rgba(0,0,0,.32)'; g.save(); g.translate(2.5, 3); oct(S, cut); g.fill(); g.restore();
+  // the chute, under the housing, pointing out the front
+  g.save(); g.rotate(Math.atan2(dy, dx));
+  g.fillStyle = '#3b3a35'; g.beginPath(); g.moveTo(8, -6); g.lineTo(15, -4.5); g.lineTo(15, 4.5); g.lineTo(8, 6); g.closePath(); g.fill();
+  g.save(); g.beginPath(); g.rect(12, -4.5, 3, 9); g.clip();
+  for (let i = -3; i < 4; i++) { g.fillStyle = i % 2 ? '#e2b12f' : '#1c1b18'; g.beginPath(); g.moveTo(12, i * 2.6); g.lineTo(15, i * 2.6 - 2); g.lineTo(15, i * 2.6 + .6); g.lineTo(12, i * 2.6 + 2.6); g.fill(); }
+  g.restore();
+  g.fillStyle = '#16150f'; g.fillRect(14.2, -3, .8, 6);
+  // pistons on both sides, pumping while it digs
+  const pump = on ? Math.sin(t * 9) * 1.4 : 0;
+  for (const sd of [-1, 1]) {
+    g.fillStyle = '#2d2c28'; g.fillRect(-7, sd * 11 - 2.2, 12, 4.4);
+    g.fillStyle = '#b9b6a8'; g.fillRect(-4 + pump * sd, sd * 11 - 1.1, 7, 2.2);
+    g.fillStyle = '#5c5a50'; g.fillRect(-8, sd * 11 - 2.6, 3, 5.2);
+  }
+  g.restore();
+  // the housing: weathered metal plate with chamfered corners
+  const hg = g.createLinearGradient(-S, -S, S, S); hg.addColorStop(0, '#8e8b78'); hg.addColorStop(.55, '#6f6c5c'); hg.addColorStop(1, '#4c4a3f');
+  g.fillStyle = hg; oct(S - 1, cut); g.fill();
+  g.strokeStyle = '#26251f'; g.lineWidth = 1.4; g.stroke();
+  // panel seams and a lighter top edge
+  g.strokeStyle = 'rgba(30,28,22,.45)'; g.lineWidth = .8;
+  g.beginPath(); g.moveTo(-S + 1, -4); g.lineTo(-7.5, -4); g.moveTo(7.5, -4); g.lineTo(S - 1, -4); g.moveTo(-S + 1, 4); g.lineTo(-7.5, 4); g.moveTo(7.5, 4); g.lineTo(S - 1, 4); g.stroke();
+  g.strokeStyle = 'rgba(255,255,240,.18)'; g.beginPath(); g.moveTo(-S + cut, -S + 1.6); g.lineTo(S - cut, -S + 1.6); g.stroke();
+  // rust and wear
+  g.fillStyle = 'rgba(150,80,30,.28)'; g.beginPath(); g.ellipse(-7, 7.5, 2.6, 1.4, .5, 0, 7); g.ellipse(8, -8, 1.8, 1, -.4, 0, 7); g.ellipse(7.5, 8.5, 1.2, .8, 0, 0, 7); g.fill();
+  // corner bolts
+  for (const [bx, by] of [[-8, -8], [8, -8], [-8, 8], [8, 8]]) {
+    g.fillStyle = '#2a2924'; g.beginPath(); g.arc(bx, by, 1.6, 0, 7); g.fill();
+    g.fillStyle = '#b3af9c'; g.beginPath(); g.arc(bx - .4, by - .4, .8, 0, 7); g.fill();
+  }
+  // the well with a ring of teeth and the turning spiral cutter
+  g.fillStyle = '#1b1a16'; g.beginPath(); g.arc(0, 0, 7.4, 0, 7); g.fill();
+  g.strokeStyle = '#3e3c34'; g.lineWidth = 1.2; g.beginPath(); g.arc(0, 0, 7.4, 0, 7); g.stroke();
+  g.save(); g.rotate(t * 5);
+  for (let i = 0; i < 3; i++) {
+    g.rotate(Math.PI * 2 / 3);
+    g.fillStyle = '#a7a493'; g.beginPath(); g.moveTo(1.2, -1); g.quadraticCurveTo(4.5, -4.2, 6.6, -1.2); g.lineTo(6.2, .6); g.quadraticCurveTo(4, -1.6, 1.2, 1.2); g.closePath(); g.fill();
+    g.fillStyle = '#d8d4c0'; g.beginPath(); g.arc(6.4, -.4, .9, 0, 7); g.fill();
+  }
+  g.fillStyle = '#e2b12f'; g.beginPath(); g.arc(0, 0, 2.3, 0, 7); g.fill();
+  g.fillStyle = '#5a4510'; g.beginPath(); g.arc(0, 0, .9, 0, 7); g.fill();
+  g.restore();
+  // dust kicked up at the ore while it digs
+  if (on) for (let i = 0; i < 6; i++) {
+    const ph = (t * 1.6 + i / 6) % 1, a = i * 2.1 + t * .7, r = 4 + ph * 9;
+    g.fillStyle = `rgba(170,150,115,${.45 * (1 - ph)})`; g.beginPath(); g.arc(Math.cos(a) * r, Math.sin(a) * r, 1 + ph * 1.8, 0, 7); g.fill();
+  }
 }
 /** A chest: a wooden box with a metal band. */
 function paintChest(g: CanvasRenderingContext2D, x: number, y: number) {

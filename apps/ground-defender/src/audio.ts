@@ -81,6 +81,8 @@ export const Sound = {
   /** An acid fish spitting, and acid sizzling. */
   spit() { this.noise(.22, 'bandpass', 800, 2, .16); this.tone('sine', 520, 180, .2, .07); },
   sizzle() { this.noise(.35, 'highpass', 2800, .7, .07); },
+  /** The machine gun: a short, punchy crack. */
+  mgun() { this.noise(.05, 'bandpass', 1800, 1.2, .16); this.tone('square', 220, 90, .05, .07); },
   pop() { this.tone('sine', 520, 880, .18, .2); this.tone('sine', 780, 1320, .22, .12, 0, .08); },
   ui() { this.tone('sine', 700, 900, .07, .12); },
   denied() { this.tone('square', 220, 150, .2, .08); },

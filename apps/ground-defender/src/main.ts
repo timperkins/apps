@@ -96,6 +96,8 @@ function renderLoadout() {
   if (document.activeElement !== name) name.value = loadout.name;
   $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
   $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
+  $('svWorld').innerHTML = [['ground', 'Ground'], ['space', 'Space']].map(([m, l]) => `<button role="radio" aria-checked="${(m === 'space') === !!loadout.space}" data-world="${m}">${l}</button>`).join('');
+  $('svMode').innerHTML = [['normal', 'Survival'], ['cheat', 'Cheat']].map(([m, l]) => `<button role="radio" aria-checked="${(m === 'cheat') === !!loadout.cheat}" data-mode="${m}">${l}</button>`).join('');
   $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
   const b = store.get<number>('best', 0);
   $('svBest').textContent = b ? `Best ${clock(b)} survived` : '';
@@ -112,12 +114,14 @@ $('svName').addEventListener('input', () => { loadout.name = cleanName($<HTMLInp
 $('svName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); });
 $('svDice').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); Sound.ui(); loadout.name = randomName(loadout.name); $<HTMLInputElement>('svName').value = loadout.name; renderLoadout(); });
 $('survSetup').addEventListener('click', e => {
-  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a]');
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a], [data-mode], [data-world]');
   if (!t) return;
   Sound.init(); Sound.ui();
   if (t.dataset.c) loadout.color = t.dataset.c;
   if (isHat(t.dataset.h)) loadout.hat = t.dataset.h;
   if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
+  if (t.dataset.mode) loadout.cheat = t.dataset.mode === 'cheat';
+  if (t.dataset.world) loadout.space = t.dataset.world === 'space';
   renderLoadout();
 });
 
@@ -128,13 +132,17 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Walk with the <kbd>arrow keys</kbd>, or drag anywhere on the screen on a phone. The map is big: the small map in the corner shows where everything is.',
     '<kbd>Space</kbd> (Shoot bear) fires at the nearest bear (or bear spawner) in range. <kbd>Z</kbd> (Shoot) fires straight ahead.',
     'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>G</kbd> to put one ammo in your gun (<kbd>D</kbd> drops it where the mouse is). <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
+    '<b>The machine gun</b> (1000 stone and 500 iron plates, Combat tab) shoots every 0.2 s while you hold <kbd>Space</kbd>, using 0.5% of an ammo a shot: 1.4 damage with stone ammo, 1.5 copper, 1.8 iron, 2 gold, 2.25 diamond.',
     'The rapid crossbow keeps firing with no ammo, but does no damage ("No Ammo").',
-    'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
+    'There is no camp. Bears wait by their spawners and only come for you if you hurt their spawner or one of their bears (then that base attacks), or if pollution reaches 1000: then a base attacks. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
+    `You start on a 10 by 10 stone patch, with a 5 by 5 iron patch and a 5 by 5 copper patch touching it. There are no bear spawners for the first ${SURVIVAL.spawnerDelay / 60} minutes, so use the time to build.`,
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
+    'Pick <b>Cheat</b> as the mode before you start. Then press <kbd>Esc</kbd> (or pause) to choose Survival or Creative: in Creative everything is free, crafting is instant and nothing hurts you.',
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
-    'A bear swipes for 8% of your health and throws rocks for 9%. Bears growl when they are close.'] },
+    'Each bear you destroy gives you 5 stone, and each acid fish 1 iron ore.',
+    'A bear swipes for 8% of your health. Bears never throw or shoot anything. Bears growl when they are close.'] },
   { icon: '🐟', title: 'Acid fish', lines: [
     `About 1 in 10 things a spawner makes (${(SURVIVAL.fishChance * 100).toFixed(2)}%) is a green <b>acid fish</b> instead of a bear. It keeps away from you and spits green acid slime from up to 10 tiles away.`,
     `A hit does ${SURVIVAL.acidHit.toLocaleString()} damage and burns you for ${SURVIVAL.acidBurn.toLocaleString()} a second for ${SURVIVAL.acidBurnTime} seconds (you glow green).`,
@@ -143,7 +151,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `Huge waves of bears come at ${min(SURVIVAL.waveStart)}, ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery)} and ${min(SURVIVAL.waveStart + SURVIVAL.waveEvery * 2)} minutes (then every ${min(SURVIVAL.waveEvery)} minutes).`,
     'You start with a drill, 10 power poles, a generator, an ammo machine, 2 turrets, 100 stone ammo, a furnace and 8 iron plates.'] },
   { icon: '⛏️', title: 'Ore, furnaces and plates', lines: [
-    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). Stand on one and press <kbd>M</kbd> (or the Mine button) to dig by hand.',
+    'Ore patches lie out in the woods: stone, iron, copper, gold and diamonds (the best ones far out, near the spawners). They never run out. Stand on one and press <kbd>M</kbd> (or the Mine button) to dig by hand.',
     'Put ore in a furnace (<kbd>T</kbd> next to it, or tap it): iron and copper become plates, gold becomes bars, diamonds get cut and stone becomes bricks. ',
     'After 4 bears, a stone mine and an ammo machine pop up. Hire miners at the mine with <kbd>H</kbd>. Tap the ammo machine and pick a recipe first, then put in stone, plates, bars or cut diamonds: 1 iron plate makes 6 (9.5 damage), copper 8 (8.55), gold 12 (11.5), diamond 16 (15). You can also craft ammo by hand in the Combat tab, but you get 1 less. Put ammo in your ammo slots to shoot it.'] },
   { icon: '⚙️', title: 'Crafting', lines: [
@@ -151,14 +159,20 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Crafting takes time: things line up in the queue at the top left (tap one to cancel it). If you are missing parts like gears, wire or circuits, they get made first.',
     'Anything you can place goes on the quickbar at the bottom left: tap it or press <kbd>1</kbd> to <kbd>0</kbd>, then tap the map. Drag to lay a line of belts. <kbd>R</kbd> turns things. Tap anything you placed to pick it back up, machines and mines too.'] },
   { icon: '🏭', title: 'Your factory', lines: [
+    'Tap a drill to see what it is digging, how fast, and whether it has power.',
     'Drills go on ore patches and dig by themselves, dropping ore in front onto a belt. Grabbers move things off belts into furnaces, assemblers, chests and turrets, and back out.',
     'Drills, assemblers and labs need power: a generator burning stone, and power poles (each one powers what is next to it and joins other poles up to 7 tiles away). A red lightning bolt means no power.',
-    'Tap a <b>crafting machine</b> to set a recipe (like gears) and put in what it needs. It crafts 4 times slower than you, but keeps going until you change the recipe. Grabbers can feed it too.',
+    'A <b>crafting machine</b> costs 10 iron plates and 5 stone, no research needed. Tap one to set a recipe (like gears) and put in what it needs. It crafts 4 times slower than you, but keeps going until you change the recipe. Grabbers can feed it too.',
     'Your factory makes pollution (top right). The more pollution, the more often bears come, and the tougher they get.'] },
   { icon: '🎯', title: 'Turrets and research', lines: [
     'Turrets shoot bears and spawners. Load them with <kbd>T</kbd>, or feed them ammo with belts and grabbers.',
-    'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed. Tap the turret twice to pick it up.',
+    'A turret shoots every 0.2 seconds for 1 damage a shot, using 16% of an ammo each shot (about 6 shots an ammo).',
+    'Tapping a turret also opens a panel where you set the most ammo it will hold, from 0 to 10,000.',
+    'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed.',
+    'Double-tap anything you built to pick it up.',
+    'Blueprint (Ctrl+C): drag a box over what you built to save it, then put it down anywhere as light blue ghosts. Build on a ghost and it goes away.',
     'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.',
+    'An <b>exploding rocket</b> costs 2 rockets. Fired from the rocket gun or a rocket launcher, it blows up everything in a 5 by 5 tile square.',
     '<b>Crafting speed</b> and <b>Furnace speed</b> can be researched again and again: each level makes it 1.25 times faster. The first level costs 30 packs and each one after costs 20 more, up to 980.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
@@ -189,9 +203,21 @@ function start() {
   mode = 'play'; last = performance.now();
 }
 $('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('intro', false)) start(); else showIntro(start); });
+/** Cheat mode: the pause menu has Survival / Creative. */
+function renderPauseMode() {
+  const on = game.cheat;
+  $('svPauseMode').hidden = !on; $('svPauseModeInfo').hidden = !on;
+  for (const b of $('svPauseMode').querySelectorAll<HTMLElement>('[data-pmode]')) b.setAttribute('aria-checked', String((b.dataset.pmode === 'creative') === game.isCreative));
+}
+$('svPauseMode').addEventListener('click', e => {
+  e.stopPropagation();
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pmode]'); if (!b) return;
+  Sound.ui(); game.setCreative(b.dataset.pmode === 'creative'); renderPauseMode();
+});
 function pause() {
   if (mode !== 'play') return;
   game.paused = true; mode = 'paused'; $('svSaved').textContent = ''; show('survPause'); pausedAt = performance.now();
+  renderPauseMode();
 }
 let pausedAt = 0;
 // Esc on the pause screen carries on
