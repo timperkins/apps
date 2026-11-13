@@ -3,7 +3,8 @@
 // ground) down to half a unit, which is the finest the renderer samples.
 import { RGB, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
-import { Shape, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
+import { Shape, StackOpts, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
+import { BUST, soldierBust } from './portrait';
 
 export { FACTIONS };
 export type { Faction };
@@ -1662,4 +1663,52 @@ export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStat
     damaged: { spr: renderStack(damaged, o), rx, ry, fx: fires },
     ruin: { spr: renderStack(ruin, { ...o, zmax: Math.ceil(Math.min(zmax, Math.max(8, zmax * 0.5 + 1))), shadowAlpha: 0.22 }), rx, ry, fx: smokes },
   };
+}
+
+// ---------- Build menu pictures ----------
+
+// The model of a building or unit for the build menu's close-up picture, with
+// the renderer settings it needs (without a scale). Foot soldiers get a
+// head-and-shoulders portrait instead of their tiny map figure.
+export function subjectModel(id: string, f: Faction): { shape: Shape; o: StackOpts } | null {
+  const both = (a: Shape, b: Shape): Shape => (u, v, z) => b(u, v, z) ?? a(u, v, z);
+  switch (id) {
+    case 'inf':
+    case 'rocket':
+      return { shape: soldierBust(f, id === 'rocket'), o: { r: BUST.r, zmax: BUST.zmax, noGroundShadow: true, outline: [14, 12, 10] } };
+    case 'light':
+      return { shape: both(tankHull(f, 16, 12, false), turretShape(f, 3.6, 5, 1, 11)), o: { r: 11.5, zmax: 14, bakeShadow: true } };
+    case 'heavy':
+      return { shape: both(tankHull(f, 20, 15, true), turretShape(f, 4.8, 6, 2, 13)), o: { r: 13.5, zmax: 16, bakeShadow: true } };
+    case 'buggy':
+      return { shape: buggy(f), o: { r: 8, zmax: 10, bakeShadow: true } };
+    case 'hauler':
+      return { shape: hauler(f, 2), o: { r: 13, zmax: 11, bakeShadow: true } };
+    case 'arty':
+      return { shape: artillery(f), o: { r: 13.5, zmax: 13, bakeShadow: true } };
+    case 'heli':
+      return { shape: heli(f), o: { r: 15.5, zmax: 10, noGroundShadow: true } };
+    case 'mcv':
+      return { shape: foundryVehicle(f), o: { r: 17.5, zmax: 17, bakeShadow: true } };
+    case 'boat':
+      return { shape: boat(f), o: { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 } };
+  }
+  const kinds: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad'];
+  const kind = kinds.find((k) => k === id);
+  if (!kind) return null;
+  const b = buildingShape(kind, f);
+  const o: StackOpts = { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 };
+  if (kind === 'tower') {
+    // the gun turret sits on top, swung round towards the viewer
+    const gun = turretShape(f, 4, 0, 2, 11);
+    const p = b.fx[0];
+    const a = Math.PI * 0.3;
+    const ca = Math.cos(a);
+    const sa = Math.sin(a);
+    return {
+      shape: (u, v, z) => gun(ca * (u - p.x) + sa * (v - p.y), -sa * (u - p.x) + ca * (v - p.y), z - p.z) ?? b.shape(u, v, z),
+      o: { ...o, rx: 12, ry: 12, zmax: p.z + 9 },
+    };
+  }
+  return { shape: b.shape, o };
 }

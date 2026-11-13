@@ -5,7 +5,8 @@ import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, CursorAt, GameLike, UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
-import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
+import { StackSprite, drawSprite, renderStack, toScreen, toWorld } from './stack';
+import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
@@ -27,6 +28,7 @@ import {
   OreArt,
   makeRocks,
   makeTrees,
+  subjectModel,
 } from './sprites';
 
 // v2 adds the Mobile Foundry to v1's units.
@@ -682,25 +684,144 @@ export class IsoGame implements GameLike {
     return TECH.filter((t) => t.needs.every((k) => have.has(k)));
   }
 
+  // The build menu's picture of something: a close-up of it in its own
+  // landscape (src/v2/cameo.ts). Those take a moment to draw, so they are made
+  // one at a time in the background, with a plain picture of the thing
+  // standing in until each is ready.
   private icon(t: Tech): string {
-    let url = this.icons.get(t.id);
-    if (!url) {
-      const W = 64;
-      const H = 48;
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const c = cv.getContext('2d')!;
-      if (t.building) {
-        const spr = this.buildingArt(t.building, ME).spr.img;
-        const k = Math.min(W / spr.width, H / spr.height) * 1.15;
-        c.imageSmoothingQuality = 'high';
-        c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
-      } else return this.unitIcon(t.unit as Kind);
-      url = cv.toDataURL();
-      this.icons.set(t.id, url);
+    const url = this.icons.get(`cameo:${t.id}`);
+    if (url) return url;
+    if (!this.cameoQueue.includes(t)) {
+      this.cameoQueue.push(t);
+      this.pumpCameos();
     }
+    return this.quickIcon(t);
+  }
+
+  private cameoQueue: Tech[] = [];
+  private cameoTimer = 0;
+  private pumpCameos(): void {
+    if (this.cameoTimer || !this.cameoQueue.length) return;
+    this.cameoTimer = window.setTimeout(() => {
+      this.cameoTimer = 0;
+      const t = this.cameoQueue.shift();
+      if (t && !this.icons.has(`cameo:${t.id}`)) {
+        try {
+          this.icons.set(`cameo:${t.id}`, this.makeCameo(t).toDataURL());
+        } catch (e) {
+          console.warn('build picture failed', t.id, e);
+          this.icons.set(`cameo:${t.id}`, this.quickIcon(t));
+        }
+      }
+      this.pumpCameos();
+    }, 40);
+  }
+
+  // The model of a building or unit drawn at `scale` times its size on the map.
+  private subjectSprite(id: string, scale: number): StackSprite | null {
+    const m = subjectModel(id, FACTIONS[ME]);
+    if (!m) return null;
+    const unit = !TECH.some((x) => x.building === id) && id !== 'inf' && id !== 'rocket';
+    const angle = unit ? (dirIndex(Math.PI * 0.62, DIRS) / DIRS) * Math.PI * 2 : 0;
+    return renderStack(m.shape, { ...m.o, angle, scale });
+  }
+
+  private makeCameo(t: Tech): HTMLCanvasElement {
+    const id = t.building ?? (t.unit as string);
+    const kind: Subject['kind'] = t.building ? 'building' : id === 'inf' || id === 'rocket' ? 'portrait' : id === 'heli' ? 'air' : 'vehicle';
+    // measure it at its own size, then draw it again at the size it is shown
+    const base = this.subjectSprite(id, 1)!;
+    const [, , tw, th] = trimBox(base.img);
+    const scale = cameoFit(kind, tw, th);
+    const spr = this.subjectSprite(id, scale)!;
+    const D = ART * scale;
+    const subject: Subject = { img: spr.img, kind };
+    if (id === 'heli') subject.rotor = [spr.cx * D, (spr.cy - 8.6) * D];
+    return composeCameo(t.id, subject, { trees: this.trees, rocks: this.rocks, bushes: this.bushes, ore: this.oreArt });
+  }
+
+  // A small picture of a tab's kind of thing for its button: a Power plant,
+  // a Gun tower, a soldier's head and shoulders and a tank.
+  private tabIcon(tab: Tab): string {
+    const key = `tab:${tab}`;
+    let url = this.icons.get(key);
+    if (url) return url;
+    const id = { base: 'power', defense: 'tower', inf: 'inf', veh: 'light' }[tab];
+    const base = this.subjectSprite(id, 1)!;
+    const [, , tw, th] = trimBox(base.img);
+    const spr = this.subjectSprite(id, Math.min(60 / tw, 52 / th))!;
+    const [x, y, w, h] = trimBox(spr.img);
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    cv.getContext('2d')!.drawImage(spr.img, x, y, w, h, 0, 0, w, h);
+    url = cv.toDataURL();
+    this.icons.set(key, url);
     return url;
+  }
+
+  // A plain picture of the building or unit, trimmed to its edges.
+  private quickIcon(t: Tech): string {
+    const key = `quick:${t.id}`;
+    let url = this.icons.get(key);
+    if (url) return url;
+    const layers: { img: HTMLCanvasElement; x: number; y: number }[] = [];
+    if (t.building) layers.push({ img: this.buildingArt(t.building, ME).spr.img, x: 0, y: 0 });
+    else for (const s of this.unitLayers(t.unit as Kind)) layers.push({ img: s.img, x: -s.cx * ART, y: -s.cy * ART });
+    // put the layers together at the art's own size
+    const x0 = Math.min(...layers.map((l) => l.x));
+    const y0 = Math.min(...layers.map((l) => l.y));
+    const x1 = Math.max(...layers.map((l) => l.x + l.img.width));
+    const y1 = Math.max(...layers.map((l) => l.y + l.img.height));
+    const raw = document.createElement('canvas');
+    raw.width = Math.max(1, x1 - x0);
+    raw.height = Math.max(1, y1 - y0);
+    const rc = raw.getContext('2d', { willReadFrequently: true })!;
+    for (const l of layers) rc.drawImage(l.img, l.x - x0, l.y - y0);
+    // trim the empty edges
+    const px = rc.getImageData(0, 0, raw.width, raw.height).data;
+    let l = raw.width, r = -1, top = raw.height, bot = -1;
+    for (let y = 0; y < raw.height; y++)
+      for (let x = 0; x < raw.width; x++)
+        if (px[(y * raw.width + x) * 4 + 3] > 24) {
+          if (x < l) l = x;
+          if (x > r) r = x;
+          if (y < top) top = y;
+          if (y > bot) bot = y;
+        }
+    if (r < l) {
+      l = top = 0;
+      r = raw.width - 1;
+      bot = raw.height - 1;
+    }
+    const tw = r - l + 1;
+    const th = bot - top + 1;
+    const fit = Math.min(220 / tw, 150 / th);
+    const k = fit >= 1 ? Math.floor(fit) : fit;
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(tw * k));
+    cv.height = Math.max(1, Math.round(th * k));
+    const c = cv.getContext('2d')!;
+    c.imageSmoothingEnabled = k < 1;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(raw, l, top, tw, th, 0, 0, cv.width, cv.height);
+    url = cv.toDataURL();
+    this.icons.set(key, url);
+    return url;
+  }
+
+  // The sprites a unit is drawn from, facing down and to the left.
+  private unitLayers(kind: Kind): StackSprite[] {
+    const a = Math.PI * 0.62;
+    const art = this.art[ME];
+    const di = dirIndex(a, DIRS);
+    return kind === 'inf' || kind === 'rocket'
+      ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
+      : kind === 'light'
+        ? [art.lightTank[di], art.lightTurret[di]]
+        : kind === 'heavy'
+          ? [art.heavyTank[di], art.heavyTurret[di]]
+          : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -715,17 +836,7 @@ export class IsoGame implements GameLike {
       cv.height = H;
       const c = cv.getContext('2d')!;
       {
-        const a = Math.PI * 0.62;
-        const art = this.art[ME];
-        const di = dirIndex(a, DIRS);
-        const layers: StackSprite[] =
-          kind === 'inf' || kind === 'rocket'
-            ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
-            : kind === 'light'
-              ? [art.lightTank[di], art.lightTurret[di]]
-              : kind === 'heavy'
-                ? [art.heavyTank[di], art.heavyTurret[di]]
-                : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+        const layers = this.unitLayers(kind);
         const base = layers[0];
         const k = Math.max(1, Math.min(3, Math.floor(Math.min(W / (base.w * 0.55), H / (base.h * 0.65)))));
         c.imageSmoothingEnabled = false;
@@ -771,7 +882,7 @@ export class IsoGame implements GameLike {
         blocked,
       });
     }
-    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id));
+    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id)).map((tb) => ({ ...tb, icon: this.tabIcon(tb.id) }));
     return { credits: Math.floor(this.credits), store: this.store(), power: this.power(), tabs, items };
   }
 

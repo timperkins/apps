@@ -30,6 +30,10 @@ export interface StackOpts {
   left?: number;
   right?: number;
   hmap?: ColumnMap;
+  // drawn this many times bigger than in the game, with that much more detail
+  // (the build menu's close-up pictures)
+  scale?: number;
+  noGroundShadow?: boolean;
 }
 
 export interface StackSprite {
@@ -50,15 +54,16 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
   const rx = o.rx ?? o.r;
   const ry = o.ry ?? o.r;
   const zmax = o.zmax;
-  const step = o.step ?? 0.5;
-  const shadowReach = Math.ceil(zmax * 0.9);
-  const D = ART;
+  const scale = o.scale ?? 1;
+  const step = (o.step ?? 0.5) / Math.max(1, scale);
+  const shadowReach = o.noGroundShadow ? 0 : Math.ceil(zmax * 0.9);
+  const D = ART * scale;
   const lw = Math.ceil(rx + ry) * 2 + 4 + shadowReach;
   const lh = Math.ceil((rx + ry) / 2) * 2 + zmax + 4 + Math.ceil(shadowReach / 2);
-  const W = lw * D;
-  const H = lh * D;
-  const cx = (Math.ceil(rx + ry) + 2) * D;
-  const cy = (zmax + 2 + Math.ceil((rx + ry) / 2)) * D;
+  const W = Math.ceil(lw * D);
+  const H = Math.ceil(lh * D);
+  const cx = Math.round((Math.ceil(rx + ry) + 2) * D);
+  const cy = Math.round((zmax + 2 + Math.ceil((rx + ry) / 2)) * D);
   const a = o.angle ?? 0;
   const ca = Math.cos(a);
   const sa = Math.sin(a);
@@ -171,7 +176,7 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
 
   // Ground shadow: march from each ground point towards the light.
   const sh = new Pix(W, H);
-  for (let y = 0; y < H; y++)
+  for (let y = 0; y < H && !o.noGroundShadow; y++)
     for (let x = 0; x < W; x++) {
       const gx = (x + 0.5 - cx) / D / 2 + (y + 0.5 - cy) / D;
       const gy = (y + 0.5 - cy) / D - (x + 0.5 - cx) / D / 2;
@@ -186,7 +191,7 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
     out.getContext('2d')!.drawImage(p.canvas(), 0, 0);
     img = out;
   } else img = p.canvas();
-  return { img, shadow: o.bakeShadow ? null : sh.canvas(), cx: cx / D, cy: cy / D, w: lw, h: lh };
+  return { img, shadow: o.bakeShadow ? null : sh.canvas(), cx: cx / D, cy: cy / D, w: W / D, h: H / D };
 }
 
 // Headings are rendered lazily, the first time each one is drawn, so the game
