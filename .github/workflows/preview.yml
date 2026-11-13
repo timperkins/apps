@@ -67,6 +67,7 @@ jobs:
     permissions:
       contents: write
       statuses: write
+      pull-requests: read
 
   links:
     needs: [detect, setup, deploy]

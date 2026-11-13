@@ -10,6 +10,14 @@ import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CU
 
 initCursors();
 
+// The newest PR in this build (set by CI), as a tiny label in the corner.
+const prNo = import.meta.env.VITE_PR_NUMBER;
+if (prNo) {
+  const el = document.querySelector<HTMLDivElement>('#build-no')!;
+  el.textContent = `#${prNo}`;
+  el.hidden = false;
+}
+
 const canvas = document.querySelector<HTMLCanvasElement>('#c')!;
 const ctx = canvas.getContext('2d', { alpha: false })!;
 const mini = document.querySelector<HTMLCanvasElement>('#mini')!;
