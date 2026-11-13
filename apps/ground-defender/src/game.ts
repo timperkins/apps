@@ -90,8 +90,9 @@ export const SURVIVAL = {
   spawnEarly: 100,      // ...but only one every 100 seconds for the first 15 minutes
   earlyTime: 900,
   maxBears: 14,         // ...while there are fewer than 14 bears on the map (huge waves come on top)
-  groupMin: 6, groupMax: 10, // bears gather by their spawners until there are 6 to 10 of them, then all attack together
-  chaseRange: 130,      // a bear outside goes for you when you walk this close
+  chaseRange: 130,
+  angryTime: 60,        // a spawner you hurt (or whose bear you hurt) sends its bears for 60 s after the last hit
+  smogLow: 50, smogHigh: 100, smogCheck: 30, // pollution: at 50 a base might attack, more likely as it rises, and at 100 one surely does (checked every 30 s)      // a bear outside goes for you when you walk this close
   oreMineCost: { iron: { stone: 100 }, copper: { stone: 100, iron: 75 }, gold: { stone: 125, iron: 100, copper: 50 }, diamond: { stone: 150, iron: 100, copper: 75, gold: 50 } } as Record<Ore, Cost>,
   rapidCost: { stone: 50, iron: 10 } as Cost, // a rapid crossbow
   rapidDamage: .75, rapidReload: .05, rapidUse: .008, // 0.8% of one ammo a shot
@@ -389,10 +390,10 @@ let structs: Spot[] = [];
 type BearState = 'walk' | 'wait' | 'enter' | 'chase' | 'dead';
 /** A wall or gate you built on a tile: bears can't pass either, you can pass a gate. */
 interface PWall { hp: number; gate: boolean; }
-interface Bear { fish?: boolean; gr?: number; wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
+interface Bear { home?: number; fish?: boolean; gr?: number; wb?: number; tc: number; id: number; x: number; y: number; hp: number; state: BearState; wait: number; tx: number; ty: number; cd: number; face: number; swipe: number; hurt: number; dead: number; step: number; gate: Gate; wave: boolean; }
 /** A bear spawner in the woods: a den that makes bears. */
 /** respawn: seconds until a destroyed spawner comes back somewhere else. */
-interface Spawner { pre?: boolean; x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
+interface Spawner { angry?: number; pre?: boolean; x: number; y: number; hp: number; t: number; hurt: number; dead: boolean; respawn?: number; }
 type Target = Bear | Spawner;
 const isBear = (t: Target): t is Bear => 'state' in t;
 const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
@@ -438,7 +439,7 @@ export class Survival {
   private fireHeld = false; private rxT = 0; private firingAt: Target | null = null; private firingEnd: { x: number; y: number } | null = null;
   private sparks: { x: number; y: number; t: number }[] = []; private noAmmoT = 0;
   /** How many bears gather before they all attack. */
-  private groupSize = 8;
+  private smogT = 0;
   /** Acid: slime in the air, puddles on the ground, and the burn you have (damage a second, seconds left). */
   private slimes: { x: number; y: number; tx: number; ty: number; t: number }[] = [];
   private puddles: { x: number; y: number; t: number }[] = [];
@@ -602,7 +603,7 @@ export class Survival {
     this.bag = emptyBag(); this.bag.furnace = 1; this.bag.ironPlate = 8;
     Object.assign(this.bag, { drill: 1, pole: 10, machine: 1, turret: 2, gen: 1 }); this.closeRecipe();
     this.weapons = ['xbow', null, null]; this.wSel = 0; this.ammoSlots = [{ k: 'ammo', pts: 100 * SURVIVAL.ammoPoints }, null, null]; this.aSel = 0;
-    this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.groupSize = this.newGroup(); this.armsSig = '';
+    this.fireHeld = false; this.firingAt = null; this.firingEnd = null; this.sparks = []; this.slimes = []; this.puddles = []; this.acidRate = 0; this.acidT = 0; this.smogT = SURVIVAL.smogCheck; this.armsSig = '';
     this.quick = Array(10).fill(null); this.hand = null; this.syncQuick();
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
@@ -615,7 +616,7 @@ export class Survival {
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
   private static SAVED = ['hp', 'x', 'y', 'face', 'reload', 't', 'healT', 'waveT', 'waveN', 'waveLeft', 'waveGap', 'waveWarned', 'nextId', 'kills', 'shots', 'hits', 'damage',
-    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'groupSize', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
+    'spawners', 'spawnerKills', 'gateStage', 'camX', 'camY', 'bag', 'weapons', 'wSel', 'ammoSlots', 'aSel', 'gateWait', 'mineOn', 'mineT', 'items', 'placeDir',
     'machines', 'expansion', 'researching', 'progress', 'lv', 'brickGate', 'robotT', 'miners', 'popT', 'load', 'patches', 'queue', 'jobN', 'quick', 'pollution'] as const;
   /** Everything needed to carry on this run later, as plain JSON. */
   save(): SaveData {
@@ -859,7 +860,6 @@ export class Survival {
     return false;
   }
   private armsSig = '';
-  private newGroup() { return SURVIVAL.groupMin + Math.floor(Math.random() * (SURVIVAL.groupMax - SURVIVAL.groupMin + 1)); }
   /** The colour of the bolt on the crossbow: the ammo it will shoot. */
   private ammoTint() { const i = this.ammoSlot('xbow'), k = i >= 0 ? this.ammoSlots[i]!.k : null; return k === 'ammo' ? STONE : k && k !== 'rocket' ? metalOf(k).color : undefined; }
   /** Draws the weapon and ammo slots (only when they change). */
@@ -2106,7 +2106,7 @@ export class Survival {
     }
     // huge waves at 12, 20 and 28 minutes (then every 8 minutes), out of the spawners, on top of the steady bears
     this.waveT -= dt;
-    if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say('A huge wave of bears is coming!', 4); Sound.boom(false); }
+    if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say(NO_BASE ? 'A huge wave of bears is about to fill the spawners!' : 'A huge wave of bears is coming!', 4); Sound.boom(false); }
     if (this.waveT <= 0) {
       this.waveLeft += SURVIVAL.waveSize + this.waveN * SURVIVAL.waveGrow; this.waveN++;
       this.waveT = SURVIVAL.waveEvery; this.waveWarned = false;
@@ -2122,11 +2122,14 @@ export class Survival {
     const guyOut = !insideBase(this.x, this.y);
     // no camp: bears gather by their spawners, and once there are enough of them they all come at once
     if (NO_BASE) {
-      const gathering = this.bears.filter(b => b.state === 'walk' || b.state === 'wait');
-      if (gathering.length >= this.groupSize) {
-        for (const b of gathering) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
-        this.say(`${gathering.length} bears are coming for you!`, 3); Sound.alarm();
-        this.groupSize = this.newGroup();
+      // bears stay by their spawner unless provoked: a base you hurt attacks, and so might one when pollution is high
+      for (const sp of this.spawners) if (sp.angry) { sp.angry = Math.max(0, sp.angry - dt); if (sp.dead) sp.angry = 0; }
+      this.smogT -= dt;
+      if (this.smogT <= 0) {
+        this.smogT = SURVIVAL.smogCheck;
+        const chance = clamp((this.pollution - SURVIVAL.smogLow) / (SURVIVAL.smogHigh - SURVIVAL.smogLow), 0, 1);
+        const live = this.spawners.filter(sp => !sp.dead && !sp.pre);
+        if (chance > 0 && live.length && Math.random() < chance) this.provoke(live[Math.floor(Math.random() * live.length)], 'pollution');
       }
     }
     for (const b of this.bears) {
@@ -2136,11 +2139,11 @@ export class Survival {
       b.gr = (b.gr ?? Math.random() * 3) - dt;
       if (!b.fish && b.gr <= 0 && dist(b.x, b.y, this.x, this.y) < 260) { b.gr = 4 + Math.random() * 4; Sound.growl(clamp((b.x - this.x) / 260, -1, 1)); }
       // a bear outside goes for you if you come close
-      if ((b.state === 'walk' || b.state === 'wait') && guyOut && dist(b.x, b.y, this.x, this.y) < SURVIVAL.chaseRange) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
+      if (!NO_BASE && (b.state === 'walk' || b.state === 'wait') && guyOut && dist(b.x, b.y, this.x, this.y) < SURVIVAL.chaseRange) { b.state = 'chase'; b.cd = .6; b.tc = 2; }
       if (b.state === 'walk') {
         if (this.navTo(b, b.tx, b.ty, SURVIVAL.bearSpeed, dt, 12)) b.state = 'wait';
       } else if (b.state === 'wait' && NO_BASE) {
-        // gathering by its spawner: it looks your way until the group is big enough
+        // waiting by its spawner: it looks your way, and only comes if its base is provoked
         b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 1.5);
       } else if (b.state === 'wait') {
         b.wait += dt;
@@ -2287,8 +2290,19 @@ export class Survival {
     for (const sp of this.spawners) if (!sp.dead && dist(sp.x, sp.y, x, y) < SPAWNER_R + pad) return sp;
     return null;
   }
+  /** A base attacks: every bear from that spawner comes for you, and new ones come straight away, for a minute after the last time. */
+  private provoke(sp: Spawner, why: 'hurt' | 'pollution') {
+    if (sp.dead || sp.pre) return;
+    const was = (sp.angry ?? 0) > 0;
+    sp.angry = SURVIVAL.angryTime;
+    const home = this.spawners.indexOf(sp);
+    let n = 0;
+    for (const b of this.bears) if (b.home === home && (b.state === 'walk' || b.state === 'wait')) { b.state = 'chase'; b.cd = .6; b.tc = 2; n++; }
+    if (!was) { this.say(why === 'hurt' ? `You made a bear base angry! ${n ? `${n} bear${n === 1 ? ' is' : 's are'} coming` : 'Its bears will come for you'}` : `The pollution made a bear base angry! ${n} bear${n === 1 ? ' is' : 's are'} coming`, 3); Sound.alarm(); }
+  }
   private damageTarget(t: Target, dmg: number) {
-    if (isBear(t)) { this.boltHit(t, dmg); return; }
+    if (isBear(t)) { const sp = t.home !== undefined ? this.spawners[t.home] : undefined; if (sp) this.provoke(sp, 'hurt'); this.boltHit(t, dmg); return; }
+    this.provoke(t, 'hurt');
     t.hp -= dmg; t.hurt = .25;
     this.hits++; this.damage += Math.min(dmg, t.hp + dmg);
     if (dmg >= 1) { this.bubble(t.x, t.y - 34, '-' + trim(dmg), 'dmg'); Sound.hitPlane(); }
@@ -2315,7 +2329,8 @@ export class Survival {
     for (let i = 0; i < 40 && nearFence(tx, ty, BEAR_R + 12); i++) { tx += G.nx * 10; ty += G.ny * 10; }
     if (NO_BASE) { const ga = Math.random() * Math.PI * 2, gr = SPAWNER_R + 40 + Math.random() * 70; tx = clamp(sp.x + Math.cos(ga) * gr, 40, W - 40); ty = clamp(sp.y + Math.sin(ga) * gr, 40, H - 40); }
     const x = sp.x + (Math.random() - .5) * 20, y = sp.y + (Math.random() - .5) * 20;
-    this.bears.push({ fish: Math.random() < SURVIVAL.fishChance || undefined, tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE && wave ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
+    const home = this.spawners.indexOf(sp), mad = (sp.angry ?? 0) > 0;
+    this.bears.push({ home, fish: Math.random() < SURVIVAL.fishChance || undefined, tc: 0, id: this.nextId++, x, y, hp: SURVIVAL.bearHp * (1 + Math.min(2, this.smog() * .15)), state: NO_BASE ? (mad ? 'chase' : 'walk') : wave ? 'chase' : 'walk', wait: 0, tx, ty, cd: 0, face: Math.atan2(ty - y, tx - x), swipe: 0, hurt: 0, dead: 0, step: Math.random() * 6, gate, wave });
   }
 
   /** Moves a bear toward a point; returns true once it is there. */
@@ -2966,7 +2981,7 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
-    g.fillText(NO_BASE ? `${inside} after you · ${waiting}/${this.groupSize} gathering` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    g.fillText(NO_BASE ? `${inside} after you · ${waiting} at their bases` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;

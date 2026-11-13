@@ -132,7 +132,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Bottom left: your weapons on top, your ammo underneath. Tap one to use it (tap again to take it out). Hold something from your inventory and tap a slot to put it in, or press <kbd>G</kbd> to put one ammo in your gun (<kbd>D</kbd> drops it where the mouse is). <kbd>Tab</kbd> switches weapon, <kbd>S</kbd> ammo. Hold <kbd>Space</kbd> to keep firing.',
     '<b>The machine gun</b> (1000 stone and 500 iron plates, Combat tab) shoots every 0.2 s while you hold <kbd>Space</kbd>, using 0.5% of an ammo a shot: 1.4 damage with stone ammo, 1.5 copper, 1.8 iron, 2 gold, 2.25 diamond.',
     'The rapid crossbow keeps firing with no ammo, but does no damage ("No Ammo").',
-    'There is no camp: bears come straight for you from the spawners. Build walls and turrets to make your own base.'] },
+    'There is no camp. Bears wait by their spawners and only come for you if you hurt their spawner or one of their bears (then that base attacks), or if pollution gets high: from 50 a base might attack, and at 100 one surely does. Build walls and turrets to make your own base.'] },
   { icon: '🐻', title: 'Bear spawners', lines: [
     `You start on a 10 by 10 stone patch, with a 5 by 5 iron patch and a 5 by 5 copper patch touching it. There are no bear spawners for the first ${SURVIVAL.spawnerDelay / 60} minutes, so use the time to build.`,
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
