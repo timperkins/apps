@@ -50,7 +50,7 @@ export interface BuildMenu {
   credits: number;
   store?: number; // most credits you can hold
   power?: { made: number; used: number };
-  tabs: { id: string; label: string }[];
+  tabs: { id: string; label: string; icon?: string }[]; // icon: image URL
   items: BuildItem[];
 }
 

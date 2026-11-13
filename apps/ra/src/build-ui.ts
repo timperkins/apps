@@ -5,7 +5,7 @@
 // tap again to put it on hold or take it off; long-press (or right-click) to
 // cancel and get your credits back. A finished building is tapped to place it.
 import type { BuildItem, BuildMenu, GameLike } from './types';
-import { BOLT, COIN, TAB_ICONS } from './pixel-icons';
+import { BOLT, COIN } from './pixel-icons';
 
 const LONG_MS = 480;
 
@@ -37,7 +37,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   let last = 0;
   let wasPlacing = false;
   let reopen = false;
-  const cards = new Map<string, { el: HTMLButtonElement; key: string }>();
+  const cards = new Map<string, { el: HTMLButtonElement; key: string; icon: string }>();
   let tabsKey = '';
   const seenSoon = new Set<string>();
 
@@ -138,7 +138,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     renderPower(menu.power);
 
     if (!menu.tabs.some((t) => t.id === tab)) tab = menu.tabs[0]?.id ?? '';
-    const tk = menu.tabs.map((t) => t.id).join(',') + '|' + tab + '|' + menu.tabs.map((t) => (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready')) ? 1 : 0)).join('');
+    const tk = menu.tabs.map((t) => t.id + (t.icon ? '*' : '')).join(',') + '|' + tab + '|' + menu.tabs.map((t) => (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready')) ? 1 : 0)).join('');
     if (tk !== tabsKey) {
       tabsKey = tk;
       tabsEl.replaceChildren(
@@ -146,8 +146,12 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
           const b = document.createElement('button');
           b.type = 'button';
           b.role = 'tab';
-          if (TAB_ICONS[t.id]) b.innerHTML = TAB_ICONS[t.id];
-          else b.textContent = t.label;
+          if (t.icon) {
+            const im = document.createElement('img');
+            im.alt = '';
+            im.src = t.icon;
+            b.append(im);
+          } else b.textContent = t.label;
           b.title = t.label;
           b.setAttribute('aria-label', t.label);
           b.setAttribute('aria-selected', String(t.id === tab));
@@ -180,10 +184,15 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     shown.forEach((it, n) => {
       let c = cards.get(it.id);
       if (!c) {
-        c = { el: card(it), key: '' };
+        c = { el: card(it), key: '', icon: it.icon };
         cards.set(it.id, c);
       }
       if (grid.children[n] !== c.el) grid.insertBefore(c.el, grid.children[n] ?? null);
+      // the close-up picture arrives a moment after the card
+      if (c.icon !== it.icon) {
+        c.icon = it.icon;
+        c.el.querySelector('img')!.src = it.icon;
+      }
       const p = Math.round(it.progress * 100);
       const key = `${it.state}|${p}|${it.isNew}|${it.blocked ?? ''}|${it.count}`;
       if (key === c.key) return;

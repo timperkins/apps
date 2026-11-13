@@ -5,7 +5,8 @@ import { STATS, UnitKind } from '../v1/game';
 import type { Action, BuildItem, BuildMenu, CursorAt, GameLike, UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
-import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
+import { StackSprite, drawSprite, renderStack, toScreen, toWorld } from './stack';
+import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
@@ -27,6 +28,7 @@ import {
   OreArt,
   makeRocks,
   makeTrees,
+  subjectModel,
 } from './sprites';
 
 // v2 adds the Mobile Foundry to v1's units.
@@ -682,11 +684,85 @@ export class IsoGame implements GameLike {
     return TECH.filter((t) => t.needs.every((k) => have.has(k)));
   }
 
-  // The build menu's picture of something: the building or unit itself,
-  // trimmed to its edges and blown up in whole pixels where it is small, at
-  // about twice the size it is shown (for sharp pixels on a phone).
+  // The build menu's picture of something: a close-up of it in its own
+  // landscape (src/v2/cameo.ts). Those take a moment to draw, so they are made
+  // one at a time in the background, with a plain picture of the thing
+  // standing in until each is ready.
   private icon(t: Tech): string {
-    const key = `cameo:${t.id}`;
+    const url = this.icons.get(`cameo:${t.id}`);
+    if (url) return url;
+    if (!this.cameoQueue.includes(t)) {
+      this.cameoQueue.push(t);
+      this.pumpCameos();
+    }
+    return this.quickIcon(t);
+  }
+
+  private cameoQueue: Tech[] = [];
+  private cameoTimer = 0;
+  private pumpCameos(): void {
+    if (this.cameoTimer || !this.cameoQueue.length) return;
+    this.cameoTimer = window.setTimeout(() => {
+      this.cameoTimer = 0;
+      const t = this.cameoQueue.shift();
+      if (t && !this.icons.has(`cameo:${t.id}`)) {
+        try {
+          this.icons.set(`cameo:${t.id}`, this.makeCameo(t).toDataURL());
+        } catch (e) {
+          console.warn('build picture failed', t.id, e);
+          this.icons.set(`cameo:${t.id}`, this.quickIcon(t));
+        }
+      }
+      this.pumpCameos();
+    }, 40);
+  }
+
+  // The model of a building or unit drawn at `scale` times its size on the map.
+  private subjectSprite(id: string, scale: number): StackSprite | null {
+    const m = subjectModel(id, FACTIONS[ME]);
+    if (!m) return null;
+    const unit = !TECH.some((x) => x.building === id) && id !== 'inf' && id !== 'rocket';
+    const angle = unit ? (dirIndex(Math.PI * 0.62, DIRS) / DIRS) * Math.PI * 2 : 0;
+    return renderStack(m.shape, { ...m.o, angle, scale });
+  }
+
+  private makeCameo(t: Tech): HTMLCanvasElement {
+    const id = t.building ?? (t.unit as string);
+    const kind: Subject['kind'] = t.building ? 'building' : id === 'inf' || id === 'rocket' ? 'portrait' : id === 'heli' ? 'air' : 'vehicle';
+    // measure it at its own size, then draw it again at the size it is shown
+    const base = this.subjectSprite(id, 1)!;
+    const [, , tw, th] = trimBox(base.img);
+    const scale = cameoFit(kind, tw, th);
+    const spr = this.subjectSprite(id, scale)!;
+    const D = ART * scale;
+    const subject: Subject = { img: spr.img, kind };
+    if (id === 'heli') subject.rotor = [spr.cx * D, (spr.cy - 8.6) * D];
+    return composeCameo(t.id, subject, { trees: this.trees, rocks: this.rocks, bushes: this.bushes, ore: this.oreArt });
+  }
+
+  // A small picture of a tab's kind of thing for its button: a Power plant,
+  // a Gun tower, a soldier's head and shoulders and a tank.
+  private tabIcon(tab: Tab): string {
+    const key = `tab:${tab}`;
+    let url = this.icons.get(key);
+    if (url) return url;
+    const id = { base: 'power', defense: 'tower', inf: 'inf', veh: 'light' }[tab];
+    const base = this.subjectSprite(id, 1)!;
+    const [, , tw, th] = trimBox(base.img);
+    const spr = this.subjectSprite(id, Math.min(60 / tw, 52 / th))!;
+    const [x, y, w, h] = trimBox(spr.img);
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    cv.getContext('2d')!.drawImage(spr.img, x, y, w, h, 0, 0, w, h);
+    url = cv.toDataURL();
+    this.icons.set(key, url);
+    return url;
+  }
+
+  // A plain picture of the building or unit, trimmed to its edges.
+  private quickIcon(t: Tech): string {
+    const key = `quick:${t.id}`;
     let url = this.icons.get(key);
     if (url) return url;
     const layers: { img: HTMLCanvasElement; x: number; y: number }[] = [];
@@ -806,7 +882,7 @@ export class IsoGame implements GameLike {
         blocked,
       });
     }
-    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id));
+    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id)).map((tb) => ({ ...tb, icon: this.tabIcon(tb.id) }));
     return { credits: Math.floor(this.credits), store: this.store(), power: this.power(), tabs, items };
   }
 
