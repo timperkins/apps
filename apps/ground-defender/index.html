@@ -34,7 +34,6 @@
     <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
     <button id="svLabBtn" class="svbtn small" hidden><span>Research</span><small>Y</small></button>
     <button id="svShopBtn" class="svbtn small"><span>Inventory</span><small>Shift</small></button>
-    <button id="svCheat" class="cheatbtn" hidden aria-pressed="false">Survival</button>
     <div id="svShop" class="svinvscreen" hidden>
       <section class="invhalf">
         <h3>Inventory</h3>
@@ -103,6 +102,8 @@
   <section id="survPause" class="screen">
     <h2>Paused</h2>
     <button class="primary" id="svResume">Resume</button>
+    <div class="seg small" id="svPauseMode" role="radiogroup" aria-label="Cheat mode" hidden><button role="radio" data-pmode="survival">Survival</button><button role="radio" data-pmode="creative">Creative</button></div>
+    <p class="fine" id="svPauseModeInfo" hidden>Cheat mode. Creative: everything is free, crafting is instant and nothing hurts you.</p>
     <div class="row"><button class="ghost" id="svSave">Save</button><button class="ghost" id="svLoadGame">Load</button></div>
     <p class="fine" id="svSaved"></p>
     <div class="settings-inline"></div>

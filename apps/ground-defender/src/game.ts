@@ -517,7 +517,6 @@ export class Survival {
     btn('#svAmmoBtn', () => this.switchAmmo());
     btn('#svHire', () => this.hire());
     btn('#svShopBtn', () => this.openShop());
-    btn('#svCheat', () => this.toggleCreative());
     btn('#svLoad', () => this.useNear());
     btn('#svDrop', () => this.dropOne());
     pad.querySelector('#svQuick')!.addEventListener('pointerdown', e => {
@@ -1605,8 +1604,12 @@ export class Survival {
   /** T next to a turret: put all your ammo in it (all your rockets in a rocket launcher). */
   /** Cheat mode only: creative gives you plenty of everything, instant free crafting and no damage; survival gives back what you had. */
   private creative = false; private survivalBag: Bag | null = null;
+  /** Cheat mode: is it on for this run, and are you in creative right now. The pause menu (Esc) switches it. */
+  get cheat() { return !!this.load.cheat; }
+  get isCreative() { return this.creative; }
+  setCreative(on: boolean) { if (on !== this.creative) this.toggleCreative(); }
   private toggleCreative() {
-    if (!this.load.cheat || !this.running) return;
+    if (!this.load.cheat) return;
     this.creative = !this.creative;
     if (this.creative) { this.survivalBag = { ...this.bag }; this.topUp(); this.queue = []; this.say('Creative: everything is free and nothing hurts you', 3); }
     else { if (this.survivalBag) this.bag = { ...emptyBag(), ...this.survivalBag }; this.survivalBag = null; this.say('Survival: back to what you had', 3); }
@@ -3059,9 +3062,6 @@ export class Survival {
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
-    const cb = this.pad.querySelector<HTMLElement>('#svCheat')!; cb.hidden = !this.load.cheat;
-    const cl = this.creative ? 'Creative' : 'Survival';
-    if (cb.textContent !== cl) { cb.textContent = cl; cb.setAttribute('aria-pressed', String(this.creative)); cb.classList.toggle('on', this.creative); }
     this.renderTurretPanel();
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));

@@ -137,7 +137,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `You start on a 10 by 10 stone patch, with a 5 by 5 iron patch and a 5 by 5 copper patch touching it. There are no bear spawners for the first ${SURVIVAL.spawnerDelay / 60} minutes, so use the time to build.`,
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
-    'Pick <b>Cheat</b> as the mode before you start to get a button at the top left that switches between Survival and Creative (everything free, instant crafting, no damage).',
+    'Pick <b>Cheat</b> as the mode before you start. Then press <kbd>Esc</kbd> (or pause) to choose Survival or Creative: in Creative everything is free, crafting is instant and nothing hurts you.',
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
     'Each bear you destroy gives you 5 stone, and each acid fish 1 iron ore.',
     'A bear swipes for 8% of your health. Bears never throw or shoot anything. Bears growl when they are close.'] },
@@ -198,9 +198,21 @@ function start() {
   mode = 'play'; last = performance.now();
 }
 $('svGo').addEventListener('click', e => { e.stopPropagation(); if (store.get('intro', false)) start(); else showIntro(start); });
+/** Cheat mode: the pause menu has Survival / Creative. */
+function renderPauseMode() {
+  const on = game.cheat;
+  $('svPauseMode').hidden = !on; $('svPauseModeInfo').hidden = !on;
+  for (const b of $('svPauseMode').querySelectorAll<HTMLElement>('[data-pmode]')) b.setAttribute('aria-checked', String((b.dataset.pmode === 'creative') === game.isCreative));
+}
+$('svPauseMode').addEventListener('click', e => {
+  e.stopPropagation();
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pmode]'); if (!b) return;
+  Sound.ui(); game.setCreative(b.dataset.pmode === 'creative'); renderPauseMode();
+});
 function pause() {
   if (mode !== 'play') return;
   game.paused = true; mode = 'paused'; $('svSaved').textContent = ''; show('survPause'); pausedAt = performance.now();
+  renderPauseMode();
 }
 let pausedAt = 0;
 // Esc on the pause screen carries on
