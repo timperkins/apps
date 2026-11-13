@@ -493,13 +493,25 @@ body {
 /* ---------- Credits, build menu and messages ---------- */
 
 #credits {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-right: 3px;
-  padding: 2px 6px;
-  color: #10170d;
-  background: #e0b83c;
-  border: 1px solid #f7e2a0;
+  padding: 3px 7px 3px 5px;
+  color: #ffe08a;
+  background: #1d150d;
+  border: 2px solid;
+  border-color: #120c06 #6a4a2c #6a4a2c #120c06;
   font-size: 12px;
   white-space: nowrap;
+  text-shadow: 1px 1px 0 #000;
+}
+
+#credits .coin,
+#build .credits .coin {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 #credits[hidden],
@@ -531,23 +543,36 @@ body {
   }
 }
 
+/* The build menu: a wooden frame round a dark board, with a power bar down
+   the left, a row of tab icons and big pictures of what you can build. */
 #build {
+  --wood: #9b6232;
+  --wood-hi: #c98a4b;
+  --wood-lo: #5a3519;
+  --board: #2a1e13;
+  --well: #18110a;
+  --cream: #f6e7c4;
+  --gold: #ffd75e;
   position: fixed;
   z-index: 2;
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
-  width: min(560px, calc(100vw - 16px));
-  max-height: min(46vh, 380px);
+  width: min(560px, calc(100vw - 12px));
+  max-height: min(58vh, 480px);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  padding: 4px 4px 6px;
   font-family: 'Silkscreen', ui-monospace, monospace;
-  color: var(--ink);
-  background: var(--panel);
-  border: 2px solid var(--edge);
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  color: var(--cream);
+  background: var(--board);
+  background-clip: padding-box;
+  border: 8px solid transparent;
+  border-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' width='10' height='10' shape-rendering='crispEdges'><rect x='1' y='0' width='8' height='1' fill='%2324170b'/><rect x='0' y='1' width='1' height='1' fill='%2324170b'/><rect x='1' y='1' width='8' height='1' fill='%23c98a4b'/><rect x='9' y='1' width='1' height='1' fill='%2324170b'/><rect x='0' y='2' width='1' height='1' fill='%2324170b'/><rect x='1' y='2' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='2' width='1' height='1' fill='%23f0cf8a'/><rect x='3' y='2' width='4' height='1' fill='%239b6232'/><rect x='7' y='2' width='1' height='1' fill='%23f0cf8a'/><rect x='8' y='2' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='2' width='1' height='1' fill='%2324170b'/><rect x='0' y='3' width='1' height='1' fill='%2324170b'/><rect x='1' y='3' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='3' width='1' height='1' fill='%239b6232'/><rect x='3' y='3' width='4' height='1' fill='%232a1c10'/><rect x='7' y='3' width='1' height='1' fill='%239b6232'/><rect x='8' y='3' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='3' width='1' height='1' fill='%2324170b'/><rect x='0' y='4' width='1' height='1' fill='%2324170b'/><rect x='1' y='4' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='4' width='1' height='1' fill='%239b6232'/><rect x='3' y='4' width='1' height='1' fill='%232a1c10'/><rect x='6' y='4' width='1' height='1' fill='%232a1c10'/><rect x='7' y='4' width='1' height='1' fill='%239b6232'/><rect x='8' y='4' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='4' width='1' height='1' fill='%2324170b'/><rect x='0' y='5' width='1' height='1' fill='%2324170b'/><rect x='1' y='5' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='5' width='1' height='1' fill='%239b6232'/><rect x='3' y='5' width='1' height='1' fill='%232a1c10'/><rect x='6' y='5' width='1' height='1' fill='%232a1c10'/><rect x='7' y='5' width='1' height='1' fill='%239b6232'/><rect x='8' y='5' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='5' width='1' height='1' fill='%2324170b'/><rect x='0' y='6' width='1' height='1' fill='%2324170b'/><rect x='1' y='6' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='6' width='1' height='1' fill='%239b6232'/><rect x='3' y='6' width='4' height='1' fill='%232a1c10'/><rect x='7' y='6' width='1' height='1' fill='%239b6232'/><rect x='8' y='6' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='6' width='1' height='1' fill='%2324170b'/><rect x='0' y='7' width='1' height='1' fill='%2324170b'/><rect x='1' y='7' width='1' height='1' fill='%23c98a4b'/><rect x='2' y='7' width='1' height='1' fill='%23f0cf8a'/><rect x='3' y='7' width='4' height='1' fill='%239b6232'/><rect x='7' y='7' width='1' height='1' fill='%23f0cf8a'/><rect x='8' y='7' width='1' height='1' fill='%236a3f1d'/><rect x='9' y='7' width='1' height='1' fill='%2324170b'/><rect x='0' y='8' width='1' height='1' fill='%2324170b'/><rect x='1' y='8' width='8' height='1' fill='%236a3f1d'/><rect x='9' y='8' width='1' height='1' fill='%2324170b'/><rect x='1' y='9' width='8' height='1' fill='%2324170b'/></svg>") 4 / 8px stretch;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.4));
 }
 
 #build[hidden],
@@ -558,90 +583,167 @@ body.sheet-open #selBar {
 #build .head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 6px 4px 10px;
-  font-size: 12px;
-}
-
-#build .title {
-  flex: 1;
+  gap: 6px;
 }
 
 #build .credits {
-  padding: 2px 6px;
-  color: #10170d;
-  background: #e0b83c;
-  border: 1px solid #f7e2a0;
-}
-
-#build .power {
-  padding: 2px 5px;
-  font-size: 11px;
-  color: #10170d;
-  background: #9dff9d;
-  border: 1px solid #d8ffd8;
-}
-
-#build .power[hidden] {
-  display: none;
-}
-
-#build .power.low,
-#credits.low {
-  color: #fff;
-  background: #c8432e;
-  border-color: #ff9a86;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 6px;
+  font-size: 14px;
+  color: var(--gold);
+  background: var(--well);
+  border: 2px solid;
+  border-color: #0c0804 #5c4026 #5c4026 #0c0804;
+  text-shadow: 1px 1px 0 #000;
 }
 
 #build .credits.full {
-  box-shadow: 0 0 0 2px #c8432e;
+  color: #ffb08a;
+}
+
+#build .close,
+#build .tabs button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--cream);
+  background: var(--wood);
+  border: 2px solid;
+  border-color: var(--wood-hi) var(--wood-lo) var(--wood-lo) var(--wood-hi);
+  box-shadow: 0 0 0 1px #24170b;
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
 }
 
 #build .close {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 26px;
-  padding: 0;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  cursor: var(--cur-hand);
+  width: 30px;
+  height: 30px;
+  margin-right: 1px;
 }
 
 #build .close svg {
   width: 11px;
   height: 11px;
   fill: currentColor;
+  filter: drop-shadow(1px 1px 0 #24170b);
+}
+
+#build .close:active,
+#build .tabs button:active {
+  border-color: var(--wood-lo) var(--wood-hi) var(--wood-hi) var(--wood-lo);
+}
+
+#build .body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 6px;
+}
+
+/* Power bar: fills up in segments from the bottom; the white notch is what
+   the base uses. */
+#build .pwr {
+  --pc: #74e05c;
+  flex: none;
+  width: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+#build .pwr[data-level='tight'] {
+  --pc: #ffd04a;
+}
+
+#build .pwr[data-level='low'] {
+  --pc: #ff5a3c;
+}
+
+#build .pwr .bolt {
+  width: 14px;
+  height: 16px;
+  flex: none;
+}
+
+#build .pwr[data-level='low'] .bolt {
+  animation: blink 0.8s steps(2) infinite;
+}
+
+#build .pwr .track {
+  position: relative;
+  flex: 1;
+  width: 12px;
+  min-height: 60px;
+  background: var(--well) repeating-linear-gradient(to top, rgba(255, 255, 255, 0.07) 0 4px, transparent 4px 6px) content-box;
+  border: 2px solid;
+  border-color: #0c0804 #5c4026 #5c4026 #0c0804;
+  padding: 1px;
+}
+
+#build .pwr .fill {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  max-height: calc(100% - 2px);
+  background: repeating-linear-gradient(to top, var(--pc) 0 4px, transparent 4px 6px);
+  transition: height 0.4s steps(6);
+}
+
+#build .pwr .use {
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  height: 2px;
+  margin-bottom: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px #24170b;
+  transition: bottom 0.4s steps(6);
+}
+
+#build .pwr .use[hidden] {
+  display: none;
+}
+
+#build .pwr[data-level='low'] .fill {
+  animation: blink 0.8s steps(2) infinite;
+}
+
+#build .main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 #build .tabs {
   display: flex;
-  gap: 4px;
-  padding: 0 6px 6px;
-  overflow-x: auto;
+  gap: 5px;
+  padding: 1px;
 }
 
 #build .tabs button {
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 6px 4px;
-  font: inherit;
-  font-size: 10px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-bottom-color: rgba(0, 0, 0, 0.5);
-  border-right-color: rgba(0, 0, 0, 0.5);
-  cursor: var(--cur-hand);
-  -webkit-tap-highlight-color: transparent;
+  height: 38px;
 }
 
-#build .tabs button[aria-pressed='true'] {
-  color: #10170d;
-  background: #9dff9d;
-  border-color: #d8ffd8 #3c7a3c #3c7a3c #d8ffd8;
+#build .tabs button svg {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.45));
+}
+
+#build .tabs button[aria-selected='true'] {
+  background: #e9c27a;
+  border-color: #fff0c4 #a8752e #a8752e #fff0c4;
+  transform: translateY(1px);
 }
 
 #build .tabs button.alert::after {
@@ -649,59 +751,100 @@ body.sheet-open #selBar {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 5px;
-  height: 5px;
-  background: #e0b83c;
+  width: 6px;
+  height: 6px;
+  background: var(--gold);
+  box-shadow: 0 0 0 1px #24170b;
+  animation: blink 0.8s steps(2) infinite;
 }
 
 #build .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  align-content: start;
   gap: 6px;
-  padding: 0 6px 6px;
+  padding: 1px;
   overflow-y: auto;
   touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wood) var(--well);
 }
 
 #build .item {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 4px 2px 3px;
+  padding: 0;
   font: inherit;
-  color: var(--ink);
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-bottom-color: rgba(0, 0, 0, 0.6);
-  border-right-color: rgba(0, 0, 0, 0.6);
+  color: var(--cream);
+  background: var(--well);
+  border: 2px solid;
+  border-color: #0c0804 #5c4026 #5c4026 #0c0804;
   cursor: var(--cur-hand);
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
 }
 
+#build .item:hover {
+  border-color: #c98a4b #f0cf8a #f0cf8a #c98a4b;
+}
+
 #build .item:active {
   transform: translateY(1px);
 }
 
+/* the picture, on a patch of dark grass */
+#build .item .pic {
+  position: relative;
+  display: block;
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(#2c3f22, #23331c 60%, #1d2a17);
+}
+
 #build .item img {
-  width: 64px;
-  height: 48px;
-  image-rendering: auto;
+  position: absolute;
+  inset: 4px 3px 2px;
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  object-fit: contain;
+  object-position: center bottom;
+  image-rendering: pixelated;
   pointer-events: none;
+}
+
+#build .item .label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 2px 4px;
+  background: #22180f;
+  border-top: 2px solid #0c0804;
 }
 
 #build .item .name {
   font-size: 9px;
-  line-height: 1.15;
+  line-height: 1.1;
   text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 #build .item .cost {
-  font-size: 9px;
-  color: #f0d27a;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--gold);
+  text-shadow: 1px 1px 0 #000;
+}
+
+#build .item .cost .coin {
+  width: 9px;
+  height: 9px;
 }
 
 #build .item .wipe {
@@ -712,10 +855,11 @@ body.sheet-open #selBar {
 
 #build .item .state {
   position: absolute;
-  top: 18px;
   left: 0;
   right: 0;
-  font-size: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
   font-weight: normal;
   text-align: center;
   text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
@@ -724,14 +868,15 @@ body.sheet-open #selBar {
 
 #build .item .new {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 3px;
+  left: 3px;
   display: none;
   padding: 1px 3px;
   font-size: 8px;
   font-style: normal;
   color: #10170d;
   background: #9dff9d;
+  box-shadow: 0 0 0 1px #10170d;
 }
 
 #build .item.fresh .new {
@@ -740,20 +885,26 @@ body.sheet-open #selBar {
 
 #build .item .count {
   position: absolute;
-  top: 2px;
-  right: 3px;
-  font-size: 10px;
-  text-shadow: 1px 1px 0 #000;
+  top: 3px;
+  right: 4px;
+  font-size: 11px;
+  color: var(--gold);
+  text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
 }
 
 #build .item[data-state='ready'] {
-  border-color: #f7e2a0;
-  box-shadow: inset 0 0 0 1px #e0b83c;
+  border-color: #fff0c4 #e0a83c #e0a83c #fff0c4;
+  animation: ready 0.8s steps(2) infinite;
+}
+
+@keyframes ready {
+  50% {
+    border-color: #e0a83c #8a5a16 #8a5a16 #e0a83c;
+  }
 }
 
 #build .item[data-state='ready'] .state {
-  color: #ffe08a;
-  animation: blink 0.8s steps(2) infinite;
+  color: var(--gold);
 }
 
 #build .item[data-state='paused'] .state {
@@ -764,28 +915,35 @@ body.sheet-open #selBar {
   opacity: 0.5;
 }
 
-#build .hint {
-  padding: 0 8px 6px;
-  font-size: 8px;
-  opacity: 0.65;
-}
-
-/* On a wide screen the menu is a sidebar down the right, under the minimap. */
+/* On a wide screen the menu is a sidebar down the right, under the minimap,
+   and it is always open: the toolbar's Build button and the close button go,
+   and the toolbar centres itself on the rest of the screen. */
 @media (min-width: 900px) {
   #build {
     left: auto;
-    right: calc(8px + env(safe-area-inset-right));
-    top: calc(142px + env(safe-area-inset-top));
-    bottom: auto;
+    right: calc(4px + env(safe-area-inset-right));
+    top: calc(140px + env(safe-area-inset-top));
+    bottom: calc(8px + env(safe-area-inset-bottom));
     transform: none;
-    width: 240px;
-    max-height: calc(100vh - 170px);
+    width: 304px;
+    max-height: none;
   }
-  #build .tabs {
-    flex-wrap: wrap;
+  #build .close,
+  #buildBtn,
+  #buildSep,
+  #credits {
+    display: none !important;
   }
-  #build .tabs button {
-    flex: 1 1 40%;
+  #build .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  #build .item .name {
+    font-size: 10px;
+  }
+  body:has(#build:not([hidden])) #toolbar,
+  body:has(#build:not([hidden])) #selBar,
+  body:has(#build:not([hidden])) #toast {
+    left: calc((100vw - 312px) / 2);
   }
 }
 

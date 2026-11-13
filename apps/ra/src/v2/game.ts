@@ -682,25 +682,70 @@ export class IsoGame implements GameLike {
     return TECH.filter((t) => t.needs.every((k) => have.has(k)));
   }
 
+  // The build menu's picture of something: the building or unit itself,
+  // trimmed to its edges and blown up in whole pixels where it is small, at
+  // about twice the size it is shown (for sharp pixels on a phone).
   private icon(t: Tech): string {
-    let url = this.icons.get(t.id);
-    if (!url) {
-      const W = 64;
-      const H = 48;
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const c = cv.getContext('2d')!;
-      if (t.building) {
-        const spr = this.buildingArt(t.building, ME).spr.img;
-        const k = Math.min(W / spr.width, H / spr.height) * 1.15;
-        c.imageSmoothingQuality = 'high';
-        c.drawImage(spr, (W - spr.width * k) / 2, (H - spr.height * k) / 2 + 2, spr.width * k, spr.height * k);
-      } else return this.unitIcon(t.unit as Kind);
-      url = cv.toDataURL();
-      this.icons.set(t.id, url);
+    const key = `cameo:${t.id}`;
+    let url = this.icons.get(key);
+    if (url) return url;
+    const layers: { img: HTMLCanvasElement; x: number; y: number }[] = [];
+    if (t.building) layers.push({ img: this.buildingArt(t.building, ME).spr.img, x: 0, y: 0 });
+    else for (const s of this.unitLayers(t.unit as Kind)) layers.push({ img: s.img, x: -s.cx * ART, y: -s.cy * ART });
+    // put the layers together at the art's own size
+    const x0 = Math.min(...layers.map((l) => l.x));
+    const y0 = Math.min(...layers.map((l) => l.y));
+    const x1 = Math.max(...layers.map((l) => l.x + l.img.width));
+    const y1 = Math.max(...layers.map((l) => l.y + l.img.height));
+    const raw = document.createElement('canvas');
+    raw.width = Math.max(1, x1 - x0);
+    raw.height = Math.max(1, y1 - y0);
+    const rc = raw.getContext('2d', { willReadFrequently: true })!;
+    for (const l of layers) rc.drawImage(l.img, l.x - x0, l.y - y0);
+    // trim the empty edges
+    const px = rc.getImageData(0, 0, raw.width, raw.height).data;
+    let l = raw.width, r = -1, top = raw.height, bot = -1;
+    for (let y = 0; y < raw.height; y++)
+      for (let x = 0; x < raw.width; x++)
+        if (px[(y * raw.width + x) * 4 + 3] > 24) {
+          if (x < l) l = x;
+          if (x > r) r = x;
+          if (y < top) top = y;
+          if (y > bot) bot = y;
+        }
+    if (r < l) {
+      l = top = 0;
+      r = raw.width - 1;
+      bot = raw.height - 1;
     }
+    const tw = r - l + 1;
+    const th = bot - top + 1;
+    const fit = Math.min(220 / tw, 150 / th);
+    const k = fit >= 1 ? Math.floor(fit) : fit;
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(tw * k));
+    cv.height = Math.max(1, Math.round(th * k));
+    const c = cv.getContext('2d')!;
+    c.imageSmoothingEnabled = k < 1;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(raw, l, top, tw, th, 0, 0, cv.width, cv.height);
+    url = cv.toDataURL();
+    this.icons.set(key, url);
     return url;
+  }
+
+  // The sprites a unit is drawn from, facing down and to the left.
+  private unitLayers(kind: Kind): StackSprite[] {
+    const a = Math.PI * 0.62;
+    const art = this.art[ME];
+    const di = dirIndex(a, DIRS);
+    return kind === 'inf' || kind === 'rocket'
+      ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
+      : kind === 'light'
+        ? [art.lightTank[di], art.lightTurret[di]]
+        : kind === 'heavy'
+          ? [art.heavyTank[di], art.heavyTurret[di]]
+          : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -715,17 +760,7 @@ export class IsoGame implements GameLike {
       cv.height = H;
       const c = cv.getContext('2d')!;
       {
-        const a = Math.PI * 0.62;
-        const art = this.art[ME];
-        const di = dirIndex(a, DIRS);
-        const layers: StackSprite[] =
-          kind === 'inf' || kind === 'rocket'
-            ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
-            : kind === 'light'
-              ? [art.lightTank[di], art.lightTurret[di]]
-              : kind === 'heavy'
-                ? [art.heavyTank[di], art.heavyTurret[di]]
-                : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+        const layers = this.unitLayers(kind);
         const base = layers[0];
         const k = Math.max(1, Math.min(3, Math.floor(Math.min(W / (base.w * 0.55), H / (base.h * 0.65)))));
         c.imageSmoothingEnabled = false;
