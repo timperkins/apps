@@ -136,7 +136,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
-    'A bear swipes for 8% of your health and throws rocks for 9%. Bears growl when they are close.'] },
+    'A bear swipes for 8% of your health. Bears never throw or shoot anything. Bears growl when they are close.'] },
   { icon: '🐟', title: 'Acid fish', lines: [
     `About 1 in 10 things a spawner makes (${(SURVIVAL.fishChance * 100).toFixed(2)}%) is a green <b>acid fish</b> instead of a bear. It keeps away from you and spits green acid slime from up to 10 tiles away.`,
     `A hit does ${SURVIVAL.acidHit.toLocaleString()} damage and burns you for ${SURVIVAL.acidBurn.toLocaleString()} a second for ${SURVIVAL.acidBurnTime} seconds (you glow green).`,

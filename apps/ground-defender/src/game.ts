@@ -2088,9 +2088,7 @@ export class Survival {
         if (d > reach - 2) this.navTo(b, this.x, this.y, SURVIVAL.bearSpeedInside, dt, reach - 2);
         else b.face = approachAngle(b.face, Math.atan2(this.y - b.y, this.x - b.x), dt * 6);
         if (d <= reach && b.cd <= 0) this.bearHit(b);
-        // from further off it throws a rock, every 5 seconds
-        b.tc = Math.max(0, b.tc - dt);
-        if (d > reach + 20 && d < 420 && b.tc <= 0) this.throwRock(b);
+        // bears don't throw rocks (only acid fish spit)
       }
     }
     for (const g of this.gates) g.open = clamp(g.open + (entering.has(g) ? dt : -dt) * 1.5, 0, 1);
@@ -2367,13 +2365,7 @@ export class Survival {
     this.acidShowT -= dt;
     if (this.acidShown > 0 && this.acidShowT <= 0) { this.bubble(this.x + (Math.random() - .5) * 16, this.y - 24, '-' + fmt(this.acidShown), 'loss'); this.acidShown = 0; this.acidShowT = .5; this.hurtFlash = .25; }
   }
-  private throwRock(b: Bear) {
-    b.tc = SURVIVAL.throwCooldown; b.swipe = .25;
-    const a = Math.atan2(this.y - b.y, this.x - b.x);
-    b.face = a;
-    this.rocks.push({ x: b.x + Math.cos(a) * 24, y: b.y + Math.sin(a) * 24, vx: Math.cos(a) * SURVIVAL.throwSpeed, vy: Math.sin(a) * SURVIVAL.throwSpeed, left: 520, spin: 0 });
-    Sound.tone('sine', 300, 160, .15, .1);
-  }
+
 
   private bearHit(b: Bear) {
     b.cd = SURVIVAL.bearCooldown; b.swipe = .35;
