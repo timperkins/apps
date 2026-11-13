@@ -212,6 +212,7 @@ const RECIPES: Rec[] = [
   R('turret', 'combat', { gear: 5, ironPlate: 5, stone: 10 }, 3, 1, 'Shoots bears and spawners: 1 damage a shot, a shot every 0.2 s, using 16% of an ammo a shot. Load ammo with T, or feed it with belts and grabbers.'),
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'A turret that reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
+  { ...R('plat', 'logistics', {}, 1, 1, 'Space only: one more tile of platform. Put it next to the platform to make it bigger.', undefined, false), in: { stone: 15 } },
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
   { ...R('ammo', 'combat', { stone: 1 }, 2, SURVIVAL.batchAmmo - 1, 'Stone ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
@@ -251,7 +252,13 @@ const CX = W / 2, CY = H / 2, OFF = CX - 900;
 /** How much of the map the screen shows at once (it is scaled to fit). */
 const VIEW_W = 640, VIEW_H = 800;
 /** Space: a square platform of tiles floating in space, with a big chest in the middle. */
-const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100 };
+const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100,
+  astEvery: 2.5, astSpeed: [40, 75], astR: [7, 11], astFrom: 560, // small asteroids: one every 2.5 s, from this far out
+  astHit: .05, astDrop: 3, // one that hits you takes 5% of your health; a shot one drops 3 stone
+  crackHits: 2, // a platform tile breaks on its second asteroid hit (the first cracks it)
+  stoneLife: 25 }; // stone drifting in space is gone after this many seconds
+interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; }
+interface Floater { x: number; y: number; vx: number; vy: number; t: number; landed: boolean; }
 /** A stack in the space chest: up to 100 of one thing. */
 interface Stack { k: Kind; n: number; }
 /** The base's walls. They move out when the base is expanded, so this object changes during a run. */
@@ -292,11 +299,11 @@ type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
   'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'xrocket', 'rgun', 'xbow', 'rxbow', 'mgun',
-  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'] as const;
+  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
-type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate';
-const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate'];
+type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate' | 'plat';
+const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'];
 const isPlaceable = (k: string): k is Placeable => (PLACEABLES as string[]).includes(k);
 /** Each metal: its smelted form, and how much ammo one of those makes in a machine (and its damage). Diamonds are our own guess. */
 export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; plate: Kind; name: string; color: string }> = {
@@ -346,14 +353,14 @@ const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
   ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', xrocket: 'exploding rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
-  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates', plat: 'platform tiles',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
   ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', xrocket: 'Exploding rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
-  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate', plat: 'Platform tile',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
@@ -506,7 +513,8 @@ export class Survival {
   private tapWait: { id: string; t: number; timer: ReturnType<typeof setTimeout>; single: () => void } | null = null;
   /** Blueprints: saved ones, the light blue ghosts on the map, and what the blueprint tool is doing. */
   /** The space game: on, where the platform's top-left tile is, what's in the chest, and whether its panel is open. */
-  private space = false; private plat = { c0: 0, r0: 0 }; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
+  private space = false; private plat = { c0: 0, r0: 0 }; private platTiles = new Set<string>(); private cracks = new Map<string, number>();
+  private asteroids: Asteroid[] = []; private floaters: Floater[] = []; private astT = 0; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
   private bps: Blueprint[] = loadBps(); private ghosts = new Map<string, Ghost>();
   private bpMode: 'select' | 'place' | null = null; private bpOpen = false; private bpSig = '';
   private bpCur: Blueprint | null = null; private bpBox: { id: number; c0: number; r0: number; c1: number; r1: number } | null = null; private bpAim: { id: number; c: number; r: number } | null = null;
@@ -671,19 +679,76 @@ export class Survival {
     if (this.tapWait) { clearTimeout(this.tapWait.timer); this.tapWait = null; }
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
-    if (this.space) this.say('You are on a platform in space. Tap the chest in the middle to store things.', 5);
+    if (this.space) this.say('You are on a platform in space. Shoot the asteroids (Space) for stone, and make platform tiles from it (15 stone).', 6);
     else this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
   }
   /* ---------- space ---------- */
   /** Space: no ground, no ore, no bears; a 10 by 10 platform with the chest in the middle, and you next to it. */
   private startSpace() {
     const t = tileAt(CX, CY)!, h = SPACE.plat / 2;
-    this.plat = { c0: t.c - h, r0: t.r - h };
+    this.plat = { c0: t.c - h, r0: t.r - h }; this.platTiles.clear(); this.cracks.clear(); this.asteroids = []; this.floaters = []; this.astT = 4;
+    for (let c = 0; c < SPACE.plat; c++) for (let r = 0; r < SPACE.plat; r++) this.platTiles.add((this.plat.c0 + c) + ',' + (this.plat.r0 + r));
     this.spawners = []; this.patches = []; this.mines = []; this.machines = []; this.mineAt = null; this.updateStructs();
     this.x = tileX(t.c) - TILE / 2; this.y = tileY(t.r + 2); this.camX = this.x; this.camY = this.y;
   }
   /** Tile (c, r) is on the space platform. */
-  private onPlat(c: number, r: number) { const p = this.plat; return c >= p.c0 && c < p.c0 + SPACE.plat && r >= p.r0 && r < p.r0 + SPACE.plat; }
+  private onPlat(c: number, r: number) { return this.platTiles.has(c + ',' + r); }
+  private onPlatXY(x: number, y: number) { const c = Math.floor((x - GX0) / TILE), r = Math.floor((y - GY0) / TILE); return this.onPlat(c, r); }
+  /** Asteroids fly in from all round; you shoot them for stone, and the ones that get through crack the platform or hit you. */
+  private updateSpace(dt: number) {
+    const b = this.chestBox();
+    this.astT -= dt;
+    if (this.astT <= 0) {
+      this.astT = SPACE.astEvery * (.6 + Math.random() * .8);
+      const ang = Math.random() * Math.PI * 2, x = b.x + Math.cos(ang) * SPACE.astFrom, y = b.y + Math.sin(ang) * SPACE.astFrom;
+      const tx = b.x + (Math.random() - .5) * TILE * (SPACE.plat + 6), ty = b.y + (Math.random() - .5) * TILE * (SPACE.plat + 6);
+      const sp = SPACE.astSpeed[0] + Math.random() * (SPACE.astSpeed[1] - SPACE.astSpeed[0]), d = Math.hypot(tx - x, ty - y);
+      this.asteroids.push({ x, y, vx: (tx - x) / d * sp, vy: (ty - y) / d * sp, r: SPACE.astR[0] + Math.random() * (SPACE.astR[1] - SPACE.astR[0]), a: 0, spin: (Math.random() - .5) * 3, pts: Array.from({ length: 8 }, () => .75 + Math.random() * .35) });
+    }
+    for (const as of this.asteroids) {
+      as.x += as.vx * dt; as.y += as.vy * dt; as.a += as.spin * dt;
+      if (dist(as.x, as.y, this.x, this.y) < as.r + GUY_R) { this.hurt(SPACE.astHit); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; continue; }
+      const c = Math.floor((as.x - GX0) / TILE), r = Math.floor((as.y - GY0) / TILE);
+      if (this.onPlat(c, r) && Math.abs(as.x - tileX(c)) < TILE * .35 && Math.abs(as.y - tileY(r)) < TILE * .35) { this.crackPlat(c, r); this.blasts.push({ x: as.x, y: as.y, t: 0 }); Sound.boom(false); as.r = 0; }
+    }
+    this.asteroids = this.asteroids.filter(as => as.r > 0 && dist(as.x, as.y, b.x, b.y) < SPACE.astFrom + 200);
+    // stone from shot asteroids drifts; on the platform it stops, and you pick it up by walking over it
+    for (const f of this.floaters) {
+      f.t += dt;
+      if (!f.landed) { f.x += f.vx * dt; f.y += f.vy * dt; if (this.onPlatXY(f.x, f.y)) f.landed = true; }
+      if (dist(f.x, f.y, this.x, this.y) < GUY_R + 8) { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); }
+    }
+    this.floaters = this.floaters.filter(f => f.t < 1e8 && (f.landed || f.t < SPACE.stoneLife));
+  }
+  /** A bolt at (x, y) hits an asteroid: it breaks up into stone. */
+  private shootAsteroid(x: number, y: number) {
+    const as = this.asteroids.find(a => a.r > 0 && dist(a.x, a.y, x, y) < a.r + 5); if (!as) return false;
+    for (let i = 0; i < SPACE.astDrop; i++) { const a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 30; this.floaters.push({ x: as.x, y: as.y, vx: as.vx * .35 + Math.cos(a) * sp, vy: as.vy * .35 + Math.sin(a) * sp, t: 0, landed: false }); }
+    this.sparks.push({ x: as.x, y: as.y, t: 0 }); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; this.hits++;
+    Sound.noise(.2, 'lowpass', 1200, .5, .3);
+    return true;
+  }
+  /** An asteroid hits platform tile (c, r): it cracks, and a cracked one breaks off with whatever was on it. The chest's tiles hold. */
+  private crackPlat(c: number, r: number) {
+    const key = c + ',' + r;
+    if (this.chestTile(c, r)) return;
+    const n = (this.cracks.get(key) ?? 0) + 1;
+    if (n < SPACE.crackHits) { this.cracks.set(key, n); return; }
+    this.cracks.delete(key); this.platTiles.delete(key); this.ghosts.delete(key);
+    for (const m of [this.belts, this.grabbers, this.turrets, this.splitters, this.chests, this.labs, this.blds, this.pwalls] as Map<string, unknown>[]) m.delete(key);
+    if (this.picked === key) this.picked = null; if (this.bldOpen === key) this.closeBld();
+    this.wallRects = null; this.powerT = 0;
+    this.bubble(tileX(c), tileY(r) - 14, 'A platform tile broke off!', 'loss');
+  }
+  /** Space: a platform tile goes next to the platform. */
+  private placePlat(c: number, r: number) {
+    const x = tileX(c), y = tileY(r), no = (t: string) => { this.bubble(x, y - 16, t, 'info'); Sound.denied(); };
+    if (!this.space) return no('Platform tiles are for space');
+    if (this.onPlat(c, r)) return no('That is platform already');
+    if (![[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => this.onPlat(c + dc, r + dr))) return no('Put it next to the platform');
+    this.platTiles.add(c + ',' + r); this.cracks.delete(c + ',' + r); this.bag.plat--; this.ghosts.delete(c + ',' + r); Sound.thump();
+    if (!this.count('plat')) this.placing = false;
+  }
   /** The space chest's 4 tiles, its middle, and whether tile (c, r) is one of them. */
   private chestBox() { const c0 = this.plat.c0 + (SPACE.plat - SPACE.chest) / 2, r0 = this.plat.r0 + (SPACE.plat - SPACE.chest) / 2; return { c0, r0, x: GX0 + (c0 + 1) * TILE, y: GY0 + (r0 + 1) * TILE }; }
   private chestTile(c: number, r: number) { if (!this.space) return false; const b = this.chestBox(); return c >= b.c0 && c < b.c0 + SPACE.chest && r >= b.r0 && r < b.r0 + SPACE.chest; }
@@ -756,15 +821,34 @@ export class Survival {
       g.fillStyle = gr; g.beginPath(); g.arc(px, py, 220, 0, 7); g.fill();
     }
     // the platform: a shadow, steel plates with rivets, and a yellow edge
-    const p = this.plat, x0 = GX0 + p.c0 * TILE, y0 = GY0 + p.r0 * TILE, s = SPACE.plat * TILE;
-    g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(x0 + 8, y0 + 10, s, s);
-    for (let c = 0; c < SPACE.plat; c++) for (let r = 0; r < SPACE.plat; r++) {
-      const x = x0 + c * TILE, y = y0 + r * TILE;
-      g.fillStyle = (c + r) % 2 ? '#5a6370' : '#636d7b'; g.fillRect(x, y, TILE, TILE);
-      g.strokeStyle = 'rgba(20,24,32,.6)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1);
-      g.fillStyle = 'rgba(200,210,225,.5)'; for (const [a, b] of [[3, 3], [TILE - 4, 3], [3, TILE - 4], [TILE - 4, TILE - 4]]) g.fillRect(x + a - .75, y + b - .75, 1.5, 1.5);
+    const tiles = [...this.platTiles].map(k => k.split(',').map(Number));
+    g.fillStyle = 'rgba(0,0,0,.5)'; for (const [c, r] of tiles) g.fillRect(GX0 + c * TILE + 8, GY0 + r * TILE + 10, TILE, TILE);
+    for (const [c, r] of tiles) paintPlat(g, GX0 + c * TILE, GY0 + r * TILE, this.cracks.get(c + ',' + r) ?? 0, (c + r) % 2 === 1);
+    // a yellow edge where the platform ends
+    g.strokeStyle = '#e0b43a'; g.lineWidth = 2;
+    g.beginPath();
+    for (const [c, r] of tiles) {
+      const x = GX0 + c * TILE, y = GY0 + r * TILE;
+      if (!this.onPlat(c, r - 1)) { g.moveTo(x, y + 1); g.lineTo(x + TILE, y + 1); }
+      if (!this.onPlat(c, r + 1)) { g.moveTo(x, y + TILE - 1); g.lineTo(x + TILE, y + TILE - 1); }
+      if (!this.onPlat(c - 1, r)) { g.moveTo(x + 1, y); g.lineTo(x + 1, y + TILE); }
+      if (!this.onPlat(c + 1, r)) { g.moveTo(x + TILE - 1, y); g.lineTo(x + TILE - 1, y + TILE); }
     }
-    g.strokeStyle = '#e0b43a'; g.lineWidth = 3; g.setLineDash([8, 6]); g.strokeRect(x0 + 1.5, y0 + 1.5, s - 3, s - 3); g.setLineDash([]);
+    g.stroke();
+  }
+  /** Asteroids and the stone floating off them. */
+  private drawRocks(g: CanvasRenderingContext2D) {
+    for (const f of this.floaters) { g.globalAlpha = f.landed ? 1 : Math.max(0, Math.min(1, (SPACE.stoneLife - f.t) / 4)); paintItem(g, f.x, f.y, 'stone'); }
+    g.globalAlpha = 1;
+    for (const as of this.asteroids) {
+      if (!this.seen(as.x, as.y)) continue;
+      g.save(); g.translate(as.x, as.y); g.rotate(as.a);
+      g.fillStyle = '#7a6f66'; g.beginPath();
+      as.pts.forEach((k, i) => { const a = i / as.pts.length * Math.PI * 2; g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * as.r * k, Math.sin(a) * as.r * k); });
+      g.closePath(); g.fill(); g.strokeStyle = '#3e3832'; g.lineWidth = 1.2; g.stroke();
+      g.fillStyle = 'rgba(40,34,30,.55)'; g.beginPath(); g.arc(as.r * .25, -as.r * .2, as.r * .25, 0, 7); g.arc(-as.r * .3, as.r * .25, as.r * .18, 0, 7); g.fill();
+      g.restore();
+    }
   }
   /** The big chest in the middle of the platform. */
   private drawSpaceChest(g: CanvasRenderingContext2D) {
@@ -793,7 +877,7 @@ export class Survival {
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
-    o.done = [...this.done]; o.spaceChest = this.spaceChest;
+    o.done = [...this.done]; o.spaceChest = this.spaceChest; o.platTiles = [...this.platTiles]; o.cracks = [...this.cracks];
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
     for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls', 'ghosts'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
@@ -826,6 +910,7 @@ export class Survival {
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
     this.ghosts = new Map((d.ghosts ?? []) as [string, Ghost][]);
     this.spaceChest = (d.spaceChest ?? []) as Stack[];
+    if (this.space && d.platTiles) { this.platTiles = new Set(d.platTiles as string[]); this.cracks = new Map((d.cracks ?? []) as [string, number][]); }
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
@@ -924,11 +1009,14 @@ export class Survival {
     let target: Target | null = null;
     if (targeted) {
       target = this.nearestTarget(this.x, this.y, w === 'rgun' ? SURVIVAL.rocketRange : SURVIVAL.targetRange);
-      if (!target) {
-        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, 'No bear in range', 'info'); this.noTargetT = 1.2; if (!this.fireHeld) Sound.denied(); }
+      // space: aim at the nearest asteroid, a little ahead of where it's going
+      const as = !target && this.space ? this.asteroids.filter(a => a.r > 0 && dist(a.x, a.y, this.x, this.y) < SURVIVAL.targetRange).sort((a, b) => dist(a.x, a.y, this.x, this.y) - dist(b.x, b.y, this.x, this.y))[0] : undefined;
+      if (as) { const lt = dist(as.x, as.y, this.x, this.y) / SURVIVAL.boltSpeed; this.face = Math.atan2(as.y + as.vy * lt - this.y, as.x + as.vx * lt - this.x); }
+      else if (!target) {
+        if (this.noTargetT <= 0) { this.bubble(this.x, this.y - 30, this.space ? 'No asteroid in range' : 'No bear in range', 'info'); this.noTargetT = 1.2; if (!this.fireHeld) Sound.denied(); }
         return;
       }
-      this.face = Math.atan2(target.y - this.y, target.x - this.x);
+      else this.face = Math.atan2(target.y - this.y, target.x - this.x);
     }
     const a = this.face, ammo = AMMO[this.load.ammo], i = this.ammoSlot(w);
     // the rocket gun: one rocket a shot, it swirls and then homes in like a launcher's
@@ -2097,6 +2185,7 @@ export class Survival {
   private placeAt(c: number, r: number) {
     const key = c + ',' + r, type = this.placeType;
     if (!this.count(type)) { this.placing = false; return; }
+    if (type === 'plat') { this.placePlat(c, r); return; }
     // building on a blueprint ghost of the same thing faces it the ghost's way
     const gh = this.ghosts.get(key), dir = this.placeDir;
     if (gh && gh.p === type && !this.taken(c, r)) this.placeDir = gh.d;
@@ -2293,7 +2382,7 @@ export class Survival {
     if (this.keys.has('ArrowUp')) my -= 1;
     if (this.keys.has('ArrowDown')) my += 1;
     if (this.stick) { const m = Math.hypot(this.stick.dx, this.stick.dy); if (m > 6) { mx = this.stick.dx / 46; my = this.stick.dy / 46; } }
-    const m = Math.hypot(mx, my);
+    const m = Math.hypot(mx, my), x0 = this.x, y0 = this.y;
     if (m > 0) {
       if (m > 1) { mx /= m; my /= m; }
       this.x += mx * SURVIVAL.guySpeed * dt; this.y += my * SURVIVAL.guySpeed * dt;
@@ -2307,7 +2396,12 @@ export class Survival {
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
     // space: you can't step off the platform
-    if (this.space) { const p = this.plat, m = GUY_R * .6; this.x = clamp(this.x, GX0 + p.c0 * TILE + m, GX0 + (p.c0 + SPACE.plat) * TILE - m); this.y = clamp(this.y, GY0 + p.r0 * TILE + m, GY0 + (p.r0 + SPACE.plat) * TILE - m); }
+    if (this.space) {
+      const ok = (x: number, y: number) => { const e = GUY_R * .5; return this.onPlatXY(x - e, y - e) && this.onPlatXY(x + e, y - e) && this.onPlatXY(x - e, y + e) && this.onPlatXY(x + e, y + e); };
+      if (!ok(this.x, this.y)) { if (ok(this.x, y0)) this.y = y0; else if (ok(x0, this.y)) this.x = x0; else { this.x = x0; this.y = y0; } }
+      // the tile under you broke off: hop to the nearest platform tile
+      if (!this.onPlatXY(this.x, this.y)) { let best = '', bd = Infinity; for (const k of this.platTiles) { const [c, r] = k.split(',').map(Number), d = dist(tileX(c), tileY(r), this.x, this.y); if (d < bd) { bd = d; best = k; } } if (best) { const [c, r] = best.split(',').map(Number); this.x = tileX(c); this.y = tileY(r); } }
+    }
     const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
     // walking over a furnace picks up what it has smelted
     { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
@@ -2525,9 +2619,11 @@ export class Survival {
       bo.x += bo.vx * dt; bo.y += bo.vy * dt; bo.left -= SURVIVAL.boltSpeed * dt;
       // your walls and gates stop bolts (the tile it was shot from doesn't count); the wall takes no damage
       const wk = this.wallAt(bo.x, bo.y); if (wk && wk !== bo.from) { bo.left = 0; this.sparks.push({ x: bo.x, y: bo.y, t: 0 }); continue; }
+      if (this.space && this.shootAsteroid(bo.x, bo.y)) { bo.left = 0; continue; }
       const hit = this.hitAt(bo.x, bo.y, 4);
       if (hit) { this.damageTarget(hit, bo.dmg); bo.left = 0; }
     }
+    if (this.space) this.updateSpace(dt);
     this.bolts = this.bolts.filter(b => b.left > 0);
     // rockets: a swirl (one loop), then they home in on the bear or spawner
     for (const rk of this.rockets) {
@@ -2876,6 +2972,7 @@ export class Survival {
     for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
     if (this.space) this.drawSpaceChest(g);
     this.drawThings(g);
+    if (this.space) this.drawRocks(g);
   }
   private drawGround(g: CanvasRenderingContext2D) {
     // ground
@@ -3415,6 +3512,8 @@ export class Survival {
     this.renderTurretPanel();
     this.renderBpPanel();
     this.renderChest();
+    const tb = this.pad.querySelector<HTMLElement>('#svTarget')!.firstElementChild!, tl = this.space ? 'Shoot asteroid' : 'Shoot bear';
+    if (tb.textContent !== tl) tb.textContent = tl;
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
@@ -3783,6 +3882,13 @@ function paintRobot(g: CanvasRenderingContext2D, x: number, y: number, bob: numb
   if (k) { g.fillStyle = KIND_DOT[k]; g.beginPath(); g.arc(x, y + 7 + bob, 3, 0, 7); g.fill(); }
 }
 /** Any one-tile thing you can place, facing direction d (for the ghost while placing, and for icons). */
+/** One tile of space platform, top-left at (x, y); crack 1 shows a crack. */
+function paintPlat(g: CanvasRenderingContext2D, x: number, y: number, crack: number, odd = false) {
+  g.fillStyle = odd ? '#5a6370' : '#636d7b'; g.fillRect(x, y, TILE, TILE);
+  g.strokeStyle = 'rgba(20,24,32,.6)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1);
+  g.fillStyle = 'rgba(200,210,225,.5)'; for (const [a, b] of [[3, 3], [TILE - 4, 3], [3, TILE - 4], [TILE - 4, TILE - 4]]) g.fillRect(x + a - .75, y + b - .75, 1.5, 1.5);
+  if (crack) { g.strokeStyle = 'rgba(15,15,20,.85)'; g.lineWidth = 1.4; g.beginPath(); g.moveTo(x + 4, y + 6); g.lineTo(x + 10, y + 11); g.lineTo(x + 8, y + 16); g.lineTo(x + 15, y + 20); g.moveTo(x + 10, y + 11); g.lineTo(x + 19, y + 8); g.stroke(); }
+}
 /** A blueprint ghost: the thing's own picture, all in light blue. Made once for each thing and way it faces. */
 const ghostSprites = new Map<string, HTMLCanvasElement>();
 const GHOST_S = 72;
@@ -3806,6 +3912,7 @@ function paintGhost(g: CanvasRenderingContext2D, c: number, r: number, q: Ghost,
   if (!isBig(q.p)) g.strokeRect(GX0 + c * TILE + 1.5, GY0 + r * TILE + 1.5, TILE - 3, TILE - 3);
 }
 function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Placeable, d: number, t: number) {
+  if (p === 'plat') { paintPlat(g, x - TILE / 2, y - TILE / 2, 0); return; }
   if (p === 'belt') paintBelt(g, x, y, d, t);
   else if (p === 'grab') paintGrabber(g, x, y, { d, t: 0, carry: false, k: 'stone' });
   else if (p === 'split') paintSplitter(g, x, y, d);
