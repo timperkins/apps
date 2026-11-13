@@ -56,6 +56,7 @@ export const SURVIVAL = {
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
+  turretMaxAmmo: 10000, // you can set how much ammo each turret holds, from 0 to 10000 (it starts at the most)
   turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
   turretRange: 280,
   grabberCost: 3,       // stone for a grabber in the shop
@@ -345,7 +346,7 @@ interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
 /** A turret shoots the nearest bear or spawner in range (or the one you picked), one ammo a shot.
  *  kind: a plain turret, a brick turret, a rapid crossbow or a rocket launcher (which only takes rockets). */
 type TKind = 'turret' | 'brick' | 'rapid' | 'rocket';
-interface Turret { ammo: Partial<Record<AmmoKind | 'rocket', number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
+interface Turret { max?: number; ammo: Partial<Record<AmmoKind | 'rocket', number>>; cd: number; face: number; kind: TKind; cool?: boolean; target?: Target | null; }
 const T_ITEM: Record<TKind, Placeable> = { turret: 'turret', brick: 'bturret', rapid: 'rapid', rocket: 'launcher' };
 const ITEM_T: Partial<Record<Placeable, TKind>> = { turret: 'turret', bturret: 'brick', rapid: 'rapid', launcher: 'rocket' };
 const tAmmo = (tu: Turret) => Object.values(tu.ammo).reduce((a, n) => a + (n ?? 0), 0);
@@ -526,6 +527,10 @@ export class Survival {
     });
     pad.querySelector('#svBld')!.addEventListener('click', e => this.bldClick(e as MouseEvent));
     pad.querySelector('#svBld')!.addEventListener('pointerdown', e => e.stopPropagation());
+    const tp = pad.querySelector<HTMLElement>('#svTurret')!;
+    for (const ev of ['pointerdown', 'pointerup', 'click', 'keydown']) tp.addEventListener(ev, e => e.stopPropagation());
+    tp.addEventListener('input', e => this.turretMaxInput(e));
+    tp.addEventListener('click', e => { const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tmax]'); if (el) { this.setTurretMax(Number(el.dataset.tmax)); Sound.click(); } });
     pad.querySelector('#svRecSeg')!.addEventListener('click', e => { e.stopPropagation(); const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mrec]'); if (b) this.setRecipe(b.dataset.mrec as MRec); });
     pad.querySelector('#svRecPut')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (m) this.useMachine(m); });
     pad.querySelector('#svRecPick')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (!m) return; if (dist(this.x, this.y, m.x, m.y) > NEAR * 1.6) { this.bubble(m.x, m.y - 36, 'Walk to the machine to pick it up', 'info'); Sound.denied(); return; } this.pickUpBig(m); });
@@ -1438,6 +1443,8 @@ export class Survival {
   }
   /** A turret takes ammo (raw stone counts as stone ammo); a rocket launcher only takes rockets. */
   private feedTurret(tu: Turret, k: Kind) {
+    // it never takes more than the most you set for it
+    if (tAmmo(tu) + 1 > (tu.max ?? SURVIVAL.turretMaxAmmo) + 1e-9) return false;
     if (tu.kind === 'rocket') { if (k !== 'rocket') return false; tu.ammo.rocket = (tu.ammo.rocket ?? 0) + 1; return true; }
     const a: AmmoKind | null = k === 'stone' ? 'ammo' : isAmmoKind(k) ? k : null;
     if (!a) return false;
@@ -1587,6 +1594,37 @@ export class Survival {
     return AMMO_KINDS.reduce((a, k) => a + this.bag[k], 0);
   }
   /** T next to a turret: put all your ammo in it (all your rockets in a rocket launcher). */
+  /** The picked turret's small panel: how much ammo it has, and the most it may hold (0 to 10000). */
+  private turretKey = '';
+  private renderTurretPanel() {
+    const el = this.pad.querySelector<HTMLElement>('#svTurret')!, tu = this.picked ? this.turrets.get(this.picked) : undefined;
+    const help = this.pad.querySelector<HTMLElement>('#svHelp');
+    if (!tu || !this.picked) { if (!el.hidden) { el.hidden = true; this.turretKey = ''; if (help) help.style.visibility = ''; } return; }
+    if (help) help.style.visibility = 'hidden';
+    const cap = tu.max ?? SURVIVAL.turretMaxAmmo, what = tu.kind === 'rocket' ? 'rockets' : 'ammo';
+    if (this.turretKey !== this.picked) {
+      this.turretKey = this.picked;
+      el.innerHTML = `<div class="trow"><b>${ONE_NAME[T_ITEM[tu.kind]]}</b><span class="fine" data-tnow></span></div>
+        <label class="fine" for="svTMax">Most ${what} it holds</label>
+        <div class="trow"><input type="range" id="svTMaxR" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" aria-label="Most ${what} it holds"><input type="number" id="svTMax" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" inputmode="numeric"></div>
+        <div class="trow quick">${[0, 10, 50, 100, 500, 1000, SURVIVAL.turretMaxAmmo].map(n => `<button class="ghost small" data-tmax="${n}">${fmt(n)}</button>`).join('')}</div>
+        <p class="fine">Tap a bear or spawner for it to shoot. Tap the turret again to pick it up.</p>`;
+    }
+    const now = el.querySelector<HTMLElement>('[data-tnow]')!, txt = `${fmt(Math.floor(tAmmo(tu)))} / ${fmt(cap)} ${what}`;
+    if (now.textContent !== txt) now.textContent = txt;
+    el.hidden = false;
+  }
+  private turretMaxInput(e: Event) {
+    const inp = e.target as HTMLInputElement; if (inp.id !== 'svTMax' && inp.id !== 'svTMaxR') return;
+    const v = Number(inp.value); if (!Number.isFinite(v) || inp.value === '') return;
+    this.setTurretMax(v, inp.id);
+  }
+  private setTurretMax(v: number, from = '') {
+    const tu = this.picked ? this.turrets.get(this.picked) : undefined; if (!tu) return;
+    tu.max = clamp(Math.round(v), 0, SURVIVAL.turretMaxAmmo);
+    const el = this.pad.querySelector<HTMLElement>('#svTurret')!;
+    for (const id of ['svTMax', 'svTMaxR']) if (id !== from) { const i = el.querySelector<HTMLInputElement>('#' + id); if (i) i.value = String(tu.max); }
+  }
   private loadTurret() {
     const best = this.nearTurret();
     if (!best) { this.bubble(this.x, this.y - 30, 'Walk to a turret to load it', 'info'); Sound.denied(); return; }
@@ -2984,6 +3022,7 @@ export class Survival {
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
+    this.renderTurretPanel();
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();

@@ -467,3 +467,12 @@ button.ghost.gold { border-color: #ffd34a; color: #ffd34a; }
 .drillinfo .warn, .drillinfo b.warn { color: #ff9a8a; }
 .drillinfo { text-align: left; }
 .drillinfo .drow b { font-size: 16px; }
+
+.svturret { position: absolute; left: 50%; bottom: 196px; transform: translateX(-50%); width: min(330px, calc(100% - 24px)); z-index: 4; background: rgba(24, 20, 40, .94); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+.svturret .fine { margin: 0; text-align: left; }
+.svturret .trow { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.svturret .trow b { font-size: 15px; }
+.svturret input[type="range"] { flex: 1; accent-color: var(--accent); min-width: 0; }
+.svturret input[type="number"] { width: 82px; font: 500 14px var(--font-b); color: var(--ink); background: rgba(255, 245, 234, .08); border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; }
+.svturret .quick { flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
+.svturret .quick button { padding: 5px 8px; font-size: 12px; }
