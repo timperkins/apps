@@ -5,9 +5,11 @@
 // The move cursor turns and plays a burst on click, and the corners cursor
 // (over a unit you can pick) and the attack cursor (over an enemy your units
 // can fire on) breathe: main.ts steps through their frames. The attack cursor
-// plays a red burst on click, like the move cursor's.
+// plays a red burst on click, like the move cursor's. The harvest cursor (over
+// ore with an ore hauler selected) is the attack cursor's cousin in gold: a
+// diamond closing in on a nugget, with a gold burst.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -22,7 +24,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -183,6 +185,7 @@ const FALLBACK: Record<CursorKind, string> = {
   move: 'crosshair',
   corners: 'pointer',
   attack: 'crosshair',
+  harvest: 'crosshair',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
@@ -329,6 +332,26 @@ function sight(put: (x: number, y: number, col: string) => void, size: number, C
   put(C, C, 'R');
 }
 
+// Over ore an ore hauler can dig: a gold diamond of "radius" r (to its tips)
+// broken at the tips, closing in on a little nugget at (C, C).
+function oreSight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number): void {
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const dx = Math.abs(x - C);
+      const dy = Math.abs(y - C);
+      if (Math.abs(dx + dy - r) < 0.6 && dx > 1.5 && dy > 1.5) put(x, y, dx + dy > r ? 'Y' : 'y');
+    }
+  // the nugget
+  put(C, C - 1, 'Y');
+  put(C - 1, C, 'y');
+  put(C, C, 'Y');
+  put(C + 1, C, 'y');
+}
+
+function oreRows(r: number): string[] {
+  return drawn(17, (put) => oreSight(put, 17, 8, r));
+}
+
 function attackRows(r: number): string[] {
   return drawn(17, (put) => sight(put, 17, 8, r));
 }
@@ -354,7 +377,7 @@ const ATTACK_CLICK: AttackFrame[] = [
 ];
 export const ATTACK_CLICK_FRAMES = ATTACK_CLICK.length;
 
-function attackClickRows(f: AttackFrame): string[] {
+function attackClickRows(f: AttackFrame, ore = false): string[] {
   return drawn(MS, (put) => {
     for (let y = 0; y < MS; y++)
       for (let x = 0; x < MS; x++) {
@@ -363,10 +386,13 @@ function attackClickRows(f: AttackFrame): string[] {
         const r = Math.hypot(vx, vy);
         if (f.ring && Math.abs(r - f.ring) < 0.55) {
           const ang = Math.atan2(vy, vx);
-          if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : 'R');
+          if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : ore ? 'Y' : 'R');
         }
       }
-    if (f.r >= 0) sight(put, MS, MC, f.r);
+    if (f.r >= 0) {
+      if (ore) oreSight(put, MS, MC, f.r * 1.4);
+      else sight(put, MS, MC, f.r);
+    }
     if (f.flash)
       for (let y = 0; y < MS; y++)
         for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, y - MC) <= f.flash) put(x, y, 'w');
@@ -375,23 +401,30 @@ function attackClickRows(f: AttackFrame): string[] {
 
 // The attack cursor's click burst, one CSS value per frame.
 export const ATTACK_CLICK_CSS: string[] = [];
+// The harvest cursor's (the same burst in gold).
+export const HARVEST_CLICK_CSS: string[] = [];
 
 export const CURSORS = {} as Record<CursorKind, string>;
 // The attack cursor through one breath.
 export const ATTACK_FRAMES: string[] = [];
 // The corners cursor through one breath.
 export const CORNER_FRAMES: string[] = [];
+// The harvest cursor through one breath.
+export const HARVEST_FRAMES: string[] = [];
 
 // Build every cursor and publish them as --cur-<kind> on the page.
 export function initCursors(): void {
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
   for (const r of [5, 5.5, 6, 5.5]) ATTACK_FRAMES.push(gridCss(attackRows(r), [8, 8], FALLBACK.attack));
   for (const f of ATTACK_CLICK) ATTACK_CLICK_CSS.push(gridCss(attackClickRows(f), [MC, MC], FALLBACK.attack));
+  for (const r of [7, 7.5, 8, 7.5]) HARVEST_FRAMES.push(gridCss(oreRows(r), [8, 8], FALLBACK.harvest));
+  for (const f of ATTACK_CLICK) HARVEST_CLICK_CSS.push(gridCss(attackClickRows(f, true), [MC, MC], FALLBACK.harvest));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);
     else if (kind === 'corners') CURSORS[kind] = CORNER_FRAMES[0];
     else if (kind === 'attack') CURSORS[kind] = ATTACK_FRAMES[0];
+    else if (kind === 'harvest') CURSORS[kind] = HARVEST_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }
@@ -415,6 +448,14 @@ export function attackRingFrames(): string[] {
   return sightFrames;
 }
 
+// The harvest cursor's diamond, opened wide round the confirm button for
+// sending haulers to dig, through one breath.
+const oreRingFrames: string[] = [];
+export function harvestRingFrames(): string[] {
+  if (!oreRingFrames.length) for (const r of [13, 13.5, 14, 13.5]) oreRingFrames.push(gridCanvas(drawn(MS, (put) => oreSight(put, MS, MC, r)), 1).toDataURL('image/png'));
+  return oreRingFrames;
+}
+
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
 // on the map where you tapped: one grid pixel to a map pixel, centred on the
@@ -422,12 +463,12 @@ export function attackRingFrames(): string[] {
 
 export const BURST_CENTER = MC;
 export const BURST_FRAME = 0.055;
-const bursts: Record<'move' | 'attack', HTMLCanvasElement[]> = { move: [], attack: [] };
-export function burstFrames(kind: 'move' | 'attack'): HTMLCanvasElement[] {
+const bursts: Record<'move' | 'attack' | 'harvest', HTMLCanvasElement[]> = { move: [], attack: [], harvest: [] };
+export function burstFrames(kind: 'move' | 'attack' | 'harvest'): HTMLCanvasElement[] {
   const out = bursts[kind];
   if (!out.length) {
     if (kind === 'move') for (const f of MOVE_CLICK) out.push(gridCanvas(moveRows(0, f), 1));
-    else for (const f of ATTACK_CLICK) out.push(gridCanvas(attackClickRows(f), 1));
+    else for (const f of ATTACK_CLICK) out.push(gridCanvas(attackClickRows(f, kind === 'harvest'), 1));
   }
   return out;
 }
