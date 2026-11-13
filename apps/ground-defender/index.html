@@ -87,6 +87,10 @@
       <div class="svfield"><span>Ammo</span><div class="svammo" id="svAmmo"></div></div>
       <div class="svfield"><span>Game</span><div class="seg small" id="svWorld" role="radiogroup" aria-label="Game"></div></div>
       <div class="svfield"><span>Mode</span><div class="seg small" id="svMode" role="radiogroup" aria-label="Mode"></div></div>
+      <div class="svfield"><span>Play together (up to 4)</span>
+        <div class="svtogether"><button class="ghost small" id="svLink">Link</button><input id="svJoinCode" maxlength="12" placeholder="Type a code" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Code to join"><button class="ghost small" id="svJoin">Join</button></div>
+        <p class="fine" id="svNetMsg"></p>
+      </div>
     </div>
     <canvas id="svPreview" width="120" height="120" aria-hidden="true"></canvas>
     <button class="primary" id="svGo">Start</button>
