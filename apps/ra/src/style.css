@@ -782,6 +782,22 @@ body.sheet-open #selBar {
   }
 }
 
+/* Build's PR number, bottom-left: tiny, faint and click-through so it never gets in the way. */
+#build-no {
+  position: fixed;
+  left: calc(4px + env(safe-area-inset-left));
+  bottom: calc(3px + env(safe-area-inset-bottom));
+  font: 8px/1 'Silkscreen', ui-monospace, monospace;
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  user-select: none;
+}
+
+#build-no[hidden] {
+  display: none;
+}
+
 #toast {
   position: fixed;
   z-index: 3;

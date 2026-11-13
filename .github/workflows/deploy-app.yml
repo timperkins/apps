@@ -52,6 +52,7 @@ jobs:
     permissions:
       contents: write # move the deployed/<app> tag
       statuses: write # preview link on the commit
+      pull-requests: read # the PR number shown as the build's version
     concurrency:
       group: deploy-${{ inputs.app }}-${{ inputs.target }}-${{ inputs.ref || github.ref_name }}
       cancel-in-progress: ${{ inputs.target == 'preview' }}
@@ -113,9 +114,26 @@ jobs:
           "$RUN" npm run lint --if-present
           if jq -e '.scripts.test' package.json > /dev/null; then "$RUN" npm test; fi
 
+      # The newest PR in this build, shown by apps as a version label: the PR this commit belongs to
+      # (the merged PR on main, or the open PR on a branch), else the last PR merged into main.
+      - name: Find PR number
+        id: pr
+        if: steps.app.outputs.type == 'hosting'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.app.outputs.sha }}
+        run: |
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" --jq '.[0].number // empty' 2>/dev/null || true)
+          [ -n "$pr" ] || pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=30" \
+            --jq '[.[] | select(.merged_at)] | sort_by(.merged_at) | last | .number // empty' 2>/dev/null || true)
+          echo "PR: ${pr:-none}"
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+
       - name: Build
         if: steps.app.outputs.type == 'hosting'
         env:
+          VITE_PR_NUMBER: ${{ steps.pr.outputs.number }}
+          NEXT_PUBLIC_PR_NUMBER: ${{ steps.pr.outputs.number }}
           VITE_APP_ENV: ${{ inputs.target }}
           VITE_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.database }}
           NEXT_PUBLIC_APP_ENV: ${{ inputs.target }}

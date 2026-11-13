@@ -42,6 +42,7 @@ jobs:
     permissions:
       contents: write
       statuses: write
+      pull-requests: read
 
   # After a merge, rebuild each deployed Hosting app with the preview environment and put it on the
   # app's fixed "latest" preview link, so that link also tracks main. App Hosting apps are skipped.
@@ -61,3 +62,4 @@ jobs:
     permissions:
       contents: write
       statuses: write
+      pull-requests: read
