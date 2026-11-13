@@ -58,6 +58,8 @@ export const SURVIVAL = {
   turretReload: 2,
   creativeStock: 9999,  // creative (cheat mode): how many of everything you have
   turretMaxAmmo: 10000, // you can set how much ammo each turret holds, from 0 to 10000 (it starts at the most)
+  dblTapMs: 320, // two taps on the same thing this close together (ms) pick it up
+  maxBlueprints: 30, // saved blueprints kept on this device
   turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
   turretRange: 280,
   grabberCost: 3,       // stone for a grabber in the shop
@@ -400,6 +402,21 @@ const alive = (t: Target) => isBear(t) ? t.state !== 'dead' : !t.dead;
 const SPAWNER_R = 26;
 /** Things that take up a big round spot (mines and machines), not a tile. */
 const isBig = (p: Placeable) => p === 'mine' || p === 'machine';
+/** One thing in a blueprint: what it is, which way it faces, and where it sits from the blueprint's middle tile. */
+interface BpPart { dc: number; dr: number; p: Placeable; d: number }
+interface Blueprint { name: string; parts: BpPart[] }
+/** A light blue ghost from a placed blueprint: it does nothing, it only shows what goes there. */
+interface Ghost { p: Placeable; d: number }
+const BP_STORE = 'grounddef.blueprints';
+const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+function loadBps(): Blueprint[] { try { const v = JSON.parse(localStorage.getItem(BP_STORE) ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } }
+function saveBps(b: Blueprint[]) { try { localStorage.setItem(BP_STORE, JSON.stringify(b)); } catch { /* private mode: they last until you close the game */ } }
+/** A blueprint turned a quarter turn clockwise. */
+/** Things that face a way (R turns them). */
+const TURNS: Placeable[] = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'];
+/** Tile (c, r) is on the map and off the fence. */
+const tileOk = (c: number, r: number) => !!tileAt(tileX(c), tileY(r));
+function turnBp(b: Blueprint): Blueprint { return { name: b.name, parts: b.parts.map(q => ({ dc: -q.dr, dr: q.dc, p: q.p, d: (q.d + 1) % 4 })) }; }
 /** A gate in the fence: which side, and where along it (0 to 1). */
 interface Gate { side: 0 | 1 | 2 | 3; at: number; open: number; }
 interface Bolt { from?: string; stone: boolean; x: number; y: number; vx: number; vy: number; left: number; dmg: number; target: Target | null; color?: string; }
@@ -475,6 +492,12 @@ export class Survival {
   /** The building whose panel is open (an assembler or a furnace). */
   private bldOpen: string | null = null;
   private dragPlace: { id: number; last: string } | null = null;
+  /** A first tap waiting to see if a second one makes it a double-tap (which picks the thing up). */
+  private tapWait: { id: string; t: number; timer: ReturnType<typeof setTimeout>; single: () => void } | null = null;
+  /** Blueprints: saved ones, the light blue ghosts on the map, and what the blueprint tool is doing. */
+  private bps: Blueprint[] = loadBps(); private ghosts = new Map<string, Ghost>();
+  private bpMode: 'select' | 'place' | null = null; private bpOpen = false; private bpSig = '';
+  private bpCur: Blueprint | null = null; private bpBox: { id: number; c0: number; r0: number; c1: number; r1: number } | null = null; private bpAim: { id: number; c: number; r: number } | null = null;
   private hover: { c: number; r: number; t: number } | null = null; shopOpen = false; helpText = 'Drag anywhere to walk';
   private miners: number[] = []; private popT = 0;
 
@@ -497,8 +520,10 @@ export class Survival {
     const up = (e: PointerEvent) => {
       if (this.stick && this.stick.id === e.pointerId) this.stick = null;
       if (this.dragPlace && this.dragPlace.id === e.pointerId) this.dragPlace = null;
-      // a quick tap (not a drag): on a turret it picks the turret (tap a bear or spawner next to aim it,
-      // or the turret again to pick it up); on a belt, grabber or anything else you placed, picks it up
+      // the blueprint tool: let go to finish the box, or to put the blueprint down where your finger is
+      if (this.bpBox && this.bpBox.id === e.pointerId) { const b = this.bpBox; this.bpBox = null; if (e.type === 'pointerup') this.copyBox(b); return; }
+      if (this.bpAim && this.bpAim.id === e.pointerId) { const a = this.bpAim; this.bpAim = null; if (e.type === 'pointerup') this.placeBp(a.c, a.r); return; }
+      // a quick tap (not a drag): opens a building's panel or picks a turret; a quick double-tap picks the thing up
       const tp = this.tap; this.tap = null;
       if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen && !this.recipeFor) {
         this.tapAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
@@ -538,7 +563,19 @@ export class Survival {
     pad.querySelector('#svRecPick')!.addEventListener('click', e => { e.stopPropagation(); const m = this.recipeFor; this.closeRecipe(); if (!m) return; if (dist(this.x, this.y, m.x, m.y) > NEAR * 1.6) { this.bubble(m.x, m.y - 36, 'Walk to the machine to pick it up', 'info'); Sound.denied(); return; } this.pickUpBig(m); });
     pad.querySelector('#svRecClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeRecipe(); });
     btn('#svLabBtn', () => this.openLab());
-    btn('#svRotate', () => this.rotate());
+    btn('#svRotate', () => { if (this.bpMode === 'place') this.bpTurn(); else this.rotate(); });
+    btn('#svBpBtn', () => this.bpButton());
+    const bpp = pad.querySelector<HTMLElement>('#svBp')!;
+    for (const ev of ['pointerdown', 'pointerup', 'click']) bpp.addEventListener(ev, e => e.stopPropagation());
+    bpp.addEventListener('click', e => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-bp]'); if (!el || !this.running || this.paused) return;
+      const i = Number(el.dataset.i), a = el.dataset.bp;
+      if (a === 'new') this.bpSelect();
+      else if (a === 'use') this.bpUse(i);
+      else if (a === 'del') { this.bps.splice(i, 1); saveBps(this.bps); this.bpSig = ''; Sound.click(); }
+      else if (a === 'clear') { this.ghosts.clear(); this.bpSig = ''; Sound.click(); }
+      else if (a === 'close') { this.bpOpen = false; Sound.click(); }
+    });
     pad.querySelector('#svLabClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeLab(); });
     pad.querySelector('#svResList')!.addEventListener('click', e => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-res]'); if (b) { e.stopPropagation(); this.pickResearch(b.dataset.res as ResId); } });
     pad.querySelector('#svShopClose')!.addEventListener('click', e => { e.stopPropagation(); this.closeShop(); });
@@ -551,6 +588,10 @@ export class Survival {
       if (this.bldOpen) { if (k === 't' || k === 'Escape') this.closeBld(); return; }
       if (this.recipeFor) { const n = '123456'.indexOf(k); if (k === 'm' || k === 'Escape') this.closeRecipe(); else if (n >= 0 && this.mrecs()[n]) this.setRecipe(this.mrecs()[n]); return; }
       if (this.shopOpen) { if ((k === 'Shift' || k === 'b' || k === 'Escape') && !e.repeat) this.closeShop(); else if (k === 'Enter' && !e.repeat) this.craft(this.invSel); return; }
+      // blueprints: Ctrl+C drags a box to copy, Ctrl+V puts the last one down; R turns it, Esc stops
+      if ((e.ctrlKey || e.metaKey) && (k === 'c' || k === 'v')) { e.preventDefault(); if (!e.repeat) { if (k === 'c') this.bpSelect(); else if (this.bps.length) this.bpUse(this.bps.length - 1); else { this.bubble(this.x, this.y - 30, 'No blueprints yet. Ctrl+C and drag a box first', 'info'); Sound.denied(); } } return; }
+      if (this.bpMode) { if (k === 'Escape') { this.bpStop(); return; } if (k === 'r') { if (!e.repeat) this.bpTurn(); return; } }
+      if (this.bpOpen && k === 'Escape') { this.bpOpen = false; return; }
       if (k === 'Shift' || k === 'b') { if (!e.repeat) this.openShop(); return; }
       const qn = '1234567890'.indexOf(k);
       if (qn >= 0) { if (!e.repeat) this.useQuick(qn); return; }
@@ -608,6 +649,8 @@ export class Survival {
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
     this.patches = genPatches(this.spawners, startPatches(this.x, this.y)); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
     this.creative = false; this.survivalBag = null;
+    this.ghosts.clear(); this.bpStop(); this.bpOpen = false; this.bps = loadBps();
+    if (this.tapWait) { clearTimeout(this.tapWait.timer); this.tapWait = null; }
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
@@ -628,7 +671,7 @@ export class Survival {
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
     o.done = [...this.done];
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
-    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls'] as const) o[k] = [...this[k]];
+    for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls', 'ghosts'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
     o.robots = this.robots.map(r => ({ x: r.x, y: r.y, hub: r.hub, k: null, src: null, dst: null }));
     for (const r of this.robots) if (r.k) (o.bag as Bag)[r.k]++;
@@ -657,6 +700,7 @@ export class Survival {
     this.belts = new Map(d.belts as [string, number][]); this.splitters = new Map(d.splitters as [string, Splitter][]);
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
+    this.ghosts = new Map((d.ghosts ?? []) as [string, Ghost][]);
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
@@ -668,6 +712,12 @@ export class Survival {
     e.preventDefault();
     if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor) return;
     const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
+    // the blueprint tool: drag a box, or hold and let go where the blueprint goes
+    if (this.bpMode) {
+      const t = tileAt(wx, wy);
+      if (t && this.bpMode === 'select') { this.bpBox = { id: e.pointerId, c0: t.c, r0: t.r, c1: t.c, r1: t.r }; return; }
+      if (t && this.bpMode === 'place') { this.bpAim = { id: e.pointerId, ...t }; return; }
+    }
     // placing a belt: tap the spot
     if (this.placing) {
       const t = tileAt(wx, wy);
@@ -678,16 +728,18 @@ export class Survival {
         return;
       }
     }
-    // a tap on the machine uses it
-    if (this.mineOn) {
-      const tm = this.machines.find(m => Math.hypot(wx - m.x, wy - m.y) < m.r + 10);
-      if (tm) { this.openRecipe(tm); return; }
-    }
     // anywhere on the map works as a joystick: drag from where the finger lands
     this.stick = { id: e.pointerId, ox: e.offsetX, oy: e.offsetY, dx: 0, dy: 0 };
     this.tap = { id: e.pointerId, x: e.offsetX, y: e.offsetY, t: e.timeStamp };
   }
   private move(e: PointerEvent) {
+    const bt = this.bpBox ?? this.bpAim;
+    if (bt && bt.id === e.pointerId) {
+      const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
+      if (t && this.bpBox) { this.bpBox.c1 = t.c; this.bpBox.r1 = t.r; }
+      if (t && this.bpAim) { this.bpAim.c = t.c; this.bpAim.r = t.r; }
+      return;
+    }
     const dp = this.dragPlace;
     if (dp && dp.id === e.pointerId && this.placing && !isBig(this.placeType)) {
       const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
@@ -706,7 +758,7 @@ export class Survival {
       return;
     }
     // with a mouse, the belt being placed follows the pointer
-    if (this.placing && e.pointerType === 'mouse') {
+    if ((this.placing || this.bpMode) && e.pointerType === 'mouse') {
       const t = tileAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
       this.hover = t ? { ...t, t: performance.now() } : null;
     }
@@ -1630,10 +1682,30 @@ export class Survival {
         <label class="fine" for="svTMax">Most ${what} it holds</label>
         <div class="trow"><input type="range" id="svTMaxR" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" aria-label="Most ${what} it holds"><input type="number" id="svTMax" min="0" max="${SURVIVAL.turretMaxAmmo}" step="1" value="${cap}" inputmode="numeric"></div>
         <div class="trow quick">${[0, 10, 50, 100, 500, 1000, SURVIVAL.turretMaxAmmo].map(n => `<button class="ghost small" data-tmax="${n}">${fmt(n)}</button>`).join('')}</div>
-        <p class="fine">Tap a bear or spawner for it to shoot. Tap the turret again to pick it up.</p>`;
+        <p class="fine">Tap a bear or spawner for it to shoot. Double-tap the turret to pick it up.</p>`;
     }
     const now = el.querySelector<HTMLElement>('[data-tnow]')!, txt = `${fmt(Math.floor(tAmmo(tu)))} / ${fmt(cap)} ${what}`;
     if (now.textContent !== txt) now.textContent = txt;
+    el.hidden = false;
+  }
+  /** The blueprint list: make a new one, put a saved one down, or delete it. */
+  private renderBpPanel() {
+    const el = this.pad.querySelector<HTMLElement>('#svBp')!, bb = this.pad.querySelector<HTMLElement>('#svBpBtn')!;
+    const on = !!this.bpMode, lab = on ? 'Done' : 'Blueprint', sm = on ? 'Esc' : 'Ctrl+C';
+    if (bb.firstElementChild!.textContent !== lab) { bb.firstElementChild!.textContent = lab; bb.lastElementChild!.textContent = sm; }
+    bb.classList.toggle('on', on || this.bpOpen); bb.hidden = this.shopOpen;
+    const show = this.bpOpen && !this.bpMode && !this.picked;
+    if (!show) { if (!el.hidden) el.hidden = true; return; }
+    const sig = JSON.stringify([this.bps.map(b => [b.name, b.parts.length]), this.ghosts.size]);
+    if (sig !== this.bpSig) {
+      this.bpSig = sig;
+      el.innerHTML = `<div class="trow"><b>Blueprints</b><button class="ghost small" data-bp="close">Close</button></div>
+        <button class="primary" data-bp="new">New: drag a box over things</button>
+        ${this.bps.length ? `<div class="bplist">${this.bps.map((b, i) => `<div class="bprow"><span>${escHtml(b.name)} <small>${b.parts.length} thing${b.parts.length > 1 ? 's' : ''}</small></span><button class="ghost small" data-bp="use" data-i="${i}">Place</button><button class="ghost small" data-bp="del" data-i="${i}" aria-label="Delete ${escHtml(b.name)}">✕</button></div>`).join('')}</div>`
+          : '<p class="fine">No blueprints yet.</p>'}
+        ${this.ghosts.size ? `<button class="ghost small" data-bp="clear">Remove all ghosts (${this.ghosts.size})</button>` : ''}
+        <p class="fine">A placed blueprint shows light blue ghosts that do nothing. Build on a ghost and it goes away. Ctrl+C copies, Ctrl+V puts the last one down.</p>`;
+    }
     el.hidden = false;
   }
   private turretMaxInput(e: Event) {
@@ -1746,30 +1818,110 @@ export class Survival {
     this.updateStructs(); this.syncQuick();
     this.bubble(s.x, s.y - 30, `+1 ${'queue' in s ? 'ammo machine' : s.ore === 'stone' ? 'stone mine' : 'drill'}`, 'info'); Sound.click();
   }
-  /** A quick tap on the map at world point (x, y). */
+  /** A tap that might be the first half of a double-tap: single() waits a moment, and a second tap on the same thing runs double() instead. */
+  private dblTap(id: string, single: () => void, double: () => void) {
+    const now = performance.now(), w = this.tapWait;
+    if (w) {
+      clearTimeout(w.timer); this.tapWait = null;
+      if (w.id === id && now - w.t < SURVIVAL.dblTapMs) { double(); return; }
+      w.single();
+    }
+    const timer = setTimeout(() => { if (this.tapWait?.timer !== timer) return; this.tapWait = null; if (this.running && !this.paused) single(); }, SURVIVAL.dblTapMs);
+    this.tapWait = { id, t: now, timer, single };
+  }
+  /** A quick tap on the map at world point (x, y). One tap opens a panel or picks a turret; a double-tap picks the thing up. */
   private tapAt(x: number, y: number) {
     const t = tileAt(x, y), key = t ? t.c + ',' + t.r : '';
+    // a turret is picked: tap a bear or spawner and that's its target until it is destroyed
     if (this.picked) {
-      const tu = this.turrets.get(this.picked);
-      // tap the picked turret again: pick it up
-      if (key === this.picked) { this.picked = null; if (t) this.pickUp(t.c, t.r); return; }
-      // tap a bear or spawner: that's the turret's target until it is destroyed
-      const hit = this.targetAt(x, y);
+      const tu = this.turrets.get(this.picked), hit = this.targetAt(x, y);
       if (tu && hit) { tu.target = hit; this.picked = null; this.bubble(hit.x, hit.y - 34, 'Target!', 'info'); Sound.locked(); return; }
-      this.picked = null;
-      if (!this.turrets.has(key)) { Sound.click(); return; }
     }
-    if (t && this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
     // tap a spawner: it makes a bear right away
     const sp = this.spawners.find(s => !s.dead && dist(s.x, s.y, x, y) < SPAWNER_R + 12);
     if (sp) { this.spawnBear(sp, false); this.bubble(sp.x, sp.y - 40, 'A bear!', 'info'); Sound.tone('sawtooth', 160, 90, .3, .1); return; }
-    // a mine: pick it up
+    const hint = (hx: number, hy: number) => { this.bubble(hx, hy, 'Double-tap to pick it up', 'info'); Sound.click(); };
+    // the big round things: a mine, or the ammo machine (one tap opens its recipes)
     const mn = this.mines.find(m => dist(m.x, m.y, x, y) < m.r + 4);
-    if (mn) { this.pickUpBig(mn); return; }
-    // furnaces and assemblers open their panel (which has Pick up)
-    const b = t ? this.blds.get(key) : undefined;
-    if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
-    if (t) this.pickUp(t.c, t.r);
+    if (mn) { this.dblTap('mine' + this.mines.indexOf(mn), () => { this.picked = null; hint(mn.x, mn.y - 30); }, () => { this.picked = null; if (this.mines.includes(mn)) this.pickUpBig(mn); }); return; }
+    const mc = this.mineOn ? this.machines.find(m => dist(m.x, m.y, x, y) < m.r + 10) : undefined;
+    if (mc) { this.dblTap('mach' + this.machines.indexOf(mc), () => { this.picked = null; if (this.machines.includes(mc)) this.openRecipe(mc); }, () => { this.picked = null; if (this.machines.includes(mc)) this.pickUpBig(mc); }); return; }
+    if (!t) return;
+    if (this.taken(t.c, t.r)) {
+      this.dblTap('tile' + key, () => {
+        const b = this.blds.get(key);
+        if (this.turrets.has(key)) { this.picked = key; Sound.click(); return; }
+        this.picked = null;
+        // furnaces, assemblers and drills open their panel (which has Pick up)
+        if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
+        hint(tileX(t.c), tileY(t.r) - 14);
+      }, () => { this.picked = null; if (this.bldOpen === key) this.closeBld(); this.pickUp(t.c, t.r); });
+      return;
+    }
+    // a light blue ghost from a blueprint: double-tap it to get rid of it
+    const gh = this.ghosts.get(key);
+    if (gh) {
+      this.dblTap('ghost' + key, () => { this.picked = null; this.bubble(tileX(t.c), tileY(t.r) - 14, `Build a ${ONE_NAME[gh.p].toLowerCase()} here, or double-tap to remove`, 'info'); Sound.click(); },
+        () => { this.picked = null; this.ghosts.delete(key); this.bubble(tileX(t.c), tileY(t.r) - 14, 'Ghost removed', 'info'); Sound.click(); });
+      return;
+    }
+    this.dblTap('', () => { if (this.picked) { this.picked = null; Sound.click(); } }, () => { this.picked = null; });
+  }
+  /* ---------- blueprints ---------- */
+  /** What's on tile (c, r) as a blueprint part (big round things count on their middle tile). */
+  private partAt(c: number, r: number): Ghost | null {
+    const key = c + ',' + r;
+    if (this.belts.has(key)) return { p: 'belt', d: this.belts.get(key)! };
+    const gr = this.grabbers.get(key); if (gr) return { p: 'grab', d: gr.d };
+    const sp = this.splitters.get(key); if (sp) return { p: 'split', d: sp.d };
+    if (this.chests.has(key)) return { p: 'chest', d: 0 };
+    const pw = this.pwalls.get(key); if (pw) return { p: pw.gate ? 'pgate' : 'wall', d: 0 };
+    if (this.labs.has(key)) return { p: 'lab', d: 0 };
+    const tu = this.turrets.get(key); if (tu) return { p: T_ITEM[tu.kind], d: 0 };
+    const b = this.blds.get(key); if (b) return { p: b.type, d: b.d };
+    const x = tileX(c), y = tileY(r);
+    if (this.machines.some(m => m.x === x && m.y === y)) return { p: 'machine', d: 0 };
+    if (this.mines.some(m => m.x === x && m.y === y && m.ore === 'stone')) return { p: 'mine', d: 0 };
+    return null;
+  }
+  /** The blueprint button: starts the tool, or stops it if it's on. */
+  private bpButton() {
+    if (this.bpMode) { this.bpStop(); Sound.click(); return; }
+    this.bpOpen = !this.bpOpen; this.bpSig = ''; if (this.bpOpen) { this.picked = null; this.closeBld(); } Sound.click();
+  }
+  private bpStop() { this.bpMode = null; this.bpCur = null; this.bpBox = null; this.bpAim = null; this.hover = null; }
+  private bpSelect() { this.bpOpen = false; this.placing = false; this.picked = null; this.closeBld(); this.bpCur = null; this.bpMode = 'select'; this.hover = null; Sound.click(); }
+  private bpUse(i: number) {
+    const b = this.bps[i]; if (!b) return;
+    this.bpOpen = false; this.placing = false; this.picked = null; this.closeBld(); this.bpCur = b; this.bpMode = 'place'; this.hover = null; Sound.click();
+  }
+  /** Saves everything inside the box you dragged as a new blueprint, then lets you put it down. */
+  private copyBox(b: { c0: number; r0: number; c1: number; r1: number }) {
+    const c0 = Math.min(b.c0, b.c1), c1 = Math.max(b.c0, b.c1), r0 = Math.min(b.r0, b.r1), r1 = Math.max(b.r0, b.r1);
+    const mc = Math.round((c0 + c1) / 2), mr = Math.round((r0 + r1) / 2), parts: BpPart[] = [];
+    for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) { const q = this.partAt(c, r); if (q) parts.push({ dc: c - mc, dr: r - mr, ...q }); }
+    if (!parts.length) { this.bubble(tileX(mc), tileY(mr) - 16, 'Nothing in that box. Drag over things you built', 'info'); Sound.denied(); return; }
+    let n = this.bps.length + 1; while (this.bps.some(x => x.name === `Blueprint ${n}`)) n++;
+    const bp: Blueprint = { name: `Blueprint ${n}`, parts };
+    this.bps.push(bp); if (this.bps.length > SURVIVAL.maxBlueprints) this.bps.shift(); saveBps(this.bps);
+    this.bubble(tileX(mc), tileY(mr) - 16, `Saved ${bp.name} (${parts.length} thing${parts.length > 1 ? 's' : ''})`, 'info'); Sound.locked();
+    this.bpCur = bp; this.bpMode = 'place'; this.bpSig = '';
+  }
+  private bpTurn() { if (!this.bpCur) return; this.bpCur = turnBp(this.bpCur); Sound.click(); }
+  /** Puts the blueprint down with its middle on tile (c, r), as light blue ghosts. Spots where something is already built are skipped. */
+  private placeBp(c: number, r: number) {
+    const b = this.bpCur; if (!b) return;
+    let n = 0;
+    for (const q of b.parts) {
+      const cc = c + q.dc, rr = r + q.dr, key = cc + ',' + rr;
+      if (!tileOk(cc, rr) || blockedTile(cc, rr)) continue;
+      const have = this.partAt(cc, rr);
+      if (have && have.p === q.p && (have.d === q.d || !TURNS.includes(q.p))) continue;
+      if (!isBig(q.p) && this.taken(cc, rr)) continue;
+      this.ghosts.set(key, { p: q.p, d: q.d }); n++;
+    }
+    this.bubble(tileX(c), tileY(r) - 20, n ? `${b.name} placed: build on the light blue ghosts` : 'It is all built there already', 'info');
+    if (n) Sound.thump(); else Sound.denied();
   }
   /** The bear or spawner under world point (x, y), if any. */
   private targetAt(x: number, y: number): Target | null {
@@ -1781,6 +1933,7 @@ export class Survival {
   private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
+    this.bpStop(); this.bpOpen = false;
     if (!this.count(type)) { this.bubble(this.x, this.y - 30, `No ${KIND_NAME[type]}. Craft them in your inventory (Shift)`, 'info'); Sound.denied(); return; }
     this.placing = true; this.placeType = type; this.hover = null; this.closeBld();
     Sound.click();
@@ -1816,6 +1969,16 @@ export class Survival {
   private placeAt(c: number, r: number) {
     const key = c + ',' + r, type = this.placeType;
     if (!this.count(type)) { this.placing = false; return; }
+    // building on a blueprint ghost of the same thing faces it the ghost's way
+    const gh = this.ghosts.get(key), dir = this.placeDir;
+    if (gh && gh.p === type && !this.taken(c, r)) this.placeDir = gh.d;
+    const n0 = this.bag[type];
+    this.placeOn(c, r, key, type);
+    if (gh && gh.p === type) this.placeDir = dir;
+    // something got built there: the ghost goes away
+    if (this.bag[type] < n0) this.ghosts.delete(key);
+  }
+  private placeOn(c: number, r: number, key: string, type: Placeable) {
     if (isBig(type)) {
       const rr = type === 'machine' ? MACHINE_R : MINE_R;
       if (!this.bigFits(c, r, rr)) { this.bubble(tileX(c), tileY(r) - 30, 'Not enough room there', 'info'); Sound.denied(); return; }
@@ -2536,6 +2699,29 @@ export class Survival {
   }
 
   private view = { x0: 0, x1: W, y0: 0, y1: H };
+  /** The blueprint tool: the box being dragged, or the blueprint about to go down. */
+  private drawBpTool(g: CanvasRenderingContext2D) {
+    if (this.bpMode === 'select') {
+      const hv = this.hover && performance.now() - this.hover.t < 4000 ? this.hover : null;
+      const b = this.bpBox ?? (hv ? { c0: hv.c, r0: hv.r, c1: hv.c, r1: hv.r } : null);
+      if (!b) return;
+      const c0 = Math.min(b.c0, b.c1), c1 = Math.max(b.c0, b.c1), r0 = Math.min(b.r0, b.r1), r1 = Math.max(b.r0, b.r1);
+      const x = GX0 + c0 * TILE, y = GY0 + r0 * TILE, w = (c1 - c0 + 1) * TILE, h = (r1 - r0 + 1) * TILE;
+      g.fillStyle = 'rgba(120,200,255,.16)'; g.fillRect(x, y, w, h);
+      for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) if (this.partAt(c, r)) { g.fillStyle = 'rgba(140,210,255,.32)'; g.fillRect(GX0 + c * TILE, GY0 + r * TILE, TILE, TILE); }
+      g.strokeStyle = '#9fdcff'; g.lineWidth = 2; g.setLineDash([6, 5]); g.strokeRect(x + 1, y + 1, w - 2, h - 2); g.setLineDash([]);
+      return;
+    }
+    if (this.bpMode !== 'place' || !this.bpCur) return;
+    const hv = this.hover && performance.now() - this.hover.t < 4000 ? this.hover : null;
+    const at = this.bpAim ?? hv; if (!at) return;
+    for (const q of this.bpCur.parts) {
+      const c = at.c + q.dc, r = at.r + q.dr;
+      if (!tileOk(c, r)) continue;
+      const have = this.partAt(c, r), same = !!have && have.p === q.p;
+      paintGhost(g, c, r, q, same ? .25 : .8, !same && (blockedTile(c, r) || (!isBig(q.p) && this.taken(c, r))));
+    }
+  }
   private seen(x: number, y: number, r = 40) { const v = this.view; return x > v.x0 - r && x < v.x1 + r && y > v.y0 - r && y < v.y1 + r; }
   private drawWorld(g: CanvasRenderingContext2D) {
     // ground
@@ -2579,7 +2765,10 @@ export class Survival {
     // power lines between poles
     g.strokeStyle = 'rgba(40,30,20,.75)'; g.lineWidth = 1.2;
     for (const [a, b] of this.poleLinks) { const [ac, ar] = a.split(',').map(Number), [bc, br] = b.split(',').map(Number); g.beginPath(); g.moveTo(tileX(ac), tileY(ar) - 9); g.quadraticCurveTo((tileX(ac) + tileX(bc)) / 2, (tileY(ar) + tileY(br)) / 2 - 3, tileX(bc), tileY(br) - 9); g.stroke(); }
+    // blueprint ghosts: light blue, under the things on the belts
+    for (const [key, q] of this.ghosts) { const [c, r] = key.split(',').map(Number); if (this.seen(tileX(c), tileY(r))) paintGhost(g, c, r, q, .62); }
     for (const it of this.items) paintItem(g, it.x, it.y, it.k);
+    this.drawBpTool(g);
     if (this.placing) {
       const t = this.ghost();
       if (t) {
@@ -3063,6 +3252,7 @@ export class Survival {
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
     this.renderTurretPanel();
+    this.renderBpPanel();
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
@@ -3073,9 +3263,11 @@ export class Survival {
     if (this.labOpen) this.renderLab();
     if (lb.firstElementChild!.textContent !== ll) lb.firstElementChild!.textContent = ll;
     const standing = tileAt(this.x, this.y);
-    this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && !(standing && this.belts.has(standing.c + ',' + standing.r));
-    const pt = this.placeType, turns = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'].includes(pt);
-    const help = this.picked ? 'Tap a bear or spawner for this turret to shoot. Tap the turret again to pick it up.'
+    this.pad.querySelector<HTMLElement>('#svRotate')!.hidden = !this.placing && this.bpMode !== 'place' && !(standing && this.belts.has(standing.c + ',' + standing.r));
+    const pt = this.placeType, turns = TURNS.includes(pt);
+    const help = this.bpMode === 'select' ? 'Drag a box over what you built to save it as a blueprint. Done (or Esc) stops.'
+      : this.bpMode === 'place' ? `Hold and let go where ${this.bpCur?.name ?? 'the blueprint'} goes: it shows as light blue ghosts. R turns it. Done (or Esc) stops.`
+      : this.picked ? 'Tap a bear or spawner for this turret to shoot. Double-tap the turret to pick it up.'
       : this.placing ? `Tap to place the ${ONE_NAME[pt].toLowerCase()} (${this.bag[pt]} left)${pt === 'belt' || pt === 'pole' || pt === 'pipe' ? ', or drag to lay a line' : ''}.${turns ? ' R turns it.' : ''}${pt === 'drill' ? ' Drills go on ore patches.' : ''}`
       : this.digAt ? `Digging ${this.digAt.ore === 'stone' ? 'stone' : ONE_NAME[this.digAt.ore].toLowerCase()} (${this.digAt.left} left). Walk away to stop.` : this.helpText;
     const hp = this.pad.querySelector<HTMLElement>('#svHelp')!;
@@ -3427,6 +3619,28 @@ function paintRobot(g: CanvasRenderingContext2D, x: number, y: number, bob: numb
   if (k) { g.fillStyle = KIND_DOT[k]; g.beginPath(); g.arc(x, y + 7 + bob, 3, 0, 7); g.fill(); }
 }
 /** Any one-tile thing you can place, facing direction d (for the ghost while placing, and for icons). */
+/** A blueprint ghost: the thing's own picture, all in light blue. Made once for each thing and way it faces. */
+const ghostSprites = new Map<string, HTMLCanvasElement>();
+const GHOST_S = 72;
+function ghostSprite(p: Placeable, d: number) {
+  const id = p + d; let cv = ghostSprites.get(id);
+  if (cv) return cv;
+  cv = document.createElement('canvas'); cv.width = cv.height = GHOST_S * 2;
+  const g = cv.getContext('2d')!; g.scale(2, 2);
+  const m = GHOST_S / 2;
+  if (isBig(p)) { g.fillStyle = '#000'; g.beginPath(); g.arc(m, m, p === 'machine' ? MACHINE_R : MINE_R, 0, 7); g.fill(); }
+  else paintPlaceable(g, m, m, p, d, 0);
+  // keep the shading, but tint it all light blue
+  g.globalCompositeOperation = 'source-atop'; g.fillStyle = 'rgba(140,210,255,.8)'; g.fillRect(0, 0, GHOST_S, GHOST_S);
+  if (isBig(p)) { g.globalCompositeOperation = 'source-over'; g.fillStyle = '#eaf7ff'; g.font = '600 10px Jost, sans-serif'; g.textAlign = 'center'; g.fillText(ONE_NAME[p], m, m + 4); }
+  ghostSprites.set(id, cv); return cv;
+}
+function paintGhost(g: CanvasRenderingContext2D, c: number, r: number, q: Ghost, a: number, bad = false) {
+  const x = tileX(c), y = tileY(r);
+  g.globalAlpha = a; g.drawImage(ghostSprite(q.p, q.d), x - GHOST_S / 2, y - GHOST_S / 2, GHOST_S, GHOST_S); g.globalAlpha = 1;
+  g.strokeStyle = bad ? 'rgba(255,110,95,.85)' : 'rgba(160,220,255,.75)'; g.lineWidth = 1;
+  if (!isBig(q.p)) g.strokeRect(GX0 + c * TILE + 1.5, GY0 + r * TILE + 1.5, TILE - 3, TILE - 3);
+}
 function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Placeable, d: number, t: number) {
   if (p === 'belt') paintBelt(g, x, y, d, t);
   else if (p === 'grab') paintGrabber(g, x, y, { d, t: 0, carry: false, k: 'stone' });

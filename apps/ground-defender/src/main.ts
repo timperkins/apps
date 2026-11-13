@@ -166,7 +166,9 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     'Turrets shoot bears and spawners. Load them with <kbd>T</kbd>, or feed them ammo with belts and grabbers.',
     'A turret shoots every 0.2 seconds for 1 damage a shot, using 16% of an ammo each shot (about 6 shots an ammo).',
     'Tapping a turret also opens a panel where you set the most ammo it will hold, from 0 to 10,000.',
-    'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed. Tap the turret twice to pick it up.',
+    'Tap a turret, then tap a bear or spawner: the turret shoots that one until it is destroyed.',
+    'Double-tap anything you built to pick it up.',
+    'Blueprint (Ctrl+C): drag a box over what you built to save it, then put it down anywhere as light blue ghosts. Build on a ghost and it goes away.',
     'Labs use red science packs (and green ones later) to research. <kbd>Y</kbd> picks what: assemblers, splitters, faster belts, stronger turrets, robots, the <b>rapid crossbow</b> and the <b>rocket launcher</b>. Some research needs other research first.',
     '<b>Crafting speed</b> and <b>Furnace speed</b> can be researched again and again: each level makes it 1.25 times faster. The first level costs 30 packs and each one after costs 20 more, up to 980.'] },
 ];
