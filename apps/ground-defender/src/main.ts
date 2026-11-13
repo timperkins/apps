@@ -96,6 +96,7 @@ function renderLoadout() {
   if (document.activeElement !== name) name.value = loadout.name;
   $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
   $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
+  $('svWorld').innerHTML = [['ground', 'Ground'], ['space', 'Space']].map(([m, l]) => `<button role="radio" aria-checked="${(m === 'space') === !!loadout.space}" data-world="${m}">${l}</button>`).join('');
   $('svMode').innerHTML = [['normal', 'Survival'], ['cheat', 'Cheat']].map(([m, l]) => `<button role="radio" aria-checked="${(m === 'cheat') === !!loadout.cheat}" data-mode="${m}">${l}</button>`).join('');
   $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
   const b = store.get<number>('best', 0);
@@ -113,13 +114,14 @@ $('svName').addEventListener('input', () => { loadout.name = cleanName($<HTMLInp
 $('svName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); });
 $('svDice').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); Sound.ui(); loadout.name = randomName(loadout.name); $<HTMLInputElement>('svName').value = loadout.name; renderLoadout(); });
 $('survSetup').addEventListener('click', e => {
-  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a], [data-mode]');
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a], [data-mode], [data-world]');
   if (!t) return;
   Sound.init(); Sound.ui();
   if (t.dataset.c) loadout.color = t.dataset.c;
   if (isHat(t.dataset.h)) loadout.hat = t.dataset.h;
   if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
   if (t.dataset.mode) loadout.cheat = t.dataset.mode === 'cheat';
+  if (t.dataset.world) loadout.space = t.dataset.world === 'space';
   renderLoadout();
 });
 

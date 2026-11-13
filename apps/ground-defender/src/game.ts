@@ -241,7 +241,7 @@ export const AMMO: Record<AmmoId, { name: string; reload: number; damage: number
 export type HatId = 'none' | 'cap' | 'helmet' | 'crown';
 export const HATS: Record<HatId, string> = { none: 'No hat', cap: 'Cap', helmet: 'Helmet', crown: 'Crown' };
 export const COLORS = ['#3f7fd6', '#d64545', '#3ea860', '#e0a32e', '#8e5bd6', '#e06aa8', '#30b8b0', '#f2f2f2'];
-export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; cheat?: boolean; }
+export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; cheat?: boolean; space?: boolean; }
 export interface SurvivalResult { time: number; kills: number; shots: number; hits: number; damage: number; won: boolean; spawners: number; }
 
 // world layout (world units). The map is much bigger than the screen; the camera follows the guy.
@@ -250,6 +250,10 @@ const W = 6600, H = 6600;
 const CX = W / 2, CY = H / 2, OFF = CX - 900;
 /** How much of the map the screen shows at once (it is scaled to fit). */
 const VIEW_W = 640, VIEW_H = 800;
+/** Space: a square platform of tiles floating in space, with a big chest in the middle. */
+const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100 };
+/** A stack in the space chest: up to 100 of one thing. */
+interface Stack { k: Kind; n: number; }
 /** The base's walls. They move out when the base is expanded, so this object changes during a run. */
 const BASE_WALL = { x0: 710 + OFF, x1: 1090 + OFF, y0: 670 + OFF, y1: 1130 + OFF };
 const EXPANSIONS = [BASE_WALL, { x0: 665 + OFF, x1: 1135 + OFF, y0: 670 + OFF, y1: 1153 + OFF }, { x0: 620 + OFF, x1: 1180 + OFF, y0: 670 + OFF, y1: 1176 + OFF }];
@@ -501,6 +505,8 @@ export class Survival {
   /** A first tap waiting to see if a second one makes it a double-tap (which picks the thing up). */
   private tapWait: { id: string; t: number; timer: ReturnType<typeof setTimeout>; single: () => void } | null = null;
   /** Blueprints: saved ones, the light blue ghosts on the map, and what the blueprint tool is doing. */
+  /** The space game: on, where the platform's top-left tile is, what's in the chest, and whether its panel is open. */
+  private space = false; private plat = { c0: 0, r0: 0 }; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
   private bps: Blueprint[] = loadBps(); private ghosts = new Map<string, Ghost>();
   private bpMode: 'select' | 'place' | null = null; private bpOpen = false; private bpSig = '';
   private bpCur: Blueprint | null = null; private bpBox: { id: number; c0: number; r0: number; c1: number; r1: number } | null = null; private bpAim: { id: number; c: number; r: number } | null = null;
@@ -531,7 +537,7 @@ export class Survival {
       if (this.bpAim && this.bpAim.id === e.pointerId) { const a = this.bpAim; this.bpAim = null; if (e.type === 'pointerup') this.placeBp(a.c, a.r); return; }
       // a quick tap (not a drag): opens a building's panel or picks a turret; a quick double-tap picks the thing up
       const tp = this.tap; this.tap = null;
-      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen && !this.recipeFor) {
+      if (tp && tp.id === e.pointerId && e.type === 'pointerup' && Math.hypot(e.offsetX - tp.x, e.offsetY - tp.y) < 10 && e.timeStamp - tp.t < 400 && this.running && !this.paused && !this.shopOpen && !this.labOpen && !this.recipeFor && !this.chestOpen) {
         this.tapAt((e.offsetX - this.ox) / this.scale, (e.offsetY - this.oy) / this.scale);
       }
     };
@@ -558,6 +564,9 @@ export class Survival {
       const el = (e.target as HTMLElement).closest<HTMLElement>('[data-job]'); e.preventDefault(); e.stopPropagation();
       if (el && this.running && !this.paused) this.cancelJob(Number(el.dataset.job));
     });
+    const spc = pad.querySelector<HTMLElement>('#svSpace')!;
+    spc.addEventListener('click', e => this.chestClick(e as MouseEvent));
+    for (const ev of ['pointerdown', 'pointerup']) spc.addEventListener(ev, e => e.stopPropagation());
     pad.querySelector('#svBld')!.addEventListener('click', e => this.bldClick(e as MouseEvent));
     pad.querySelector('#svBld')!.addEventListener('pointerdown', e => e.stopPropagation());
     const tp = pad.querySelector<HTMLElement>('#svTurret')!;
@@ -590,6 +599,7 @@ export class Survival {
     addEventListener('keydown', e => {
       if (!this.running || this.paused) return;
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (this.chestOpen) { if (k === 'Escape' || k === 't') this.closeChest(); return; }
       if (this.labOpen) { if (k === 'y' || k === 'Escape') this.closeLab(); return; }
       if (this.bldOpen) { if (k === 't' || k === 'Escape') this.closeBld(); return; }
       if (this.recipeFor) { const n = '123456'.indexOf(k); if (k === 'm' || k === 'Escape') this.closeRecipe(); else if (n >= 0 && this.mrecs()[n]) this.setRecipe(this.mrecs()[n]); return; }
@@ -656,10 +666,118 @@ export class Survival {
     this.patches = genPatches(this.spawners, startPatches(this.x, this.y)); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
     this.creative = false; this.survivalBag = null;
     this.ghosts.clear(); this.bpStop(); this.bpOpen = false; this.bps = loadBps();
+    this.space = !!load.space; this.spaceChest = []; this.chestOpen = false; this.chestSig = '';
+    if (this.space) this.startSpace();
     if (this.tapWait) { clearTimeout(this.tapWait.timer); this.tapWait = null; }
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
-    this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
+    if (this.space) this.say('You are on a platform in space. Tap the chest in the middle to store things.', 5);
+    else this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
+  }
+  /* ---------- space ---------- */
+  /** Space: no ground, no ore, no bears; a 10 by 10 platform with the chest in the middle, and you next to it. */
+  private startSpace() {
+    const t = tileAt(CX, CY)!, h = SPACE.plat / 2;
+    this.plat = { c0: t.c - h, r0: t.r - h };
+    this.spawners = []; this.patches = []; this.mines = []; this.machines = []; this.mineAt = null; this.updateStructs();
+    this.x = tileX(t.c) - TILE / 2; this.y = tileY(t.r + 2); this.camX = this.x; this.camY = this.y;
+  }
+  /** Tile (c, r) is on the space platform. */
+  private onPlat(c: number, r: number) { const p = this.plat; return c >= p.c0 && c < p.c0 + SPACE.plat && r >= p.r0 && r < p.r0 + SPACE.plat; }
+  /** The space chest's 4 tiles, its middle, and whether tile (c, r) is one of them. */
+  private chestBox() { const c0 = this.plat.c0 + (SPACE.plat - SPACE.chest) / 2, r0 = this.plat.r0 + (SPACE.plat - SPACE.chest) / 2; return { c0, r0, x: GX0 + (c0 + 1) * TILE, y: GY0 + (r0 + 1) * TILE }; }
+  private chestTile(c: number, r: number) { if (!this.space) return false; const b = this.chestBox(); return c >= b.c0 && c < b.c0 + SPACE.chest && r >= b.r0 && r < b.r0 + SPACE.chest; }
+  private openChest() { this.chestOpen = true; this.chestSig = ''; this.picked = null; this.closeBld(); this.bpOpen = false; this.placing = false; this.stick = null; Sound.click(); }
+  private closeChest() { this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
+  /** Puts up to n of k in the chest: tops up stacks of k first, then starts new ones while there's room. Returns how many went in. */
+  private chestPut(k: Kind, n: number) {
+    let left = Math.min(n, this.bag[k]);
+    for (const st of this.spaceChest) if (st.k === k && st.n < SPACE.stack) { const m = Math.min(left, SPACE.stack - st.n); st.n += m; left -= m; }
+    while (left > 0 && this.spaceChest.length < SPACE.stacks) { const m = Math.min(left, SPACE.stack); this.spaceChest.push({ k, n: m }); left -= m; }
+    const put = Math.min(n, this.bag[k]) - left; this.bag[k] -= put; return put;
+  }
+  private chestClick(e: MouseEvent) {
+    e.stopPropagation();
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose]'); if (!el || !this.running || this.paused) return;
+    if (el.dataset.chestclose !== undefined) { this.closeChest(); return; }
+    if (el.dataset.take !== undefined) {
+      const i = Number(el.dataset.take), st = this.spaceChest[i]; if (!st) return;
+      this.bag[st.k] += st.n; this.spaceChest.splice(i, 1); Sound.click();
+    } else if (el.dataset.put) {
+      const k = el.dataset.put as Kind, n = this.chestPut(k, this.bag[k]);
+      if (!n) { this.say('The chest is full: 100 stacks', 2); Sound.denied(); } else Sound.thump();
+    } else if (el.dataset.putall !== undefined) {
+      let n = 0; for (const k of KINDS) if (this.bag[k] > 0) n += this.chestPut(k, this.bag[k]);
+      if (!n) { this.say(this.spaceChest.length >= SPACE.stacks ? 'The chest is full: 100 stacks' : 'Nothing to put in', 2); Sound.denied(); } else Sound.thump();
+    }
+    this.syncQuick(); this.chestSig = '';
+  }
+  private renderChest() {
+    const el = this.pad.querySelector<HTMLElement>('#svSpace')!;
+    if (!this.chestOpen) { if (!el.hidden) el.hidden = true; return; }
+    const have = KINDS.filter(k => this.bag[k] > 0);
+    const sig = JSON.stringify([this.spaceChest, have.map(k => this.bag[k])]);
+    if (sig !== this.chestSig) {
+      this.chestSig = sig;
+      const slots = Array.from({ length: SPACE.stacks }, (_, i) => { const st = this.spaceChest[i]; return st ? `<button class="slot" data-take="${i}" title="Take ${st.n} ${escHtml(KIND_NAME[st.k])}"><img src="${this.icon(st.k)}" alt=""><b>${st.n}</b></button>` : '<div class="slot empty"></div>'; }).join('');
+      const items = have.map(k => `<button class="slot" data-put="${k}" title="Put in ${escHtml(KIND_NAME[k])}"><img src="${this.icon(k)}" alt=""><b>${fmt(Math.floor(this.bag[k]))}</b></button>`).join('');
+      el.innerHTML = `<div class="trow"><h3>Space chest</h3><span class="fine">${this.spaceChest.length} / ${SPACE.stacks} stacks</span></div>
+        <p class="fine">Each stack holds up to ${SPACE.stack}. Tap a stack to take it out.</p>
+        <div class="chestgrid">${slots}</div>
+        <div class="trow"><b>Your things</b><button class="ghost small" data-putall>Put everything in</button></div>
+        <p class="fine">Tap something to put all of it in.</p>
+        <div class="chestmine">${items || '<p class="fine">Your pockets are empty.</p>'}</div>
+        <button class="ghost small" data-chestclose>Close (Esc)</button>`;
+    }
+    el.hidden = false;
+  }
+  /** Space: black sky with stars, and the platform's metal plates. */
+  private drawSpace(g: CanvasRenderingContext2D) {
+    const v = this.view;
+    g.fillStyle = '#05060f'; g.fillRect(v.x0 - 200, v.y0 - 200, v.x1 - v.x0 + 400, v.y1 - v.y0 + 400);
+    // stars: the same ones every frame, in cells of 120 so only the ones in view are drawn
+    const cell = 120;
+    for (let cx = Math.floor(v.x0 / cell) - 1; cx <= Math.ceil(v.x1 / cell); cx++) for (let cy = Math.floor(v.y0 / cell) - 1; cy <= Math.ceil(v.y1 / cell); cy++) {
+      let h = (cx * 73856093) ^ (cy * 19349663);
+      for (let i = 0; i < 3; i++) {
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const sx = cx * cell + (h % cell);
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const sy = cy * cell + (h % cell);
+        h = (h * 1103515245 + 12345) & 0x7fffffff; const b = (h % 100) / 100;
+        g.fillStyle = b > .9 ? '#ffe9c4' : b > .75 ? '#bcd6ff' : 'rgba(255,255,255,.7)';
+        const r = b > .9 ? 1.6 : .8 + b * .6, tw = .6 + .4 * Math.sin(this.t * (1 + b * 2) + h);
+        g.globalAlpha = tw; g.fillRect(sx - r / 2, sy - r / 2, r, r);
+      }
+    }
+    g.globalAlpha = 1;
+    // a distant planet
+    const px = CX + 900, py = CY - 700;
+    if (this.seen(px, py, 260)) {
+      const gr = g.createRadialGradient(px - 60, py - 60, 20, px, py, 220); gr.addColorStop(0, '#6f5bd6'); gr.addColorStop(1, '#1b1440');
+      g.fillStyle = gr; g.beginPath(); g.arc(px, py, 220, 0, 7); g.fill();
+    }
+    // the platform: a shadow, steel plates with rivets, and a yellow edge
+    const p = this.plat, x0 = GX0 + p.c0 * TILE, y0 = GY0 + p.r0 * TILE, s = SPACE.plat * TILE;
+    g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(x0 + 8, y0 + 10, s, s);
+    for (let c = 0; c < SPACE.plat; c++) for (let r = 0; r < SPACE.plat; r++) {
+      const x = x0 + c * TILE, y = y0 + r * TILE;
+      g.fillStyle = (c + r) % 2 ? '#5a6370' : '#636d7b'; g.fillRect(x, y, TILE, TILE);
+      g.strokeStyle = 'rgba(20,24,32,.6)'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1);
+      g.fillStyle = 'rgba(200,210,225,.5)'; for (const [a, b] of [[3, 3], [TILE - 4, 3], [3, TILE - 4], [TILE - 4, TILE - 4]]) g.fillRect(x + a - .75, y + b - .75, 1.5, 1.5);
+    }
+    g.strokeStyle = '#e0b43a'; g.lineWidth = 3; g.setLineDash([8, 6]); g.strokeRect(x0 + 1.5, y0 + 1.5, s - 3, s - 3); g.setLineDash([]);
+  }
+  /** The big chest in the middle of the platform. */
+  private drawSpaceChest(g: CanvasRenderingContext2D) {
+    const b = this.chestBox(), s = SPACE.chest * TILE, x = b.x - s / 2, y = b.y - s / 2;
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(x + 3, y + 5, s, s);
+    g.fillStyle = '#3d4a5c'; g.fillRect(x + 2, y + 2, s - 4, s - 4);
+    g.fillStyle = '#56677e'; g.fillRect(x + 2, y + 2, s - 4, 14);
+    g.strokeStyle = '#1e2633'; g.lineWidth = 2; g.strokeRect(x + 2, y + 2, s - 4, s - 4);
+    g.fillStyle = '#8fd3ff'; g.fillRect(b.x - 7, y + 20, 14, 4);
+    g.fillStyle = '#e0b43a'; g.fillRect(b.x - 4, y + 12, 8, 7);
+    const n = this.spaceChest.length;
+    g.fillStyle = '#9aa8ba'; g.fillRect(x + 8, y + s - 12, s - 16, 4);
+    g.fillStyle = n >= SPACE.stacks ? '#ff6a5a' : '#6fe0a0'; g.fillRect(x + 8, y + s - 12, (s - 16) * n / SPACE.stacks, 4);
   }
   /* ---------- save and load ---------- */
   /** Plain fields saved as they are. Maps, sets and things that point at each other are handled below. */
@@ -675,7 +793,7 @@ export class Survival {
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
-    o.done = [...this.done];
+    o.done = [...this.done]; o.spaceChest = this.spaceChest;
     o.turrets = [...this.turrets].map(([k, tu]) => [k, { ...tu, target: !tu.target || !alive(tu.target) ? null : isBear(tu.target) ? { bear: tu.target.id } : { spawner: this.spawners.indexOf(tu.target) } }]);
     for (const k of ['belts', 'splitters', 'chests', 'labs', 'blds', 'grabbers', 'pwalls', 'ghosts'] as const) o[k] = [...this[k]];
     // robots drop whatever they are carrying into your pocket
@@ -707,6 +825,7 @@ export class Survival {
     this.chests = new Map((d.chests as [string, Chest][]).map(([k, c]) => [k, { ...emptyBag(), ...c }])); this.labs = new Map(d.labs as [string, Lab][]);
     this.blds = new Map(d.blds as [string, Bld][]); this.grabbers = new Map(d.grabbers as [string, Grabber][]); this.pwalls = new Map((d.pwalls ?? []) as [string, PWall][]);
     this.ghosts = new Map((d.ghosts ?? []) as [string, Ghost][]);
+    this.spaceChest = (d.spaceChest ?? []) as Stack[];
     this.robots = d.robots as Robot[];
     Object.assign(WALL, EXPANSIONS[this.expansion]); this.rebuildWalls(); this.updateStructs(); this.coolT = 0; this.powerT = 0;
     this.say('Game loaded', 2);
@@ -716,7 +835,7 @@ export class Survival {
   /* ---------- input ---------- */
   private down(e: PointerEvent) {
     e.preventDefault();
-    if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor) return;
+    if (!this.running || this.paused || this.shopOpen || this.labOpen || this.recipeFor || this.chestOpen) return;
     const wx = (e.offsetX - this.ox) / this.scale, wy = (e.offsetY - this.oy) / this.scale;
     // the blueprint tool: drag a box, or hold and let go where the blueprint goes
     if (this.bpMode) {
@@ -1847,6 +1966,8 @@ export class Survival {
     // tap a spawner: it makes a bear right away
     const sp = this.spawners.find(s => !s.dead && dist(s.x, s.y, x, y) < SPAWNER_R + 12);
     if (sp) { this.spawnBear(sp, false); this.bubble(sp.x, sp.y - 40, 'A bear!', 'info'); Sound.tone('sawtooth', 160, 90, .3, .1); return; }
+    // space: tap the chest to open it
+    if (this.space && t && this.chestTile(t.c, t.r)) { this.dblTap('chest', () => this.openChest(), () => this.openChest()); return; }
     const hint = (hx: number, hy: number) => { this.bubble(hx, hy, 'Double-tap to pick it up', 'info'); Sound.click(); };
     // the big round things: a mine, or the ammo machine (one tap opens its recipes)
     const mn = this.mines.find(m => dist(m.x, m.y, x, y) < m.r + 4);
@@ -1921,7 +2042,7 @@ export class Survival {
     let n = 0;
     for (const q of b.parts) {
       const cc = c + q.dc, rr = r + q.dr, key = cc + ',' + rr;
-      if (!tileOk(cc, rr) || blockedTile(cc, rr)) continue;
+      if (!tileOk(cc, rr) || blockedTile(cc, rr) || (this.space && !this.onPlat(cc, rr))) continue;
       const have = this.partAt(cc, rr);
       if (have && have.p === q.p && (have.d === q.d || !TURNS.includes(q.p))) continue;
       if (!isBig(q.p) && this.taken(cc, rr)) continue;
@@ -1937,7 +2058,7 @@ export class Survival {
     for (const sp of this.spawners) { if (sp.dead) continue; const d = dist(sp.x, sp.y, x, y); if (d < SPAWNER_R + 14 && d < bd) { bd = d; best = sp; } }
     return best;
   }
-  private taken(c: number, r: number) { const k = c + ',' + r; return this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
+  private taken(c: number, r: number) { const k = c + ',' + r; return this.chestTile(c, r) || this.belts.has(k) || this.grabbers.has(k) || this.turrets.has(k) || this.splitters.has(k) || this.chests.has(k) || this.labs.has(k) || this.blds.has(k) || this.pwalls.has(k); }
   private togglePlacing(type: Placeable) {
     if (this.placing && this.placeType === type) { this.placing = false; Sound.click(); return; }
     this.bpStop(); this.bpOpen = false;
@@ -1988,6 +2109,7 @@ export class Survival {
   private placeOn(c: number, r: number, key: string, type: Placeable) {
     if (isBig(type)) {
       const rr = type === 'machine' ? MACHINE_R : MINE_R;
+      if (this.space && !this.onPlat(c, r)) { this.bubble(tileX(c), tileY(r) - 30, 'Only on the platform', 'info'); Sound.denied(); return; }
       if (!this.bigFits(c, r, rr)) { this.bubble(tileX(c), tileY(r) - 30, 'Not enough room there', 'info'); Sound.denied(); return; }
       if (type === 'mine') this.mines.push({ x: tileX(c), y: tileY(r), r: rr, ore: 'stone' });
       else this.machines.push({ x: tileX(c), y: tileY(r), r: rr, queue: [], batchT: 0, out: [], recipe: null });
@@ -1998,6 +2120,7 @@ export class Survival {
     if (this.turnTile(key)) return;
     if (this.taken(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
     if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put that there", 'info'); Sound.denied(); return; }
+    if (this.space && !this.onPlat(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Only on the platform', 'info'); Sound.denied(); return; }
     if (type === 'drill' && this.patchAt(c, r) < 0) { this.bubble(tileX(c), tileY(r) - 16, 'Put drills on an ore patch', 'info'); Sound.denied(); return; }
     const tk = ITEM_T[type];
     if (type === 'belt') this.belts.set(key, this.placeDir);
@@ -2183,6 +2306,8 @@ export class Survival {
     if (ud !== undefined) { this.x += DIRS[ud][0] * ST.beltSpeed * dt; this.y += DIRS[ud][1] * ST.beltSpeed * dt; }
     // the guy can walk out through any gate, but not through the fence, and stays on the map
     this.x = clamp(this.x, GUY_R, W - GUY_R); this.y = clamp(this.y, GUY_R, H - GUY_R);
+    // space: you can't step off the platform
+    if (this.space) { const p = this.plat, m = GUY_R * .6; this.x = clamp(this.x, GX0 + p.c0 * TILE + m, GX0 + (p.c0 + SPACE.plat) * TILE - m); this.y = clamp(this.y, GY0 + p.r0 * TILE + m, GY0 + (p.r0 + SPACE.plat) * TILE - m); }
     const me = { x: this.x, y: this.y }; collide(me, GUY_R, this.walls); this.x = me.x; this.y = me.y;
     // walking over a furnace picks up what it has smelted
     { const ft = tileAt(this.x, this.y), fb = ft ? this.blds.get(ft.c + ',' + ft.r) : undefined;
@@ -2279,6 +2404,7 @@ export class Survival {
     }
     // huge waves at 12, 20 and 28 minutes (then every 8 minutes), out of the spawners, on top of the steady bears
     this.waveT -= dt;
+    if (this.space) this.waveT = SURVIVAL.waveEvery;
     if (!this.waveWarned && this.waveT <= 5) { this.waveWarned = true; this.say(NO_BASE ? 'A huge wave of bears is about to fill the spawners!' : 'A huge wave of bears is coming!', 4); Sound.boom(false); }
     if (this.waveT <= 0) {
       this.waveLeft += SURVIVAL.waveSize + this.waveN * SURVIVAL.waveGrow; this.waveN++;
@@ -2710,13 +2836,13 @@ export class Survival {
     this.camX = clamp(this.camX, Math.min(hw, W / 2), Math.max(W - hw, W / 2)); this.camY = clamp(this.camY, Math.min(hh, H / 2), Math.max(H - hh, H / 2));
     this.ox = cw / 2 - this.camX * this.scale; this.oy = top + avail / 2 - this.camY * this.scale;
     this.view = { x0: this.camX - hw - 40, x1: this.camX + hw + 40, y0: this.camY - hh - top / this.scale - 40, y1: this.camY + hh + bottom / this.scale + 40 };
-    g.fillStyle = '#2f4426'; g.fillRect(0, 0, cw, ch);
+    g.fillStyle = this.space ? '#05060f' : '#2f4426'; g.fillRect(0, 0, cw, ch);
     g.save();
     g.translate(this.ox, this.oy); g.scale(this.scale, this.scale);
     this.drawWorld(g);
     g.restore();
     this.drawHud(g, dt);
-    this.drawMap(g, cw, top);
+    if (!this.space) this.drawMap(g, cw, top);
   }
 
   private view = { x0: 0, x1: W, y0: 0, y1: H };
@@ -2745,6 +2871,13 @@ export class Survival {
   }
   private seen(x: number, y: number, r = 40) { const v = this.view; return x > v.x0 - r && x < v.x1 + r && y > v.y0 - r && y < v.y1 + r; }
   private drawWorld(g: CanvasRenderingContext2D) {
+    if (this.space) this.drawSpace(g); else this.drawGround(g);
+    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r * 1.15)) paintPatch(g, p, this.t);
+    for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
+    if (this.space) this.drawSpaceChest(g);
+    this.drawThings(g);
+  }
+  private drawGround(g: CanvasRenderingContext2D) {
     // ground
     g.fillStyle = '#4b6b37'; g.fillRect(0, 0, W, H);
     // the edge of the map
@@ -2779,8 +2912,8 @@ export class Survival {
         g.fillStyle = '#3f6230'; g.beginPath(); g.arc(d.x, d.y, d.r * .55, 0, 7); g.fill();
       }
     }
-    for (const p of this.patches) if (p.left > 0 && this.seen(p.x, p.y, p.r * 1.15)) paintPatch(g, p, this.t);
-    for (const sp of this.spawners) if (this.seen(sp.x, sp.y, 60)) this.drawSpawner(g, sp);
+  }
+  private drawThings(g: CanvasRenderingContext2D) {
     this.drawBelts(g);
     if (this.mineOn) { this.drawMineAndMachine(g); }
     // power lines between poles
@@ -3201,7 +3334,7 @@ export class Survival {
     g.textAlign = 'right';
     g.fillStyle = inside ? '#ff8a7a' : '#fff5ea';
     const sps = this.spawners.filter(sp => !sp.dead).length;
-    g.fillText(NO_BASE ? `${inside} after you · ${waiting} at their bases` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
+    g.fillText(this.space ? 'Space' : NO_BASE ? `${inside} after you · ${waiting} at their bases` : `${inside ? `${inside} after you · ` : ''}${waiting} at gates · ${sps} spawner${sps === 1 ? '' : 's'}`, cw - 14, y + h + 20);
     // pollution: a small bar under the counts on the right
     if (this.pollution > 1) {
       const k2 = this.smog() / 10, pw = 90;
@@ -3281,6 +3414,7 @@ export class Survival {
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
     this.renderTurretPanel();
     this.renderBpPanel();
+    this.renderChest();
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));
     const lb = this.pad.querySelector<HTMLElement>('#svLoad')!, use = this.nearUsable();
