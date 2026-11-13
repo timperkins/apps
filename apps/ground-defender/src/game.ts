@@ -56,6 +56,7 @@ export const SURVIVAL = {
   turretCost: 15,       // stone for a turret in the shop
   turretDamage: 5.25,
   turretReload: 2,
+  creativeStock: 9999,  // creative (cheat mode): how many of everything you have
   turretMaxAmmo: 10000, // you can set how much ammo each turret holds, from 0 to 10000 (it starts at the most)
   turretShot: 1, turretEvery: .2, turretUse: .16, // a turret: 1 damage a shot, a shot every 0.2 s, 16% of an ammo a shot
   turretRange: 280,
@@ -235,7 +236,7 @@ export const AMMO: Record<AmmoId, { name: string; reload: number; damage: number
 export type HatId = 'none' | 'cap' | 'helmet' | 'crown';
 export const HATS: Record<HatId, string> = { none: 'No hat', cap: 'Cap', helmet: 'Helmet', crown: 'Crown' };
 export const COLORS = ['#3f7fd6', '#d64545', '#3ea860', '#e0a32e', '#8e5bd6', '#e06aa8', '#30b8b0', '#f2f2f2'];
-export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; }
+export interface Loadout { name: string; color: string; hat: HatId; ammo: AmmoId; cheat?: boolean; }
 export interface SurvivalResult { time: number; kills: number; shots: number; hits: number; damage: number; won: boolean; spawners: number; }
 
 // world layout (world units). The map is much bigger than the screen; the camera follows the guy.
@@ -515,6 +516,7 @@ export class Survival {
     btn('#svAmmoBtn', () => this.switchAmmo());
     btn('#svHire', () => this.hire());
     btn('#svShopBtn', () => this.openShop());
+    btn('#svCheat', () => this.toggleCreative());
     btn('#svLoad', () => this.useNear());
     btn('#svDrop', () => this.dropOne());
     pad.querySelector('#svQuick')!.addEventListener('pointerdown', e => {
@@ -605,6 +607,7 @@ export class Survival {
     this.blds.clear(); this.brickGate = false; this.robots = []; this.robotT = 0;
     this.labs.clear(); this.researching = null; this.progress = {}; this.lv = {}; this.done.clear(); this.closeLab(); resetStats();
     this.patches = genPatches(this.spawners, startPatches(this.x, this.y)); this.queue = []; this.pollution = 0; this.powerT = 0; this.poweredSet.clear(); this.poleLinks = [];
+    this.creative = false; this.survivalBag = null;
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
     this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
@@ -618,6 +621,8 @@ export class Survival {
   save(): SaveData {
     const me = this as unknown as Record<string, unknown>, o: Record<string, unknown> = { v: 2 };
     for (const k of Survival.SAVED) o[k] = me[k];
+    // a save made in creative keeps what you had in survival
+    if (this.creative && this.survivalBag) o.bag = { ...this.survivalBag };
     o.gates = this.gates.map(g => ({ ...g, open: 0 }));
     o.bears = this.bears.filter(b => b.state !== 'dead').map(b => ({ ...b, gate: this.gates.indexOf(b.gate) }));
     o.mines = this.mines; o.mineAt = this.mineAt ? this.mines.indexOf(this.mineAt) : -1;
@@ -1010,6 +1015,8 @@ export class Survival {
       else if (id === 'gate') { for (const [k, q] of Object.entries(r.in) as [Kind, number][]) this.bag[k] -= q; this.brickGate = true; this.say('Brick gate built: bears wait 10 seconds longer'); Sound.pop(); }
       this.renderShop(); return;
     }
+    // creative: anything, right away, for free
+    if (this.creative) { this.bag[r.out] += r.n * n; this.bubble(this.x, this.y - 30, `+${r.n * n} ${r.n * n === 1 ? ONE_NAME[r.out] : KIND_NAME[r.out]}`, 'info'); Sound.pop(); this.syncQuick(); this.renderShop(); return; }
     let made = 0;
     for (let i = 0; i < n; i++) {
       if (this.queue.length >= SURVIVAL.queueMax) { this.bubble(this.x, this.y - 30, 'The crafting queue is full', 'info'); break; }
@@ -1596,6 +1603,16 @@ export class Survival {
     return AMMO_KINDS.reduce((a, k) => a + this.bag[k], 0);
   }
   /** T next to a turret: put all your ammo in it (all your rockets in a rocket launcher). */
+  /** Cheat mode only: creative gives you plenty of everything, instant free crafting and no damage; survival gives back what you had. */
+  private creative = false; private survivalBag: Bag | null = null;
+  private toggleCreative() {
+    if (!this.load.cheat || !this.running) return;
+    this.creative = !this.creative;
+    if (this.creative) { this.survivalBag = { ...this.bag }; this.topUp(); this.queue = []; this.say('Creative: everything is free and nothing hurts you', 3); }
+    else { if (this.survivalBag) this.bag = { ...emptyBag(), ...this.survivalBag }; this.survivalBag = null; this.say('Survival: back to what you had', 3); }
+    this.syncQuick(); this.invSig = ''; this.quickSig = ''; this.bldSig = ''; Sound.click();
+  }
+  private topUp() { for (const k of KINDS) if (this.bag[k] < SURVIVAL.creativeStock) this.bag[k] = SURVIVAL.creativeStock; }
   /** The picked turret's small panel: how much ammo it has, and the most it may hold (0 to 10000). */
   private turretKey = '';
   private renderTurretPanel() {
@@ -1966,6 +1983,7 @@ export class Survival {
   update(dt: number) {
     if (!this.running || this.paused || this.labOpen || this.recipeFor) return;
     this.t += dt;
+    if (this.creative) { this.topUp(); this.hp = SURVIVAL.maxHp; }
     this.reload = Math.max(0, this.reload - dt);
     this.holdFire(dt);
     this.runAcid(dt);
@@ -2393,6 +2411,7 @@ export class Survival {
   }
   /** Damage in health points (not a share of your health), shown as a number. */
   private hurtAbs(dmg: number, quiet = false) {
+    if (this.creative) return;
     dmg *= ST.armor; this.hp -= dmg;
     if (quiet) { this.acidShown += dmg; return; }
     this.hurtFlash = .4;
@@ -2439,6 +2458,7 @@ export class Survival {
   }
 
   private hurt(share: number) {
+    if (this.creative) return;
     const dmg = SURVIVAL.maxHp * share * ST.armor;
     this.hp -= dmg;
     this.hurtFlash = .4;
@@ -3024,6 +3044,9 @@ export class Survival {
     const hn = this.miners.length ? 'Extra miner' : 'Miner';
     if (hb.firstElementChild!.textContent !== hn) hb.firstElementChild!.textContent = hn;
     this.pad.querySelector<HTMLElement>('#svShopBtn')!.hidden = this.shopOpen;
+    const cb = this.pad.querySelector<HTMLElement>('#svCheat')!; cb.hidden = !this.load.cheat;
+    const cl = this.creative ? 'Creative' : 'Survival';
+    if (cb.textContent !== cl) { cb.textContent = cl; cb.setAttribute('aria-pressed', String(this.creative)); cb.classList.toggle('on', this.creative); }
     this.renderTurretPanel();
     this.renderQuick();
     const db = this.pad.querySelector<HTMLElement>('#svDrop')!; db.hidden = !(this.placing || (this.hand && this.bag[this.hand] > 0));

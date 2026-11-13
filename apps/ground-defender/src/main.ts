@@ -96,6 +96,7 @@ function renderLoadout() {
   if (document.activeElement !== name) name.value = loadout.name;
   $('svColors').innerHTML = COLORS.map(c => `<button role="radio" aria-label="Colour ${c}" aria-checked="${c === loadout.color}" data-c="${c}" style="background:${c}"></button>`).join('');
   $('svHats').innerHTML = (Object.keys(HATS) as HatId[]).map(h => `<button role="radio" aria-checked="${h === loadout.hat}" data-h="${h}">${HATS[h]}</button>`).join('');
+  $('svMode').innerHTML = [['normal', 'Survival'], ['cheat', 'Cheat']].map(([m, l]) => `<button role="radio" aria-checked="${(m === 'cheat') === !!loadout.cheat}" data-mode="${m}">${l}</button>`).join('');
   $('svAmmo').innerHTML = (Object.keys(AMMO) as AmmoId[]).map(a => `<button role="radio" aria-checked="${a === loadout.ammo}" data-a="${a}">${AMMO[a].name}<small>${AMMO[a].desc}</small></button>`).join('');
   const b = store.get<number>('best', 0);
   $('svBest').textContent = b ? `Best ${clock(b)} survived` : '';
@@ -112,12 +113,13 @@ $('svName').addEventListener('input', () => { loadout.name = cleanName($<HTMLInp
 $('svName').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); });
 $('svDice').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); Sound.init(); Sound.ui(); loadout.name = randomName(loadout.name); $<HTMLInputElement>('svName').value = loadout.name; renderLoadout(); });
 $('survSetup').addEventListener('click', e => {
-  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a]');
+  const t = (e.target as HTMLElement).closest<HTMLElement>('[data-c], [data-h], [data-a], [data-mode]');
   if (!t) return;
   Sound.init(); Sound.ui();
   if (t.dataset.c) loadout.color = t.dataset.c;
   if (isHat(t.dataset.h)) loadout.hat = t.dataset.h;
   if (isAmmo(t.dataset.a)) loadout.ammo = t.dataset.a;
+  if (t.dataset.mode) loadout.cheat = t.dataset.mode === 'cheat';
   renderLoadout();
 });
 
@@ -135,6 +137,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
     `You start on a 10 by 10 stone patch, with a 5 by 5 iron patch and a 5 by 5 copper patch touching it. There are no bear spawners for the first ${SURVIVAL.spawnerDelay / 60} minutes, so use the time to build.`,
     `Bears only come from bear spawners out in the woods. There are ${SURVIVAL.spawnerMin} to ${SURVIVAL.spawnerMax}, each with ${SURVIVAL.spawnerHp} health.`,
     `For the first ${min(SURVIVAL.earlyTime)} minutes each spawner makes a bear every ${SURVIVAL.spawnEarly} seconds, then every ${SURVIVAL.spawnEvery} seconds, up to ${SURVIVAL.maxBears} bears on the map. Tap a spawner to make it send a bear right away. A destroyed spawner comes back somewhere else ${SURVIVAL.spawnerBack} seconds later, so the bears never stop: survive as long as you can.`,
+    'Pick <b>Cheat</b> as the mode before you start to get a button at the top left that switches between Survival and Creative (everything free, instant crafting, no damage).',
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
     'Each bear you destroy gives you 5 stone, and each acid fish 1 iron ore.',
     'A bear swipes for 8% of your health. Bears never throw or shoot anything. Bears growl when they are close.'] },
