@@ -2,9 +2,10 @@
 // match the chunky pixels of the game. They are turned into CSS cursor values
 // once, at start-up, and set as --cur-* variables on the page for style.css.
 //
-// The move cursor turns and plays a burst on click, and the corners cursor
-// (over a unit you can pick) and the attack cursor (over an enemy your units
-// can fire on) breathe: main.ts steps through their frames. The attack cursor
+// The move cursor turns and plays a burst on click, the corners cursor (over
+// a unit you can pick) breathes, and the attack cursor (over an enemy your
+// units can fire on) and harvest cursor spin as the move cursor does,
+// breathing as they turn: main.ts steps through their frames. The attack cursor
 // plays a red burst on click, like the move cursor's. The harvest cursor (over
 // ore with an ore hauler selected) is the attack cursor's cousin in gold: a
 // diamond closing in on a nugget, with a gold burst.
@@ -312,35 +313,45 @@ function cornerRows(h: number): string[] {
   });
 }
 
-// Over an enemy your units can fire on: a red gunsight, a broken ring of
-// radius r with four ticks pointing in at the target and a dot on it, centred
-// on (C, C).
-function sight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number): void {
+// Over an enemy your units can fire on: a red gunsight, a ring of radius r
+// broken into four arcs round a small cross on the target, centred on (C, C).
+// The arcs are turned by angle a, so as a steps round the ring spins (as the
+// move cursor does).
+function sight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number, a = 0): void {
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
   for (let y = 0; y < size; y++)
     for (let x = 0; x < size; x++) {
-      const dx = x - C;
-      const dy = y - C;
+      const dx = (x - C) * ca + (y - C) * sa;
+      const dy = -(x - C) * sa + (y - C) * ca;
       if (Math.abs(Math.hypot(dx, dy) - r) < 0.55 && Math.abs(dx) > 1.5 && Math.abs(dy) > 1.5) put(x, y, 'r');
     }
-  for (let i = 3; i <= Math.round(r) + 1; i++) {
-    const col = i > r - 1 ? 'R' : 'r';
-    put(C + i, C, col);
-    put(C - i, C, col);
-    put(C, C + i, col);
-    put(C, C - i, col);
-  }
+  // a small cross on the target, well clear of the ring so the turning arcs
+  // never join up with it
+  put(C + 1, C, 'r');
+  put(C - 1, C, 'r');
+  put(C, C + 1, 'r');
+  put(C, C - 1, 'r');
   put(C, C, 'R');
 }
 
 // Over ore an ore hauler can dig: a gold diamond of "radius" r (to its tips)
-// broken at the tips, closing in on a little nugget at (C, C).
-function oreSight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number): void {
-  for (let y = 0; y < size; y++)
-    for (let x = 0; x < size; x++) {
-      const dx = Math.abs(x - C);
-      const dy = Math.abs(y - C);
-      if (Math.abs(dx + dy - r) < 0.6 && dx > 1.5 && dy > 1.5) put(x, y, dx + dy > r ? 'Y' : 'y');
-    }
+// broken at the tips, closing in on a little nugget at (C, C). Its four sides
+// are turned by angle a round the nugget, so it spins as a steps round.
+function oreSight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number, a = 0): void {
+  const m = r / Math.SQRT2; // how far each side's middle is from the nugget
+  const half = (r - 3) / Math.SQRT2; // half of the part of a side that shows
+  for (let k = 0; k < 4; k++) {
+    const t = a + Math.PI / 4 + (k * Math.PI) / 2;
+    const nx = Math.cos(t);
+    const ny = Math.sin(t);
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const out = (x - C) * nx + (y - C) * ny - m; // across the side, + outwards
+        const along = -(x - C) * ny + (y - C) * nx;
+        if (Math.abs(out) < 0.62 && Math.abs(along) <= half + 0.3) put(x, y, out > 0 ? 'Y' : 'y');
+      }
+  }
   // the nugget
   put(C, C - 1, 'Y');
   put(C - 1, C, 'y');
@@ -348,13 +359,19 @@ function oreSight(put: (x: number, y: number, col: string) => void, size: number
   put(C + 1, C, 'y');
 }
 
-function oreRows(r: number): string[] {
-  return drawn(17, (put) => oreSight(put, 17, 8, r));
+function oreRows(r: number, a: number): string[] {
+  return drawn(17, (put) => oreSight(put, 17, 8, r, a));
 }
 
-function attackRows(r: number): string[] {
-  return drawn(17, (put) => sight(put, 17, 8, r));
+function attackRows(r: number, a: number): string[] {
+  return drawn(17, (put) => sight(put, 17, 8, r, a));
 }
+
+// The attack and harvest cursors spin through a quarter turn (they look the
+// same each quarter) in MOVE_STEPS frames, breathing in and out as they go:
+// the turn and the size of the sight at frame i.
+const spin = (i: number) => (i / MOVE_STEPS) * (Math.PI / 2);
+const breath = (i: number, rs: number[]) => rs[i % rs.length];
 
 // A click on an enemy plays ATTACK_CLICK, the move burst in red: the sight
 // snaps in to a white flash, a red ring bursts out from the target, and the
@@ -415,9 +432,9 @@ export const HARVEST_FRAMES: string[] = [];
 // Build every cursor and publish them as --cur-<kind> on the page.
 export function initCursors(): void {
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
-  for (const r of [5, 5.5, 6, 5.5]) ATTACK_FRAMES.push(gridCss(attackRows(r), [8, 8], FALLBACK.attack));
+  for (let i = 0; i < MOVE_STEPS; i++) ATTACK_FRAMES.push(gridCss(attackRows(breath(i, [5, 5.5, 6, 5.5]), spin(i)), [8, 8], FALLBACK.attack));
   for (const f of ATTACK_CLICK) ATTACK_CLICK_CSS.push(gridCss(attackClickRows(f), [MC, MC], FALLBACK.attack));
-  for (const r of [7, 7.5, 8, 7.5]) HARVEST_FRAMES.push(gridCss(oreRows(r), [8, 8], FALLBACK.harvest));
+  for (let i = 0; i < MOVE_STEPS; i++) HARVEST_FRAMES.push(gridCss(oreRows(breath(i, [7, 7.5, 8, 7.5]), spin(i)), [8, 8], FALLBACK.harvest));
   for (const f of ATTACK_CLICK) HARVEST_CLICK_CSS.push(gridCss(attackClickRows(f, true), [MC, MC], FALLBACK.harvest));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
@@ -444,7 +461,8 @@ export const MOVE_RING_SIZE = MS;
 // attack, through one breath.
 const sightFrames: string[] = [];
 export function attackRingFrames(): string[] {
-  if (!sightFrames.length) for (const r of [9.5, 10, 10.5, 10]) sightFrames.push(gridCanvas(drawn(MS, (put) => sight(put, MS, MC, r)), 1).toDataURL('image/png'));
+  if (!sightFrames.length)
+    for (let i = 0; i < MOVE_STEPS; i++) sightFrames.push(gridCanvas(drawn(MS, (put) => sight(put, MS, MC, breath(i, [9.5, 10, 10.5, 10]), spin(i))), 1).toDataURL('image/png'));
   return sightFrames;
 }
 
@@ -452,7 +470,8 @@ export function attackRingFrames(): string[] {
 // sending haulers to dig, through one breath.
 const oreRingFrames: string[] = [];
 export function harvestRingFrames(): string[] {
-  if (!oreRingFrames.length) for (const r of [13, 13.5, 14, 13.5]) oreRingFrames.push(gridCanvas(drawn(MS, (put) => oreSight(put, MS, MC, r)), 1).toDataURL('image/png'));
+  if (!oreRingFrames.length)
+    for (let i = 0; i < MOVE_STEPS; i++) oreRingFrames.push(gridCanvas(drawn(MS, (put) => oreSight(put, MS, MC, breath(i, [13, 13.5, 14, 13.5]), spin(i))), 1).toDataURL('image/png'));
   return oreRingFrames;
 }
 

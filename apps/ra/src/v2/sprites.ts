@@ -911,7 +911,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       return { shape, rx: 21, ry: 20, zmax: 37, fx: [{ x: 4, y: -6, z: 36 }] };
     }
     case 'power': {
-      // The Generator: two cooling towers, a turbine hall and a transformer yard.
+      // The power plant: two cooling towers, a turbine hall and a transformer yard.
       const tower = (u: number, v: number, z: number, cu: number, cv: number) => {
         const d = Math.hypot(u - cu, v - cv);
         const r = 8 - 2.2 * Math.sin((Math.PI * Math.min(z, 26)) / 30);

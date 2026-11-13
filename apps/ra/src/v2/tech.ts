@@ -24,7 +24,7 @@ export const TABS: { id: Tab; label: string }[] = [
 ];
 
 export const TECH: Tech[] = [
-  { id: 'power', name: 'Generator', tab: 'base', cost: 300, needs: ['yard'], building: 'power', blurb: 'Power for your base.' },
+  { id: 'power', name: 'Power plant', tab: 'base', cost: 300, needs: ['yard'], building: 'power', blurb: 'Power for your base.' },
   { id: 'barracks', name: 'Barracks', tab: 'base', cost: 300, needs: ['power'], building: 'barracks', blurb: 'Trains infantry.' },
   { id: 'refinery', name: 'Ore refinery', tab: 'base', cost: 1500, needs: ['power'], building: 'refinery', blurb: 'Turns ore into credits.' },
   { id: 'silo', name: 'Ore silo', tab: 'base', cost: 150, needs: ['refinery'], building: 'silo', blurb: 'Stores more credits.' },

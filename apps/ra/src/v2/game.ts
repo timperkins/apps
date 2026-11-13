@@ -8,7 +8,7 @@ import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, toScreen, toWorld } from './stack';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
-import { BUILDING_DEF, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './combat';
+import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -38,7 +38,7 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
 const BNAME: Record<BuildingKind, string> = {
   yard: 'Foundry',
   hq: 'Command post',
-  power: 'Generator',
+  power: 'Power plant',
   barracks: 'Barracks',
   refinery: 'Ore refinery',
   radar: 'Radar mast',
@@ -144,6 +144,20 @@ interface Ruin {
   y: number;
   states: BuildingStates;
   t: number;
+  // the fires burning over it after the big bang: where (from its middle,
+  // and height), how tall, and when each goes out (seconds after the bang)
+  flames: [number, number, number, number, number][];
+}
+
+// A destroyed vehicle's wreck burning where it stood: a few flames over a
+// scorch mark, dying down over BURN_WRECK seconds.
+interface Fire {
+  x: number;
+  y: number;
+  z: number;
+  t: number;
+  w: number; // how far the flames are spread (world units)
+  flames: [number, number, number, number][]; // dx, dy, height, when it goes out
 }
 
 interface OreNode {
@@ -198,6 +212,7 @@ interface Particle {
   max: number;
   kind: 'smoke' | 'soot' | 'wake' | 'dust';
   size: number;
+  v?: number; // which puff texture
 }
 
 const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
@@ -270,6 +285,7 @@ export class IsoGame implements GameLike {
   markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
+  private fires: Fire[] = [];
   private bStates = new Map<string, BuildingStates>();
   // Mark where a move or attack order goes. main.ts turns it off for the
   // mouse, whose cursor plays the burst instead.
@@ -366,6 +382,7 @@ export class IsoGame implements GameLike {
     this.sparks = [];
     this.fx.clear();
     this.ruins = [];
+    this.fires = [];
     this.lastTap = null;
     this.mapVersion++;
     const combat = this.stage === 'combat';
@@ -871,7 +888,7 @@ export class IsoGame implements GameLike {
     if (opened) this.notice('New construction options');
     const pw = this.power();
     const low = pw.used > pw.made;
-    if (low && !this.lowPower) this.notice('Low power: build a generator');
+    if (low && !this.lowPower) this.notice('Low power: build a power plant');
     this.lowPower = low;
     for (const j of this.jobs.values()) {
       if (j.ready || j.paused) continue;
@@ -1992,6 +2009,7 @@ export class IsoGame implements GameLike {
           }
     }
     this.updateRuins(dt);
+    this.updateFires(dt);
     this.fx.step(dt);
 
     for (const p of this.particles) {
@@ -2440,7 +2458,7 @@ export class IsoGame implements GameLike {
     return [amp * (Math.sin(t * 71) * 0.6 + Math.sin(t * 43 + 1.3) * 0.4), amp * 0.7 * (Math.sin(t * 59 + 2.1) * 0.6 + Math.sin(t * 37 + 0.4) * 0.4)];
   }
 
-  private damage(t: Target, amt: number, src: Unit | Building): void {
+  private damage(t: Target, amt: number, src?: Unit | Building): void {
     if (t.dead) return;
     const max = isB(t) ? BUILDING_DEF[t.kind].strength : UNIT_DEF[t.kind].strength;
     t.hp = Math.max(0, t.hp - amt / max);
@@ -2452,7 +2470,7 @@ export class IsoGame implements GameLike {
       else this.kill(t);
       return;
     }
-    if (src.dead) return;
+    if (!src || src.dead) return;
     // it fights back, and its friends nearby come to help
     if (!isB(t)) this.retaliate(t, src);
     for (const o of this.units) if (o.f === t.f && o !== t && this.reach(o.x, o.y, t) < HELP) this.retaliate(o, src);
@@ -2485,7 +2503,101 @@ export class IsoGame implements GameLike {
     );
     const q = QUAKE[u.kind];
     if (q) this.quake(sx, sy, q);
+    if (u.kind !== 'inf' && u.kind !== 'rocket') {
+      const r = BOOM[u.kind] ?? 6;
+      // the blast hurts whatever is close by, on either side
+      if (u.kind !== 'heli') this.blast(u.x, u.y, 0, 0, CELL * (1 + r / 12), 18 + r * 1.5);
+      // the wreck burns where it stood (a copter falls and burns too; a boat sinks)
+      if (u.kind !== 'boat' && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
+      // and a few of the crew crawl out, hurt
+      if (u.kind !== 'heli' && u.kind !== 'boat') this.survivors(u);
+    }
     if (u.sel) this.emit();
+  }
+
+  // An explosion at world point (x, y) hurts everything on the ground within
+  // R world units of it (or of the box rx by ry round it), on any side, less
+  // further out, and knocks soldiers off their feet.
+  private blast(x: number, y: number, rx: number, ry: number, R: number, dmg: number): void {
+    for (const o of [...this.units]) {
+      if (o.kind === 'heli' || o.dead) continue;
+      const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
+      const d = Math.hypot(Math.max(0, Math.abs(ox - x) - rx), Math.max(0, Math.abs(oy - y) - ry));
+      if (d >= R) continue;
+      const k = 1 - d / R;
+      if (o.kind === 'inf' || o.kind === 'rocket') this.shove(o, 5 * k, ox - x, oy - y);
+      this.damage(o, dmg * VERSUS.HE[UNIT_DEF[o.kind].armor] * (1 - (d / R) * 0.6));
+    }
+  }
+
+  // A wreck on fire at world point (x, y), its blast r map pixels across.
+  private burn(x: number, y: number, z: number, r: number): void {
+    const n = 2 + Math.round(r / 4);
+    const w = 1.5 + r * 0.3;
+    const flames: Fire['flames'] = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = i ? Math.sqrt(Math.random()) * w : 0;
+      // the middle burns tallest and longest
+      flames.push([Math.cos(a) * d, Math.sin(a) * d, (i ? 3 + Math.random() * 2 : 5) + r * 0.12, BURN_WRECK * (i ? 0.5 + Math.random() * 0.5 : 1)]);
+    }
+    flames.sort((p, q) => p[0] + p[1] - q[0] - q[1]);
+    this.fires.push({ x, y, z, t: 0, w, flames });
+  }
+
+  // 0 to 2 soldiers crawl out of a destroyed vehicle, badly hurt, and stagger
+  // a little way off from it.
+  private survivors(u: Unit): void {
+    const n = Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const [x, y] = this.fold(u.x + Math.cos(a) * 3, u.y + Math.sin(a) * 3);
+      // not into water, nor up or down a cliff
+      if (this.terrain.k(x, y) === K.Water || this.terrain.elev(x, y) !== u.z) continue;
+      const s = this.newUnit('inf', u.f, x, y, a);
+      s.hp = 0.12 + Math.random() * 0.23;
+      const go = 10 + Math.random() * 8;
+      [s.tx, s.ty] = this.nearPoint(s.x, s.y, s.x + Math.cos(a) * go, s.y + Math.sin(a) * go);
+      s.moving = true;
+    }
+    if (n) this.mapVersion++;
+  }
+
+  private updateFires(dt: number): void {
+    for (const f of this.fires) {
+      f.t += dt;
+      for (const [dx, dy, h, end] of f.flames) {
+        const k = 1 - f.t / end;
+        if (k <= 0) continue;
+        // smoke and the odd ember off each flame, less as it dies down
+        if (Math.random() < dt * 3 * k) {
+          const [sx, sy] = toScreen(f.x + dx, f.y + dy, f.z + h * 0.8);
+          this.fx.smoke(sx, sy, true, 1.2 + h * 0.3 * k);
+        }
+        if (Math.random() < dt * 1.5 * k) this.fx.ember(...toScreen(f.x + dx, f.y + dy, f.z + h * 0.6));
+      }
+    }
+    // (the scorch mark fades for a few seconds after the last flame)
+    this.fires = this.fires.filter((f) => f.t < BURN_WRECK + 6);
+  }
+
+  private drawFire(f: Fire, i: number): void {
+    const c = this.ctx;
+    const [sx, sy] = toScreen(f.x, f.y, f.z);
+    // a scorch mark on the ground
+    const a = 0.45 * Math.min(1, (BURN_WRECK + 6 - f.t) / 6);
+    c.fillStyle = `rgba(20,16,12,${a})`;
+    c.beginPath();
+    c.ellipse(sx, sy, f.w * 1.7 + 1.5, f.w * 0.85 + 0.8, 0, 0, Math.PI * 2);
+    c.fill();
+    for (const [j, [dx, dy, h, end]] of f.flames.entries()) {
+      const k = 1 - f.t / end;
+      if (k <= 0) continue;
+      // it flares up, then dies down with a flicker
+      const flare = Math.min(1, f.t * 4) * k ** 0.6 * (0.85 + 0.15 * Math.sin(this.time * 9 + j * 2.3));
+      const [fx, fy] = toScreen(f.x + dx, f.y + dy, f.z);
+      drawFlame(c, fx, fy, Math.max(0.8, h * flare), this.time + j * 0.37, i * 7 + j);
+    }
   }
 
   // The sprites a unit is drawn with, and where (world point and height).
@@ -2518,15 +2630,34 @@ export class IsoGame implements GameLike {
     b.dead = true;
     this.buildings.splice(this.buildings.indexOf(b), 1);
     const { rx, ry } = b.art;
-    const n = 4 + Math.round((rx + ry) / 6);
+    // a power plant goes up far bigger than anything else
+    const power = b.kind === 'power';
+    const n = (power ? 12 : 6) + Math.round((rx + ry) / 5);
     for (let i = 0; i < n; i++) {
       const [sx, sy] = toScreen(b.x + (Math.random() * 2 - 1) * rx * 0.8, b.y + (Math.random() * 2 - 1) * ry * 0.8, 2 + Math.random() * 12);
-      this.fx.boom(sx, sy, 5 + Math.random() * 5, i * 0.12);
+      this.fx.boom(sx, sy, 6 + Math.random() * 6, i * (power ? 0.06 : 0.1));
     }
     const [cx, cy] = toScreen(b.x, b.y, 8);
-    this.fx.boom(cx, cy, (rx + ry) * 0.45, 0.4);
-    this.quake(cx, cy, buildingQuake(rx, ry) * 0.6);
-    this.ruins.push({ kind: b.kind, f: b.f, x: b.x, y: b.y, states: this.states(b.kind, b.f), t: -0.45 });
+    this.fx.boom(cx, cy, (rx + ry) * 0.7, 0.4);
+    if (power) {
+      // the cooling towers go: one huge fireball, then more bursting round it
+      this.fx.boom(cx, cy - 4, (rx + ry) * 1.3, 0.45);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const [sx, sy] = toScreen(b.x + Math.cos(a) * rx * 1.3, b.y + Math.sin(a) * ry * 1.3, 4 + Math.random() * 10);
+        this.fx.boom(sx, sy, 10 + Math.random() * 6, 0.6 + Math.random() * 0.5);
+      }
+    }
+    this.quake(cx, cy, buildingQuake(rx, ry) * (power ? 1 : 0.6));
+    const states = this.states(b.kind, b.f);
+    // fires over the ruin: on its smoking spots and scattered across it
+    const ruin = states.ruin;
+    const spots: [number, number, number][] = ruin.fx.map((p) => [p.x, p.y, p.z]);
+    const more = 4 + Math.round((ruin.rx + ruin.ry) / 5);
+    for (let i = 0; i < more; i++) spots.push([(Math.random() * 2 - 1) * ruin.rx * 0.7, (Math.random() * 2 - 1) * ruin.ry * 0.7, 1 + Math.random() * 2]);
+    const flames: Ruin['flames'] = spots.map(([x, y, z], i) => [x, y, z, (i < ruin.fx.length ? 7 : 4 + Math.random() * 3) * (power ? 1.3 : 1), BURN_RUIN * (0.55 + Math.random() * 0.45)]);
+    flames.sort((p, q) => p[0] + p[1] - q[0] - q[1]);
+    this.ruins.push({ kind: b.kind, f: b.f, x: b.x, y: b.y, states, t: -0.45, flames });
     if (b.own) this.notice(`${BNAME[b.kind]} destroyed`);
     this.mapVersion++;
     if (b.sel) this.emit();
@@ -2541,16 +2672,19 @@ export class IsoGame implements GameLike {
         const [sx, sy] = toScreen(r.x, r.y, 0);
         const [ox, oy] = toScreen(r.x, r.y, 10);
         const { rx, ry } = r.states.damaged;
-        this.fx.collapse(r.states.damaged.spr, sx, sy, ox, oy, rx + ry, (rx + ry) * 0.5);
-        this.quake(ox, oy, buildingQuake(rx, ry));
+        const power = r.kind === 'power';
+        this.fx.collapse(r.states.damaged.spr, sx, sy, ox, oy, rx + ry, (rx + ry) * 0.5, power ? 2.2 : 1);
+        this.quake(ox, oy, power ? 4 : buildingQuake(rx, ry));
+        // the blast hurts whatever is close by, on either side
+        this.blast(r.x, r.y, rx, ry, power ? 3.5 * CELL : 1.6 * CELL, power ? 90 : 35);
       }
       // smoke pours off it for a while, thins out and stops (the ruin stays)
-      const rate = r.t < 15 ? 5 : 5 * Math.max(0, 1 - (r.t - 15) / 25);
+      const rate = r.t < BURN_RUIN ? 7 : 7 * Math.max(0, 1 - (r.t - BURN_RUIN) / 20);
       if (r.t > 0 && rate > 0)
         for (const p of r.states.ruin.fx)
           if (Math.random() < (dt * rate) / 2) {
             const [sx, sy] = toScreen(r.x + p.x, r.y + p.y, p.z + 1);
-            this.fx.smoke(sx, sy, true, 2);
+            this.fx.smoke(sx, sy, true, 2.6 + Math.random());
           }
     }
   }
@@ -2562,11 +2696,13 @@ export class IsoGame implements GameLike {
       return;
     }
     this.blit(r.states.ruin.spr, r.x, r.y, 0);
-    if (r.t < 8)
-      for (const [i, p] of r.states.ruin.fx.entries()) {
-        const [sx, sy] = toScreen(r.x + p.x, r.y + p.y, p.z);
-        drawFlame(this.ctx, sx, sy, 4 * (1 - r.t / 9), this.time + i, i + 3);
-      }
+    for (const [i, [x, y, z, h, end]] of r.flames.entries()) {
+      const k = 1 - r.t / end;
+      if (k <= 0) continue;
+      const flare = k ** 0.5 * (0.85 + 0.15 * Math.sin(this.time * 8 + i * 1.7));
+      const [sx, sy] = toScreen(r.x + x, r.y + y, z);
+      drawFlame(this.ctx, sx, sy, Math.max(0.8, h * flare), this.time + i * 0.41, i + 3);
+    }
   }
 
   // ---------- Rendering ----------
@@ -2698,6 +2834,7 @@ export class IsoGame implements GameLike {
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
     for (const r of this.ruins) if (seen(r.x, r.y, 4)) items.push({ k: r.x + r.y + Math.min(r.states.ruin.rx, r.states.ruin.ry), draw: () => this.drawRuin(r) });
+    for (const [i, f] of this.fires.entries()) if (seen(f.x, f.y, f.z)) items.push({ k: f.x + f.y + f.z * 2, draw: () => this.drawFire(f, i) });
     const ore = this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5).filter((n) => n.amt >= 10);
     const oreSize = (n: OreNode) => (n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0);
     for (const n of ore) {
@@ -2711,21 +2848,8 @@ export class IsoGame implements GameLike {
     for (const p of this.particles) {
       if (p.kind === 'wake' || !inView(p.x, p.y)) continue;
       const k = p.life / p.max;
-      const s = Math.max(1, Math.round(p.size));
-      c.fillStyle =
-        p.kind === 'smoke' ? `rgba(222,222,216,${0.6 * (1 - k)})` : p.kind === 'soot' ? `rgba(70,66,60,${0.55 * (1 - k)})` : `rgba(165,145,105,${0.5 * (1 - k)})`;
-      const X = Math.round(p.x - s / 2);
-      const Y = Math.round(p.y - s / 2);
-      if (s > 1) {
-        // a puff with its corners knocked off
-        c.fillRect(X + 0.5, Y, s - 1, s);
-        c.fillRect(X, Y + 0.5, 0.5, s - 1);
-        c.fillRect(X + s - 0.5, Y + 0.5, 0.5, s - 1);
-      } else c.fillRect(X, Y, s, s);
-      if (s > 2) {
-        c.fillStyle = p.kind === 'smoke' ? `rgba(255,255,255,${0.35 * (1 - k)})` : 'rgba(0,0,0,0)';
-        c.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), Math.ceil(s / 2), 1);
-      }
+      p.v ??= (Math.random() * 64) | 0;
+      drawPuff(c, p.kind, p.x, p.y, p.size * 1.8, (p.kind === 'smoke' ? 0.65 : p.kind === 'soot' ? 0.6 : 0.55) * puffAlpha(k), k * 0.6, p.v);
     }
 
     this.fx.drawBelow(c);

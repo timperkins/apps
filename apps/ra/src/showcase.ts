@@ -3,7 +3,7 @@
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { BOOM, DAMAGED, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, knockback, makeShot, muzzles } from './v2/combat';
+import { BOOM, DAMAGED, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -67,6 +67,7 @@ interface Particle {
   max: number;
   kind: 'smoke' | 'soot' | 'dust' | 'spark';
   size: number;
+  v?: number; // which puff texture
 }
 
 // What a scene draws with, in map pixels, with the ground origin at (0, 0).
@@ -137,20 +138,8 @@ class Scene {
         c.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
         continue;
       }
-      const s = Math.max(1, Math.round(p.size));
-      c.fillStyle =
-        p.kind === 'smoke' ? `rgba(222,222,216,${0.6 * (1 - k)})` : p.kind === 'soot' ? `rgba(70,66,60,${0.55 * (1 - k)})` : `rgba(165,145,105,${0.5 * (1 - k)})`;
-      const X = Math.round(p.x - s / 2);
-      const Y = Math.round(p.y - s / 2);
-      if (s > 1) {
-        c.fillRect(X + 0.5, Y, s - 1, s);
-        c.fillRect(X, Y + 0.5, 0.5, s - 1);
-        c.fillRect(X + s - 0.5, Y + 0.5, 0.5, s - 1);
-      } else c.fillRect(X, Y, s, s);
-      if (s > 2 && p.kind === 'smoke') {
-        c.fillStyle = `rgba(255,255,255,${0.35 * (1 - k)})`;
-        c.fillRect(X, Y, Math.ceil(s / 2), 1);
-      }
+      p.v ??= (Math.random() * 64) | 0;
+      drawPuff(c, p.kind, p.x, p.y, p.size * 1.8, (p.kind === 'smoke' ? 0.65 : p.kind === 'soot' ? 0.6 : 0.55) * puffAlpha(k), k * 0.6, p.v);
     }
   }
 
@@ -950,7 +939,7 @@ function puffSite(s: Scene, b: V2BuildingArt): void {
 
 const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'yard', name: 'Foundry', blurb: 'Where your base starts: builds everything else. Packs up into a Mobile Foundry.' },
-  { kind: 'power', name: 'Generator' },
+  { kind: 'power', name: 'Power plant' },
   { kind: 'barracks', name: 'Barracks' },
   { kind: 'refinery', name: 'Ore refinery' },
   { kind: 'silo', name: 'Ore silo' },
