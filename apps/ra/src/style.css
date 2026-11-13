@@ -371,7 +371,14 @@ body {
   border-style: dashed;
 }
 
-#clearBtn:disabled {
+/* All and Clear take turns in one slot: the same width, so nothing moves */
+#selBar #allBtn,
+#selBar #clearBtn {
+  width: 56px;
+  min-width: 56px;
+}
+
+#allBtn:disabled {
   opacity: 0.5;
   cursor: var(--cur-arrow);
 }
