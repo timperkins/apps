@@ -256,7 +256,7 @@ const VIEW_W = 640, VIEW_H = 800;
 /** Space: a square platform of tiles floating in space, with a big chest in the middle. */
 const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100,
   astEvery: 2.5, astSpeed: [40, 75], astR: [7, 11], astFrom: 560, // small asteroids: one every 2.5 s, from this far out
-  astHit: .05, astDrop: 3, // one that hits you takes 5% of your health; a shot one drops 3 stone
+  astHarm: false, astHit: .05, astDrop: 3, // small asteroids fly past harmlessly (astHarm false); with astHarm one that hits you takes 5% of your health; a shot one drops 3 stone
   crackHits: 2, // a platform tile breaks on its second asteroid hit (the first cracks it)
   stoneLife: 25 }; // stone drifting in space is gone after this many seconds
 interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; }
@@ -1002,6 +1002,7 @@ export class Survival {
     }
     for (const as of this.asteroids) {
       as.x += as.vx * dt; as.y += as.vy * dt; as.a += as.spin * dt;
+      if (!SPACE.astHarm) continue;
       if (dist(as.x, as.y, this.x, this.y) < as.r + GUY_R) { this.hurt(SPACE.astHit); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; continue; }
       const c = Math.floor((as.x - GX0) / TILE), r = Math.floor((as.y - GY0) / TILE);
       if (this.onPlat(c, r) && Math.abs(as.x - tileX(c)) < TILE * .35 && Math.abs(as.y - tileY(r)) < TILE * .35) { this.crackPlat(c, r); this.blasts.push({ x: as.x, y: as.y, t: 0 }); Sound.boom(false); as.r = 0; }
