@@ -377,7 +377,9 @@ const ONE_NAME: Record<Kind, string> = {
   belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate', plat: 'Platform tile', catcher: 'Catcher',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
-interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
+/** f: what it's allowed to grab (empty or missing: anything). */
+interface Grabber { d: number; t: number; carry: boolean; k: Kind; f?: Kind[]; }
+const grabOk = (gr: Grabber, k: Kind) => !gr.f?.length || gr.f.includes(k);
 /** A turret shoots the nearest bear or spawner in range (or the one you picked), one ammo a shot.
  *  kind: a plain turret, a brick turret, a rapid crossbow or a rocket launcher (which only takes rockets). */
 type TKind = 'turret' | 'brick' | 'rapid' | 'rocket';
@@ -475,7 +477,7 @@ interface Mate { id: string; link: Link; p: Persona; bub: Bubble[]; dig: number;
 /** Another player's guy, as drawn. */
 interface OtherGuy { down?: boolean; id: string; x: number; y: number; face: number; walk: number; load: Loadout; hp: number; w: Weapon | null; }
 /** What a friend's game may ask the host's game to do for its guy. */
-const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet', 'boxPut', 'boxTake', 'fillBld'] as const;
+const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet', 'boxPut', 'boxTake', 'fillBld', 'setFilter'] as const;
 type Act = typeof ACTS[number];
 
 export class Survival {
@@ -1103,6 +1105,14 @@ export class Survival {
   private openChest() { this.chestOpen = true; this.chestSig = ''; this.picked = null; this.closeBld(); this.bpOpen = false; this.placing = false; this.stick = null; Sound.click(); }
   /** A chest you built: tap it to open it (20 stacks). */
   private boxKey: string | null = null;
+  /** A grabber whose filter panel is open. */
+  private grabKey: string | null = null;
+  private openGrab(key: string) { this.openChest(); this.grabKey = key; }
+  /** What the grabber at key may grab (an empty list: anything). */
+  private setFilter(key: string, f: Kind[]) {
+    const gr = this.grabbers.get(key); if (!gr) return;
+    gr.f = f.filter(k => (KINDS as string[]).includes(k)); this.chestSig = '';
+  }
   private openBox(key: string) { this.openChest(); this.boxKey = key; }
   /** Puts up to n of k into the chest at key; returns how many went in. */
   private boxPut(key: string, k: Kind, n: number) {
@@ -1116,7 +1126,7 @@ export class Survival {
     const ch = this.chests.get(key); if (!ch) return;
     const m = Math.min(n, ch[k]); ch[k] -= m; this.bag[k] += m; this.syncQuick(); this.chestSig = ''; Sound.click();
   }
-  private closeChest() { this.boxKey = null; this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
+  private closeChest() { this.boxKey = null; this.grabKey = null; this.chestOpen = false; this.pad.querySelector<HTMLElement>('#svSpace')!.hidden = true; Sound.click(); }
   /** Puts up to n of k in the chest: tops up stacks of k first, then starts new ones while there's room. Returns how many went in. */
   private chestPut(k: Kind, n: number) {
     let left = Math.min(n, this.bag[k]);
@@ -1126,8 +1136,14 @@ export class Survival {
   }
   private chestClick(e: MouseEvent) {
     e.stopPropagation();
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose]'); if (!el || !this.running || this.paused) return;
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-take], [data-put], [data-putall], [data-chestclose], [data-filt]'); if (!el || !this.running || this.paused) return;
     if (el.dataset.chestclose !== undefined) { this.closeChest(); return; }
+    if (this.grabKey !== null) {
+      const gr = this.grabbers.get(this.grabKey); if (!gr) { this.closeChest(); return; }
+      const k = el.dataset.filt as Kind | '', cur = gr.f ?? [];
+      const f = !k ? [] : cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k];
+      gr.f = f; this.remote('setFilter', [this.grabKey, f]); this.chestSig = ''; Sound.click(); return;
+    }
     const box = this.boxKey;
     if (box !== null) {
       const ch = this.chests.get(box); if (!ch) { this.closeChest(); return; }
@@ -1161,6 +1177,21 @@ export class Survival {
     const el = this.pad.querySelector<HTMLElement>('#svSpace')!;
     if (!this.chestOpen) { if (!el.hidden) el.hidden = true; return; }
     const have = KINDS.filter(k => this.bag[k] > 0);
+    if (this.grabKey !== null) {
+      const gr = this.grabbers.get(this.grabKey); if (!gr) { this.closeChest(); return; }
+      const f = gr.f ?? [], sig = JSON.stringify(['grab', this.grabKey, f]);
+      if (sig !== this.chestSig) {
+        this.chestSig = sig;
+        const btn = (k: Kind) => `<button class="slot${f.includes(k) ? ' on' : ''}" data-filt="${k}" title="${escHtml(KIND_NAME[k])}" aria-pressed="${f.includes(k)}"><img src="${this.icon(k)}" alt=""></button>`;
+        const first = (this.space ? CATCH_OUT : []).concat(KINDS.filter(k => !(this.space && CATCH_OUT.includes(k))));
+        el.innerHTML = `<div class="trow"><h3>Grabber</h3><span class="fine">${f.length ? `Grabs only ${f.map(k => escHtml(KIND_NAME[k])).join(', ')}` : 'Grabs anything'}</span></div>
+          <p class="fine">Tap things to pick what this grabber grabs. Pick nothing and it grabs anything.</p>
+          <button class="ghost small${f.length ? '' : ' on'}" data-filt="">Anything</button>
+          <div class="chestgrid filtgrid">${first.map(btn).join('')}</div>
+          <button class="ghost small" data-chestclose>Close (Esc)</button>`;
+      }
+      el.hidden = false; return;
+    }
     if (this.boxKey !== null) {
       const ch = this.chests.get(this.boxKey); if (!ch) { this.closeChest(); return; }
       const list = chestList(ch), sig = JSON.stringify(['box', this.boxKey, list, have.map(k => this.bag[k])]);
@@ -2516,6 +2547,7 @@ export class Survival {
         if (this.turrets.has(key)) { if (this.hostOnly()) return; this.picked = key; Sound.click(); return; }
         this.picked = null;
         if (this.chests.has(key)) { this.openBox(key); return; }
+        if (this.grabbers.has(key)) { this.openGrab(key); return; }
         // a catcher: one tap takes what it caught
         if (b?.type === 'catcher') { if (!this.remote('fillBld', [key])) this.fillBld(key); return; }
         // furnaces, assemblers and drills open their panel (which has Pick up)
@@ -2753,15 +2785,17 @@ export class Survival {
     for (const [key, gr] of this.grabbers) {
       const [c, r] = key.split(',').map(Number), [dx, dy] = DIRS[gr.d];
       if (!gr.carry) {
-        const it = this.items.find(o => { if (o.gone) return false; const t = tileAt(o.x, o.y); return !!t && t.c === c - dx && t.r === r - dy && this.canTake(c + dx, r + dy, o.k); });
+        const it = this.items.find(o => { if (o.gone || !grabOk(gr, o.k)) return false; const t = tileAt(o.x, o.y); return !!t && t.c === c - dx && t.r === r - dy && this.canTake(c + dx, r + dy, o.k); });
         if (it) { it.gone = true; gr.carry = true; gr.k = it.k; gr.t = 0; }
         else {
           // or one out of a chest behind it (ammo first), or stone ammo out of the machine
           const bk = (c - dx) + ',' + (r - dy), ch = this.chests.get(bk);
-          const kk = ch ? KINDS.find(x => ch[x] > 0 && this.canTake(c + dx, r + dy, x)) : undefined, bb = this.blds.get(bk);
+          const kk = ch ? KINDS.find(x => ch[x] > 0 && grabOk(gr, x) && this.canTake(c + dx, r + dy, x)) : undefined, bb = this.blds.get(bk);
+          const ck = bb?.type === 'catcher' ? CATCH_OUT.find(x => (bb.buf?.[x] ?? 0) > 0 && grabOk(gr, x) && this.canTake(c + dx, r + dy, x)) : undefined;
           if (ch && kk) { ch[kk]--; gr.carry = true; gr.k = kk; gr.t = 0; }
-          else if (bb && bb.out > 0 && bb.outK && this.canTake(c + dx, r + dy, bb.outK)) { gr.k = bb.outK; bb.out--; if (!bb.out) bb.outK = undefined; gr.carry = true; gr.t = 0; }
-          else { const bm = this.isMachine(c - dx, r - dy); if (bm && bm.out.length) { gr.k = bm.out.shift()!; gr.carry = true; gr.t = 0; } }
+          else if (bb && ck) { bb.buf![ck]! -= 1; gr.carry = true; gr.k = ck; gr.t = 0; }
+          else if (bb && bb.out > 0 && bb.outK && grabOk(gr, bb.outK) && this.canTake(c + dx, r + dy, bb.outK)) { gr.k = bb.outK; bb.out--; if (!bb.out) bb.outK = undefined; gr.carry = true; gr.t = 0; }
+          else { const bm = this.isMachine(c - dx, r - dy); if (bm && bm.out.length && grabOk(gr, bm.out[0])) { gr.k = bm.out.shift()!; gr.carry = true; gr.t = 0; } }
         }
         continue;
       }
@@ -3648,7 +3682,11 @@ export class Survival {
       paintWall(g, x, y, w.gate, (k: string) => this.pwalls.get(k)?.gate === false, c, r, Math.hypot(this.x - x, this.y - y) < 30);
       if (w.hp < max) { g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(x - 10, y + 8, 20, 3); g.fillStyle = w.hp / max > .4 ? '#7fd36a' : '#ff6a5a'; g.fillRect(x - 10, y + 8, 20 * w.hp / max, 3); }
     }
-    for (const [key, gr] of this.grabbers) { const [c, r] = key.split(',').map(Number); paintGrabber(g, tileX(c), tileY(r), gr); }
+    for (const [key, gr] of this.grabbers) {
+      const [c, r] = key.split(',').map(Number); paintGrabber(g, tileX(c), tileY(r), gr);
+      // a filtered grabber shows what it grabs in its corner
+      if (gr.f?.length) { const x = tileX(c) + 6, y = tileY(r) - 6; g.fillStyle = 'rgba(20,26,40,.85)'; g.beginPath(); g.arc(x, y, 5.5, 0, 7); g.fill(); g.strokeStyle = '#9fdcff'; g.lineWidth = 1; g.stroke(); g.save(); g.translate(x, y); g.scale(.5, .5); paintItem(g, 0, 0, gr.f[0]); g.restore(); }
+    }
     for (const [key, sp] of this.splitters) { const [c, r] = key.split(',').map(Number); paintSplitter(g, tileX(c), tileY(r), sp.d); }
     for (const [key, ch] of this.chests) {
       const [c, r] = key.split(',').map(Number), n = chestStacks(ch); paintChest(g, tileX(c), tileY(r));
