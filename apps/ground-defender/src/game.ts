@@ -215,7 +215,7 @@ const RECIPES: Rec[] = [
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'A turret that reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
   { ...R('plat', 'logistics', {}, 1, 1, 'Space only: one more tile of platform. Put it next to the platform to make it bigger.', undefined, false), in: { stone: 15 } },
-  { ...R('catcher', 'production', {}, 2, 1, 'Space only: pulls in little asteroids (from asteroids you shoot) within 3 tiles and turns each into 1 stone, 2 copper and, 89% of the time, 1 iron. They go out the front onto a belt or into a chest; tap it to take them. R turns it.', undefined, false), in: { stone: 20 } },
+  { ...R('catcher', 'production', {}, 2, 1, 'Space only: shoots out a grabby arm that reaches 20 tiles, grabs little asteroids (from asteroids you shoot) and turns each into 1 stone, 2 copper and, 89% of the time, 1 iron. They go out the front onto a belt or into a chest; tap it to take them. R turns it.', undefined, false), in: { stone: 20 } },
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
   { ...R('ammo', 'combat', { stone: 1 }, 2, SURVIVAL.batchAmmo - 1, 'Stone ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
@@ -260,11 +260,13 @@ const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100,
   astHarm: false, astHit: .05, astDrop: 3, // small asteroids fly past harmlessly (astHarm false); with astHarm one that hits you takes 5% of your health; a shot one drops 3 stone
   crackHits: 2, // a platform tile breaks on its second asteroid hit (the first cracks it)
   stoneLife: 25, // a little asteroid drifting in space is gone after this many seconds
-  catchR: 3 * 24, catchHold: 30, // a catcher pulls in little asteroids this close, and holds up to 30 things until they go out the front
+  catchR: 20 * 24, catchHold: 30, armOut: 320, armBack: 200, // a catcher's grabby arm reaches 20 tiles for little asteroids (fast out, slower back); it holds up to 30 things until they go out the front
   catchIron: .89, // each little asteroid caught gives 1 stone, 2 copper and (89% of the time) 1 iron
   bigAfter: 600, bigChance: .35, bigR: [17, 24], bigHp: 4, bigDrop: 8, bigSpeed: .6 }; // after 10 minutes, about 1 in 3 asteroids is big: 4 shots, 8 little ones, slower, and it hurts
 interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; big?: boolean; hp?: number; }
 interface Floater { x: number; y: number; vx: number; vy: number; t: number; landed: boolean; }
+/** A catcher's grabby arm: where its claw is, the little asteroid it's after, and whether it has it. */
+interface Arm { x: number; y: number; f: Floater | null; got: boolean; }
 /** A stack in the space chest: up to 100 of one thing. */
 interface Stack { k: Kind; n: number; }
 /** The base's walls. They move out when the base is expanded, so this object changes during a run. */
@@ -543,7 +545,7 @@ export class Survival {
   /** Blueprints: saved ones, the light blue ghosts on the map, and what the blueprint tool is doing. */
   /** The space game: on, where the platform's top-left tile is, what's in the chest, and whether its panel is open. */
   private space = false; private plat = { c0: 0, r0: 0 }; private platTiles = new Set<string>(); private cracks = new Map<string, number>();
-  private asteroids: Asteroid[] = []; private floaters: Floater[] = []; private astT = 0; private spaceChest: Stack[] = []; private chestOpen = false; private chestSig = '';
+  private asteroids: Asteroid[] = []; private floaters: Floater[] = []; private astT = 0; private spaceChest: Stack[] = []; private arms = new Map<string, Arm>(); private chestOpen = false; private chestSig = '';
   /** Playing together. host: the world runs here and friends' guys are mates; guest: this shows the host's world. */
   net: 'solo' | 'host' | 'guest' = 'solo'; netCode = ''; private room: Host | null = null; private link: Link | null = null;
   private mates = new Map<string, Mate>(); private others: OtherGuy[] = []; private netT = 0; private fullT = 0; private myId = ''; private nextMate = 1;
@@ -880,7 +882,7 @@ export class Survival {
       t: 'fast', time: this.t, pollution: this.pollution, me: this.mineOf(m), bub: m.bub.splice(0), piles: this.piles,
       bears: this.bears.filter(b => b.state !== 'dead' || b.dead < 1).map(b => ({ ...b, gate: this.gates.indexOf(b.gate) })),
       spawners: this.spawners, bolts: this.bolts.map(strip), rockets: this.rockets.map(strip), items: this.items, blasts: this.blasts, booms: this.booms, sparks: this.sparks,
-      asteroids: this.asteroids, floaters: this.floaters, guys: this.guyList(), researching: this.researching, progress: this.progress,
+      asteroids: this.asteroids, floaters: this.floaters, arms: [...this.arms].map(([k, a]) => [k, Math.round(a.x), Math.round(a.y)]), guys: this.guyList(), researching: this.researching, progress: this.progress,
       turrets: [...this.turrets].map(([k, tu]) => [k, tu.ammo, tu.face]), blds: [...this.blds].map(([k, b]) => [k, b.out, b.inp, b.on]),
     });
   }
@@ -925,6 +927,7 @@ export class Survival {
     this.spawners = f.spawners as Spawner[]; this.bolts = f.bolts as Bolt[]; this.rockets = f.rockets as Rocket[]; this.items = f.items as Item[];
     this.blasts = f.blasts as typeof this.blasts; this.booms = f.booms as typeof this.booms; this.sparks = f.sparks as typeof this.sparks;
     this.asteroids = f.asteroids as Asteroid[]; this.floaters = f.floaters as Floater[];
+    this.arms = new Map((f.arms as [string, number, number][] ?? []).map(([k, x, y]) => [k, { x, y, f: null, got: false }]));
     this.researching = f.researching as typeof this.researching; this.progress = f.progress as typeof this.progress;
     for (const [k, ammo, face] of f.turrets as [string, Turret['ammo'], number][]) { const tu = this.turrets.get(k); if (tu) { tu.ammo = ammo; tu.face = face; } }
     for (const [k, out, inp, on] of f.blds as [string, number, number, boolean | undefined][]) { const b = this.blds.get(k); if (b) { b.out = out; b.inp = inp; b.on = on; } }
@@ -988,7 +991,7 @@ export class Survival {
   /** Space: no ground, no ore, no bears; a 10 by 10 platform with the chest in the middle, and you next to it. */
   private startSpace() {
     const t = tileAt(CX, CY)!, h = SPACE.plat / 2;
-    this.plat = { c0: t.c - h, r0: t.r - h }; this.platTiles.clear(); this.cracks.clear(); this.asteroids = []; this.floaters = []; this.astT = 4;
+    this.plat = { c0: t.c - h, r0: t.r - h }; this.platTiles.clear(); this.cracks.clear(); this.asteroids = []; this.floaters = []; this.arms.clear(); this.astT = 4;
     for (let c = 0; c < SPACE.plat; c++) for (let r = 0; r < SPACE.plat; r++) this.platTiles.add((this.plat.c0 + c) + ',' + (this.plat.r0 + r));
     this.spawners = []; this.patches = []; this.mines = []; this.machines = []; this.mineAt = null; this.updateStructs();
     this.x = tileX(t.c) - TILE / 2; this.y = tileY(t.r + 2); this.camX = this.x; this.camY = this.y;
@@ -1021,27 +1024,47 @@ export class Survival {
     this.asteroids = this.asteroids.filter(as => as.r > 0 && dist(as.x, as.y, b.x, b.y) < SPACE.astFrom + 200);
     // little asteroids from shot ones drift; on the platform they stop, and you pick one up (1 stone) by walking over it.
     // A catcher pulls them in and turns each into 1 stone, 2 copper and (mostly) 1 iron.
-    const cats: { b: Bld; x: number; y: number }[] = [];
-    for (const [key, b] of this.blds) if (b.type === 'catcher' && catchN(b) < SPACE.catchHold) { const [c, r] = key.split(',').map(Number); cats.push({ b, x: tileX(c), y: tileY(r) }); }
+    const held = this.updateArms(dt);
     for (const f of this.floaters) {
+      if (held.has(f)) continue;
       f.t += dt;
-      let cat: typeof cats[number] | undefined, cd = SPACE.catchR;
-      for (const ct of cats) { const d = dist(f.x, f.y, ct.x, ct.y); if (d < cd && catchN(ct.b) < SPACE.catchHold) { cd = d; cat = ct; } }
-      if (cat) {
-        const sp = Math.min(cd, 90 * dt); f.x += (cat.x - f.x) / cd * sp; f.y += (cat.y - f.y) / cd * sp; f.t = Math.min(f.t, SPACE.stoneLife - 5);
-        if (cd < 5) {
-          const bf = cat.b.buf ??= {}, iron = Math.random() < SPACE.catchIron;
-          bf.stone = (bf.stone ?? 0) + 1; bf.copper = (bf.copper ?? 0) + 2; if (iron) bf.iron = (bf.iron ?? 0) + 1;
-          f.t = 1e9; this.sparks.push({ x: cat.x, y: cat.y, t: 0 });
-        }
-        continue;
-      }
       if (!f.landed) { f.x += f.vx * dt; f.y += f.vy * dt; if (this.onPlatXY(f.x, f.y)) f.landed = true; }
       const mate = [...this.mates.values()].find(m => !((m.p.deadT as number) > 0) && dist(f.x, f.y, m.p.x as number, m.p.y as number) < GUY_R + 8);
       const grab = () => { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); };
       if (mate) this.withMate(mate, grab); else if (this.deadT <= 0 && dist(f.x, f.y, this.x, this.y) < GUY_R + 8) grab();
     }
     this.floaters = this.floaters.filter(f => f.t < 1e8 && (f.landed || f.t < SPACE.stoneLife));
+  }
+  /** Each catcher shoots out a long grabby arm at the nearest little asteroid in range, grabs it and pulls it back.
+   *  Back at the catcher it becomes 1 stone, 2 copper and (mostly) 1 iron. Returns the little asteroids being carried. */
+  private updateArms(dt: number) {
+    const held = new Set<Floater>(), claimed = new Set<Floater>();
+    for (const [key, a] of this.arms) if (this.blds.get(key)?.type !== 'catcher') this.arms.delete(key); else if (a.f) claimed.add(a.f);
+    for (const [key, b] of this.blds) {
+      if (b.type !== 'catcher') continue;
+      const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
+      let a = this.arms.get(key); if (!a) { a = { x, y, f: null, got: false }; this.arms.set(key, a); }
+      // what it was after is gone (picked up, or drifted off): come back empty
+      if (a.f && !a.got && (a.f.t >= 1e8 || !this.floaters.includes(a.f))) { claimed.delete(a.f); a.f = null; }
+      if (!a.f && catchN(b) < SPACE.catchHold && dist(a.x, a.y, x, y) < 2) {
+        let best: Floater | null = null, bd = SPACE.catchR;
+        for (const f of this.floaters) { if (claimed.has(f) || f.t >= 1e8) continue; const d = dist(f.x, f.y, x, y); if (d < bd) { bd = d; best = f; } }
+        if (best) { a.f = best; a.got = false; claimed.add(best); }
+      }
+      const tx = a.f && !a.got ? a.f.x : x, ty = a.f && !a.got ? a.f.y : y, d = dist(a.x, a.y, tx, ty);
+      const step = (a.got ? SPACE.armBack : a.f ? SPACE.armOut : SPACE.armBack) * dt;
+      if (d <= step) { a.x = tx; a.y = ty; } else { a.x += (tx - a.x) / d * step; a.y += (ty - a.y) / d * step; }
+      if (a.f && !a.got && dist(a.x, a.y, a.f.x, a.f.y) < 4) { a.got = true; Sound.click(); }
+      if (a.f && a.got) {
+        a.f.x = a.x; a.f.y = a.y; held.add(a.f);
+        if (dist(a.x, a.y, x, y) < 2) {
+          const bf = b.buf ??= {};
+          bf.stone = (bf.stone ?? 0) + 1; bf.copper = (bf.copper ?? 0) + 2; if (Math.random() < SPACE.catchIron) bf.iron = (bf.iron ?? 0) + 1;
+          a.f.t = 1e9; held.delete(a.f); a.f = null; a.got = false; this.sparks.push({ x, y, t: 0 });
+        }
+      }
+    }
+    return held;
   }
   /** A bolt at (x, y) hits an asteroid: it breaks up into stone. */
   private shootAsteroid(x: number, y: number) {
@@ -1212,6 +1235,11 @@ export class Survival {
   }
   /** Asteroids and the stone floating off them. */
   private drawRocks(g: CanvasRenderingContext2D) {
+    for (const [key, a] of this.arms) {
+      const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r), d = dist(a.x, a.y, x, y);
+      if (d < 3) continue;
+      paintArm(g, x, y, a.x, a.y, d, this.t);
+    }
     this.floaters.forEach((f, i) => { g.globalAlpha = f.landed ? 1 : Math.max(0, Math.min(1, (SPACE.stoneLife - f.t) / 4)); paintPebble(g, f.x, f.y, i); });
     g.globalAlpha = 1;
     for (const as of this.asteroids) {
@@ -4350,6 +4378,22 @@ function paintPebble(g: CanvasRenderingContext2D, x: number, y: number, i: numbe
   for (let j = 0; j < 6; j++) { const a = j / 6 * Math.PI * 2, k = 3.6 + ((i * 7 + j * 3) % 5) * .35; g[j ? 'lineTo' : 'moveTo'](x + Math.cos(a) * k, y + Math.sin(a) * k); }
   g.closePath(); g.fill(); g.stroke();
   g.fillStyle = 'rgba(40,34,30,.5)'; g.beginPath(); g.arc(x + 1, y - .8, 1.1, 0, 7); g.fill();
+}
+/** A catcher's grabby arm, from the catcher at (x, y) to its claw at (tx, ty), d apart. */
+function paintArm(g: CanvasRenderingContext2D, x: number, y: number, tx: number, ty: number, d: number, t: number) {
+  const ux = (tx - x) / d, uy = (ty - y) / d, ang = Math.atan2(uy, ux);
+  g.lineCap = 'round';
+  g.strokeStyle = '#2b323c'; g.lineWidth = 5; g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
+  g.strokeStyle = '#9aa7b6'; g.lineWidth = 3; g.beginPath(); g.moveTo(x, y); g.lineTo(tx, ty); g.stroke();
+  // joints along it
+  g.fillStyle = '#d6dee8'; for (let s = 14; s < d - 6; s += 18) { g.beginPath(); g.arc(x + ux * s, y + uy * s, 1.6, 0, 7); g.fill(); }
+  // the claw: two fingers that open as it reaches
+  g.save(); g.translate(tx, ty); g.rotate(ang); g.scale(1.5, 1.5);
+  const open = .55 + .2 * Math.sin(t * 10);
+  g.strokeStyle = '#ffcf8c'; g.lineWidth = 2.2;
+  for (const sgn of [-1, 1]) { g.beginPath(); g.moveTo(-2, 0); g.lineTo(3, sgn * 4 * open); g.lineTo(7, sgn * 2 * open); g.stroke(); }
+  g.fillStyle = '#c9d4df'; g.beginPath(); g.arc(-2, 0, 2.6, 0, 7); g.fill();
+  g.restore(); g.lineCap = 'butt';
 }
 /** A catcher: a dish with three claws that pulls in little asteroids, and an arrow for where things go out. */
 function paintCatcher(g: CanvasRenderingContext2D, d: number, t: number, full: number) {
