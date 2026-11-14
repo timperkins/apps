@@ -215,6 +215,7 @@ const RECIPES: Rec[] = [
   R('bturret', 'combat', { turret: 1, brick: 10 }, 2, 1, 'A turret that reaches farther.', 'bricks'),
   R('rapid', 'combat', { ironPlate: 10, stone: 50 }, 3, 1, '0.75 damage every 0.05 seconds; each shot uses 0.8% of one ammo.', 'rapid'),
   { ...R('plat', 'logistics', {}, 1, 1, 'Space only: one more tile of platform. Put it next to the platform to make it bigger.', undefined, false), in: { stone: 15 } },
+  { ...R('catcher', 'production', {}, 2, 1, 'Space only: pulls in little asteroids (from asteroids you shoot) within 3 tiles and turns each into 1 stone, 2 copper and, 89% of the time, 1 iron. They go out the front onto a belt or into a chest; tap it to take them. R turns it.', undefined, false), in: { stone: 20 } },
   R('wall', 'combat', { stone: 5 }, .5, 1, 'Build your own base: you can walk through it, bears can\'t. Bears bite walls in their way. Drag to place a row.', undefined, true),
   R('pgate', 'combat', { wall: 1, gear: 2 }, 1, 1, 'A stronger piece of wall (200 health instead of 150).', undefined, true),
   { ...R('ammo', 'combat', { stone: 1 }, 2, SURVIVAL.batchAmmo - 1, 'Stone ammo made by hand: 1 less than an ammo machine makes.', undefined, false), time: .5 },
@@ -258,8 +259,11 @@ const SPACE = { plat: 10, chest: 2, stacks: 100, stack: 100,
   astEvery: 2.5, astSpeed: [40, 75], astR: [7, 11], astFrom: 560, // small asteroids: one every 2.5 s, from this far out
   astHarm: false, astHit: .05, astDrop: 3, // small asteroids fly past harmlessly (astHarm false); with astHarm one that hits you takes 5% of your health; a shot one drops 3 stone
   crackHits: 2, // a platform tile breaks on its second asteroid hit (the first cracks it)
-  stoneLife: 25 }; // stone drifting in space is gone after this many seconds
-interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; }
+  stoneLife: 25, // a little asteroid drifting in space is gone after this many seconds
+  catchR: 3 * 24, catchHold: 30, // a catcher pulls in little asteroids this close, and holds up to 30 things until they go out the front
+  catchIron: .89, // each little asteroid caught gives 1 stone, 2 copper and (89% of the time) 1 iron
+  bigAfter: 600, bigChance: .35, bigR: [17, 24], bigHp: 4, bigDrop: 8, bigSpeed: .6 }; // after 10 minutes, about 1 in 3 asteroids is big: 4 shots, 8 little ones, slower, and it hurts
+interface Asteroid { x: number; y: number; vx: number; vy: number; r: number; a: number; spin: number; pts: number[]; big?: boolean; hp?: number; }
 interface Floater { x: number; y: number; vx: number; vy: number; t: number; landed: boolean; }
 /** A stack in the space chest: up to 100 of one thing. */
 interface Stack { k: Kind; n: number; }
@@ -301,11 +305,11 @@ type AmmoKind = 'ammo' | 'ironAmmo' | 'copperAmmo' | 'goldAmmo' | 'diamondAmmo';
 /** Everything you can carry, in the order the inventory shows it. Buildings are things too. */
 const ITEMS = ['stone', 'iron', 'copper', 'gold', 'diamond', 'brick', 'ironPlate', 'copperPlate', 'goldBar', 'gem', 'gear', 'wire', 'circuit', 'pack', 'pack2',
   'ammo', 'ironAmmo', 'copperAmmo', 'goldAmmo', 'diamondAmmo', 'rocket', 'xrocket', 'rgun', 'xbow', 'rxbow', 'mgun',
-  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'] as const;
+  'belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'robot', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat', 'catcher'] as const;
 type Kind = typeof ITEMS[number];
 /** Things you can put down on the map. */
-type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate' | 'plat';
-const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat'];
+type Placeable = 'belt' | 'grab' | 'split' | 'tunnel' | 'chest' | 'pole' | 'drill' | 'mine' | 'furnace' | 'machine' | 'asm' | 'lab' | 'gen' | 'pump' | 'pipe' | 'hub' | 'turret' | 'bturret' | 'rapid' | 'launcher' | 'wall' | 'pgate' | 'plat' | 'catcher';
+const PLACEABLES: Placeable[] = ['belt', 'grab', 'split', 'tunnel', 'chest', 'pole', 'drill', 'mine', 'furnace', 'machine', 'asm', 'lab', 'gen', 'pump', 'pipe', 'hub', 'turret', 'bturret', 'rapid', 'launcher', 'wall', 'pgate', 'plat', 'catcher'];
 const isPlaceable = (k: string): k is Placeable => (PLACEABLES as string[]).includes(k);
 /** Each metal: its smelted form, and how much ammo one of those makes in a machine (and its damage). Diamonds are our own guess. */
 export const METAL: Record<Ore, { per: number; dmg: number; ammo: AmmoKind; plate: Kind; name: string; color: string }> = {
@@ -361,14 +365,14 @@ const KIND_NAME: Record<Kind, string> = {
   stone: 'stone', iron: 'iron ore', copper: 'copper ore', gold: 'gold ore', diamond: 'rough diamonds', brick: 'bricks', ironPlate: 'iron plates', copperPlate: 'copper plates', goldBar: 'gold bars', gem: 'cut diamonds',
   gear: 'gears', wire: 'wire', circuit: 'circuits', pack: 'red science packs', pack2: 'green science packs',
   ammo: 'stone ammo', ironAmmo: 'iron ammo', copperAmmo: 'copper ammo', goldAmmo: 'gold ammo', diamondAmmo: 'diamond ammo', rocket: 'rockets', xrocket: 'exploding rockets', rgun: 'rocket guns', xbow: 'crossbows', rxbow: 'rapid crossbows', mgun: 'machine guns',
-  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates', plat: 'platform tiles',
+  belt: 'belts', grab: 'grabbers', split: 'splitters', tunnel: 'underground belts', chest: 'chests', pole: 'power poles', drill: 'drills', mine: 'stone mines', furnace: 'furnaces', machine: 'ammo machines', asm: 'crafting machines', lab: 'labs', gen: 'generators', pump: 'water pumps', pipe: 'pipes', hub: 'robot hubs', robot: 'robots', turret: 'turrets', bturret: 'brick turrets', rapid: 'rapid crossbow turrets', launcher: 'rocket launchers', wall: 'walls', pgate: 'gates', plat: 'platform tiles', catcher: 'catchers',
 };
 /** One of a thing, for labels: "Iron plate". */
 const ONE_NAME: Record<Kind, string> = {
   stone: 'Stone', iron: 'Iron ore', copper: 'Copper ore', gold: 'Gold ore', diamond: 'Rough diamond', brick: 'Brick', ironPlate: 'Iron plate', copperPlate: 'Copper plate', goldBar: 'Gold bar', gem: 'Cut diamond',
   gear: 'Gear', wire: 'Wire', circuit: 'Circuit', pack: 'Red science pack', pack2: 'Green science pack',
   ammo: 'Stone ammo', ironAmmo: 'Iron ammo', copperAmmo: 'Copper ammo', goldAmmo: 'Gold ammo', diamondAmmo: 'Diamond ammo', rocket: 'Rocket', xrocket: 'Exploding rocket', rgun: 'Rocket gun', xbow: 'Crossbow', rxbow: 'Rapid crossbow', mgun: 'The machine gun',
-  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate', plat: 'Platform tile',
+  belt: 'Belt', grab: 'Grabber', split: 'Splitter', tunnel: 'Underground belt', chest: 'Chest', pole: 'Power pole', drill: 'Drill', mine: 'Stone mine', furnace: 'Furnace', machine: 'Ammo machine', asm: 'Crafting machine', lab: 'Lab', gen: 'Generator', pump: 'Water pump', pipe: 'Pipe', hub: 'Robot hub', robot: 'Robot', turret: 'Turret', bturret: 'Brick turret', rapid: 'Rapid crossbow turret', launcher: 'Rocket launcher', wall: 'Wall', pgate: 'Gate', plat: 'Platform tile', catcher: 'Catcher',
 };
 /** A grabber picks a thing up from the tile behind it and puts it down on the tile in front. */
 interface Grabber { d: number; t: number; carry: boolean; k: Kind; }
@@ -380,9 +384,9 @@ const T_ITEM: Record<TKind, Placeable> = { turret: 'turret', brick: 'bturret', r
 const ITEM_T: Partial<Record<Placeable, TKind>> = { turret: 'turret', bturret: 'brick', rapid: 'rapid', launcher: 'rocket' };
 const tAmmo = (tu: Turret) => Object.values(tu.ammo).reduce((a, n) => a + (n ?? 0), 0);
 /** One-tile buildings. */
-type BType = 'furnace' | 'gen' | 'pump' | 'pipe' | 'asm' | 'tunnel' | 'hub' | 'drill' | 'pole';
-const BTYPES: BType[] = ['furnace', 'gen', 'pump', 'pipe', 'asm', 'tunnel', 'hub', 'drill', 'pole'];
-const BNAME: Record<BType, string> = { furnace: 'Furnace', gen: 'Generator', pump: 'Pump', pipe: 'Pipe', asm: 'Crafting machine', tunnel: 'Underground belt', hub: 'Robot hub', drill: 'Drill', pole: 'Power pole' };
+type BType = 'furnace' | 'gen' | 'pump' | 'pipe' | 'asm' | 'tunnel' | 'hub' | 'drill' | 'pole' | 'catcher';
+const BTYPES: BType[] = ['furnace', 'gen', 'pump', 'pipe', 'asm', 'tunnel', 'hub', 'drill', 'pole', 'catcher'];
+const BNAME: Record<BType, string> = { furnace: 'Furnace', gen: 'Generator', pump: 'Pump', pipe: 'Pipe', asm: 'Crafting machine', tunnel: 'Underground belt', hub: 'Robot hub', drill: 'Drill', pole: 'Power pole', catcher: 'Catcher' };
 /** Buildings that need power to run. */
 const ELECTRIC: BType[] = ['drill', 'asm'];
 /** Hotkeys for placing things (the quickbar also has 1 to 0). */
@@ -390,6 +394,9 @@ const PLACE_KEY: Partial<Record<Placeable, string>> = { belt: 'E', grab: 'G', sp
 /** A one-tile building. inp/inpK: what's waiting to go in (one kind at a time), out/outK: what it made.
  *  buf: an assembler's ingredients. recipe: what an assembler makes. pi: the ore patch a drill sits on. */
 interface Bld { on?: boolean; type: BType; d: number; inp: number; inpK?: Kind; out: number; outK?: Kind; t: number; fuel: number; recipe: string; robots: number; buf?: Cost; pi?: number; }
+/** What a catcher makes from little asteroids. */
+const CATCH_OUT: Kind[] = ['stone', 'copper', 'iron'];
+const catchN = (b: Bld) => CATCH_OUT.reduce((a, k) => a + (b.buf?.[k] ?? 0), 0);
 /** A flying robot that carries one thing from a chest to whatever needs it. */
 interface Robot { x: number; y: number; hub: string; k: Kind | null; src: { x: number; y: number; take: () => boolean; kind?: Kind } | null; dst: { x: number; y: number; give: () => boolean; id: string } | null; }
 const KIND_DOT: Record<Kind, string> = Object.fromEntries(KINDS.map(k => [k, '#d0ccc2'])) as Record<Kind, string>;
@@ -442,7 +449,7 @@ function loadBps(): Blueprint[] { try { const v = JSON.parse(localStorage.getIte
 function saveBps(b: Blueprint[]) { try { localStorage.setItem(BP_STORE, JSON.stringify(b)); } catch { /* private mode: they last until you close the game */ } }
 /** A blueprint turned a quarter turn clockwise. */
 /** Things that face a way (R turns them). */
-const TURNS: Placeable[] = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill'];
+const TURNS: Placeable[] = ['belt', 'grab', 'split', 'furnace', 'asm', 'tunnel', 'drill', 'catcher'];
 /** Tile (c, r) is on the map and off the fence. */
 const tileOk = (c: number, r: number) => !!tileAt(tileX(c), tileY(r));
 function turnBp(b: Blueprint): Blueprint { return { name: b.name, parts: b.parts.map(q => ({ dc: -q.dr, dr: q.dc, p: q.p, d: (q.d + 1) % 4 })) }; }
@@ -466,7 +473,7 @@ interface Mate { id: string; link: Link; p: Persona; bub: Bubble[]; dig: number;
 /** Another player's guy, as drawn. */
 interface OtherGuy { down?: boolean; id: string; x: number; y: number; face: number; walk: number; load: Loadout; hp: number; w: Weapon | null; }
 /** What a friend's game may ask the host's game to do for its guy. */
-const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet', 'boxPut', 'boxTake'] as const;
+const ACTS = ['shoot', 'pickUp', 'pickBigAt', 'craft', 'cancelJob', 'pickResearch', 'useNear', 'armsPut', 'armsSlot', 'switchWeapon', 'switchAmmo', 'turnTile', 'placeBp', 'removeGhost', 'chestPut', 'chestTake', 'placeAt', 'digSet', 'boxPut', 'boxTake', 'fillBld'] as const;
 type Act = typeof ACTS[number];
 
 export class Survival {
@@ -703,7 +710,7 @@ export class Survival {
     if (this.tapWait) { clearTimeout(this.tapWait.timer); this.tapWait = null; }
     this.running = true; this.paused = false;
     this.canvas.hidden = false; this.pad.hidden = false;
-    if (this.space) this.say('You are on a platform in space. Shoot the asteroids (Space) for stone, and make platform tiles from it (15 stone).', 6);
+    if (this.space) this.say('You are on a platform in space. Shoot the asteroids (Space): they break into little ones. Walk over those for stone, or build catchers (20 stone) to turn them into stone, copper and iron.', 6);
     else this.say(`No bears for ${SURVIVAL.spawnerDelay / 60} minutes: dig, smelt and build. Then ${n} bear spawners appear in the woods!`, 5);
   }
   /** Walking: arrow keys or the drag stick; belts carry you; you stay on the map (and on the platform in space). Returns how hard you're pushing. */
@@ -997,20 +1004,38 @@ export class Survival {
       this.astT = SPACE.astEvery * (.6 + Math.random() * .8);
       const ang = Math.random() * Math.PI * 2, x = b.x + Math.cos(ang) * SPACE.astFrom, y = b.y + Math.sin(ang) * SPACE.astFrom;
       const tx = b.x + (Math.random() - .5) * TILE * (SPACE.plat + 6), ty = b.y + (Math.random() - .5) * TILE * (SPACE.plat + 6);
-      const sp = SPACE.astSpeed[0] + Math.random() * (SPACE.astSpeed[1] - SPACE.astSpeed[0]), d = Math.hypot(tx - x, ty - y);
-      this.asteroids.push({ x, y, vx: (tx - x) / d * sp, vy: (ty - y) / d * sp, r: SPACE.astR[0] + Math.random() * (SPACE.astR[1] - SPACE.astR[0]), a: 0, spin: (Math.random() - .5) * 3, pts: Array.from({ length: 8 }, () => .75 + Math.random() * .35) });
+      // after 10 minutes some are big
+      const big = this.t >= SPACE.bigAfter && Math.random() < SPACE.bigChance, R = big ? SPACE.bigR : SPACE.astR;
+      const sp = (SPACE.astSpeed[0] + Math.random() * (SPACE.astSpeed[1] - SPACE.astSpeed[0])) * (big ? SPACE.bigSpeed : 1), d = Math.hypot(tx - x, ty - y);
+      this.asteroids.push({ x, y, vx: (tx - x) / d * sp, vy: (ty - y) / d * sp, r: R[0] + Math.random() * (R[1] - R[0]), a: 0, spin: (Math.random() - .5) * (big ? 1.2 : 3), pts: Array.from({ length: big ? 11 : 8 }, () => .75 + Math.random() * .35), ...(big ? { big: true, hp: SPACE.bigHp } : {}) });
     }
+    if (this.t >= SPACE.bigAfter && this.t - dt < SPACE.bigAfter) { this.say('Big asteroids are coming! They take 4 shots, and they hurt.', 5); Sound.tone('sawtooth', 160, 90, .3, .1); }
     for (const as of this.asteroids) {
       as.x += as.vx * dt; as.y += as.vy * dt; as.a += as.spin * dt;
-      if (!SPACE.astHarm) continue;
+      // small ones fly past harmlessly; big ones hurt you and crack the platform
+      if (!SPACE.astHarm && !as.big) continue;
       if (dist(as.x, as.y, this.x, this.y) < as.r + GUY_R) { this.hurt(SPACE.astHit); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; continue; }
       const c = Math.floor((as.x - GX0) / TILE), r = Math.floor((as.y - GY0) / TILE);
       if (this.onPlat(c, r) && Math.abs(as.x - tileX(c)) < TILE * .35 && Math.abs(as.y - tileY(r)) < TILE * .35) { this.crackPlat(c, r); this.blasts.push({ x: as.x, y: as.y, t: 0 }); Sound.boom(false); as.r = 0; }
     }
     this.asteroids = this.asteroids.filter(as => as.r > 0 && dist(as.x, as.y, b.x, b.y) < SPACE.astFrom + 200);
-    // stone from shot asteroids drifts; on the platform it stops, and you pick it up by walking over it
+    // little asteroids from shot ones drift; on the platform they stop, and you pick one up (1 stone) by walking over it.
+    // A catcher pulls them in and turns each into 1 stone, 2 copper and (mostly) 1 iron.
+    const cats: { b: Bld; x: number; y: number }[] = [];
+    for (const [key, b] of this.blds) if (b.type === 'catcher' && catchN(b) < SPACE.catchHold) { const [c, r] = key.split(',').map(Number); cats.push({ b, x: tileX(c), y: tileY(r) }); }
     for (const f of this.floaters) {
       f.t += dt;
+      let cat: typeof cats[number] | undefined, cd = SPACE.catchR;
+      for (const ct of cats) { const d = dist(f.x, f.y, ct.x, ct.y); if (d < cd && catchN(ct.b) < SPACE.catchHold) { cd = d; cat = ct; } }
+      if (cat) {
+        const sp = Math.min(cd, 90 * dt); f.x += (cat.x - f.x) / cd * sp; f.y += (cat.y - f.y) / cd * sp; f.t = Math.min(f.t, SPACE.stoneLife - 5);
+        if (cd < 5) {
+          const bf = cat.b.buf ??= {}, iron = Math.random() < SPACE.catchIron;
+          bf.stone = (bf.stone ?? 0) + 1; bf.copper = (bf.copper ?? 0) + 2; if (iron) bf.iron = (bf.iron ?? 0) + 1;
+          f.t = 1e9; this.sparks.push({ x: cat.x, y: cat.y, t: 0 });
+        }
+        continue;
+      }
       if (!f.landed) { f.x += f.vx * dt; f.y += f.vy * dt; if (this.onPlatXY(f.x, f.y)) f.landed = true; }
       const mate = [...this.mates.values()].find(m => !((m.p.deadT as number) > 0) && dist(f.x, f.y, m.p.x as number, m.p.y as number) < GUY_R + 8);
       const grab = () => { f.t = 1e9; this.bag.stone++; this.syncQuick(); this.bubble(f.x, f.y - 12, '+1 stone', 'info'); Sound.pop(); };
@@ -1021,7 +1046,9 @@ export class Survival {
   /** A bolt at (x, y) hits an asteroid: it breaks up into stone. */
   private shootAsteroid(x: number, y: number) {
     const as = this.asteroids.find(a => a.r > 0 && dist(a.x, a.y, x, y) < a.r + 5); if (!as) return false;
-    for (let i = 0; i < SPACE.astDrop; i++) { const a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 30; this.floaters.push({ x: as.x, y: as.y, vx: as.vx * .35 + Math.cos(a) * sp, vy: as.vy * .35 + Math.sin(a) * sp, t: 0, landed: false }); }
+    // a big one takes a few shots
+    if (as.big && (as.hp = (as.hp ?? 1) - 1) > 0) { this.sparks.push({ x, y, t: 0 }); Sound.noise(.12, 'lowpass', 900, .4, .2); return true; }
+    for (let i = 0; i < (as.big ? SPACE.bigDrop : SPACE.astDrop); i++) { const a = Math.random() * Math.PI * 2, sp = 10 + Math.random() * 30; this.floaters.push({ x: as.x, y: as.y, vx: as.vx * .35 + Math.cos(a) * sp, vy: as.vy * .35 + Math.sin(a) * sp, t: 0, landed: false }); }
     this.sparks.push({ x: as.x, y: as.y, t: 0 }); this.blasts.push({ x: as.x, y: as.y, t: 0 }); as.r = 0; this.hits++;
     Sound.noise(.2, 'lowpass', 1200, .5, .3);
     return true;
@@ -1185,15 +1212,16 @@ export class Survival {
   }
   /** Asteroids and the stone floating off them. */
   private drawRocks(g: CanvasRenderingContext2D) {
-    for (const f of this.floaters) { g.globalAlpha = f.landed ? 1 : Math.max(0, Math.min(1, (SPACE.stoneLife - f.t) / 4)); paintItem(g, f.x, f.y, 'stone'); }
+    this.floaters.forEach((f, i) => { g.globalAlpha = f.landed ? 1 : Math.max(0, Math.min(1, (SPACE.stoneLife - f.t) / 4)); paintPebble(g, f.x, f.y, i); });
     g.globalAlpha = 1;
     for (const as of this.asteroids) {
       if (!this.seen(as.x, as.y)) continue;
       g.save(); g.translate(as.x, as.y); g.rotate(as.a);
-      g.fillStyle = '#7a6f66'; g.beginPath();
+      g.fillStyle = as.big ? '#6a5f58' : '#7a6f66'; g.beginPath();
       as.pts.forEach((k, i) => { const a = i / as.pts.length * Math.PI * 2; g[i ? 'lineTo' : 'moveTo'](Math.cos(a) * as.r * k, Math.sin(a) * as.r * k); });
       g.closePath(); g.fill(); g.strokeStyle = '#3e3832'; g.lineWidth = 1.2; g.stroke();
       g.fillStyle = 'rgba(40,34,30,.55)'; g.beginPath(); g.arc(as.r * .25, -as.r * .2, as.r * .25, 0, 7); g.arc(-as.r * .3, as.r * .25, as.r * .18, 0, 7); g.fill();
+      if (as.big) { g.strokeStyle = 'rgba(255,120,90,.55)'; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, as.r + 3, 0, 7); g.stroke(); }
       g.restore();
     }
   }
@@ -2000,6 +2028,14 @@ export class Survival {
         if (b.fuel > 0) { b.fuel = Math.max(0, b.fuel - dt * rate); this.pollution += P.gen * dt; }
         continue;
       }
+      if (b.type === 'catcher') {
+        // what it caught goes out the front, one at a time
+        for (let i = 0; i < CATCH_OUT.length; i++) {
+          const k = CATCH_OUT[(b.t + i) % CATCH_OUT.length];
+          if ((b.buf?.[k] ?? 0) > 0 && this.deliver(c + dx, r + dy, k)) { b.buf![k]! -= 1; b.t = (b.t + i + 1) % CATCH_OUT.length; break; }
+        }
+        continue;
+      }
       if (b.type !== 'furnace' && b.type !== 'asm' && b.type !== 'drill') continue;
       // things made go out the front, onto a belt or into whatever is there
       if (b.out > 0 && b.outK && this.deliver(c + dx, r + dy, b.outK)) { b.out--; if (!b.out) b.outK = undefined; }
@@ -2216,9 +2252,12 @@ export class Survival {
   }
   /** Takes out what a building made, then puts in what it can use from your pocket. */
   private fillBld(key: string) {
-    const b = this.blds.get(key)!, [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
+    const b = this.blds.get(key); if (!b) return;
+    const [c, r] = key.split(',').map(Number), x = tileX(c), y = tileY(r);
     const said: string[] = [];
     if (b.out > 0 && b.outK) { this.bag[b.outK] += b.out; said.push(`+${b.out} ${KIND_NAME[b.outK]}`); b.out = 0; b.outK = undefined; }
+    if (b.type === 'catcher') for (const k of CATCH_OUT) { const n = b.buf?.[k] ?? 0; if (n > 0) { this.bag[k] += n; said.push(`+${n} ${KIND_NAME[k]}`); b.buf![k] = 0; } }
+    if (b.type === 'catcher') this.syncQuick();
     if (b.type === 'hub') {
       const n = this.bag.robot;
       if (n) { b.robots += n; for (let i = 0; i < n; i++) this.robots.push(this.newRobot(key)); this.bag.robot = 0; said.push(`${n} robot${n > 1 ? 's' : ''} in`); }
@@ -2230,7 +2269,7 @@ export class Survival {
       for (const k of order) { let n = 0; while (this.bag[k] > 0 && this.feedBld(b, k)) { this.bag[k]--; n++; } if (n) { said.push(`${n} ${KIND_NAME[k]} in`); break; } }
     }
     if (said.length) { this.bubble(x, y - 20, said.join(', '), 'info'); Sound.thump(); }
-    else { this.bubble(x, y - 20, b.type === 'furnace' ? 'Bring ore or stone to smelt' : b.type === 'gen' ? 'It burns stone' : b.type === 'hub' ? 'Craft robots to put in it' : b.type === 'drill' ? 'Nothing dug yet' : 'Nothing to put in', 'info'); Sound.denied(); }
+    else { this.bubble(x, y - 20, b.type === 'furnace' ? 'Bring ore or stone to smelt' : b.type === 'gen' ? 'It burns stone' : b.type === 'hub' ? 'Craft robots to put in it' : b.type === 'drill' ? 'Nothing dug yet' : b.type === 'catcher' ? 'Nothing caught yet' : 'Nothing to put in', 'info'); Sound.denied(); }
     if (this.bldOpen) this.renderBld();
   }
 
@@ -2449,6 +2488,8 @@ export class Survival {
         if (this.turrets.has(key)) { if (this.hostOnly()) return; this.picked = key; Sound.click(); return; }
         this.picked = null;
         if (this.chests.has(key)) { this.openBox(key); return; }
+        // a catcher: one tap takes what it caught
+        if (b?.type === 'catcher') { if (!this.remote('fillBld', [key])) this.fillBld(key); return; }
         // furnaces, assemblers and drills open their panel (which has Pick up)
         if (b && (b.type === 'asm' || b.type === 'furnace' || b.type === 'drill')) { this.openBld(key); return; }
         hint(tileX(t.c), tileY(t.r) - 14);
@@ -2594,6 +2635,7 @@ export class Survival {
     if (this.taken(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Something is there', 'info'); Sound.denied(); return; }
     if (blockedTile(c, r)) { this.bubble(tileX(c), tileY(r) - 16, "Can't put that there", 'info'); Sound.denied(); return; }
     if (this.space && !this.onPlat(c, r)) { this.bubble(tileX(c), tileY(r) - 16, 'Only on the platform', 'info'); Sound.denied(); return; }
+    if (type === 'catcher' && !this.space) { this.bubble(tileX(c), tileY(r) - 16, 'Catchers are for space', 'info'); Sound.denied(); return; }
     if (type === 'drill' && this.patchAt(c, r) < 0) { this.bubble(tileX(c), tileY(r) - 16, 'Put drills on an ore patch', 'info'); Sound.denied(); return; }
     const tk = ITEM_T[type];
     if (type === 'belt') this.belts.set(key, this.placeDir);
@@ -4302,6 +4344,25 @@ function paintGhost(g: CanvasRenderingContext2D, c: number, r: number, q: Ghost,
   g.strokeStyle = bad ? 'rgba(255,110,95,.85)' : 'rgba(160,220,255,.75)'; g.lineWidth = 1;
   if (!isBig(q.p)) g.strokeRect(GX0 + c * TILE + 1.5, GY0 + r * TILE + 1.5, TILE - 3, TILE - 3);
 }
+/** A little asteroid: a lumpy grey pebble. */
+function paintPebble(g: CanvasRenderingContext2D, x: number, y: number, i: number) {
+  g.fillStyle = '#8a7f75'; g.strokeStyle = '#3e3832'; g.lineWidth = 1; g.beginPath();
+  for (let j = 0; j < 6; j++) { const a = j / 6 * Math.PI * 2, k = 3.6 + ((i * 7 + j * 3) % 5) * .35; g[j ? 'lineTo' : 'moveTo'](x + Math.cos(a) * k, y + Math.sin(a) * k); }
+  g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = 'rgba(40,34,30,.5)'; g.beginPath(); g.arc(x + 1, y - .8, 1.1, 0, 7); g.fill();
+}
+/** A catcher: a dish with three claws that pulls in little asteroids, and an arrow for where things go out. */
+function paintCatcher(g: CanvasRenderingContext2D, d: number, t: number, full: number) {
+  g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(-10, -9, 22, 22);
+  g.fillStyle = '#3c4552'; g.fillRect(-11, -11, 22, 22);
+  g.fillStyle = '#5d6b7d'; g.beginPath(); g.arc(0, 0, 8.5, 0, 7); g.fill();
+  g.fillStyle = '#9fdcff'; g.globalAlpha = .35 + .25 * Math.sin(t * 4); g.beginPath(); g.arc(0, 0, 4.5, 0, 7); g.fill(); g.globalAlpha = 1;
+  g.strokeStyle = '#c9d4df'; g.lineWidth = 2; g.lineCap = 'round';
+  for (let i = 0; i < 3; i++) { const a = t * .8 + i * Math.PI * 2 / 3; g.beginPath(); g.moveTo(Math.cos(a) * 5, Math.sin(a) * 5); g.lineTo(Math.cos(a + .35) * 9.5, Math.sin(a + .35) * 9.5); g.stroke(); }
+  g.lineCap = 'butt';
+  const [dx, dy] = DIRS[d]; g.fillStyle = '#ffcf8c'; g.beginPath(); g.moveTo(dx * 11, dy * 11); g.lineTo(dx * 7 - dy * 3, dy * 7 - dx * 3); g.lineTo(dx * 7 + dy * 3, dy * 7 + dx * 3); g.fill();
+  if (full > 0) { g.fillStyle = full >= 1 ? '#ff8a6a' : '#7fd47f'; g.fillRect(-10, 9, 20 * Math.min(1, full), 2); }
+}
 function paintPlaceable(g: CanvasRenderingContext2D, x: number, y: number, p: Placeable, d: number, t: number) {
   if (p === 'plat') { paintPlat(g, x - TILE / 2, y - TILE / 2, 0); return; }
   if (p === 'belt') paintBelt(g, x, y, d, t);
@@ -4440,6 +4501,7 @@ function paintBld(g: CanvasRenderingContext2D, x: number, y: number, b: Bld, t: 
     g.restore(); return;
   }
   if (b.type === 'drill') { paintDrill(g, dx, dy, b.on === false ? 0 : t, b.on !== false && t > 0); g.restore(); return; }
+  if (b.type === 'catcher') { paintCatcher(g, b.d, t, catchN(b) / SPACE.catchHold); g.restore(); return; }
   if (b.type === 'tunnel') {
     g.fillStyle = '#3a3330'; g.fillRect(-11, -11, 22, 22);
     g.fillStyle = '#15110f'; g.beginPath(); g.arc(dx * 3, dy * 3, 7, 0, 7); g.fill();
