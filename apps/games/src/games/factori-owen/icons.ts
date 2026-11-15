@@ -266,6 +266,148 @@ export function drawItem(c: Ctx, item: ItemId) {
     case 'green-pack': flask(c, '#43c463', '#c5ffd0'); break;
     case 'military-pack': flask(c, '#6b7280', '#d1d5db'); break;
     case 'advanced-pack': flask(c, '#3b82f6', '#bfdbfe'); break;
+    case 'grenade': {
+      c.fillStyle = '#4b5a3a';
+      c.beginPath();
+      c.ellipse(0.5, 0.58, 0.26, 0.3, 0, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#2f3a24';
+      c.lineWidth = 0.04;
+      for (const yy of [0.48, 0.62, 0.76]) {
+        c.beginPath();
+        c.moveTo(0.27, yy);
+        c.lineTo(0.73, yy);
+        c.stroke();
+      }
+      c.fillStyle = '#8d939e';
+      c.fillRect(0.42, 0.18, 0.16, 0.14);
+      c.strokeStyle = '#c9ced8';
+      c.lineWidth = 0.05;
+      c.beginPath();
+      c.arc(0.66, 0.22, 0.08, 0, Math.PI * 2);
+      c.stroke();
+      break;
+    }
+    case 'helper-drone': {
+      c.fillStyle = '#4b5563';
+      c.fillRect(0.12, 0.3, 0.76, 0.06);
+      for (const xx of [0.18, 0.82]) {
+        c.fillStyle = 'rgba(200,220,255,.6)';
+        c.beginPath();
+        c.ellipse(xx, 0.28, 0.14, 0.04, 0, 0, Math.PI * 2);
+        c.fill();
+      }
+      c.fillStyle = '#9fb0e6';
+      c.beginPath();
+      c.arc(0.5, 0.55, 0.22, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#1b2433';
+      c.beginPath();
+      c.arc(0.5, 0.55, 0.1, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#ff5b4b';
+      c.beginPath();
+      c.arc(0.5, 0.55, 0.04, 0, Math.PI * 2);
+      c.fill();
+      break;
+    }
+    case 'armor-1': case 'armor-2': case 'armor-3': case 'armor-4': case 'armor-5': {
+      const tier = Number(item.slice(-1));
+      const [body, trim] = [['#9a6a3c', '#5f3e20'], ['#6f82c8', '#3b4a85'], ['#a4acb8', '#4e535c'], ['#3b4a6b', '#e3b341'], ['#1f2a3a', '#5adcff']][tier - 1];
+      c.fillStyle = body;
+      c.beginPath();
+      c.moveTo(0.3, 0.14);
+      c.lineTo(0.42, 0.2);
+      c.lineTo(0.58, 0.2);
+      c.lineTo(0.7, 0.14);
+      c.lineTo(0.9, 0.3);
+      c.lineTo(0.8, 0.48);
+      c.lineTo(0.74, 0.44);
+      c.lineTo(0.74, 0.88);
+      c.lineTo(0.26, 0.88);
+      c.lineTo(0.26, 0.44);
+      c.lineTo(0.2, 0.48);
+      c.lineTo(0.1, 0.3);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = trim;
+      c.lineWidth = 0.05;
+      c.stroke();
+      owenO(c, 0.5, 0.5, 0.1, trim);
+      for (let i = 0; i < tier; i++) {
+        c.fillStyle = trim;
+        c.fillRect(0.3 + i * 0.09, 0.74, 0.06, 0.06);
+      }
+      break;
+    }
+    case 'eq-solar': case 'eq-battery': case 'eq-core': case 'eq-laser': case 'eq-shield': case 'eq-legs': case 'eq-night': {
+      c.fillStyle = '#2b3440';
+      c.beginPath();
+      c.roundRect(0.08, 0.08, 0.84, 0.84, 0.1);
+      c.fill();
+      c.strokeStyle = '#5b6c7d';
+      c.lineWidth = 0.04;
+      c.stroke();
+      if (item === 'eq-solar') {
+        c.fillStyle = '#1d3566';
+        for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) c.fillRect(0.18 + i * 0.33, 0.18 + j * 0.33, 0.3, 0.3);
+        c.fillStyle = 'rgba(120,170,255,.4)';
+        c.fillRect(0.18, 0.18, 0.63, 0.08);
+      } else if (item === 'eq-battery') {
+        c.fillStyle = '#3f8f63';
+        c.fillRect(0.3, 0.22, 0.4, 0.62);
+        c.fillStyle = '#57d38c';
+        c.fillRect(0.34, 0.5, 0.32, 0.3);
+        c.fillStyle = '#c9ced8';
+        c.fillRect(0.42, 0.15, 0.16, 0.07);
+      } else if (item === 'eq-core') {
+        const grd = c.createRadialGradient(0.5, 0.5, 0.02, 0.5, 0.5, 0.32);
+        grd.addColorStop(0, '#fff3b0');
+        grd.addColorStop(1, '#e3b341');
+        c.fillStyle = grd;
+        c.beginPath();
+        c.arc(0.5, 0.5, 0.3, 0, Math.PI * 2);
+        c.fill();
+        owenO(c, 0.5, 0.5, 0.12, '#8a5a10');
+      } else if (item === 'eq-laser') {
+        c.fillStyle = '#7d8a9b';
+        c.fillRect(0.2, 0.42, 0.45, 0.16);
+        c.fillStyle = '#d6455d';
+        c.fillRect(0.62, 0.47, 0.22, 0.06);
+        c.fillStyle = '#ffb3b3';
+        c.beginPath();
+        c.arc(0.84, 0.5, 0.05, 0, Math.PI * 2);
+        c.fill();
+      } else if (item === 'eq-shield') {
+        c.fillStyle = 'rgba(90,169,255,.8)';
+        c.beginPath();
+        c.moveTo(0.5, 0.16);
+        c.lineTo(0.8, 0.28);
+        c.quadraticCurveTo(0.78, 0.7, 0.5, 0.86);
+        c.quadraticCurveTo(0.22, 0.7, 0.2, 0.28);
+        c.closePath();
+        c.fill();
+      } else if (item === 'eq-legs') {
+        c.fillStyle = '#9aa2ad';
+        c.fillRect(0.28, 0.18, 0.14, 0.62);
+        c.fillRect(0.58, 0.18, 0.14, 0.62);
+        c.fillStyle = '#e3b341';
+        c.fillRect(0.24, 0.42, 0.22, 0.08);
+        c.fillRect(0.54, 0.42, 0.22, 0.08);
+        c.fillStyle = '#4b5563';
+        c.fillRect(0.22, 0.78, 0.24, 0.08);
+        c.fillRect(0.52, 0.78, 0.24, 0.08);
+      } else {
+        c.fillStyle = '#1b2433';
+        c.fillRect(0.16, 0.4, 0.68, 0.22);
+        c.fillStyle = '#57d38c';
+        c.beginPath();
+        c.arc(0.34, 0.51, 0.08, 0, Math.PI * 2);
+        c.arc(0.66, 0.51, 0.08, 0, Math.PI * 2);
+        c.fill();
+      }
+      break;
+    }
     default:
       if (ITEMS[item].place) drawEntityIcon(c, ITEMS[item].place!);
   }

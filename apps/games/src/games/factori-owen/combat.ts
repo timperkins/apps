@@ -2,6 +2,8 @@
 import { ENTITIES, maxHp, type ItemId } from './data';
 import type { Entity, Game } from './sim';
 import { WORLD } from './world';
+import { bulletMult, fireRate, healing, railMult, turretRange } from './bonus';
+import { absorb, lasersReady, LASER_DAMAGE, LASER_RANGE, LASER_SHOT_J } from './armor';
 
 export const BUG_NAMES = ['Calvin', 'Archie', 'Mom', 'Dad', 'Roger'];
 /** The player walks 6 tiles/s; bugs run at 95% of that. */
@@ -59,7 +61,7 @@ export interface Nest {
 }
 
 export interface Fx {
-  kind: 'bullet' | 'rail' | 'splat' | 'boom' | 'bite';
+  kind: 'bullet' | 'rail' | 'splat' | 'boom' | 'bite' | 'laser' | 'grenade' | 'drone';
   x0: number;
   y0: number;
   x1: number;
@@ -107,6 +109,10 @@ export function newCombatState() {
     muzzle: 0,
     aimAngle: Math.PI / 2,
     railShots: 0,
+    /** grenades in the air */
+    grenades: [] as { x: number; y: number; t: number }[],
+    /** the helper drone, when you carry one */
+    drone: null as null | { x: number; y: number; cd: number; angle: number },
   };
 }
 export type CombatState = ReturnType<typeof newCombatState>;
@@ -260,14 +266,18 @@ export function playerWeapon(g: Game): keyof typeof WEAPONS | null {
 }
 
 /** Fires a weapon from (x, y) at the nearest target (or at `aim`). Returns false if nothing to shoot. */
-export function playerFireFrom(g: Game, x: number, y: number, wk: keyof typeof WEAPONS, aim?: { x: number; y: number }): boolean {
+export function playerFireFrom(g: Game, x: number, y: number, wk: keyof typeof WEAPONS | 'grenade', aim?: { x: number; y: number }): boolean {
+  if (wk === 'grenade') {
+    if (aim) throwGrenade(g, x, y, aim.x, aim.y);
+    return !!aim;
+  }
   const wpn = WEAPONS[wk];
   if (!wpn) return false;
   let t = nearestTarget(g, aim?.x ?? x, aim?.y ?? y, aim ? 4 : wpn.range);
   if (t && Math.hypot(t.x - x, t.y - y) > wpn.range + NEST_R) t = null;
   if (!t && !aim) return false;
   if (!t && aim) t = { x: aim.x, y: aim.y };
-  if (wk === 'rail') railShot(g, x, y - 0.1, t!.x, t!.y, wpn.range, wpn.damage);
+  if (wk === 'rail') railShot(g, x, y - 0.1, t!.x, t!.y, wpn.range, wpn.damage * railMult(g));
   else {
     if (t!.bug || t!.nest) shoot(g, x, y - 0.1, t!, wpn.damage * damageMult(g));
     else g.cs.fx.push({ kind: 'bullet', x0: x, y0: y - 0.1, x1: t!.x, y1: t!.y, t: 4, life: 4 });
@@ -319,7 +329,7 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
       g.events.push('shot');
     }
   } else playerFireFrom(g, g.px, g.py, wk, aim);
-  cs.gunCd = wpn.cooldown;
+  cs.gunCd = Math.round(wpn.cooldown / fireRate(g));
   const tx = t?.x ?? aim?.x, ty = t?.y ?? aim?.y;
   if (tx !== undefined && ty !== undefined) {
     cs.aimAngle = Math.atan2(ty - g.py, tx - g.px);
@@ -344,12 +354,16 @@ export function updateCombat(g: Game) {
     if (cs.reload === 0 && g.inv.remove('owen-ammo', 1) === 1) g.pistolRounds = MAG_SIZE;
   }
   // player regenerates after a while
-  if (g.tick - cs.lastHurt > 600 && cs.playerHp < PLAYER_HP) cs.playerHp = Math.min(PLAYER_HP, cs.playerHp + 0.25);
+  const heal = healing(g);
+  const max = g.maxHp();
+  if (g.tick - cs.lastHurt > (heal ? 180 : 600) && cs.playerHp < max) cs.playerHp = Math.min(max, cs.playerHp + (heal ? 1 : 0.25));
+  updateGrenades(g);
   for (const f of cs.fx) f.t--;
   if (cs.fx.length) cs.fx = cs.fx.filter((f) => f.t > 0);
 
   if (g.remote) return;
   updateTurrets(g);
+  updateHelpers(g);
   if (!g.enemies) return;
 
   if (g.tick % 60 === 0) secondly(g);
@@ -464,12 +478,7 @@ function updateBug(g: Game, b: Bug) {
         b.cd = 40;
         cs.fx.push({ kind: 'bite', x0: px, y0: py, x1: px, y1: py, t: 10, life: 10 });
         if (who) g.hurtOthers.push([who, k.damage, b.name]);
-        else {
-          cs.playerHp -= k.damage;
-          cs.lastHurt = g.tick;
-          g.events.push('hurt');
-          if (cs.playerHp <= 0) g.killPlayer(b.name);
-        }
+        else hurtPlayer(g, k.damage, b.name);
       }
       b.angle = Math.atan2(py - b.y, px - b.x);
       return;
@@ -489,6 +498,7 @@ function updateBug(g: Game, b: Bug) {
     if (Math.hypot(tx - b.x, ty - b.y) < 2.5) {
       let best: Entity | null = null, bd = 10;
       for (const e of g.ents.values()) {
+        if (e.def.kind === 'floor' || e.def.kind === 'mine') continue;
         const d = Math.hypot(e.cx - b.x, e.cy - b.y);
         if (d < bd) {
           bd = d;
@@ -527,7 +537,7 @@ function updateBug(g: Game, b: Bug) {
     const tx2 = Math.floor(nx + Math.cos(aa) * k.size * 0.5), ty2 = Math.floor(ny + Math.sin(aa) * k.size * 0.5);
     if (!g.world.inside(tx2, ty2)) continue;
     const e = g.entAt(tx2, ty2);
-    if (e && e.def.kind !== 'belt' && b.mode !== 'idle') {
+    if (e && !passable(e) && b.mode !== 'idle') {
       // something in the way: bite it
       if (b.cd <= 0) {
         damageEntity(g, e, k.damage);
@@ -537,7 +547,7 @@ function updateBug(g: Game, b: Bug) {
       b.angle = aa;
       return;
     }
-    if (e && e.def.kind !== 'belt') continue;
+    if (e && !passable(e)) continue;
     const i = ty2 * WORLD + tx2;
     if (g.world.ground[i] === 4 || g.world.tree[i]) continue;
     b.x = nx;
@@ -572,14 +582,14 @@ function updateTurrets(g: Game) {
     e.status = rail ? (e.progress < 1 ? `Charging ${Math.round(e.progress * 100)}%` : 'Ready') : 'Ready';
     if (e.anim > 0 || g.tick % 4 !== e.id % 4) continue;
     if (rail && e.progress < 1) continue;
-    const t = nearestTarget(g, e.cx, e.cy, d.range!);
+    const t = nearestTarget(g, e.cx, e.cy, d.range! * turretRange(g));
     if (!t) continue;
     e.t = Math.atan2(t.y - e.cy, t.x - e.cx); // head angle
     if (rail) {
       e.input[ammo]! -= 1;
       if (!e.input[ammo]) delete e.input[ammo];
       e.progress = 0;
-      railShot(g, e.cx, e.cy - 0.3, t.x, t.y, d.range!, d.damage!);
+      railShot(g, e.cx, e.cy - 0.3, t.x, t.y, d.range! * turretRange(g), d.damage! * railMult(g));
     } else {
       if (e.burn <= 0) {
         e.input[ammo]! -= 1;
@@ -588,7 +598,7 @@ function updateTurrets(g: Game) {
       }
       e.burn--;
       shoot(g, e.cx, e.cy - 0.3, t, d.damage! * damageMult(g));
-      e.anim = Math.round(60 / d.fireRate!);
+      e.anim = Math.round(60 / d.fireRate! / fireRate(g));
       e.status = 'Firing';
       g.events.push('turret');
     }
@@ -600,5 +610,96 @@ export function healthFrac(e: Entity) {
 }
 
 export function damageMult(g: Game) {
-  return g.researched.has('weapon-damage') ? 1.5 : 1;
+  return bulletMult(g);
+}
+
+/** Bugs walk over belts, paths, splitters and mines. */
+function passable(e: Entity) {
+  const k = e.def.kind;
+  return k === 'belt' || k === 'floor' || k === 'splitter' || k === 'mine';
+}
+
+/** Damage to the local player, after the energy shield and armor. */
+export function hurtPlayer(g: Game, dmg: number, by: string) {
+  const cs = g.cs;
+  cs.playerHp -= absorb(g, dmg);
+  cs.lastHurt = g.tick;
+  g.events.push('hurt');
+  if (cs.playerHp <= 0) g.killPlayer(by);
+}
+
+export const GRENADE_RADIUS = 3.2;
+const GRENADE_DAMAGE = 90;
+const GRENADE_FLIGHT = 36;
+
+export function throwGrenade(g: Game, x: number, y: number, tx: number, ty: number) {
+  // can't throw farther than 14 tiles
+  const d = Math.hypot(tx - x, ty - y);
+  if (d > 14) {
+    tx = x + ((tx - x) / d) * 14;
+    ty = y + ((ty - y) / d) * 14;
+  }
+  g.cs.grenades.push({ x: tx, y: ty, t: GRENADE_FLIGHT });
+  g.cs.fx.push({ kind: 'grenade', x0: x, y0: y - 0.2, x1: tx, y1: ty, t: GRENADE_FLIGHT, life: GRENADE_FLIGHT });
+}
+
+function explode(g: Game, x: number, y: number, r: number, dmg: number) {
+  g.cs.fx.push({ kind: 'boom', x0: x, y0: y, x1: x, y1: y, t: 30, life: 30 });
+  g.events.push('destroyed');
+  if (g.remote) return;
+  for (const b of [...g.cs.bugs]) if (Math.hypot(b.x - x, b.y - y) < r) damageBug(g, b, dmg);
+  for (const n of [...g.cs.nests]) if (Math.hypot(n.x - x, n.y - y) < r + NEST_R) damageNest(g, n, dmg);
+}
+
+function updateGrenades(g: Game) {
+  const cs = g.cs;
+  if (!cs.grenades.length) return;
+  for (const gr of cs.grenades) if (--gr.t <= 0) explode(g, gr.x, gr.y, GRENADE_RADIUS, GRENADE_DAMAGE);
+  cs.grenades = cs.grenades.filter((gr) => gr.t > 0);
+}
+
+/** Land mines, personal lasers and the helper drone. */
+function updateHelpers(g: Game) {
+  const cs = g.cs;
+  // land mines go off when a bug steps close
+  if (g.tick % 6 === 0 && cs.bugs.length) {
+    for (const e of [...g.ents.values()]) {
+      if (e.def.kind !== 'mine') continue;
+      if (cs.bugs.some((b) => Math.abs(b.x - e.cx) < 1 && Math.abs(b.y - e.cy) < 1)) {
+        g.remove(e);
+        explode(g, e.cx, e.cy, 3, 150);
+      }
+    }
+  }
+  if (g.playerDead) return;
+  // personal lasers
+  const n = lasersReady(g);
+  if (n > 0) {
+    const t = nearestTarget(g, g.px, g.py, LASER_RANGE, false);
+    if (t?.bug) {
+      for (let i = 0; i < n; i++) g.suit.energy -= LASER_SHOT_J;
+      damageBug(g, t.bug, LASER_DAMAGE * n);
+      cs.fx.push({ kind: 'laser', x0: g.px, y0: g.py - 0.5, x1: t.x, y1: t.y, t: 8, life: 8 });
+      g.suit.laserCd = 30;
+      g.events.push('laser');
+    }
+  }
+  // the helper drone floats next to you and shoots bugs
+  if (g.inv.count('helper-drone') > 0) {
+    if (!cs.drone) cs.drone = { x: g.px, y: g.py, cd: 0, angle: 0 };
+    const dr = cs.drone;
+    dr.angle += 0.03;
+    const hx = g.px + Math.cos(dr.angle) * 1.3, hy = g.py - 0.8 + Math.sin(dr.angle) * 0.5;
+    dr.x += (hx - dr.x) * 0.12;
+    dr.y += (hy - dr.y) * 0.12;
+    if (dr.cd > 0) dr.cd--;
+    else {
+      const t = nearestTarget(g, dr.x, dr.y, 11, false);
+      if (t?.bug) {
+        shoot(g, dr.x, dr.y, t, 7);
+        dr.cd = 18;
+        g.events.push('turret');
+      }
+    }
+  } else cs.drone = null;
 }

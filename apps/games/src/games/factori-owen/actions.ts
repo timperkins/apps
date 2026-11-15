@@ -1,6 +1,6 @@
 // Everything a player can do to the shared world. Single-player and hosts apply these directly;
 // guests send them to the host (see mp.ts).
-import { RECIPE_BY_ID, type EntityType, type ItemId } from './data';
+import { ITEMS, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
 import { RES_ITEM } from './world';
 import type { Dir, Entity, Game } from './sim';
 
@@ -71,6 +71,11 @@ export function doTake(g: Game, e: Entity, what: TakeWhat, key?: string | number
 
 export function doSetRecipe(g: Game, e: Entity, id: string): Items {
   const out: Items = [];
+  if (e.def.filter) {
+    // a filter arm's "recipe" is the item it moves
+    e.recipe = ITEMS[id as ItemId] ? id : null;
+    return out;
+  }
   if (!RECIPE_BY_ID[id]) return out;
   if (e.recipe !== id) {
     for (const [k, v] of Object.entries(e.input)) if (v) out.push([k as ItemId, v]);

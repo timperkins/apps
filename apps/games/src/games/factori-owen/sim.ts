@@ -7,6 +7,8 @@ import {
 import { Inventory, type Stack } from './inventory';
 import { b64, RES_ITEM, Res, unb64, World, WORLD } from './world';
 import { packExplored, unpackExplored } from './minimap';
+import { asmProd, bootsMult, craftSpeed, genMult, hpMult, invSize, labSpeed, miningProd } from './bonus';
+import { legsMult, newSuit, suitFromJSON, suitToJSON, updateSuit } from './armor';
 import { newCombatState, nestBlocks, playerFire, PLAYER_HP, PLAYER_SPEED, spawnNests, updateCombat, type CombatState } from './combat';
 
 export interface RemotePlayer {
@@ -59,6 +61,8 @@ export class Entity {
   // drill
   pending: ItemId | null = null;
   cursor = 0;
+  /** productivity progress (drills, assemblers) */
+  extra = 0;
   // power
   net = -1;
   sat = 0;
@@ -142,13 +146,15 @@ export class Game {
   /** Guest copy of a hosted game: the host runs bugs, turrets and research. */
   remote = false;
   /** Guests send shots to the host instead of resolving them. */
-  onFire: ((weapon: 'pistol' | 'rail', aim?: { x: number; y: number }) => void) | null = null;
+  onFire: ((weapon: 'pistol' | 'rail' | 'grenade', aim?: { x: number; y: number }) => void) | null = null;
   /** Other players in a multiplayer game (host side), by id. */
   others = new Map<string, RemotePlayer>();
   /** Damage dealt to other players this tick, for the host to send out. */
   hurtOthers: [string, number, string][] = [];
   /** Tiles changed by mining, for the host to send out. */
   tileChanges = new Set<number>();
+  /** Armor and personal grid. */
+  suit = newSuit();
   /** 1 where the player has seen the tile (for the map). */
   explored = new Uint8Array(WORLD * WORLD);
   exploredAt = -1;
@@ -180,12 +186,21 @@ export class Game {
     if (this.playerDead === 0) {
       this.px = this.spawnX;
       this.py = this.spawnY;
-      this.cs.playerHp = PLAYER_HP;
+      this.cs.playerHp = this.maxHp();
       this.toast('You woke up back at the start.', 3);
     }
   }
 
   // ---------- helpers ----------
+
+  maxHp() {
+    return PLAYER_HP * hpMult(this);
+  }
+
+  /** Applies research upgrades that change the player's things (like the backpack). */
+  applyBonuses() {
+    this.inv.resize(invSize(this));
+  }
 
   entAt(x: number, y: number): Entity | null {
     if (x < 0 || y < 0 || x >= WORLD || y >= WORLD) return null;
@@ -244,6 +259,7 @@ export class Game {
   place(type: EntityType, x: number, y: number, dir: Dir): Entity | null {
     if (!this.canPlace(type, x, y)) return null;
     const e = new Entity(this.nextId++, type, x, y, ENTITIES[type].rotatable ? dir : 0);
+    if (e.def.ug) this.ugPair(e);
     this.addEntity(e);
     return e;
   }
@@ -295,6 +311,11 @@ export class Game {
 
   rotate(e: Entity) {
     if (!e.def.rotatable) return;
+    if (e.def.ug) {
+      // an underground belt flips between going in and coming out
+      e.recipe = e.recipe === 'out' ? null : 'out';
+      return;
+    }
     e.dir = ((e.dir + 1) % 4) as Dir;
     if (e.def.kind === 'belt') this.updateCurves(e.x, e.y);
   }
@@ -304,7 +325,7 @@ export class Game {
     for (const o of this.ents.values()) {
       if (o === e || o.def.kind !== 'pole') continue;
       const d = Math.hypot(o.cx - e.cx, o.cy - e.cy);
-      if (d <= POLE_WIRE_REACH) near.push([d, o]);
+      if (d <= Math.min(e.def.wireReach ?? POLE_WIRE_REACH, o.def.wireReach ?? POLE_WIRE_REACH)) near.push([d, o]);
     }
     near.sort((a, b) => a[0] - b[0]);
     for (const [, o] of near.slice(0, 2)) {
@@ -360,9 +381,24 @@ export class Game {
       const limit = i === items.length - 1 ? 1 : items[i + 1].pos - BELT_SPACING;
       b.pos = Math.min(b.pos + v, Math.max(b.pos, limit));
       if (i === items.length - 1 && b.pos >= 1) {
+        if (e.def.ug && e.recipe !== 'out') {
+          // underground entrance: the item pops out of the paired exit
+          const exit = this.ugExit(e);
+          if (exit && this.beltRoom(exit, 0)) {
+            items.pop();
+            this.beltPut(exit, b.item, 0);
+          }
+          b.pos = Math.min(b.pos, 1);
+          continue;
+        }
         const nx = e.x + DX[e.dir], ny = e.y + DY[e.dir];
         const n = this.entAt(nx, ny);
-        if (n && n.def.kind === 'belt' && n.dir !== (e.dir + 2) % 4) {
+        if (n && n.def.kind === 'splitter' && n.dir === e.dir) {
+          if (n.items.length < 2) {
+            items.pop();
+            n.items.push({ item: b.item, pos: 0 });
+          }
+        } else if (n && n.def.kind === 'belt' && n.dir !== (e.dir + 2) % 4) {
           const straight = n.dir === e.dir || n.curve === ((e.dir + 2) % 4);
           const entry = straight ? 0 : 0.5;
           if (this.beltRoom(n, entry)) {
@@ -373,6 +409,46 @@ export class Game {
         b.pos = Math.min(b.pos, 1);
       }
     }
+  }
+
+  /** The exit of an underground entrance: the first underground belt ahead, up to 5 tiles. */
+  ugExit(e: Entity): Entity | null {
+    for (let k = 1; k <= 5; k++) {
+      const o = this.entAt(e.x + DX[e.dir] * k, e.y + DY[e.dir] * k);
+      if (o && o.def.ug && o.dir === e.dir) return o.recipe === 'out' ? o : null;
+    }
+    return null;
+  }
+
+  /** Decides whether a new underground belt is an exit (an entrance points at it from behind). */
+  private ugPair(e: Entity) {
+    for (let k = 1; k <= 5; k++) {
+      const o = this.entAt(e.x - DX[e.dir] * k, e.y - DY[e.dir] * k);
+      if (o && o.def.ug && o.dir === e.dir) {
+        e.recipe = o.recipe === 'out' ? null : 'out';
+        return;
+      }
+    }
+    e.recipe = null;
+  }
+
+  /** Hands items out in turn to belts on the splitter's left, front and right. */
+  private updateSplitter(e: Entity) {
+    if (!e.items.length) return;
+    for (let k = 0; k < 3; k++) {
+      const turn = [3, 0, 1][(e.cursor + k) % 3];
+      const od = ((e.dir + turn) % 4) as Dir;
+      const n = this.entAt(e.x + DX[od], e.y + DY[od]);
+      if (!n || n.def.kind !== 'belt' || n.dir === (od + 2) % 4) continue;
+      const entry = n.dir === od ? 0 : 0.5;
+      if (this.beltPut(n, e.items[0].item, entry)) {
+        e.items.shift();
+        e.cursor = (e.cursor + k + 1) % 3;
+        e.working = true;
+        return;
+      }
+    }
+    e.working = false;
   }
 
   // ---------- item exchange ----------
@@ -530,9 +606,9 @@ export class Game {
       const d = e.def;
       if (d.kind === 'pole') continue;
       e.net = -1;
-      if (!d.electric && d.kind !== 'generator' && d.kind !== 'solar') continue;
+      if (!d.electric && d.kind !== 'generator' && d.kind !== 'solar' && d.kind !== 'battery') continue;
       for (const p of poles) {
-        const r = POLE_SUPPLY_RADIUS;
+        const r = p.def.supply ?? POLE_SUPPLY_RADIUS;
         if (e.x < p.cx + r && e.x + d.w > p.cx - r && e.y < p.cy + r && e.y + d.h > p.cy - r) {
           e.net = p.net;
           break;
@@ -550,6 +626,7 @@ export class Game {
       case 'assembler': return e.crafting ? d.power : d.power * 0.03;
       case 'lab': return e.crafting ? d.power : d.power * 0.03;
       case 'turret': return e.progress < 1 ? d.power : d.power * 0.01;
+      case 'lamp': return this.daylight() < 0.6 ? d.power : 0;
     }
     return d.power;
   }
@@ -560,22 +637,52 @@ export class Game {
     const demand = new Array(n).fill(0);
     const supply = new Array(n).fill(0);
     const light = this.daylight();
+    const gm = genMult(this);
+    const batts: Entity[] = [];
+    const out = new Array(n).fill(0); // what batteries could give, watts
+    const room = new Array(n).fill(0); // what batteries could take, watts
     for (const e of this.ents.values()) {
       if (e.net < 0) continue;
       const d = e.def;
       if (d.kind === 'generator') {
-        if (e.burn > 0 || e.fuel) supply[e.net] += d.output!;
+        if (e.burn > 0 || e.fuel) supply[e.net] += d.output! * gm;
       } else if (d.kind === 'solar') {
         supply[e.net] += d.output! * light;
+      } else if (d.kind === 'battery') {
+        batts.push(e);
+        out[e.net] += Math.min(d.rate!, e.burn * TPS);
+        room[e.net] += Math.min(d.rate!, (d.capacity! - e.burn) * TPS);
       } else demand[e.net] += this.wantsPower(e);
     }
+    // batteries fill up from spare power and help out when there isn't enough
+    const give = demand.map((dm, i) => Math.max(0, Math.min(out[i], dm - supply[i])));
+    const take = demand.map((dm, i) => Math.max(0, Math.min(room[i], supply[i] - dm)));
+    for (const e of batts) {
+      const d = e.def;
+      const i = e.net;
+      const myOut = Math.min(d.rate!, e.burn * TPS), myRoom = Math.min(d.rate!, (d.capacity! - e.burn) * TPS);
+      if (give[i] > 0 && out[i] > 0) e.burn -= (myOut * (give[i] / out[i])) / TPS;
+      if (take[i] > 0 && room[i] > 0) e.burn += (myRoom * (take[i] / room[i])) / TPS;
+      e.burn = Math.max(0, Math.min(d.capacity!, e.burn));
+      e.working = give[i] > 0 || take[i] > 0;
+      e.status = `Charge ${Math.round((e.burn / d.capacity!) * 100)}%` + (give[i] > 0 ? ' · helping out' : take[i] > 0 ? ' · charging' : '');
+    }
+    for (const e of this.ents.values()) if (e.def.kind === 'battery' && e.net < 0) e.status = 'Not connected to a power pole';
+    for (let i = 0; i < n; i++) {
+      supply[i] += give[i];
+      demand[i] += take[i];
+    }
     const sat = demand.map((dm, i) => (dm <= 0 ? 1 : Math.min(1, supply[i] / dm)));
-    const load = demand.map((dm, i) => (supply[i] <= 0 ? 0 : Math.min(1, dm / supply[i])));
+    // generators only burn for what isn't covered by solar and batteries
+    const load = demand.map((dm, i) => {
+      const gen = supply[i] - give[i];
+      return gen <= 0 ? 0 : Math.min(1, Math.max(0, dm) / supply[i]);
+    });
     for (const e of this.ents.values()) {
       const d = e.def;
       if (d.electric) e.sat = e.net >= 0 && supply[e.net] > 0 ? sat[e.net] : 0;
       if (d.kind === 'generator' && e.net >= 0) {
-        const want = load[e.net] * d.output! / TPS;
+        const want = load[e.net] * d.output! * gm / TPS;
         e.working = want > 0 && this.burnerDraw(e, want) > 0;
         e.status = !e.fuel && e.burn <= 0 ? 'No fuel' : load[e.net] > 0 ? `Supplying ${Math.round(load[e.net] * 100)}%` : 'Idle';
       } else if (d.kind === 'generator') {
@@ -642,7 +749,10 @@ export class Game {
     if (e.progress >= 1) {
       e.progress -= 1;
       const kind = this.world.res[ty * WORLD + tx] as Res;
-      this.world.mineRes(tx, ty);
+      // productivity: now and then a free ore that doesn't use up the patch
+      e.extra += miningProd(this);
+      if (e.extra >= 1) e.extra -= 1;
+      else this.world.mineRes(tx, ty);
       e.cursor++;
       e.pending = RES_ITEM[kind] as ItemId;
       this.produced[e.pending] = (this.produced[e.pending] ?? 0) + 1;
@@ -678,7 +788,7 @@ export class Game {
     const en = this.energy(e);
     if (en <= 0) {
       e.working = false;
-      e.status = 'No fuel';
+      e.status = d.electric ? (e.net < 0 ? 'Not connected to power' : 'No power') : 'No fuel';
       return;
     }
     e.working = true;
@@ -729,7 +839,13 @@ export class Game {
     e.anim += en;
     e.progress += (en * (d.speed ?? 0.75)) / TPS / r.time;
     if (e.progress >= 1) {
-      this.addOutput(e, r.out, r.count);
+      e.extra += asmProd(this);
+      let bonus = 0;
+      if (e.extra >= 1) {
+        e.extra -= 1;
+        bonus = r.count;
+      }
+      this.addOutput(e, r.out, r.count + bonus);
       e.crafting = null;
       e.progress = 0;
     }
@@ -765,7 +881,7 @@ export class Game {
     e.working = true;
     e.status = 'Researching ' + tech.name;
     e.anim += en;
-    e.progress += en / TPS / tech.time;
+    e.progress += (en * labSpeed(this)) / TPS / tech.time;
     if (e.progress >= 1) {
       e.crafting = null;
       e.progress = 0;
@@ -777,6 +893,7 @@ export class Game {
   private finishResearch(id: string) {
     this.researched.add(id);
     this.research = null;
+    this.applyBonuses();
     this.toast(`Research complete: ${TECH_BY_ID[id].name}`, 5);
     this.events.push('research');
     for (const e of this.ents.values()) if (e.def.kind === 'lab' && e.crafting === id) e.crafting = null;
@@ -810,7 +927,12 @@ export class Game {
           return;
         }
       }
-      const it = this.take(src, (i) => this.accepts(dst, i) > 0);
+      const filter = d.filter ? e.recipe : null;
+      if (d.filter && !filter) {
+        e.status = 'Pick an item to move';
+        return;
+      }
+      const it = this.take(src, (i) => (!filter || i === filter) && this.accepts(dst, i) > 0);
       if (!it) {
         e.status = 'Waiting for items';
         return;
@@ -946,7 +1068,7 @@ export class Game {
       for (const [it, n] of r.ing) this.inv.remove(it, n);
       this.craftProgress = 1e-6;
     }
-    this.craftProgress += 1 / TPS / r.time;
+    this.craftProgress += craftSpeed(this) / TPS / r.time;
     if (this.craftProgress >= 1) {
       this.craftProgress = 0;
       const added = this.inv.add(r.out, r.count);
@@ -981,7 +1103,8 @@ export class Game {
       mx = 0;
       my = 0;
     }
-    const sp = PLAYER_SPEED / TPS;
+    const under = this.entAt(Math.floor(this.px), Math.floor(this.py));
+    const sp = (PLAYER_SPEED * bootsMult(this) * legsMult(this) * (under?.def.kind === 'floor' ? 1.3 : 1)) / TPS;
     this.pmoving = mx !== 0 || my !== 0;
     if (this.pmoving) {
       const l = Math.hypot(mx, my);
@@ -991,7 +1114,6 @@ export class Game {
       else this.pdir = my > 0 ? 2 : 0;
     }
     // belts carry the player
-    const under = this.entAt(Math.floor(this.px), Math.floor(this.py));
     if (under && under.def.kind === 'belt') {
       const v = (under.def.speed ?? 1.875) / TPS;
       mx += DX[under.dir] * v;
@@ -1025,9 +1147,12 @@ export class Game {
         case 'furnace': this.updateFurnace(e); break;
         case 'assembler': this.updateAssembler(e); break;
         case 'lab': if (!this.remote) this.updateLab(e); break;
+        case 'splitter': this.updateSplitter(e); break;
+        case 'lamp': e.working = e.sat > 0 && this.daylight() < 0.6; break;
       }
     }
     this.updateCrafting();
+    updateSuit(this);
     if (this.shooting && !this.playerDead) playerFire(this, this.aim ?? undefined);
     updateCombat(this);
     this.updatePlayerLife();
@@ -1104,6 +1229,7 @@ export class Game {
       pol: Array.from(this.cs.pollution, (v) => Math.round(v * 100) / 100),
       kills: this.kills, nd: this.nestsDestroyed, pr: this.pistolRounds,
       exp: b64(packExplored(this.explored)),
+      suit: suitToJSON(this.suit),
     };
   }
 
@@ -1127,7 +1253,9 @@ export class Game {
     g.cs.nests = s.nests ?? [];
     g.cs.nextBug = g.cs.bugs.reduce((m: number, b: { id: number }) => Math.max(m, b.id + 1), 1);
     g.cs.evolution = s.evo ?? 0;
-    g.cs.playerHp = s.php ?? PLAYER_HP;
+    g.suit = suitFromJSON(s.suit);
+    g.applyBonuses();
+    g.cs.playerHp = s.php ?? g.maxHp();
     if (Array.isArray(s.pol)) g.cs.pollution.set(s.pol.slice(0, g.cs.pollution.length));
     g.kills = s.kills ?? 0;
     g.nestsDestroyed = s.nd ?? 0;
@@ -1140,7 +1268,7 @@ export class Game {
 
 export function solid(type: EntityType): boolean {
   const k = ENTITIES[type].kind;
-  return k !== 'belt';
+  return k !== 'belt' && k !== 'floor' && k !== 'splitter' && k !== 'mine';
 }
 
 

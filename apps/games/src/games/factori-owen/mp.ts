@@ -1,6 +1,6 @@
 // Multiplayer sessions on top of net.ts. The host's game is the real one; guests mirror it.
 import { ENTITIES, ITEMS, type EntityType, type ItemId } from './data';
-import { BUG_NAMES, playerFireFrom, PLAYER_HP, type Fx } from './combat';
+import { BUG_NAMES, hurtPlayer, playerFireFrom, PLAYER_HP, type Fx } from './combat';
 import { doMine, doSetRecipe, doTake, type Actions, type Items, type TakeWhat } from './actions';
 import { DEFAULT_LOOK, type PlayerLook } from './art';
 import { Host, joinHost, type Pipe } from './net';
@@ -272,10 +272,7 @@ export class GuestSession {
         break;
       }
       case 'hurt':
-        g.cs.playerHp -= m.dmg;
-        g.cs.lastHurt = g.tick;
-        g.events.push('hurt');
-        if (g.cs.playerHp <= 0) g.killPlayer(m.by);
+        hurtPlayer(g, m.dmg, m.by);
         break;
       case 'reply': {
         const cb = this.pending.get(m.rid);

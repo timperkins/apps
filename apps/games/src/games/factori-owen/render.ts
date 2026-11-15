@@ -221,7 +221,7 @@ export class Renderer {
       c.fillStyle = 'rgba(90,170,255,.14)';
       for (const e of g.ents.values())
         if (e.def.kind === 'pole') {
-          const r = POLE_SUPPLY_RADIUS;
+          const r = e.def.supply ?? POLE_SUPPLY_RADIUS;
           c.fillRect(e.cx - r, e.cy - r, r * 2, r * 2);
         }
     }
@@ -242,7 +242,11 @@ export class Renderer {
       curve: e.curve,
       noPower: !!e.def.electric && e.def.kind !== 'inserter' && (e.net < 0 || e.sat <= 0) && e.def.kind !== 'pole',
       noFuel: e.status === 'No fuel',
+      ugOut: e.recipe === 'out',
     });
+
+    // paths and mines lie flat on the ground
+    for (const e of vis) if (e.def.kind === 'floor' || e.def.kind === 'mine') drawBuilding(c, e.type, e.x, e.y, look(e));
 
     // belts, then their items
     for (const e of vis) if (e.def.kind === 'belt') drawBelt(c, e.type, e.x, e.y, look(e));
@@ -253,6 +257,12 @@ export class Renderer {
           c.drawImage(iconCanvas(b.item, 32), ix - 0.21, iy - 0.21, 0.42, 0.42);
         }
 
+    for (const e of vis)
+      if (e.def.kind === 'splitter') {
+        drawBuilding(c, e.type, e.x, e.y, look(e));
+        if (e.items[0]) c.drawImage(iconCanvas(e.items[0].item, 32), e.x + 0.29, e.y + 0.29, 0.42, 0.42);
+      }
+
     // inserter bases sit under everything tall
     for (const e of vis) if (e.def.kind === 'inserter') inserterBase(c, e.type, e.x, e.y, look(e));
 
@@ -261,7 +271,7 @@ export class Renderer {
     const tall: Item[] = [];
     for (const e of vis) {
       const k = e.def.kind;
-      if (k === 'belt' || k === 'inserter') continue;
+      if (k === 'belt' || k === 'inserter' || k === 'floor' || k === 'mine' || k === 'splitter') continue;
       tall.push({ y: e.y + e.def.h, f: () => this.building(e, look(e)) });
     }
     for (let y = y0; y <= y1; y++)
@@ -285,6 +295,8 @@ export class Renderer {
         } });
       }
     }
+    const dr = g.cs.drone;
+    if (dr && !g.playerDead) tall.push({ y: dr.y + 1.2, f: () => this.drone(dr.x, dr.y, time) });
     for (const o of this.others) tall.push({ y: o.y + 0.3, f: () => drawEngineer(c, o.x, o.y, o.dir, o.moving, time, false, o.look, 'pistol', DIR_ANGLE[o.dir], 0, 0) });
     const inView = (x: number, y: number, r: number) => x + r > x0 && x - r < x1 && y + r > y0 - 1 && y - r < y1;
     for (const n of g.cs.nests)
@@ -347,11 +359,42 @@ export class Renderer {
     this.overlays(g, ov);
   }
 
+  private drone(x: number, y: number, time: number) {
+    const c = this.c;
+    c.fillStyle = 'rgba(0,0,0,.25)';
+    c.beginPath();
+    c.ellipse(x, y + 1.1, 0.25, 0.08, 0, 0, Math.PI * 2);
+    c.fill();
+    c.save();
+    c.translate(x - 0.35, y - 0.35);
+    c.scale(0.7, 0.7);
+    c.drawImage(iconCanvas('helper-drone', 48), 0, Math.sin(time * 5) * 0.05, 1, 1);
+    c.restore();
+  }
+
   private effects(g: Game) {
     const c = this.c;
     for (const f of g.cs.fx) {
       const a = f.t / f.life;
-      if (f.kind === 'bullet') {
+      if (f.kind === 'laser') {
+        c.lineCap = 'round';
+        c.strokeStyle = `rgba(255,60,90,${a * 0.6})`;
+        c.lineWidth = 0.22 * a + 0.04;
+        c.beginPath();
+        c.moveTo(f.x0, f.y0);
+        c.lineTo(f.x1, f.y1);
+        c.stroke();
+        c.strokeStyle = `rgba(255,220,230,${a})`;
+        c.lineWidth = 0.05;
+        c.stroke();
+      } else if (f.kind === 'grenade') {
+        const p = 1 - a;
+        const gx = f.x0 + (f.x1 - f.x0) * p, gy = f.y0 + (f.y1 - f.y0) * p - Math.sin(p * Math.PI) * 2;
+        c.fillStyle = '#2f3a24';
+        c.beginPath();
+        c.arc(gx, gy, 0.14, 0, Math.PI * 2);
+        c.fill();
+      } else if (f.kind === 'bullet') {
         c.strokeStyle = `rgba(255,230,120,${a})`;
         c.lineWidth = 0.05;
         c.beginPath();
@@ -474,7 +517,7 @@ export class Renderer {
     d.setTransform(1, 0, 0, 1, 0, 0);
     d.globalCompositeOperation = 'source-over';
     d.clearRect(0, 0, dw, dh);
-    d.fillStyle = `rgba(8,12,38,${dark * 0.62})`;
+    d.fillStyle = `rgba(8,12,38,${dark * (g.suit.nightOn ? 0.2 : 0.62)})`;
     d.fillRect(0, 0, dw, dh);
     d.globalCompositeOperation = 'destination-out';
     const light = (wx: number, wy: number, r: number, a: number) => {
@@ -486,10 +529,11 @@ export class Renderer {
       d.fillStyle = grd;
       d.fillRect(sx - rr, sy - rr, rr * 2, rr * 2);
     };
-    light(g.px, g.py, 7, 0.95);
+    light(g.px, g.py, g.suit.nightOn ? 16 : 7, 0.95);
     for (const e of vis) {
       const k = e.def.kind;
-      if (k === 'pole') light(e.cx, e.cy, 3.5, 0.6);
+      if (k === 'lamp' && e.working) light(e.cx, e.cy - 0.3, 7.5, 0.95);
+      else if (k === 'pole') light(e.cx, e.cy, 3.5, 0.6);
       else if (e.working && (k === 'furnace' || k === 'lab' || k === 'generator' || k === 'assembler' || k === 'drill'))
         light(e.cx, e.cy, e.def.w + 1.5, 0.75);
     }
@@ -535,13 +579,13 @@ export class Renderer {
       if (d.kind === 'inserter') this.inserterMarks(gh.x, gh.y, gh.dir, d.reach ?? 1);
       if (d.kind === 'drill') this.drillArea(gh.type, gh.x, gh.y, gh.dir);
       if (d.kind === 'pole') {
-        const r = POLE_SUPPLY_RADIUS;
+        const r = d.supply ?? POLE_SUPPLY_RADIUS;
         c.strokeStyle = 'rgba(120,190,255,.9)';
         c.lineWidth = 0.05;
         c.strokeRect(gh.x + 0.5 - r, gh.y + 0.5 - r, r * 2, r * 2);
         c.strokeStyle = 'rgba(255,220,120,.7)';
         for (const e of g.ents.values())
-          if (e.def.kind === 'pole' && Math.hypot(e.cx - gh.x - 0.5, e.cy - gh.y - 0.5) <= POLE_WIRE_REACH) {
+          if (e.def.kind === 'pole' && Math.hypot(e.cx - gh.x - 0.5, e.cy - gh.y - 0.5) <= Math.min(d.wireReach ?? POLE_WIRE_REACH, e.def.wireReach ?? POLE_WIRE_REACH)) {
             c.beginPath();
             c.moveTo(gh.x + 0.5, gh.y + 0.5);
             c.lineTo(e.cx, e.cy);

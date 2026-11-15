@@ -4,6 +4,7 @@ import { iconURL } from './icons';
 import { sfx } from './audio';
 import type { Entity, Game } from './sim';
 import type { Actions } from './actions';
+import { ARMORS, capacity, equip, EQUIP, gridSize, isArmor, isEquip, shieldMax, takeOff, unequip, wear } from './armor';
 
 export type PanelMode = null | 'inventory' | 'entity' | 'research' | 'menu' | 'help' | 'load';
 
@@ -17,6 +18,8 @@ export interface UIState {
   pickRecipe: boolean;
   /** Technology picked in the research tree. */
   techSel?: string | null;
+  /** scroll the tree to the picked technology on the next draw */
+  techJump?: boolean;
   act: Actions;
   setCursor: (item: ItemId | null) => void;
   /** Esc menu and load screen live in index.ts */
@@ -88,6 +91,7 @@ const TABS: [Category, string][] = [
   ['intermediate', 'Parts'],
   ['science', 'Science'],
   ['military', 'Military'],
+  ['armor', 'Armor'],
 ];
 
 function craftingPanel(ui: UIState) {
@@ -182,6 +186,13 @@ function entityPanel(ui: UIState): string {
       break;
     case 'inserter':
       body += `<p class="fo-note">Picks items up from the green square and drops them on the orange circle.</p>`;
+      if (d.filter) {
+        const picks = (Object.keys(ITEMS) as ItemId[])
+          .filter((it) => g.produced[it] || g.inv.count(it) || it === e.recipe)
+          .map((it) => `<div class="fo-slot recipe ${it === e.recipe ? 'sel' : ''}" data-act="set-recipe" data-id="${it}" data-tip="item:${it}">${icon(it)}</div>`)
+          .join('');
+        body += `<h4>Only move: ${e.recipe ? esc(ITEMS[e.recipe as ItemId].name) : 'nothing yet'}</h4><div class="fo-grid recipes">${picks || '<span class="fo-sub">Make some items first.</span>'}</div>`;
+      }
       if (e.held) body += `<div class="fo-row"><label>Holding</label>${slot(e.held, null)}</div>`;
       break;
     case 'belt':
@@ -202,8 +213,24 @@ function entityPanel(ui: UIState): string {
     case 'monument':
       body += `<p class="fo-note">Owen is proud of you.</p>`;
       break;
+    case 'battery':
+      body += `<div class="fo-row"><label>Charge</label>${bar(e.burn / d.capacity!, 'power')}<span class="fo-sub">${(e.burn / 1e6).toFixed(1)} of ${d.capacity! / 1e6} MJ</span></div><p class="fo-note">Fills up when your generators and solar panels make more than you use, and helps out when they don't. Place it near a power pole.</p>`;
+      break;
+    case 'lamp':
+      body += `<p class="fo-note">Turns on at night when it has power.</p>`;
+      break;
+    case 'splitter':
+      body += `<p class="fo-note">Point a belt into its back. It hands items out in turn to belts on its left, front and right.</p>`;
+      break;
+    case 'floor':
+      body += `<p class="fo-note">You walk 30% faster on stone paths.</p>`;
+      break;
+    case 'mine':
+      body += `<p class="fo-note">Blows up when a bug walks over it.</p>`;
+      break;
   }
-  const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall'].includes(d.kind);
+  if (d.ug) body += `<p class="fo-note">${e.recipe === 'out' ? 'Exit: items come up here.' : g.ugExit(e) ? 'Entrance: items go under and come up at the exit.' : 'Entrance with no exit yet: place another underground belt facing the same way, up to 4 tiles ahead.'} Press R while hovering to swap entrance and exit.</p>`;
+  const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall', 'battery', 'lamp', 'splitter', 'floor', 'mine'].includes(d.kind);
   return `<div class="fo-cols">
     <section><h3>${icon(d.item)} ${esc(name)}</h3>${body}</section>
     ${accepts ? `<section><h3>Inventory</h3>${inventoryGrid(g, 'give')}<p class="fo-note">Click an item to put it all in, right-click for half. Same for taking items out.</p></section>` : ''}
@@ -249,6 +276,33 @@ const TREE: { nodes: Record<string, TreeNode>; width: number; height: number } =
 
 function techState(g: Game, id: string) {
   return g.researched.has(id) ? 'done' : g.research === id ? 'cur' : g.canResearch(id) ? 'can' : 'locked';
+}
+
+function armorPanel(g: Game) {
+  const s = g.suit;
+  if (!s.armor) return `<h3>Armor</h3><div class="fo-row"><div class="fo-slot empty armor"></div><span class="fo-sub">No armor on. Research Owen vest to make your first one.</span></div>`;
+  const [W, H] = gridSize(s);
+  const C = 30; // cell size in px
+  const pieces = s.grid
+    .map((p, i) => {
+      const d = EQUIP[p.item]!;
+      return `<div class="fo-eq" data-act="unequip" data-i="${i}" data-tip="item:${p.item}" style="left:${p.x * C}px;top:${p.y * C}px;width:${d.w * C - 2}px;height:${d.h * C - 2}px;background:${d.color}">${icon(p.item)}</div>`;
+    })
+    .join('');
+  const cells = Array.from({ length: W * H }, () => '<i></i>').join('');
+  const a = ARMORS[s.armor]!;
+  const max = shieldMax(s);
+  return `<h3>Armor</h3>
+  <div class="fo-armor">
+    <div class="fo-slot armor" data-act="unwear" data-tip="item:${s.armor}">${icon(s.armor)}</div>
+    <div>
+      <div class="fo-sub">${esc(ITEMS[s.armor].name)} · blocks ${Math.round(a.reduce * 100)}% of damage · ${W}×${H} grid</div>
+      <div class="fo-row"><label>Suit power</label>${bar(s.energy / capacity(s), 'power')}<span class="fo-sub">${(s.energy / 1e6).toFixed(1)} MJ</span></div>
+      ${max ? `<div class="fo-row"><label>Shield</label>${bar(s.shield / max, "shieldbar")}<span class="fo-sub">${Math.round(s.shield)}/${max}</span></div>` : ''}
+    </div>
+  </div>
+  <div class="fo-pgrid" style="width:${W * C}px;height:${H * C}px;grid-template-columns:repeat(${W},${C}px)">${cells}${pieces}</div>
+  <p class="fo-note">Click equipment in your inventory to add it. Click a piece in the grid to take it out, or the armor to take it all off.</p>`;
 }
 
 function researchPanel(ui: UIState) {
@@ -327,6 +381,7 @@ function helpPanel() {
   <p><b>First steps:</b> put your burner drill on Owen ore and give it wood or coal. Point its yellow arrow at the stone furnace so the ore drops straight in. Add fuel to the furnace too, and Owen plates come out.</p>
   <p><b>Bugs:</b> Calvin, Archie, Mom, Dad and Roger live in nests far from the start. Pollution from your machines makes them angry, and after 10 quiet minutes they come for your factory, at most one wave every 3 minutes. They run almost as fast as you (95%) and chase anyone who comes within 10 tiles. Hold <kbd>Space</kbd> to shoot the closest bug with your gun: each shot plants your feet for a second, and a new magazine of 10 Owen bullets takes 1.45 seconds to load. Build gun turrets and load them with Owen bullets, and research Rail guns for the big stuff.</p>
   <p><b>Science:</b> there are 4 science packs: automation (red), logistic (green), military (grey) and advanced (blue). Press <kbd>T</kbd> to open the research tree, click a technology to see what it needs and unlocks, then feed those packs to powered labs.</p>
+  <p><b>Armor:</b> research and craft armor, then click it in your inventory to put it on. There are 5 kinds, each blocking more damage with a bigger personal grid. Fill the grid with equipment: solar panels, batteries and a power core make suit power; the personal laser, energy shield, exo legs and night vision use it. Press <kbd>G</kbd> to throw a grenade at the mouse.</p>
   <p><b>Map:</b> the map in the top right fills in as you explore. Click it or press <kbd>N</kbd> for the whole map.</p>
   <p><b>On a phone:</b> use the stick to walk, tap to build or open, press and hold to mine, and hold Shoot to fire.</p>
   </div><button class="fo-btn" data-act="close">Got it</button>`;
@@ -344,7 +399,7 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
       html = `<div class="fo-cols"><section><h3>Inventory <button class="fo-mini" data-act="sort">Sort</button></h3>${inventoryGrid(
         g,
         'hold',
-      )}<p class="fo-note">Click a building to hold it.</p></section><section><h3>Crafting</h3>${craftingPanel(ui)}</section></div>`;
+      )}<p class="fo-note">Click a building to hold it. Click armor to wear it, and grid equipment to put it in your armor.</p></section><section><h3>Crafting</h3>${craftingPanel(ui)}${armorPanel(g)}</section></div>`;
       break;
     case 'entity':
       html = entityPanel(ui);
@@ -368,6 +423,18 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
     if (scrolls[i]) [x.scrollLeft, x.scrollTop] = scrolls[i];
   });
   el.scrollTop = keep;
+  const wrap = el.querySelector<HTMLElement>('.fo-tree-wrap');
+  const sel = el.querySelector<HTMLElement>('.fo-tnode.sel');
+  if (wrap && sel && (!scrolls.length || ui.techJump)) {
+    // bring the picked technology into view
+    const x = sel.offsetLeft + sel.offsetWidth / 2 - wrap.clientWidth / 2;
+    const y = sel.offsetTop + sel.offsetHeight / 2 - wrap.clientHeight / 2;
+    if (!scrolls.length || sel.offsetLeft < wrap.scrollLeft || sel.offsetLeft + sel.offsetWidth > wrap.scrollLeft + wrap.clientWidth || sel.offsetTop < wrap.scrollTop || sel.offsetTop + sel.offsetHeight > wrap.scrollTop + wrap.clientHeight) {
+      wrap.scrollLeft = x;
+      wrap.scrollTop = y;
+    }
+  }
+  ui.techJump = false;
   el.hidden = !ui.panel;
   el.className = `fo-panel p-${ui.panel}`;
 }
@@ -396,8 +463,21 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
       }
       break;
     }
+    case 'unwear': takeOff(g); break;
+    case 'unequip': unequip(g, i); break;
     case 'hold': {
       const s = g.inv.slots[i];
+      if (s && isArmor(s.item)) {
+        wear(g, s.item);
+        sfx.click();
+        break;
+      }
+      if (s && isEquip(s.item)) {
+        if (!g.suit.armor) g.toast('Put on some armor first');
+        else if (!equip(g, s.item)) g.toast('No room in your armor grid');
+        else sfx.click();
+        break;
+      }
       if (s && ITEMS[s.item].place) {
         ui.setCursor(s.item);
         ui.panel = null;
@@ -428,7 +508,10 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
       break;
     case 'change-recipe': ui.pickRecipe = true; break;
     case 'open-research': ui.panel = 'research'; break;
-    case 'tech-sel': ui.techSel = id; break;
+    case 'tech-sel':
+      ui.techSel = id;
+      ui.techJump = true;
+      break;
     case 'research':
       ui.act.research(id);
       sfx.click();

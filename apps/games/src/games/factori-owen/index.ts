@@ -9,7 +9,9 @@ import { RES_NAME, WORLD } from './world';
 import { iconURL } from './icons';
 import { localActions, type Actions } from './actions';
 import { DEFAULT_LOOK, drawPlayer, LOOK_OPTIONS, type PlayerLook } from './art';
-import { MAG_SIZE, PLAYER_HP, playerWeapon, WEAPONS } from './combat';
+import { MAG_SIZE, playerWeapon, throwGrenade, WEAPONS } from './combat';
+import { reachBonus } from './bonus';
+import { shieldMax } from './armor';
 import { explore, Minimap } from './minimap';
 import { buildScene, pickScene, SCENE_SECONDS, type Scene } from './scenes';
 import type { GameModule } from '../types';
@@ -120,7 +122,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
         <canvas class="fo-minimap" title="Map (N): click to open the whole map"></canvas>
         <div class="fo-mpstatus" hidden></div>
       </div>
-      <div class="fo-health"><div class="fo-hp"><i></i></div><span class="fo-weapon"></span></div>
+      <div class="fo-health"><div class="fo-hpcol"><div class="fo-hp fo-shield" hidden><i></i></div><div class="fo-hp"><i></i></div></div><span class="fo-weapon"></span></div>
       <div class="fo-toasts"></div>
       <div class="fo-hand"></div>
       <div class="fo-queue"></div>
@@ -130,6 +132,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
         <div class="fo-stick"><i></i></div>
         <div class="fo-tbtns">
           <button data-t="shoot">Shoot</button>
+          <button data-t="grenade">Boom</button>
           <button data-t="mine">Mine</button>
           <button data-t="rotate">Turn</button>
           <button data-t="clear">Hand</button>
@@ -159,7 +162,9 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   const researchEl = $('.fo-research');
   const winEl = $('.fo-win');
   const deadEl = $('.fo-dead');
-  const hpEl = $('.fo-hp i');
+  const hpEl = $('.fo-hp:not(.fo-shield) i');
+  const shEl = $('.fo-shield i');
+  const gBtn = $('[data-t="grenade"]');
   const weaponEl = $('.fo-weapon');
   const mpEl = $('.fo-mpstatus');
   const bigMapEl = $('.fo-bigmap');
@@ -608,7 +613,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     const d = ENTITIES[type];
     const [wx, wy] = renderer.screenToWorld(mouseX, mouseY);
     const x = Math.floor(wx - d.w / 2 + 0.5), y = Math.floor(wy - d.h / 2 + 0.5);
-    const inReach = Math.hypot(x + d.w / 2 - game.px, y + d.h / 2 - game.py) <= BUILD_REACH;
+    const inReach = Math.hypot(x + d.w / 2 - game.px, y + d.h / 2 - game.py) <= reach();
     return { type, x, y, dir: cursorDir, ok: inReach && game.inv.count(item) > 0 && game.canPlace(type, x, y) };
   };
 
@@ -637,7 +642,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   }
 
   function openEntity(e: Entity) {
-    if (Math.hypot(e.cx - game.px, e.cy - game.py) > BUILD_REACH) {
+    if (Math.hypot(e.cx - game.px, e.cy - game.py) > reach()) {
       game.toast('Too far away');
       sfx.error();
       return;
@@ -654,12 +659,35 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     const t = hoverTile();
     const e = t ? game.entAt(t[0], t[1]) : null;
     if (!e || e.def.kind !== 'belt' || !e.items.length) return;
-    if (Math.hypot(e.cx - game.px, e.cy - game.py) > BUILD_REACH) {
+    if (Math.hypot(e.cx - game.px, e.cy - game.py) > reach()) {
       if (frame % 30 === 0) game.toast('Walk closer to pick that up');
       return;
     }
     act.take(e, 'belt');
     sfx.pickup();
+  }
+
+  const reach = () => BUILD_REACH + reachBonus(game);
+
+  /** G: throw a grenade at the mouse (on a phone, at the nearest bug). */
+  let lastThrow = 0;
+  function throwG() {
+    if (game.playerDead || performance.now() - lastThrow < 500) return;
+    if (game.inv.count('grenade') <= 0) {
+      game.toast(game.researched.has('grenades') ? 'No grenades: craft some (E, Military tab)' : 'Research Grenades first');
+      return;
+    }
+    let tx: number, ty: number;
+    if (touchMode) {
+      const b = game.cs.bugs.reduce<{ x: number; y: number } | null>((m, q) => (Math.hypot(q.x - game.px, q.y - game.py) < (m ? Math.hypot(m.x - game.px, m.y - game.py) : 14) ? q : m), null);
+      tx = b ? b.x : game.px + [0, 6, 0, -6][game.pdir];
+      ty = b ? b.y : game.py + [-6, 0, 6, 0][game.pdir];
+    } else [tx, ty] = renderer.screenToWorld(mouseX, mouseY);
+    lastThrow = performance.now();
+    game.inv.remove('grenade', 1);
+    throwGrenade(game, game.px, game.py, tx, ty);
+    game.onFire?.('grenade', { x: tx, y: ty });
+    sfx.click();
   }
 
   function pipette() {
@@ -719,6 +747,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       else if (k === 'm') toggleMute();
       else if (k === 'n') toggleBigMap();
       else if (k === 'p') pickKey = true;
+      else if (k === 'g') throwG();
       else if (/^[0-9]$/.test(k)) selectHot((Number(k) + 9) % 10);
     }
     if (k === 'p' && !down) pickKey = false;
@@ -842,6 +871,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (t === 'clear') ui.cursor = null;
       if (t === 'mine') touchMineBtn = true;
       if (t === 'shoot') touchShoot = true;
+      if (t === 'grenade') throwG();
       if (t === 'mine' || t === 'shoot') b.classList.add('on');
     });
     const up = () => {
@@ -983,7 +1013,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
         const w = game.world;
         const i = w.idx(tx, ty);
         if (e) {
-          if (Math.hypot(e.cx - game.px, e.cy - game.py) <= BUILD_REACH)
+          if (Math.hypot(e.cx - game.px, e.cy - game.py) <= reach())
             target = {
               key: 'e' + e.id, time: e.def.mineTime, x: e.x, y: e.y, w: e.def.w, h: e.def.h,
               done: () => {
@@ -1078,6 +1108,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (ev === 'turret' && Math.random() < 0.5) sfx.shot();
       if (ev === 'rail') sfx.rail();
       if (ev === 'reload') sfx.reload();
+      if (ev === 'laser') sfx.laser();
       if (ev === 'hurt') sfx.hurt();
       if (ev === 'attack') sfx.alarm();
       if (ev === 'nest') sfx.boom();
@@ -1152,7 +1183,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       ghost,
       mining: miningOverlay,
       showPower: cdef?.kind === 'pole' || !!cdef?.electric || hoverEnt?.def.kind === 'pole',
-      reachOk: !!hoverEnt && Math.hypot(hoverEnt.cx - game.px, hoverEnt.cy - game.py) <= BUILD_REACH,
+      reachOk: !!hoverEnt && Math.hypot(hoverEnt.cx - game.px, hoverEnt.cy - game.py) <= reach(),
     }, now / 1000);
 
     if (ui.panel === 'entity' && ui.entity && !game.ents.has(ui.entity.id)) {
@@ -1161,7 +1192,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (again && again.type === ui.entity.type) ui.entity = again;
       else ui.panel = null;
     }
-    if (ui.panel === 'entity' && ui.entity && Math.hypot(ui.entity.cx - game.px, ui.entity.cy - game.py) > BUILD_REACH + 2) ui.panel = null;
+    if (ui.panel === 'entity' && ui.entity && Math.hypot(ui.entity.cx - game.px, ui.entity.cy - game.py) > reach() + 2) ui.panel = null;
     const live = ui.panel && ui.panel !== 'menu' && ui.panel !== 'help';
     if (panelDirty || (live && frame % 12 === 0)) {
       renderPanel(panelEl, ui);
@@ -1192,8 +1223,12 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
         }</em>`
       : hoverInfo(ht, hoverEnt);
     handEl.hidden = !handEl.innerHTML;
-    hpEl.style.width = `${Math.max(0, game.cs.playerHp / PLAYER_HP) * 100}%`;
-    hpEl.parentElement!.classList.toggle('low', game.cs.playerHp < PLAYER_HP * 0.35);
+    hpEl.style.width = `${Math.max(0, game.cs.playerHp / game.maxHp()) * 100}%`;
+    hpEl.parentElement!.classList.toggle('low', game.cs.playerHp < game.maxHp() * 0.35);
+    const smax = shieldMax(game.suit);
+    shEl.parentElement!.hidden = !smax;
+    if (smax) shEl.style.width = `${(game.suit.shield / smax) * 100}%`;
+    gBtn.hidden = !game.inv.count('grenade');
     const wk = playerWeapon(game);
     weaponEl.innerHTML = wk === 'rail'
       ? `<img src="${iconURL('rail-gun')}" alt="">${game.inv.count('rail-ammo')}`

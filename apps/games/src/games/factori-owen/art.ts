@@ -15,6 +15,8 @@ export interface Look {
   curve?: number;
   noPower?: boolean;
   noFuel?: boolean;
+  /** underground belt: this one is the exit */
+  ugOut?: boolean;
 }
 
 function rr(c: Ctx, x: number, y: number, w: number, h: number, r: number) {
@@ -67,11 +69,44 @@ function arrow(c: Ctx, cx: number, cy: number, dir: number, s: number, col: stri
 const BELT_COLORS: Record<string, [string, string, string]> = {
   'belt': ['#2c3138', '#4b5561', '#3fc1b0'],
   'fast-belt': ['#2c2a30', '#5a4d55', '#f08a3c'],
+  'express-belt': ['#262833', '#4d5a72', '#4fa3ff'],
 };
 
 export function drawBelt(c: Ctx, type: EntityType, x: number, y: number, l: Look) {
+  drawBeltBase(c, type, x, y, l);
+  if (ENTITIES[type].ug) {
+    // a hood over the end where items dive under (entrance) or come up (exit)
+    c.save();
+    c.translate(x + 0.5, y + 0.5);
+    c.rotate((l.dir * Math.PI) / 2);
+    const top = l.ugOut ? 0.5 : -0.5; // forward is -y
+    const y0 = l.ugOut ? 0 : -0.5;
+    c.fillStyle = 'rgba(0,0,0,.3)';
+    c.fillRect(-0.5, y0 + 0.06, 1, 0.5);
+    c.fillStyle = '#5b6573';
+    c.fillRect(-0.5, y0, 1, 0.5);
+    c.fillStyle = '#3fc1b0';
+    c.fillRect(-0.5, y0, 1, 0.08);
+    c.fillStyle = '#1b1f25';
+    c.fillRect(-0.36, l.ugOut ? 0.0 : 0.0 - 0.08, 0.72, 0.08);
+    arrowDir(c, 0, top * 0.5, 0.14, l.ugOut ? '#ffd23f' : '#e8eef7');
+    c.restore();
+  }
+}
+
+function arrowDir(c: Ctx, cx: number, cy: number, s: number, col: string) {
+  c.fillStyle = col;
+  c.beginPath();
+  c.moveTo(cx, cy - s);
+  c.lineTo(cx + s, cy + s * 0.6);
+  c.lineTo(cx - s, cy + s * 0.6);
+  c.closePath();
+  c.fill();
+}
+
+function drawBeltBase(c: Ctx, type: EntityType, x: number, y: number, l: Look) {
   const [base, rail, chev] = BELT_COLORS[type] ?? BELT_COLORS['belt'];
-  const speed = type === 'fast-belt' ? 2 : 1;
+  const speed = (ENTITIES[type].speed ?? 1.875) / 1.875;
   const off = ((l.time * 1.875 * speed) % 0.5 + 0.5) % 0.5;
   c.save();
   c.translate(x + 0.5, y + 0.5);
@@ -297,7 +332,19 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       break;
     }
     case 'furnace': {
-      box(c, x, y, w, h, '#8f8173', '#b2a493', '#574c41');
+      if (w !== 2) {
+        // bigger furnaces are the same drawing, scaled up
+        c.save();
+        c.translate(x, y);
+        c.scale(w / 2, h / 2);
+        drawBuilding(c, 'steel-furnace', 0, 0, { ...l, noPower: false, noFuel: false });
+        c.restore();
+        c.fillStyle = '#5adcff';
+        c.fillRect(x + 0.4, y + 0.3, w - 0.8, 0.12);
+        break;
+      }
+      const [fb, ft, fe] = type === 'stone-furnace' ? ['#8f8173', '#b2a493', '#574c41'] : ['#7d8592', '#a4acb8', '#454b55'];
+      box(c, x, y, w, h, fb, ft, fe);
       c.fillStyle = '#2a2420';
       rr(c, x + 0.6, y + 0.95, 0.8, 0.55, 0.25);
       c.fill();
@@ -314,7 +361,8 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       break;
     }
     case 'assembler': {
-      box(c, x, y, w, h, '#5b6c7d', '#7d90a3', '#33404d');
+      if (type === 'assembler-2') box(c, x, y, w, h, '#5d6f58', '#7e9a76', '#33452f');
+      else box(c, x, y, w, h, '#5b6c7d', '#7d90a3', '#33404d');
       c.fillStyle = '#2b3440';
       rr(c, x + 0.7, y + 0.6, 1.6, 1.5, 0.2);
       c.fill();
@@ -349,6 +397,28 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       break;
     }
     case 'pole': {
+      if (type === 'big-pole') {
+        c.fillStyle = 'rgba(0,0,0,.25)';
+        c.beginPath();
+        c.ellipse(x + 0.6, y + 0.9, 0.3, 0.1, 0, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#8d939e';
+        c.lineWidth = 0.07;
+        c.beginPath();
+        c.moveTo(x + 0.25, y + 0.9); c.lineTo(x + 0.45, y - 0.6);
+        c.moveTo(x + 0.75, y + 0.9); c.lineTo(x + 0.55, y - 0.6);
+        for (let k = 0; k < 4; k++) {
+          const yy = y + 0.9 - k * 0.37;
+          c.moveTo(x + 0.27 + k * 0.05, yy); c.lineTo(x + 0.68 - k * 0.04, yy - 0.37);
+        }
+        c.stroke();
+        c.fillStyle = '#5c626d';
+        c.fillRect(x + 0.1, y - 0.66, 0.8, 0.14);
+        c.fillStyle = '#d8dde6';
+        c.fillRect(x + 0.14, y - 0.72, 0.1, 0.08);
+        c.fillRect(x + 0.76, y - 0.72, 0.1, 0.08);
+        break;
+      }
       c.fillStyle = 'rgba(0,0,0,.25)';
       c.beginPath();
       c.ellipse(x + 0.6, y + 0.85, 0.18, 0.08, 0, 0, Math.PI * 2);
@@ -418,13 +488,14 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       break;
     }
     case 'wall': {
+      const steel = type === 'steel-wall';
       c.fillStyle = 'rgba(0,0,0,.3)';
       c.fillRect(x + 0.08, y + 0.2, 0.96, 0.9);
-      c.fillStyle = '#8a7a66';
+      c.fillStyle = steel ? '#5c626d' : '#8a7a66';
       c.fillRect(x, y + 0.08, 1, 0.92);
-      c.fillStyle = '#b8a688';
+      c.fillStyle = steel ? '#a4acb8' : '#b8a688';
       c.fillRect(x, y - 0.1, 1, 0.82);
-      c.strokeStyle = '#8a7a66';
+      c.strokeStyle = steel ? '#5c626d' : '#8a7a66';
       c.lineWidth = 0.04;
       c.beginPath();
       c.moveTo(x, y + 0.3); c.lineTo(x + 1, y + 0.3);
@@ -432,6 +503,74 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       c.moveTo(x + 0.25, y + 0.3); c.lineTo(x + 0.25, y + 0.72);
       c.moveTo(x + 0.75, y + 0.3); c.lineTo(x + 0.75, y + 0.72);
       c.stroke();
+      break;
+    }
+    case 'floor': {
+      c.fillStyle = '#8e8676';
+      c.fillRect(x, y, 1, 1);
+      c.fillStyle = '#a69d8b';
+      c.fillRect(x + 0.04, y + 0.04, 0.44, 0.44);
+      c.fillRect(x + 0.52, y + 0.52, 0.44, 0.44);
+      c.fillStyle = '#9b927f';
+      c.fillRect(x + 0.52, y + 0.04, 0.44, 0.44);
+      c.fillRect(x + 0.04, y + 0.52, 0.44, 0.44);
+      break;
+    }
+    case 'splitter': {
+      shadow(c, x, y, 1, 1);
+      c.fillStyle = '#33404d';
+      rr(c, x + 0.05, y + 0.05, 0.9, 0.9, 0.12);
+      c.fill();
+      c.fillStyle = '#e3b341';
+      rr(c, x + 0.15, y + 0.15, 0.7, 0.7, 0.1);
+      c.fill();
+      // three little arrows: left, front, right
+      for (const t of [3, 0, 1]) arrow(c, x + 0.5 + DX[(l.dir + t) % 4] * 0.22, y + 0.5 + DY[(l.dir + t) % 4] * 0.22, (l.dir + t) % 4, 0.12, '#2b3440');
+      break;
+    }
+    case 'lamp': {
+      c.fillStyle = 'rgba(0,0,0,.25)';
+      c.beginPath();
+      c.ellipse(x + 0.55, y + 0.88, 0.2, 0.08, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#4b5563';
+      c.fillRect(x + 0.44, y + 0.2, 0.12, 0.7);
+      c.fillStyle = l.working ? '#fff3b0' : '#c9ced8';
+      c.beginPath();
+      c.arc(x + 0.5, y + 0.2, 0.22, 0, Math.PI * 2);
+      c.fill();
+      if (l.working) {
+        c.fillStyle = 'rgba(255,240,160,.35)';
+        c.beginPath();
+        c.arc(x + 0.5, y + 0.2, 0.42, 0, Math.PI * 2);
+        c.fill();
+      }
+      break;
+    }
+    case 'battery': {
+      box(c, x, y, w, h, '#3d4a3f', '#56685a', '#232c25');
+      for (let i = 0; i < 3; i++) {
+        c.fillStyle = '#1b2120';
+        rr(c, x + 0.3 + i * 0.5, y + 0.4, 0.36, 1.1, 0.06);
+        c.fill();
+        c.fillStyle = l.working ? '#57d38c' : '#3f8f63';
+        c.fillRect(x + 0.36 + i * 0.5, y + 0.9, 0.24, 0.55);
+      }
+      c.fillStyle = '#ffd23f';
+      c.fillRect(x + 0.85, y + 0.22, 0.3, 0.08);
+      break;
+    }
+    case 'mine': {
+      c.globalAlpha = 0.55;
+      c.fillStyle = '#4b5563';
+      c.beginPath();
+      c.ellipse(x + 0.5, y + 0.55, 0.3, 0.2, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#ff5b4b';
+      c.beginPath();
+      c.arc(x + 0.5, y + 0.5, 0.06, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
       break;
     }
     case 'monument': {
@@ -487,7 +626,11 @@ export function drawEntityIcon(c: Ctx, type: EntityType) {
     c.scale(0.7, 0.7);
     inserterBase(c, type, 0, 0, { ...look, dir: 0 });
     inserterArm(c, type, 0, 0, { ...look, dir: 0, t: 0.35 }, 0.7);
-  } else if (d.kind === 'pole') {
+  } else if (d.kind === 'floor' || d.kind === 'mine' || d.kind === 'splitter') {
+    c.translate(0.1, 0.1);
+    c.scale(0.8, 0.8);
+    drawBuilding(c, type, 0, 0, { ...look, dir: 0 });
+  } else if (d.kind === 'pole' || d.kind === 'lamp') {
     c.translate(0.1, 0.35);
     c.scale(0.75, 0.75);
     drawBuilding(c, type, 0, 0, look);

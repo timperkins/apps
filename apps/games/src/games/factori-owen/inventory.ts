@@ -12,6 +12,11 @@ export class Inventory {
     this.slots = new Array(size).fill(null);
   }
 
+  /** Grows the inventory to `size` slots (never shrinks). */
+  resize(size: number) {
+    while (this.slots.length < size) this.slots.push(null);
+  }
+
   count(item: ItemId): number {
     let c = 0;
     for (const s of this.slots) if (s && s.item === item) c += s.n;
