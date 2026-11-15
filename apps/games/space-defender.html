@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Space Defender</title>
+<meta name="description" content="Build a factory on a platform in space, shoot asteroids and catch their stone.">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Jost:wght@400;500&display=swap">
+</head>
+<body>
+<div id="safe"></div>
+<div id="topbar"></div>
+<div id="stage">
+  <canvas id="sv"></canvas>
+  <div id="svPad" hidden>
+    <button id="svPause" class="hudbtn" aria-label="Pause">
+      <svg viewBox="0 0 24 24" width="20" height="20"><rect x="6" y="5" width="4" height="14" rx="1.3"/><rect x="14" y="5" width="4" height="14" rx="1.3"/></svg>
+    </button>
+    <p id="svHelp">Drag anywhere to walk</p>
+    <div id="svArms" class="arms"></div>
+    <div id="svQuick" class="quickbar"></div>
+    <div id="svQueue" class="craftq"></div>
+    <button id="svLoad" class="svbtn small" hidden><span>Use</span><small>T</small></button>
+    <button id="svDrop" class="svbtn small" hidden><span>Put 1</span><small>D</small></button>
+    <button id="svRotate" class="svbtn small" hidden><span>Rotate</span><small>R</small></button>
+    <button id="svLabBtn" class="svbtn small" hidden><span>Research</span><small>Y</small></button>
+    <button id="svShopBtn" class="svbtn small"><span>Inventory</span><small>Shift</small></button>
+    <div id="svShop" class="svinvscreen" hidden>
+      <section class="invhalf">
+        <h3>Inventory</h3>
+        <div id="svInvGrid" class="slots"></div>
+        <div id="svInvHand"></div>
+      </section>
+      <section class="invhalf">
+        <h3>Crafting <small id="svRecCat"></small></h3>
+        <div id="svRecTabs" class="rectabs"></div>
+        <div id="svRecGrid" class="slots"></div>
+        <div id="svRecInfo" class="recinfo"></div>
+      </section>
+      <button class="ghost small invclose" id="svShopClose">Close (Shift)</button>
+    </div>
+    <div id="svBld" class="svshop svbld" hidden></div>
+    <div id="svTurret" class="svturret" hidden></div>
+    <div id="svBp" class="svturret svbp" hidden></div>
+    <div id="svSpace" class="svshop svspace" hidden></div>
+    <button id="svBpBtn" class="svbtn small"><span>Blueprint</span><small>Ctrl+C</small></button>
+    <div id="svLab" class="svshop svlab" hidden>
+      <h3>Research</h3>
+      <p class="fine" id="svLabInfo"></p>
+      <div id="svResList" class="svreslist"></div>
+      <p class="fine">Each lab with packs in it uses one every 2 seconds. Put packs in with T.</p>
+      <button class="ghost small" id="svLabClose">Close (Y)</button>
+    </div>
+    <div id="svRecipe" class="svshop svrecipe" hidden>
+      <h3>Ammo machine</h3>
+      <p class="fine" id="svRecInfoM"></p>
+      <div class="seg mrecs" role="radiogroup" aria-label="Recipe" id="svRecSeg"></div>
+      <button class="primary" id="svRecPut">Put your stone or plates in</button>
+      <div class="craftbtns"><button class="ghost small" id="svRecPick">Pick up</button><button class="ghost small" id="svRecClose">Close</button></div>
+    </div>
+    <button id="svFree" class="svbtn"><span>Shoot</span><small>Z</small></button>
+    <button id="svMine" class="svbtn small" hidden><span>Mine</span><small>M</small></button>
+    <button id="svHire" class="svbtn small hire" hidden><span>Miner</span><small>H: 30 stone</small></button>
+    <button id="svAmmoBtn" class="svbtn small" hidden><span>Normal</span><small>S: ammo</small></button>
+    <button id="svTarget" class="svbtn aim"><span>Shoot bear</span><small>Space</small></button>
+  </div>
+
+
+  <div id="version" aria-hidden="true"></div>
+
+  <section id="survSetup" class="screen">
+    <h2>Space Defender</h2>
+    <p class="lead">Get your astronaut ready</p>
+    <div class="svform">
+      <label class="svfield"><span>Name</span><span class="svname"><input id="svName" maxlength="16" autocomplete="off" spellcheck="false"><button class="ghost small" id="svDice" aria-label="Random name">🎲</button></span></label>
+      <div class="svfield"><span>Colour</span><div class="swatches" id="svColors"></div></div>
+      <div class="svfield"><span>Hat</span><div class="seg small" id="svHats"></div></div>
+      <div class="svfield"><span>Ammo</span><div class="svammo" id="svAmmo"></div></div>
+      <div class="svfield"><span>Mode</span><div class="seg small" id="svMode" role="radiogroup" aria-label="Mode"></div></div>
+      <div class="svfield"><span>Play together (up to 4)</span>
+        <div class="svtogether"><button class="ghost small" id="svLink" hidden>Try again</button><input id="svJoinCode" maxlength="12" placeholder="Type a code" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Code to join"><button class="ghost small" id="svJoin">Join</button></div>
+        <p class="fine" id="svNetMsg"></p>
+      </div>
+    </div>
+    <canvas id="svPreview" width="120" height="120" aria-hidden="true"></canvas>
+    <button class="primary" id="svGo">Start</button>
+    <p class="fine" id="svBest"></p>
+    <div class="row"><button class="ghost small" id="svHow">How to play</button><button class="ghost small" id="svLoadTitle">Load</button><button class="ghost small" data-open="settings">Settings</button></div>
+    <button class="ghost small" id="svHub">Back to games</button>
+  </section>
+
+  <section id="survIntro" class="screen">
+    <p class="fine" id="svIntroStep"></p>
+    <div class="svintro-icon" id="svIntroIcon" aria-hidden="true"></div>
+    <h2 id="svIntroTitle"></h2>
+    <ul class="svintro" id="svIntroText"></ul>
+    <div class="row"><button class="ghost" id="svIntroBack">Back</button><button class="primary" id="svIntroNext">Next</button></div>
+    <button class="ghost small" id="svIntroSkip">Skip</button>
+  </section>
+
+  <section id="survPause" class="screen">
+    <h2>Paused</h2>
+    <p class="fine" id="svPauseCode"></p>
+    <button class="primary" id="svResume">Resume</button>
+    <div class="seg small" id="svPauseMode" role="radiogroup" aria-label="Cheat mode" hidden><button role="radio" data-pmode="survival">Survival</button><button role="radio" data-pmode="creative">Creative</button></div>
+    <p class="fine" id="svPauseModeInfo" hidden>Cheat mode. Creative: everything is free, crafting is instant and nothing hurts you.</p>
+    <div class="row"><button class="ghost" id="svSave">Save</button><button class="ghost" id="svLoadGame">Load</button></div>
+    <p class="fine" id="svSaved"></p>
+    <div class="settings-inline"></div>
+    <button class="ghost small" id="svQuit">Quit to title</button>
+  </section>
+
+  <section id="saves" class="screen">
+    <h2>Load a game</h2>
+    <ol id="saveList" class="savelist"></ol>
+    <button class="ghost" id="svSavesBack">Back</button>
+  </section>
+
+  <section id="survOver" class="screen">
+    <h2 id="svOverTitle">Lost in space</h2>
+    <div id="svNewBest" class="newbest" hidden>New best time</div>
+    <div class="big" id="svTime">0:00</div>
+    <dl class="stats" id="svStats"></dl>
+    <button class="primary" id="svAgain">Play again</button>
+    <button class="ghost" id="svChange">Change your guy</button>
+    
+  </section>
+
+  <section id="settings" class="screen">
+    <h2>Settings</h2>
+    <div class="settings-inline"></div>
+    <button class="ghost" data-close>Done</button>
+    <p class="fine" id="buildInfo"></p>
+  </section>
+</div>
+<script type="module" src="/src/games/space-defender/main.ts"></script>
+</body>
+</html>
