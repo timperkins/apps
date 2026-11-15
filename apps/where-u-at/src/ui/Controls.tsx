@@ -1,4 +1,5 @@
 import type { Scene, SceneState } from '../scene/Scene';
+import { Filter } from './Filter';
 
 export function Controls({ scene, state }: { scene: Scene; state: SceneState }) {
   return (
@@ -26,6 +27,7 @@ export function Controls({ scene, state }: { scene: Scene; state: SceneState }) 
         </svg>
         Traces
       </button>
+      <Filter scene={scene} state={state} />
     </div>
   );
 }

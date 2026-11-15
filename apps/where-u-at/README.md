@@ -29,5 +29,5 @@ npm run dev
 npm test
 ```
 
-Keys: Space play/pause, Left/Right one year, F fit everyone, W whole world, T traces, L pause for
-life events.
+Keys: Space play/pause, Left/Right one year, F fit everyone, W whole world, T traces, L pause on
+each event (time stops until its animation is done, then waits 3 seconds).

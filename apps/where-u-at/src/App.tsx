@@ -11,7 +11,7 @@ function nowMonth(): number {
   return d.getFullYear() * 12 + d.getMonth() + 0.99;
 }
 
-const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, view: 'fit' };
+const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, view: 'fit', hidden: [] };
 const noop = () => () => {};
 
 export function App() {

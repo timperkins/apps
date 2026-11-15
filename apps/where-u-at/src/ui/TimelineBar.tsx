@@ -104,10 +104,10 @@ export function TimelineBar({ scene, state, timeline }: Props) {
         className={`pill small ${state.pauseForEvents ? 'on' : ''}`}
         onClick={() => scene.setPauseForEvents(!state.pauseForEvents)}
         aria-pressed={state.pauseForEvents}
-        title="Pause briefly on births and marriages (L)"
+        title="Stop on every move, birth and wedding until it has played, then wait 3 seconds (L)"
       >
         <span className="switch" aria-hidden />
-        Pause for life events
+        Pause on each event
       </button>
     </div>
   );

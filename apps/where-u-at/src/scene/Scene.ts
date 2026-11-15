@@ -10,7 +10,7 @@ import { withAlpha } from '../engine/color';
 import { DARK, LIGHT, mapStyle, type Theme } from '../map/style';
 import { step, type Body } from './physics';
 import { arc, easeInOut, laneOffset, pointAt, shifted, type Pt } from './curves';
-import { Player } from './player';
+import { FLIGHT_SECONDS, Player } from './player';
 import { babySvg, circleImage, heart, label, ring, roundRect, sparkle, star, weddingRing } from './draw';
 
 setWorkerUrl(workerUrl);
@@ -24,11 +24,12 @@ export interface SceneState {
   pauseForEvents: boolean;
   traces: boolean;
   view: View;
+  /** Friends switched off in the filter. */
+  hidden: string[];
 }
 
 const FRIEND_R = 22;
 const CHILD_R = 13;
-const FLIGHT_SECONDS = 1.2;
 const PLACE_LABEL_SECONDS = 2;
 const TRACE_LANE = 4.5;
 const WORLD: [[number, number], [number, number]] = [[-168, -50], [192, 74]];
@@ -59,13 +60,15 @@ interface Actor {
   justBorn: boolean;
   label: { text: string; start: number; until: number } | null;
   prevAnchor: Pt | null;
-  phase: number;
 }
 
 interface Particle {
   kind: 'sparkle' | 'heart' | 'confetti' | 'star' | 'wave';
+  /** Position on screen, or relative to the bubble it follows. */
   x: number;
   y: number;
+  /** Births' sparkles and stars stay centered on the bubble even while it moves. */
+  follow?: Actor;
   vx: number;
   vy: number;
   gravity: number;
@@ -105,6 +108,7 @@ export class Scene {
   private frameId = 0;
   private snap = true;
   private traces = true;
+  private hidden = new Set<string>();
   private view: View = 'fit';
   private fitKey = '';
   private hover: Pt | null = null;
@@ -125,6 +129,8 @@ export class Scene {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.player = new Player(timeline);
+    // Time doesn't stop for events that only involve people filtered out.
+    this.player.skip = (e) => e.event.people.every((id) => this.isHidden(id));
     this.map = new MapLibre({
       container: mapEl,
       style: mapStyle(this.theme),
@@ -163,7 +169,6 @@ export class Scene {
         justBorn: false,
         label: null,
         prevAnchor: null,
-        phase: (person.order * 1.37) % (Math.PI * 2),
       };
       this.actors.push(actor);
       this.byId.set(person.id, actor);
@@ -231,6 +236,26 @@ export class Scene {
     this.emit();
   }
 
+  /** Shows or hides a friend; their children go with them when they're the parent. */
+  setHidden(id: string, hidden: boolean): void {
+    if (hidden) this.hidden.add(id);
+    else this.hidden.delete(id);
+    this.snap = true;
+    this.emit();
+  }
+
+  setAllHidden(hidden: boolean): void {
+    this.hidden = new Set(hidden ? this.timeline.friends.map((f) => f.id) : []);
+    this.snap = true;
+    this.emit();
+  }
+
+  private isHidden(id: string): boolean {
+    const person = this.timeline.people.get(id);
+    if (!person) return false;
+    return this.hidden.has(person.kind === 'child' ? person.motherId : id);
+  }
+
   setView(view: View): void {
     if (this.view === view) return;
     this.view = view;
@@ -277,7 +302,7 @@ export class Scene {
     const t = this.player.t;
     const started: Actor[] = [];
     for (const actor of this.actors) {
-      const target = this.timeline.placeAt(actor.person.id, t);
+      const target = this.isHidden(actor.person.id) ? null : this.timeline.placeAt(actor.person.id, t);
       const body = actor.body;
       if (!target) {
         body.active = false;
@@ -368,11 +393,14 @@ export class Scene {
           body.ax = p.x + f.startOffset.x * (1 - e);
           body.ay = p.y + f.startOffset.y * (1 - e);
           body.flying = s < 0.85;
+          // Coming in to land, it starts nudging the others aside instead of dropping on top of them.
+          body.ghost = s < 0.6;
           actor.prevAnchor = null;
           continue;
         }
       }
       body.flying = false;
+      body.ghost = false;
       const p = this.projectPlace(actor.place);
       // Move with the map as the camera moves; the springs only handle bumping and settling.
       if (actor.prevAnchor) {
@@ -406,13 +434,12 @@ export class Scene {
         for (const id of event.people) {
           const actor = this.byId.get(id);
           if (!actor?.body.active) continue;
-          const { x, y } = actor.body;
           if (actor.person.kind === 'friend') {
-            this.burst('sparkle', x, y, 18, [actor.color, '#F2C94C', actor.color], 70, 1.4);
-            this.particles.push(this.particle('wave', x, y, 0, 0, actor.color, 1.1, FRIEND_R));
+            this.burst('sparkle', actor, 18, [actor.color, '#F2C94C', actor.color], 70, 1.4);
+            this.particles.push({ ...this.particle('wave', 0, 0, 0, 0, actor.color, 1.1, FRIEND_R), follow: actor });
             this.setLabel(actor, `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, 3);
           } else {
-            this.burst('star', x, y - 10, 14, [actor.color, '#ffffff', actor.color], 90, 1.5);
+            this.burst('star', actor, 14, [actor.color, '#ffffff', actor.color], 90, 1.5);
             // Twins share one label so the two don't sit on top of each other.
             if (id === event.people[0]) this.setLabel(actor, event.people.length > 1 ? 'Twins!' : babyLabel(actor.person.name, actor.person.sex), 3);
           }
@@ -535,9 +562,8 @@ export class Scene {
     const scale = Math.max(0, actor.scale);
     if (scale < 0.02) return;
     const r = b.r * scale;
-    const bob = actor.flight ? 0 : Math.sin(this.clock * 1.7 + actor.phase) * 1.4;
     const x = b.x;
-    const y = b.y + bob + actor.drop;
+    const y = b.y + actor.drop;
     const friend = actor.person.kind === 'friend';
     ctx.save();
     ctx.shadowColor = this.theme.dark ? 'rgba(0,0,0,0.55)' : 'rgba(40,30,20,0.28)';
@@ -619,6 +645,7 @@ export class Scene {
       p.rot += p.vr * dt;
       const age = (this.clock - p.born) / p.life;
       ctx.save();
+      if (p.follow) ctx.translate(p.follow.body.x, p.follow.body.y + p.follow.drop);
       ctx.globalAlpha = Math.max(0, 1 - age * age);
       switch (p.kind) {
         case 'sparkle':
@@ -692,13 +719,14 @@ export class Scene {
     actor.label = { text, start: this.clock, until: this.clock + seconds };
   }
 
-  private burst(kind: Particle['kind'], x: number, y: number, n: number, colors: string[], speed: number, life: number) {
+  /** Particles flying out from a bubble, and moving with it. */
+  private burst(kind: Particle['kind'], from: Actor, n: number, colors: string[], speed: number, life: number) {
     for (let i = 0; i < n; i++) {
       const angle = (i / n) * Math.PI * 2 + Math.random() * 0.3;
       const v = speed * (0.6 + Math.random() * 0.6);
       const size = kind === 'star' ? 4 + Math.random() * 3 : 4 + Math.random() * 4;
-      const p = this.particle(kind, x, y, Math.cos(angle) * v, Math.sin(angle) * v - (kind === 'star' ? 40 : 0), colors[i % colors.length], life * (0.7 + Math.random() * 0.5), size);
-      this.particles.push(p);
+      const p = this.particle(kind, 0, 0, Math.cos(angle) * v, Math.sin(angle) * v - (kind === 'star' ? 40 : 0), colors[i % colors.length], life * (0.7 + Math.random() * 0.5), size);
+      this.particles.push({ ...p, follow: from });
     }
   }
 
@@ -770,6 +798,7 @@ export class Scene {
       pauseForEvents: this.player.pauseForEvents,
       traces: this.traces,
       view: this.view,
+      hidden: [...this.hidden],
     };
   }
 
