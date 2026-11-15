@@ -39,4 +39,25 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./space-defender/index'),
   },
+  {
+    id: 'survivle',
+    title: 'Survivle',
+    tagline: 'Explore a huge land and beat the Dark Beast before the world goes black.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#2a2140"/>
+      <path d="M0 60L30 45L60 60L30 75Z" fill="#63b04b"/><path d="M0 60L30 75V80H0Z" fill="#8a6c4c"/>
+      <path d="M50 40L80 25L110 40L80 55Z" fill="#918c84"/><path d="M50 40L80 55V80H50Z" fill="#77726b"/><path d="M80 55L110 40V80H80Z" fill="#5f5b55"/>
+      <rect x="70" y="14" width="20" height="18" fill="#8c8996"/><path d="M68 14h4v-4h4v4h4v-4h4v4h4v-4h4v4h-24z" fill="#8c8996"/>
+      <circle cx="80" cy="10" r="9" fill="#1a0b28"/><circle cx="80" cy="10" r="9" fill="none" stroke="#9b3ad6" stroke-width="2" opacity=".7"/>
+      <circle cx="77" cy="9" r="1.5" fill="#ff4fd8"/><circle cx="83" cy="9" r="1.5" fill="#ff4fd8"/>
+      <g transform="translate(28 58)">
+        <rect x="-4" y="-6" width="3" height="7" fill="#2f7d31"/><rect x="1" y="-6" width="3" height="7" fill="#2f7d31"/>
+        <rect x="-5" y="-15" width="10" height="10" rx="3" fill="#3e9b3a"/>
+        <circle cx="0" cy="-19" r="5" fill="#f0c7a0"/><path d="M-6-17Q-6-26 0-25Q6-26 6-17L4-20Q0-23-4-20Z" fill="#1b4a20"/>
+        <rect x="6" y="-24" width="2" height="12" fill="#b98b52" transform="rotate(25 7 -14)"/>
+      </g>
+      <g transform="translate(12 44)"><rect x="-1.5" y="0" width="3" height="8" fill="#6b4424"/><circle cx="0" cy="-3" r="6" fill="#3f9440"/></g>
+    </svg>`,
+    load: () => import('./survivle/index'),
+  },
 ];
