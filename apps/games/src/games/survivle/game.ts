@@ -21,6 +21,8 @@ const CLIMB_DRAIN = 0.12; // 12% of the stamina ring per second
 const SAFE_FALL = 4; // levels you can drop without getting hurt
 const AGGRO = 30; // tiles
 const MAX_CHESTS = 25;
+/** Most things one sword swing can hit. */
+const SWING_MAX = 10;
 
 export interface Input {
   up: boolean;
@@ -467,46 +469,55 @@ export class Game {
     p.swingCd = 0.4;
     sfx.swing();
     const dmg = this.swordDmg;
-    let hit = false;
-    for (const e of this.enemies) {
-      const dx = e.x - p.x, dy = e.y - p.y;
-      const d = Math.hypot(dx, dy);
-      if (d < 1.8 && Math.abs(e.z - p.z) < 2 && (d < 0.5 || angDiff(ang(dx, dy), p.face) < 1.25)) {
-        if (this.role === 'guest') {
-          this.net?.hitEnemy(e.id, dmg, dx / (d || 1), dy / (d || 1));
-          e.hurtT = 0.25;
-          sfx.hit();
-          this.float(e.x, e.y, e.z, `${dmg}`, '#fff');
-        } else this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
-        hit = true;
-      }
+    for (let i = -3; i <= 3; i++) {
+      const a = p.face + i * 0.4;
+      this.puff(p.x + Math.cos(a) * 2, p.y + Math.sin(a) * 2, p.z + 0.8, '#f4f8ff', 1, 0.6);
+    }
+    // one swing hits up to 10 things in a wide arc in front of you: Murks, bosses and trees
+    let left = SWING_MAX;
+    const close = this.enemies
+      .map((e) => ({ e, dx: e.x - p.x, dy: e.y - p.y, d: Math.hypot(e.x - p.x, e.y - p.y) }))
+      .filter((q) => q.d < 2.4 && Math.abs(q.e.z - p.z) < 2 && (q.d < 0.6 || angDiff(ang(q.dx, q.dy), p.face) < 1.4))
+      .sort((a, b) => a.d - b.d);
+    for (const { e, dx, dy, d } of close) {
+      if (left <= 0) break;
+      left--;
+      if (this.role === 'guest') {
+        this.net?.hitEnemy(e.id, dmg, dx / (d || 1), dy / (d || 1));
+        e.hurtT = 0.25;
+        sfx.hit();
+        this.float(e.x, e.y, e.z, `${dmg}`, '#fff');
+      } else this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
     }
     const b = this.boss;
     const body = this.beastBodies().find((q) => {
       const dx = q.x - p.x, dy = q.y - p.y;
       return Math.hypot(dx, dy) < 2.3 + q.r * 0.8 && angDiff(ang(dx, dy), p.face) < 1.3;
     });
-    if (body) {
+    if (body && left > 0) {
+      left--;
       if (this.role === 'guest') {
         this.net?.hitBoss(dmg);
         b.hurtT = 0.2;
         sfx.hit();
       } else this.hurtBoss(dmg);
-      hit = true;
     }
-    if (this.minis.swordHit(this, dmg, (dx, dy) => angDiff(ang(dx, dy), p.face) < 1.3)) hit = true;
-    if (hit) return;
-    // chop a tree in front
-    const fx = p.x + Math.cos(p.face) * 0.9, fy = p.y + Math.sin(p.face) * 0.9;
-    const cands = [[Math.floor(fx), Math.floor(fy)], [Math.floor(p.x + Math.cos(p.face) * 0.5), Math.floor(p.y + Math.sin(p.face) * 0.5)]];
-    for (const [tx, ty] of cands) {
-      const v = this.world.tile(tx, ty);
-      const t = tT(v);
-      if (t === T.None) continue;
-      if (Math.abs(tH(v) - p.z) > 1.5) continue;
-      this.chopTree(tx, ty, t, tH(v));
-      return;
-    }
+    if (left > 0 && this.minis.swordHit(this, dmg, (dx, dy) => angDiff(ang(dx, dy), p.face) < 1.3)) left--;
+    // trees and bushes in the arc, nearest first
+    if (left <= 0) return;
+    const trees: { tx: number; ty: number; t: number; h: number; d: number }[] = [];
+    const R = 3;
+    for (let ty = Math.floor(p.y - R); ty <= Math.floor(p.y + R); ty++)
+      for (let tx = Math.floor(p.x - R); tx <= Math.floor(p.x + R); tx++) {
+        const v = this.world.tile(tx, ty);
+        const t = tT(v);
+        if (t === T.None || Math.abs(tH(v) - p.z) > 1.5) continue;
+        const dx = tx + 0.5 - p.x, dy = ty + 0.5 - p.y, d = Math.hypot(dx, dy);
+        if (d > R || (d > 0.9 && angDiff(ang(dx, dy), p.face) > 1.4)) continue;
+        trees.push({ tx, ty, t, h: tH(v), d });
+      }
+    trees.sort((a, b) => a.d - b.d);
+    for (const tr of trees.slice(0, left)) this.chopTree(tr.tx, tr.ty, tr.t, tr.h);
   }
 
   private chopTree(tx: number, ty: number, t: number, h: number) {
