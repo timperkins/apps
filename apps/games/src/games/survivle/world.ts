@@ -83,6 +83,21 @@ export function villageAt(x: number, y: number): number {
   return -1;
 }
 
+/** The four corner lairs, one mini boss each. */
+export const LAIRS = [
+  { x: 350, y: 350, ground: G.Snow },
+  { x: SIZE - 350, y: 350, ground: G.Dirt },
+  { x: 350, y: SIZE - 350, ground: G.Forest },
+  { x: SIZE - 350, y: SIZE - 350, ground: G.Rock },
+];
+export const LAIR_R = 16;
+
+function lairDist(x: number, y: number) {
+  let d = 1e9;
+  for (const l of LAIRS) d = Math.min(d, Math.max(Math.abs(x - l.x), Math.abs(y - l.y)));
+  return d;
+}
+
 function villageDist(x: number, y: number) {
   let d = 1e9;
   for (const v of VILLAGES) d = Math.min(d, Math.max(Math.abs(x - v.x), Math.abs(y - v.y)));
@@ -115,12 +130,13 @@ export function gen(x: number, y: number, seed: number): number {
   if (r <= 34) return castleTile(dx, dy, r);
   const path = onPath(dx, dy);
   const vd = villageDist(x, y);
-  const camp = inCamp(x, y) || vd <= VILLAGE_R;
+  const ld = lairDist(x, y);
+  const camp = inCamp(x, y) || vd <= VILLAGE_R || ld <= LAIR_R + 2;
   const n = fbm(x / 260, y / 260, seed, 4);
   const m = fbm(x / 70, y / 70, seed + 7, 3);
   if (n < 0.36 && r >= 140) {
     if (path && dx === 0) return pack(1, G.Bridge, 0); // a narrow, one-tile bridge
-    if (!camp && vd > VILLAGE_R + 2) return pack(0, G.Water, 0);
+    if (!camp && vd > VILLAGE_R + 2 && ld > 45) return pack(0, G.Water, 0);
   }
   let h = 1 + Math.floor(Math.max(0, n - 0.36) * 22);
   // cliffs and plateaus, ramping down to the road and the starting camp so those stay open
@@ -133,11 +149,17 @@ export function gen(x: number, y: number, seed: number): number {
     const cd = Math.max(Math.abs(x - 5000), Math.abs(y - 5600));
     k = Math.min(k, Math.max(0, (cd - 8) / 12));
     k = Math.min(k, Math.max(0, (vd - VILLAGE_R) / 12));
+    k = Math.min(k, Math.max(0, (ld - LAIR_R) / 14));
     h += Math.round(lift * k);
   }
   if (r < 140) {
     const k = Math.max(0, (r - 90) / 50);
     h = Math.round(FLOOR_H + (h - FLOOR_H) * k);
+  }
+  if (ld <= LAIR_R) {
+    const l = LAIRS.find((q) => Math.max(Math.abs(x - q.x), Math.abs(y - q.y)) <= LAIR_R)!;
+    const ring = Math.max(Math.abs(x - l.x), Math.abs(y - l.y));
+    return pack(h, ring === LAIR_R ? G.Stone : l.ground, 0);
   }
   const vi = vd <= VILLAGE_R ? villageAt(x, y) : -1;
   if (vi >= 0) {

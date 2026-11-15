@@ -391,7 +391,7 @@ const game: GameModule = {
               <p class="sv-dim">${g.arrows} arrows · ${g.wood} wood · ${g.coins} coins · ${g.apples} apples</p></div>
             <div><h3>Clothes</h3>${g.owned.map((id) => { const o = outfitById(id); return `<button class="sv-item ${g.p.outfit === id ? 'on' : ''}" data-a="wear" data-id="${id}"><i style="background:${o.shirt};border-color:${o.hood}"></i>${o.name}</button>`; }).join('')}</div>
           </div>
-          <p class="sv-dim">Chests hide on cliff tops and deep in forests. Each one holds a better sword or bow (up to 5 damage better than your best). The best sword does 15.</p>
+          <p class="sv-dim">Chests hide on cliff tops and deep in forests. Each one holds a better sword or bow (up to 5 damage better than your best). The best sword does 15. Four mini bosses guard the corners of the map: beat one for a permanent heart.</p>
           <div class="sv-row"><button data-a="close" class="sv-btn big">Done</button></div>
         </div></div>`);
     }

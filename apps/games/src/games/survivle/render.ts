@@ -2,6 +2,7 @@
 // campfires, the castle, the Dark Beast, the spreading darkness and the HUD.
 import { CROP_TIME, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
 import type { Game, Particle } from './game';
+import { MINI_KINDS, type Mini } from './minis';
 import { BOARD, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, gen, hash, tG, tH, tT } from './world';
 
 export const TW = 48;
@@ -834,6 +835,77 @@ export class Renderer {
         ctx.restore();
       });
     }
+    // corner mini bosses, their shots and the warning circles on the ground
+    for (const hz of game.minis.hazards) {
+      const h = game.world.heightAt(hz.x, hz.y);
+      add(hz.x - 2, hz.y - 2, () => {
+        const X = this.sx(cam, hz.x, hz.y), Y = this.sy(cam, hz.x, hz.y, h);
+        const rx = hz.r * TW * 0.707, ry = hz.r * TH * 0.707;
+        ctx.save();
+        if (!hz.hit) {
+          const k = hz.t / hz.max;
+          ctx.globalAlpha = 0.85;
+          ctx.strokeStyle = hz.color;
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.ellipse(X, Y, rx, ry, 0, 0, 7);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = hz.color;
+          ctx.beginPath();
+          ctx.ellipse(X, Y, rx * k, ry * k, 0, 0, 7);
+          ctx.fill();
+        } else {
+          const k = (hz.t - hz.max) / hz.after;
+          ctx.globalAlpha = Math.max(0, 1 - k);
+          ctx.fillStyle = hz.color;
+          ctx.beginPath();
+          ctx.ellipse(X, Y, rx, ry, 0, 0, 7);
+          ctx.fill();
+          if (hz.color === '#6fbf4a') {
+            // roots
+            ctx.fillStyle = '#5a3a1e';
+            for (let i = -1; i <= 1; i++) {
+              ctx.beginPath();
+              ctx.moveTo(X + i * 10 - 4, Y);
+              ctx.lineTo(X + i * 10, Y - 26 + Math.abs(i) * 8);
+              ctx.lineTo(X + i * 10 + 4, Y);
+              ctx.fill();
+            }
+          } else if (hz.color === '#fff36b') {
+            ctx.strokeStyle = '#fffbd0';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(X, Y - 120);
+            ctx.lineTo(X + 8, Y - 80);
+            ctx.lineTo(X - 6, Y - 50);
+            ctx.lineTo(X + 4, Y);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      });
+    }
+    for (const sh of game.minis.shots) {
+      const h = game.world.heightAt(sh.x, sh.y);
+      add(sh.x, sh.y, () => {
+        const X = this.sx(cam, sh.x, sh.y), Y = this.sy(cam, sh.x, sh.y, h + 0.9);
+        const gr = ctx.createRadialGradient(X, Y, 1, X, Y, 9);
+        gr.addColorStop(0, '#fff');
+        gr.addColorStop(0.45, sh.color);
+        gr.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gr;
+        ctx.beginPath();
+        ctx.arc(X, Y, 9, 0, 7);
+        ctx.fill();
+      });
+    }
+    for (const m of game.minis.list) {
+      if (m.dead || Math.abs(m.x - cam.x) > 60 || Math.abs(m.y - cam.y) > 60) continue;
+      add(m.x, m.y, () => this.miniBoss(game, m, cam));
+    }
     // enemies
     for (const e of game.enemies) {
       add(e.x, e.y, () => this.murk(game, e, cam));
@@ -949,6 +1021,176 @@ export class Renderer {
         ctx.restore();
       });
     }
+  }
+
+  private miniBoss(game: Game, m: Mini, cam: Cam) {
+    const ctx = this.ctx;
+    const t = game.time;
+    const g = game.world.heightAt(m.x, m.y);
+    const X = this.sx(cam, m.x, m.y);
+    const gy = this.sy(cam, m.x, m.y, g);
+    const Y = this.sy(cam, m.x, m.y, g + m.lift);
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.3)';
+    ctx.beginPath();
+    ctx.ellipse(X, gy, 30 - Math.min(14, m.lift * 2), 12 - Math.min(5, m.lift), 0, 0, 7);
+    ctx.fill();
+    ctx.translate(X, Y);
+    ctx.scale(1.3, 1.3);
+    const hurt = m.hurtT > 0;
+    if (m.kind === 0) {
+      // Frost Golem: a big blocky ice giant
+      const bob = Math.sin(t * 3) * 1.5;
+      ctx.fillStyle = hurt ? '#fff' : '#5aa7c9';
+      ctx.fillRect(-18, -24, 13, 24);
+      ctx.fillRect(5, -24, 13, 24);
+      ctx.fillStyle = hurt ? '#fff' : '#7fcbe8';
+      ctx.beginPath();
+      ctx.roundRect(-26, -64 + bob, 52, 44, 8);
+      ctx.fill();
+      ctx.fillStyle = hurt ? '#fff' : '#5aa7c9';
+      ctx.fillRect(-38, -60 + bob, 13, 34);
+      ctx.fillRect(25, -60 + bob, 13, 34);
+      ctx.fillStyle = hurt ? '#fff' : '#a8e6ff';
+      ctx.beginPath();
+      ctx.roundRect(-14, -86 + bob, 28, 24, 6);
+      ctx.fill();
+      ctx.fillStyle = '#e8fbff';
+      [[-30, -66], [-22, -70], [22, -70], [30, -66]].forEach(([dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(dx - 4, dy + 6 + bob);
+        ctx.lineTo(dx, dy - 8 + bob);
+        ctx.lineTo(dx + 4, dy + 6 + bob);
+        ctx.fill();
+      });
+      ctx.fillStyle = '#00e5ff';
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = 10;
+      ctx.fillRect(-9, -78 + bob, 6, 4);
+      ctx.fillRect(3, -78 + bob, 6, 4);
+      ctx.shadowBlur = 0;
+    } else if (m.kind === 1) {
+      // Ember Toad: a wide, glowing orange toad
+      const puff = 1 + Math.sin(t * 4) * 0.04;
+      ctx.fillStyle = hurt ? '#fff' : '#c9471f';
+      ctx.beginPath();
+      ctx.ellipse(-22, -6, 12, 7, 0, 0, 7);
+      ctx.ellipse(22, -6, 12, 7, 0, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = hurt ? '#fff' : '#ff6a2a';
+      ctx.beginPath();
+      ctx.ellipse(0, -22, 32 * puff, 22 * puff, 0, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = '#ffc070';
+      ctx.beginPath();
+      ctx.ellipse(0, -14, 20, 10, 0, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,230,90,${0.6 + 0.4 * Math.sin(t * 6)})`;
+      [[-16, -32], [12, -36], [20, -24], [-6, -38]].forEach(([dx, dy]) => {
+        ctx.beginPath();
+        ctx.arc(dx, dy, 3, 0, 7);
+        ctx.fill();
+      });
+      ctx.fillStyle = '#ffde3a';
+      ctx.beginPath();
+      ctx.arc(-13, -44, 8, 0, 7);
+      ctx.arc(13, -44, 8, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = '#1b1b22';
+      ctx.fillRect(-15, -48, 4, 8);
+      ctx.fillRect(11, -48, 4, 8);
+      ctx.strokeStyle = '#7a1f0a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, -24, 16, 0.3, Math.PI - 0.3);
+      ctx.stroke();
+    } else if (m.kind === 2) {
+      // Thorn King: a walking tree with a crown of thorns
+      const sway = Math.sin(t * 2) * 3;
+      ctx.fillStyle = hurt ? '#fff' : '#6b4424';
+      ctx.fillRect(-14, -16, 9, 16);
+      ctx.fillRect(5, -16, 9, 16);
+      ctx.beginPath();
+      ctx.roundRect(-18, -62, 36, 50, 10);
+      ctx.fill();
+      ctx.strokeStyle = hurt ? '#fff' : '#4a2e17';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(-16, -48);
+      ctx.quadraticCurveTo(-36, -50 + sway, -40, -30 + sway);
+      ctx.moveTo(16, -48);
+      ctx.quadraticCurveTo(36, -50 - sway, 40, -30 - sway);
+      ctx.stroke();
+      ctx.fillStyle = '#3f8f3a';
+      [[-24, -76, 16], [0, -86, 20], [24, -76, 16]].forEach(([dx, dy, r]) => {
+        ctx.beginPath();
+        ctx.arc(dx, dy, r, 0, 7);
+        ctx.fill();
+      });
+      ctx.fillStyle = '#2a5a24';
+      for (let i = 0; i < 7; i++) {
+        const a = Math.PI + (i / 6) * Math.PI;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 20 - 4, -96 + Math.sin(a) * 4);
+        ctx.lineTo(Math.cos(a) * 24, -112 + Math.sin(a) * 6);
+        ctx.lineTo(Math.cos(a) * 20 + 4, -96 + Math.sin(a) * 4);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffde3a';
+      ctx.fillRect(-10, -48, 6, 5);
+      ctx.fillRect(4, -48, 6, 5);
+      ctx.fillStyle = '#2a1a0a';
+      ctx.fillRect(-7, -36, 14, 4);
+    } else {
+      // Storm Eye: a floating eyeball crackling with lightning
+      ctx.strokeStyle = `rgba(255,243,107,${0.5 + 0.5 * Math.sin(t * 20)})`;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        const a = t * 3 + (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 26, -30 + Math.sin(a) * 26);
+        ctx.lineTo(Math.cos(a + 0.3) * 34, -30 + Math.sin(a + 0.3) * 30);
+        ctx.lineTo(Math.cos(a + 0.15) * 40, -30 + Math.sin(a + 0.15) * 38);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(120,110,150,.85)';
+      ctx.beginPath();
+      ctx.arc(-14, 0, 10, 0, 7);
+      ctx.arc(0, 4, 12, 0, 7);
+      ctx.arc(14, 0, 10, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = hurt ? '#ffd0d0' : '#f4f1ff';
+      ctx.beginPath();
+      ctx.arc(0, -30, 24, 0, 7);
+      ctx.fill();
+      const p = game.p;
+      const ldx = (p.x - m.x) - (p.y - m.y), ldy = (p.x - m.x) + (p.y - m.y), ll = Math.hypot(ldx, ldy) || 1;
+      ctx.fillStyle = '#8a4ae0';
+      ctx.beginPath();
+      ctx.arc((ldx / ll) * 8, -30 + (ldy / ll) * 6, 11, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = '#120a1e';
+      ctx.beginPath();
+      ctx.arc((ldx / ll) * 10, -30 + (ldy / ll) * 7, 5, 0, 7);
+      ctx.fill();
+      ctx.strokeStyle = '#d06a8a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-22, -24);
+      ctx.lineTo(-14, -26);
+      ctx.moveTo(20, -38);
+      ctx.lineTo(13, -36);
+      ctx.stroke();
+    }
+    if (m.flash > 0) {
+      ctx.globalAlpha = m.flash;
+      ctx.fillStyle = MINI_KINDS[m.kind].color;
+      ctx.beginPath();
+      ctx.arc(0, -40, 44, 0, 7);
+      ctx.globalAlpha = m.flash * 0.35;
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   private murk(game: Game, e: Game['enemies'][number], cam: Cam) {
@@ -1183,6 +1425,19 @@ export class Renderer {
       this.shadowText(`The Dark Beast  ${b.hp} / 500`, W / 2, H - 188, '#f0d8ff');
     }
 
+    const mb = game.minis.current();
+    if (mb) {
+      const k = MINI_KINDS[mb.kind];
+      const bw = Math.min(360, W - 60);
+      ctx.fillStyle = 'rgba(0,0,0,.6)';
+      ctx.fillRect(W / 2 - bw / 2 - 3, H - 182, bw + 6, 16);
+      ctx.fillStyle = k.color;
+      ctx.fillRect(W / 2 - bw / 2, H - 179, (bw * mb.hp) / k.hp, 10);
+      ctx.font = '900 13px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      this.shadowText(`${k.name}  ${mb.hp} / ${k.hp}`, W / 2, H - 188, '#fff');
+    }
+
     // stamina ring next to the hero
     if (p.stamina < 0.999 || p.climbing) {
       const X = this.sx(cam, p.x, p.y) + 22, Y = this.sy(cam, p.x, p.y, p.z) - 40;
@@ -1368,6 +1623,7 @@ export class Renderer {
     };
     for (const st of game.stones()) if (!game.stoneDone(st)) dot(st.x, st.y, '#5ad0ff', 3);
     for (const v of VILLAGES) dot(v.x, v.y, '#ff9a5a', 5);
+    for (const m of game.minis.list) if (!m.dead) dot(m.homeX, m.homeY, MINI_KINDS[m.kind].color, 6);
     for (const f of game.fires) dot(f.x, f.y, '#ff7a2a', 2.5);
     dot(CX, CY, '#b03ad6', 6);
     ctx.restore();

@@ -5,6 +5,7 @@ import {
   MAX_UPGRADE, TIME_LIMIT, bowName, jobById, rollEnemyKind, swordName,
 } from './data';
 import { sfx } from './audio';
+import { Minis } from './minis';
 import {
   BOARD, CX, CY, FLOOR_H, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
   blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
@@ -72,6 +73,8 @@ export interface Enemy {
   hop: number;
   /** Part of a challenge-rock fight. */
   ch?: boolean;
+  /** Called in by a mini boss. */
+  minion?: boolean;
 }
 
 export interface Arrow {
@@ -159,6 +162,7 @@ export interface SaveData {
   jobVillage?: number;
   farm?: [number, number][];
   letterTo?: number | null;
+  minis?: number[];
 }
 
 export interface Work {
@@ -222,6 +226,7 @@ export class Game {
   particles: Particle[] = [];
   treeHits = new Map<number, { hits: number; t: number }>();
   boss: Boss;
+  minis = new Minis();
   won = false;
   lost = false;
   time = 0;
@@ -357,6 +362,7 @@ export class Game {
         hit = true;
       }
     }
+    if (this.minis.swordHit(this, dmg, (dx, dy) => angDiff(ang(dx, dy), p.face) < 1.3)) hit = true;
     if (hit) return;
     // chop a tree in front
     const fx = p.x + Math.cos(p.face) * 0.9, fy = p.y + Math.sin(p.face) * 0.9;
@@ -526,6 +532,14 @@ export class Game {
   quitJob() {
     this.job = null;
     this.letterTo = null;
+  }
+
+  spawnMinion(kind: number, x: number, y: number) {
+    this.enemies.push({
+      id: this.nextId++, kind, x, y, z: this.world.heightAt(x, y), hp: ENEMY_KINDS[kind].hp, aggro: true, atkCd: 1.5,
+      hurtT: 0, kx: 0, ky: 0, wanderA: 0, wanderT: 0, hop: Math.random() * 6, minion: true,
+    });
+    this.puff(x, y, this.world.heightAt(x, y), '#6fbf4a', 10, 2);
   }
 
   private startChallenge(st: { x: number; y: number }) {
@@ -773,6 +787,7 @@ export class Game {
     this.updateTrader(dt);
     this.updateEnemies(dt);
     this.updateChallenge();
+    this.minis.update(this, dt);
     this.updateNarrator();
     this.updateArrows(dt);
     this.updateBoss(dt);
@@ -1086,7 +1101,7 @@ export class Game {
       const e = this.enemies[i];
       const k = ENEMY_KINDS[e.kind];
       const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
-      if ((d > 75 && !e.ch) || fighting) {
+      if ((d > 75 && !e.ch && !e.minion) || fighting) {
         this.enemies.splice(i, 1);
         continue;
       }
@@ -1167,6 +1182,7 @@ export class Game {
         this.hurtBoss(a.dmg);
         dead = true;
       }
+      if (!dead && this.minis.arrowHit(this, a.x, a.y, a.dmg)) dead = true;
       if (dead) this.arrowsFlying.splice(i, 1);
     }
   }
@@ -1315,6 +1331,7 @@ export class Game {
       chopped: [...this.world.chopped].slice(-20000), fires: this.fires, spawn: this.spawn, chests: this.chests,
       won: this.won, savedAt: Date.now(), acorns: this.acorns, maxHp: this.maxHp, stones: [...this.stonesDone], job: this.job,
       jobVillage: this.jobVillage, farm: [...this.farm], letterTo: this.letterTo,
+      minis: this.minis.defeated(),
     };
   }
 
@@ -1344,6 +1361,7 @@ export class Game {
     g.jobVillage = s.jobVillage ?? 0;
     g.farm = new Map(s.farm ?? []);
     g.letterTo = s.letterTo ?? null;
+    g.minis = new Minis(s.minis ?? []);
     // If saved inside the locked room, start just outside its door so the fight starts fresh.
     if (inRoom(s.x, s.y) && !s.won) {
       g.p.x = CX + 0.5;
