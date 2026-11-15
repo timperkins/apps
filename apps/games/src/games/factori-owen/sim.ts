@@ -815,9 +815,21 @@ export class Game {
         e.status = 'Waiting for items';
         return;
       }
+      if (!d.electric && !e.fuel && this.isFuel(it)) {
+        // fuel-up: a burner arm keeps a spare piece of fuel for itself before passing any on
+        e.fuel = { item: it, n: 1 };
+        e.status = 'Fueling up';
+        return;
+      }
       e.held = it;
       e.phase = 'swing';
       e.t = 0;
+    }
+    if (!d.electric && e.burn <= 0 && !e.fuel && e.held && this.isFuel(e.held)) {
+      // ran dry mid-swing while carrying fuel: burn what it's holding
+      e.fuel = { item: e.held, n: 1 };
+      e.held = null;
+      e.phase = 'back';
     }
     const en = this.energy(e);
     if (en <= 0) {

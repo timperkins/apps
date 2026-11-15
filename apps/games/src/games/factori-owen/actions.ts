@@ -5,14 +5,15 @@ import { RES_ITEM } from './world';
 import type { Dir, Entity, Game } from './sim';
 
 export type Items = [ItemId, number][];
-export type TakeWhat = 'fuel' | 'output' | 'input' | 'chest';
+export type TakeWhat = 'fuel' | 'output' | 'input' | 'chest' | 'belt';
 
 export interface Actions {
   place(type: EntityType, x: number, y: number, dir: Dir, item: ItemId): boolean;
   remove(e: Entity): void;
   rotate(e: Entity, dir?: Dir): void;
   give(e: Entity, slot: number, n: number): boolean;
-  take(e: Entity, what: TakeWhat, key?: string | number): void;
+  /** Take items out of a building. `half` takes half the stack (right-click). */
+  take(e: Entity, what: TakeWhat, key?: string | number, half?: boolean): void;
   setRecipe(e: Entity, id: string): void;
   research(id: string): void;
   /** Finish hand-mining a tile (ore or tree). */
@@ -21,22 +22,37 @@ export interface Actions {
 
 // ---------- the real effects, returning what the player gets back ----------
 
-export function doTake(g: Game, e: Entity, what: TakeWhat, key?: string | number, room: (item: ItemId) => number = () => 1e9): Items {
+export function doTake(g: Game, e: Entity, what: TakeWhat, key?: string | number, roomFn: (item: ItemId) => number = () => 1e9, half = false): Items {
   const out: Items = [];
+  if (what === 'belt') {
+    // pick everything up off a belt tile
+    const keep = [];
+    for (const b of e.items) {
+      if (roomFn(b.item) > 0 && (out.find((o) => o[0] === b.item)?.[1] ?? 0) < roomFn(b.item)) {
+        const o = out.find((x) => x[0] === b.item);
+        if (o) o[1]++;
+        else out.push([b.item, 1]);
+      } else keep.push(b);
+    }
+    e.items = keep;
+    return out;
+  }
+  // right-click takes half (rounded up), like splitting a stack
+  const room = (item: ItemId, n: number) => Math.min(roomFn(item), half ? Math.ceil(n / 2) : n);
   if (what === 'fuel' && e.fuel) {
-    const k = Math.min(e.fuel.n, room(e.fuel.item));
+    const k = room(e.fuel.item, e.fuel.n);
     out.push([e.fuel.item, k]);
     e.fuel.n -= k;
     if (e.fuel.n <= 0) e.fuel = null;
   } else if (what === 'output' && e.output) {
-    const k = Math.min(e.output.n, room(e.output.item));
+    const k = room(e.output.item, e.output.n);
     out.push([e.output.item, k]);
     e.output.n -= k;
     if (e.output.n <= 0) e.output = null;
   } else if (what === 'input') {
     const item = (key || Object.keys(e.input).find((k) => e.input[k as ItemId])) as ItemId | undefined;
     if (item && e.input[item]) {
-      const k = Math.min(e.input[item]!, room(item));
+      const k = room(item, e.input[item]!);
       out.push([item, k]);
       e.input[item]! -= k;
       if (!e.input[item]) delete e.input[item];
@@ -44,7 +60,7 @@ export function doTake(g: Game, e: Entity, what: TakeWhat, key?: string | number
   } else if (what === 'chest' && e.inv) {
     const s = e.inv.slots[Number(key)];
     if (s) {
-      const k = Math.min(s.n, room(s.item));
+      const k = room(s.item, s.n);
       out.push([s.item, k]);
       s.n -= k;
       if (s.n <= 0) e.inv.slots[Number(key)] = null;
@@ -127,9 +143,9 @@ export function localActions(g: () => Game): Actions {
       if (s.n <= 0) game.inv.slots[slot] = null;
       return true;
     },
-    take(e, what, key) {
+    take(e, what, key, half) {
       const game = g();
-      addAll(game, doTake(game, e, what, key, (item) => game.inv.space(item)));
+      addAll(game, doTake(game, e, what, key, (item) => game.inv.space(item), half));
     },
     setRecipe(e, id) {
       addAll(g(), doSetRecipe(g(), e, id));

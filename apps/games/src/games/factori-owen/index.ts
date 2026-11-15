@@ -648,6 +648,20 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     sfx.click();
   }
 
+  /** P: scoop up whatever is on the belt under the mouse. Hold P and sweep to grab more. */
+  let pickKey = false;
+  function pickFromBelt() {
+    const t = hoverTile();
+    const e = t ? game.entAt(t[0], t[1]) : null;
+    if (!e || e.def.kind !== 'belt' || !e.items.length) return;
+    if (Math.hypot(e.cx - game.px, e.cy - game.py) > BUILD_REACH) {
+      if (frame % 30 === 0) game.toast('Walk closer to pick that up');
+      return;
+    }
+    act.take(e, 'belt');
+    sfx.pickup();
+  }
+
   function pipette() {
     if (ui.cursor) {
       ui.cursor = null;
@@ -704,8 +718,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       else if (k === 'q') pipette();
       else if (k === 'm') toggleMute();
       else if (k === 'n') toggleBigMap();
+      else if (k === 'p') pickKey = true;
       else if (/^[0-9]$/.test(k)) selectHot((Number(k) + 9) % 10);
     }
+    if (k === 'p' && !down) pickKey = false;
     if (k === ' ' || k === 'c') {
       shootKey = down;
       ev.preventDefault();
@@ -1117,6 +1133,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     }
     handleEvents();
     renderer.others = guest ? guest.others : host ? host.views() : [];
+    if (pickKey && frame % 3 === 0) pickFromBelt();
     explore(game, game.px, game.py);
     minimap.draw(game, renderer.others, frame, !bigMapEl.hidden);
 

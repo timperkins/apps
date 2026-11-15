@@ -206,7 +206,7 @@ function entityPanel(ui: UIState): string {
   const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall'].includes(d.kind);
   return `<div class="fo-cols">
     <section><h3>${icon(d.item)} ${esc(name)}</h3>${body}</section>
-    ${accepts ? `<section><h3>Inventory</h3>${inventoryGrid(g, 'give')}<p class="fo-note">Click an item to put it in.</p></section>` : ''}
+    ${accepts ? `<section><h3>Inventory</h3>${inventoryGrid(g, 'give')}<p class="fo-note">Click an item to put it all in, right-click for half. Same for taking items out.</p></section>` : ''}
   </div>`;
 }
 
@@ -320,6 +320,8 @@ function helpPanel() {
     <li><kbd>E</kbd> inventory and crafting · <kbd>T</kbd> research tree · <kbd>N</kbd> map · <kbd>Esc</kbd> menu</li>
     <li>Click an item (or press <kbd>1</kbd>–<kbd>0</kbd>) to hold it, then <b>left-click</b> to build. Drag to lay belts.</li>
     <li><kbd>R</kbd> rotates · <kbd>Q</kbd> picks the building under the mouse, or empties your hand</li>
+    <li><kbd>P</kbd> over a belt picks up the items on it (hold P and sweep to grab more)</li>
+    <li>In a building's window, click a slot to take everything, or right-click to take half.</li>
     <li>Left-click a building to open it, then click inventory items to load fuel, ore or ingredients.</li>
   </ul>
   <p><b>First steps:</b> put your burner drill on Owen ore and give it wood or coal. Point its yellow arrow at the stone furnace so the ore drops straight in. Add fuel to the furnace too, and Owen plates come out.</p>
@@ -414,10 +416,10 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
       }
       break;
     }
-    case 'take-fuel': if (e) ui.act.take(e, 'fuel'); break;
-    case 'take-output': if (e) ui.act.take(e, 'output'); break;
-    case 'take-input': if (e) ui.act.take(e, 'input', id || undefined); break;
-    case 'take-chest': if (e) ui.act.take(e, 'chest', i); break;
+    case 'take-fuel': if (e) ui.act.take(e, 'fuel', undefined, button === 2); break;
+    case 'take-output': if (e) ui.act.take(e, 'output', undefined, button === 2); break;
+    case 'take-input': if (e) ui.act.take(e, 'input', id || undefined, button === 2); break;
+    case 'take-chest': if (e) ui.act.take(e, 'chest', i, button === 2); break;
     case 'set-recipe':
       if (e) {
         ui.act.setRecipe(e, id);

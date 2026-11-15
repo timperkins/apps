@@ -125,7 +125,7 @@ export class HostSession {
       }
       case 'take': {
         const e = at();
-        if (e) items = doTake(g, e, m.what as TakeWhat, m.key);
+        if (e) items = doTake(g, e, m.what as TakeWhat, m.key, undefined, !!m.half);
         break;
       }
       case 'recipe': {
@@ -350,9 +350,9 @@ export class GuestSession {
         this.cmd('give', { x: e.x, y: e.y, item, n: k }, (r) => this.addItems(r.items));
         return true;
       },
-      take: (e, what, key) => {
-        doTake(this.game!, e, what, key);
-        this.cmd('take', { x: e.x, y: e.y, what, key }, (r) => this.addItems(r.items));
+      take: (e, what, key, half) => {
+        doTake(this.game!, e, what, key, undefined, half);
+        this.cmd('take', { x: e.x, y: e.y, what, key, half }, (r) => this.addItems(r.items));
       },
       setRecipe: (e, id) => {
         doSetRecipe(this.game!, e, id);
