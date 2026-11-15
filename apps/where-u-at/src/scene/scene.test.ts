@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { GAP, step, type Body } from './physics';
+import { gapBetween, step, type Body } from './physics';
 import { arc, laneOffset, pointAt, shifted } from './curves';
-import { Player } from './player';
+import { ANIMATION_SECONDS, EVENT_PAUSE, FLIGHT_SECONDS, Player } from './player';
 import { Timeline } from '../engine/timeline';
 import { monthIndex } from '../engine/time';
 import type { LifeEvent, Person } from '../data/types';
@@ -16,7 +16,7 @@ function overlaps(bodies: Body[]): number {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i];
       const b = bodies[j];
-      worst = Math.max(worst, a.r + b.r + GAP - Math.hypot(a.x - b.x, a.y - b.y));
+      worst = Math.max(worst, a.r + b.r + gapBetween(a, b) - Math.hypot(a.x - b.x, a.y - b.y));
     }
   return worst;
 }
@@ -28,6 +28,23 @@ describe('physics', () => {
       step(bodies, 1 / 60);
       expect(overlaps(bodies)).toBeLessThan(0.5);
     }
+  });
+
+  it('comes to rest when a crowd is pressed around one spot', () => {
+    const bodies = Array.from({ length: 31 }, (_, i) => body(`p${i}`, 400 + (i % 5), 300 + (i % 7), `f${i % 9}`, i < 17 ? 22 : 13));
+    for (const b of bodies) {
+      b.ax = 400;
+      b.ay = 300;
+    }
+    for (let frame = 0; frame < 600; frame++) step(bodies, 1 / 60);
+    const before = bodies.map((b) => [b.x, b.y]);
+    for (let frame = 0; frame < 60; frame++) step(bodies, 1 / 60);
+    const drift = Math.max(...bodies.map((b, i) => Math.hypot(b.x - before[i][0], b.y - before[i][1])));
+    expect(drift).toBeLessThan(0.05);
+  });
+
+  it('keeps family members touching and other families a little apart', () => {
+    expect(gapBetween(body('a', 0, 0, 'f'), body('b', 0, 0, 'f'))).toBeLessThan(gapBetween(body('a', 0, 0, 'f'), body('c', 0, 0, 'g')));
   });
 
   it('settles near the anchor when alone, after a little bounce', () => {
@@ -76,16 +93,20 @@ describe('Player', () => {
     expect(p.t).toBeCloseTo(monthIndex('2000-06') + 6);
   });
 
-  it('holds on births and marriages when asked to', () => {
+  it('stops on every event until its animation is done, then 3 more seconds', () => {
     const p = new Player(tl);
     p.play();
-    const crossed = p.advance(10);
-    expect(crossed.map((e) => e.event.id)).toEqual(['1']);
-    const t = p.t;
-    p.advance(1);
-    expect(p.t).toBe(t);
-    p.advance(1);
-    expect(p.t).toBeGreaterThan(t);
+    expect(p.advance(10).map((e) => e.event.id)).toEqual(['1']);
+    const born = p.t;
+    p.advance(ANIMATION_SECONDS.birth + EVENT_PAUSE - 0.1);
+    expect(p.t).toBe(born);
+    // Time resumes and stops again at the move.
+    expect(p.advance(10).map((e) => e.event.id)).toEqual(['2']);
+    const moved = p.t;
+    p.advance(FLIGHT_SECONDS + EVENT_PAUSE - 0.1);
+    expect(p.t).toBe(moved);
+    p.advance(0.5);
+    expect(p.t).toBeGreaterThan(moved);
   });
 
   it('stops at the end', () => {

@@ -1,14 +1,21 @@
-// Moves time forward while playing, optionally pausing on births and marriages.
+// Moves time forward while playing, optionally stopping on every event until its animation is
+// done and a moment after.
+import type { LifeEvent } from '../data/types';
 import type { TimedEvent, Timeline } from '../engine/timeline';
 
 /** Seconds of play per year of timeline. */
 export const SPEEDS = [24, 12, 6, 3, 1.5];
 export const DEFAULT_SPEED = 2;
 export const SPEED_LABELS = ['0.25x', '0.5x', '1x', '2x', '4x'];
-export const EVENT_HOLD = 1.5;
+/** How long a move's flight takes, in seconds. */
+export const FLIGHT_SECONDS = 2.4;
+/** How long each kind of event's animation runs, in seconds. */
+export const ANIMATION_SECONDS: Record<LifeEvent['type'], number> = { move: FLIGHT_SECONDS, birth: 1.5, marriage: 3 };
+/** Seconds to wait after an event's animation before time moves on. */
+export const EVENT_PAUSE = 3;
 
-export function isBigEvent(e: TimedEvent): boolean {
-  return e.event.type === 'birth' || e.event.type === 'marriage';
+export function holdFor(e: TimedEvent): number {
+  return ANIMATION_SECONDS[e.event.type] + EVENT_PAUSE;
 }
 
 export class Player {
@@ -35,11 +42,11 @@ export class Player {
     let next = Math.min(this.t + dt * monthsPerSecond, this.timeline.end);
     let crossed = this.timeline.eventsBetween(this.t, next);
     if (this.pauseForEvents) {
-      const big = crossed.find(isBigEvent);
-      if (big) {
-        next = big.t;
-        crossed = crossed.filter((e) => e.t <= big.t);
-        this.hold = EVENT_HOLD;
+      const first = crossed[0];
+      if (first) {
+        next = first.t;
+        crossed = [first];
+        this.hold = holdFor(first);
       }
     }
     this.t = next;

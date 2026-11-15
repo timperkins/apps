@@ -19,8 +19,14 @@ export interface Body {
   active: boolean;
 }
 
-// Room for the colored rings (3.5px each) plus a little air.
-export const GAP = 10;
+// Space between bubble edges. The colored rings take 3.5px each, so family members' rings touch
+// and there is a little air between families.
+export const FAMILY_GAP = 8;
+export const GAP = 18;
+
+export function gapBetween(a: Body, b: Body): number {
+  return a.family === b.family ? FAMILY_GAP : GAP;
+}
 
 const SPRING = 55;
 const DAMPING = 7.5;
@@ -29,9 +35,12 @@ const FLY_DAMPING = 60;
 const FAMILY = 14;
 const RESTITUTION = 0.35;
 const SOLVE_PASSES = 80;
+/** Pixels per second under which a bubble counts as resting. */
+const REST_SPEED = 12;
 
 export function step(bodies: Body[], dt: number): void {
   const live = bodies.filter((b) => b.active);
+  const before = live.map((b) => [b.x, b.y]);
   for (const b of live) {
     const k = b.flying ? FLY_SPRING : SPRING;
     const c = b.flying ? FLY_DAMPING : DAMPING;
@@ -43,7 +52,7 @@ export function step(bodies: Body[], dt: number): void {
         const dx = o.x - b.x;
         const dy = o.y - b.y;
         const d = Math.hypot(dx, dy);
-        const rest = b.r + o.r + GAP;
+        const rest = b.r + o.r + FAMILY_GAP;
         if (d > rest && d < rest * 4) {
           fx += (FAMILY * (d - rest) * dx) / d;
           fy += (FAMILY * (d - rest) * dy) / d;
@@ -55,8 +64,26 @@ export function step(bodies: Body[], dt: number): void {
     b.x += b.vx * dt;
     b.y += b.vy * dt;
   }
-  bounce(live);
+  const free = live.map((b) => [b.x, b.y]);
   separate(live);
+  // Velocity is what actually happened after the push-apart, so a crowd pressed around one spot
+  // comes to rest instead of the springs and the push-apart fighting every frame.
+  let rested = false;
+  live.forEach((b, i) => {
+    b.vx = (b.x - before[i][0]) / dt;
+    b.vy = (b.y - before[i][1]) / dt;
+    // A bubble pressed against others that is only crawling stays put rather than creeping.
+    const pressed = Math.hypot(b.x - free[i][0], b.y - free[i][1]) > 0.001;
+    if (pressed && !b.flying && Math.hypot(b.vx, b.vy) < REST_SPEED) {
+      b.x = before[i][0];
+      b.y = before[i][1];
+      b.vx = b.vy = 0;
+      rested = true;
+    }
+  });
+  // Putting resting bubbles back can't be allowed to leave an overlap.
+  if (rested) separate(live);
+  bounce(live);
 }
 
 function collides(a: Body, b: Body): boolean {
@@ -73,7 +100,7 @@ function bounce(live: Body[]): void {
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const d = Math.hypot(dx, dy) || 0.0001;
-      if (d >= a.r + b.r + GAP) continue;
+      if (d >= a.r + b.r + gapBetween(a, b)) continue;
       const nx = dx / d;
       const ny = dy / d;
       const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
@@ -99,7 +126,7 @@ export function separate(live: Body[]): void {
         let dx = b.x - a.x;
         let dy = b.y - a.y;
         let d = Math.hypot(dx, dy);
-        const min = a.r + b.r + GAP;
+        const min = a.r + b.r + gapBetween(a, b);
         if (d >= min) continue;
         if (d < 0.0001) {
           // Same spot: split them along a direction that depends on their ids, so it is stable.
