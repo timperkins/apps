@@ -155,7 +155,7 @@
     "id": "rachel-kit",
     "name": "Kit",
     "kind": "child",
-    "sex": "female",
+    "sex": "male",
     "motherId": "rachel",
     "order": 104
   },
