@@ -3056,13 +3056,19 @@ export class Survival {
       let target: Target | null;
       if (tu.target) target = dist(x, y, tu.target.x, tu.target.y) - (isBear(tu.target) ? 0 : SPAWNER_R) <= range ? tu.target : null;
       else target = this.nearestTarget(x, y, range);
-      if (!target) continue;
-      const a = Math.atan2(target.y - y, target.x - x), cool = tu.cool ? .5 : 1;
+      // in space, with no bear about, it shoots the nearest asteroid, a little ahead of where it's going (not rocket launchers)
+      let aim: { x: number; y: number } | null = target;
+      if (!target && this.space && tu.kind !== 'rocket') {
+        const as = this.asteroids.filter(o => o.r > 0 && dist(o.x, o.y, x, y) < range).sort((p, q) => dist(p.x, p.y, x, y) - dist(q.x, q.y, x, y))[0];
+        if (as) { const t = dist(as.x, as.y, x, y) / SURVIVAL.boltSpeed; aim = { x: as.x + as.vx * t, y: as.y + as.vy * t }; }
+      }
+      if (!aim) continue;
+      const a = Math.atan2(aim.y - y, aim.x - x), cool = tu.cool ? .5 : 1;
       tu.face = a;
       if (tu.kind === 'rocket') {
         const rk = ROCKETS.find(k => (tu.ammo[k] ?? 0) > 1e-6) ?? 'rocket';
         tu.ammo[rk] = (tu.ammo[rk] ?? 0) - 1; tu.cd = SURVIVAL.rocketReload * cool;
-        this.rockets.push({ boom: rk === 'xrocket', from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target, trail: [] });
+        this.rockets.push({ boom: rk === 'xrocket', from: key, x: x + Math.cos(a) * 14, y: y + Math.sin(a) * 14, a, t: 0, spin: Math.random() < .5 ? 1 : -1, target: target!, trail: [] });
         Sound.rocket();
         continue;
       }
