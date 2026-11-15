@@ -13,8 +13,10 @@ export interface Body {
   ay: number;
   /** Bubbles in the same family attract each other a little, so families cluster. */
   family: string;
-  /** Flying bubbles follow their arc tightly and only bump into other flying bubbles. */
+  /** Flying bubbles follow their arc tightly. */
   flying: boolean;
+  /** Bubbles still high in the air pass over the others and only bump into each other. */
+  ghost?: boolean;
   /** Bubbles that aren't drawn (not born yet) take no part. */
   active: boolean;
 }
@@ -33,10 +35,18 @@ const DAMPING = 7.5;
 const FLY_SPRING = 900;
 const FLY_DAMPING = 60;
 const FAMILY = 14;
-const RESTITUTION = 0.35;
-const SOLVE_PASSES = 80;
+const SOLVE_PASSES = 160;
+/** Share of each pass's pushes applied, so pushes from several sides at once don't overshoot. */
+const RELAX = 0.5;
 /** Pixels per second under which a bubble counts as resting. */
 const REST_SPEED = 12;
+/** A bubble only counts as resting once the push-apart it needs is this small, in pixels. */
+const REST_PUSH = 1;
+/** Share of a shove, up to MAX_BOUNCE pixels, kept as outward speed. */
+const PUSH_BOUNCE = 0.5;
+const MAX_BOUNCE = 3;
+const CRAWL_SPEED = 20;
+const CRAWL_FRICTION = 0.8;
 
 export function step(bodies: Body[], dt: number): void {
   const live = bodies.filter((b) => b.active);
@@ -66,15 +76,38 @@ export function step(bodies: Body[], dt: number): void {
   }
   const free = live.map((b) => [b.x, b.y]);
   separate(live);
-  // Velocity is what actually happened after the push-apart, so a crowd pressed around one spot
-  // comes to rest instead of the springs and the push-apart fighting every frame.
   let rested = false;
   live.forEach((b, i) => {
-    b.vx = (b.x - before[i][0]) / dt;
-    b.vy = (b.y - before[i][1]) / dt;
+    const dx = b.x - free[i][0];
+    const dy = b.y - free[i][1];
+    const push = Math.hypot(dx, dy);
+    if (push > 0.001) {
+      const nx = dx / push;
+      const ny = dy / push;
+      // The push-apart moves a bubble without flinging it: a pressed bubble just stops heading
+      // into the others...
+      const into = b.vx * nx + b.vy * ny;
+      if (into < 0) {
+        b.vx -= into * nx;
+        b.vy -= into * ny;
+      }
+      // ...and when another bubble shoves it, it keeps a little of that as speed, for a small
+      // bounce as bubbles make room.
+      const shove = push - Math.max(0, -into) * dt;
+      if (shove > REST_PUSH) {
+        const kept = Math.min(shove, MAX_BOUNCE) * PUSH_BOUNCE;
+        b.vx += (nx * kept) / dt;
+        b.vy += (ny * kept) / dt;
+      }
+    }
+    // Slow bubbles feel extra friction, so a settled group comes to a stop instead of drifting.
+    if (!b.flying && Math.hypot(b.vx, b.vy) < CRAWL_SPEED) {
+      b.vx *= CRAWL_FRICTION;
+      b.vy *= CRAWL_FRICTION;
+    }
     // A bubble pressed against others that is only crawling stays put rather than creeping.
-    const pressed = Math.hypot(b.x - free[i][0], b.y - free[i][1]) > 0.001;
-    if (pressed && !b.flying && Math.hypot(b.vx, b.vy) < REST_SPEED) {
+    const moved = Math.hypot(b.x - before[i][0], b.y - before[i][1]) / dt;
+    if (push > 0.001 && push < REST_PUSH && !b.flying && moved < REST_SPEED) {
       b.x = before[i][0];
       b.y = before[i][1];
       b.vx = b.vy = 0;
@@ -83,43 +116,27 @@ export function step(bodies: Body[], dt: number): void {
   });
   // Putting resting bubbles back can't be allowed to leave an overlap.
   if (rested) separate(live);
-  bounce(live);
 }
 
 function collides(a: Body, b: Body): boolean {
-  return a.flying === b.flying;
+  return !!a.ghost === !!b.ghost;
 }
 
-/** Exchange a bit of momentum between bubbles that touch, so they visibly bump. */
-function bounce(live: Body[]): void {
-  for (let i = 0; i < live.length; i++) {
-    for (let j = i + 1; j < live.length; j++) {
-      const a = live[i];
-      const b = live[j];
-      if (!collides(a, b)) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const d = Math.hypot(dx, dy) || 0.0001;
-      if (d >= a.r + b.r + gapBetween(a, b)) continue;
-      const nx = dx / d;
-      const ny = dy / d;
-      const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-      if (closing >= 0) continue;
-      const impulse = (-(1 + RESTITUTION) * closing) / 2;
-      a.vx -= impulse * nx;
-      a.vy -= impulse * ny;
-      b.vx += impulse * nx;
-      b.vy += impulse * ny;
-    }
-  }
-}
-
-/** Push overlapping bubbles apart until none overlap. Bigger bubbles move less. */
+/**
+ * Push overlapping bubbles apart until none overlap. Bigger bubbles move less. Each pass works out
+ * every pair from the same positions, so the order of the list favors no one and a squeezed crowd
+ * doesn't slowly turn.
+ */
 export function separate(live: Body[]): void {
+  const n = live.length;
+  const cx = new Float64Array(n);
+  const cy = new Float64Array(n);
   for (let pass = 0; pass < SOLVE_PASSES; pass++) {
-    let moved = false;
-    for (let i = 0; i < live.length; i++) {
-      for (let j = i + 1; j < live.length; j++) {
+    cx.fill(0);
+    cy.fill(0);
+    let worst = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
         const a = live[i];
         const b = live[j];
         if (!collides(a, b)) continue;
@@ -128,6 +145,7 @@ export function separate(live: Body[]): void {
         let d = Math.hypot(dx, dy);
         const min = a.r + b.r + gapBetween(a, b);
         if (d >= min) continue;
+        worst = Math.max(worst, min - d);
         if (d < 0.0001) {
           // Same spot: split them along a direction that depends on their ids, so it is stable.
           const angle = (hash(a.id + b.id) % 360) * (Math.PI / 180);
@@ -138,14 +156,17 @@ export function separate(live: Body[]): void {
         const push = (min - d) / d;
         const wa = b.r / (a.r + b.r);
         const wb = a.r / (a.r + b.r);
-        a.x -= dx * push * wa;
-        a.y -= dy * push * wa;
-        b.x += dx * push * wb;
-        b.y += dy * push * wb;
-        moved = true;
+        cx[i] -= dx * push * wa;
+        cy[i] -= dy * push * wa;
+        cx[j] += dx * push * wb;
+        cy[j] += dy * push * wb;
       }
     }
-    if (!moved) return;
+    if (worst < 0.01) return;
+    for (let i = 0; i < n; i++) {
+      live[i].x += cx[i] * RELAX;
+      live[i].y += cy[i] * RELAX;
+    }
   }
 }
 

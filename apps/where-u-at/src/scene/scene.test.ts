@@ -30,6 +30,24 @@ describe('physics', () => {
     }
   });
 
+  it('makes room for someone landing without flinging anyone', () => {
+    const bodies = Array.from({ length: 8 }, (_, i) => body(`p${i}`, 400 + i, 300 + (i % 3), `f${i}`));
+    for (const b of bodies) [b.ax, b.ay] = [400, 300];
+    for (let frame = 0; frame < 600; frame++) step(bodies, 1 / 60);
+    const lander = { ...body('new', 100, 300), ax: 100, ay: 300, flying: true, ghost: true };
+    let fastest = 0;
+    for (let frame = 0; frame < 300; frame++) {
+      const s = Math.min(1, frame / 144);
+      lander.ax = 100 + 300 * (s < 0.5 ? 2 * s * s : 1 - 2 * (1 - s) ** 2);
+      lander.flying = s < 0.85;
+      lander.ghost = s < 0.6;
+      step([...bodies, lander], 1 / 60);
+      for (const b of bodies) fastest = Math.max(fastest, Math.hypot(b.vx, b.vy));
+    }
+    // Before, neighbors shot off at well over 1000 px/s and sprang back.
+    expect(fastest).toBeLessThan(250);
+  });
+
   it('comes to rest when a crowd is pressed around one spot', () => {
     const bodies = Array.from({ length: 31 }, (_, i) => body(`p${i}`, 400 + (i % 5), 300 + (i % 7), `f${i % 9}`, i < 17 ? 22 : 13));
     for (const b of bodies) {
@@ -107,6 +125,13 @@ describe('Player', () => {
     expect(p.t).toBe(moved);
     p.advance(0.5);
     expect(p.t).toBeGreaterThan(moved);
+  });
+
+  it("doesn't stop for events it is told to skip", () => {
+    const p = new Player(tl);
+    p.skip = (e) => e.event.id === '1';
+    p.play();
+    expect(p.advance(10).map((e) => e.event.id)).toEqual(['1', '2']);
   });
 
   it('stops at the end', () => {

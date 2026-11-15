@@ -23,6 +23,8 @@ export class Player {
   playing = false;
   speed = DEFAULT_SPEED;
   pauseForEvents = true;
+  /** Events that don't stop time, such as ones about people who are filtered out. */
+  skip: (e: TimedEvent) => boolean = () => false;
   private hold = 0;
 
   constructor(private readonly timeline: Timeline) {
@@ -42,10 +44,10 @@ export class Player {
     let next = Math.min(this.t + dt * monthsPerSecond, this.timeline.end);
     let crossed = this.timeline.eventsBetween(this.t, next);
     if (this.pauseForEvents) {
-      const first = crossed[0];
+      const first = crossed.find((e) => !this.skip(e));
       if (first) {
         next = first.t;
-        crossed = [first];
+        crossed = crossed.filter((e) => e.t <= first.t);
         this.hold = holdFor(first);
       }
     }

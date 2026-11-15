@@ -24,6 +24,8 @@ export interface SceneState {
   pauseForEvents: boolean;
   traces: boolean;
   view: View;
+  /** Friends switched off in the filter. */
+  hidden: string[];
 }
 
 const FRIEND_R = 22;
@@ -106,6 +108,7 @@ export class Scene {
   private frameId = 0;
   private snap = true;
   private traces = true;
+  private hidden = new Set<string>();
   private view: View = 'fit';
   private fitKey = '';
   private hover: Pt | null = null;
@@ -126,6 +129,8 @@ export class Scene {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.player = new Player(timeline);
+    // Time doesn't stop for events that only involve people filtered out.
+    this.player.skip = (e) => e.event.people.every((id) => this.isHidden(id));
     this.map = new MapLibre({
       container: mapEl,
       style: mapStyle(this.theme),
@@ -231,6 +236,26 @@ export class Scene {
     this.emit();
   }
 
+  /** Shows or hides a friend; their children go with them when they're the parent. */
+  setHidden(id: string, hidden: boolean): void {
+    if (hidden) this.hidden.add(id);
+    else this.hidden.delete(id);
+    this.snap = true;
+    this.emit();
+  }
+
+  setAllHidden(hidden: boolean): void {
+    this.hidden = new Set(hidden ? this.timeline.friends.map((f) => f.id) : []);
+    this.snap = true;
+    this.emit();
+  }
+
+  private isHidden(id: string): boolean {
+    const person = this.timeline.people.get(id);
+    if (!person) return false;
+    return this.hidden.has(person.kind === 'child' ? person.motherId : id);
+  }
+
   setView(view: View): void {
     if (this.view === view) return;
     this.view = view;
@@ -277,7 +302,7 @@ export class Scene {
     const t = this.player.t;
     const started: Actor[] = [];
     for (const actor of this.actors) {
-      const target = this.timeline.placeAt(actor.person.id, t);
+      const target = this.isHidden(actor.person.id) ? null : this.timeline.placeAt(actor.person.id, t);
       const body = actor.body;
       if (!target) {
         body.active = false;
@@ -368,11 +393,14 @@ export class Scene {
           body.ax = p.x + f.startOffset.x * (1 - e);
           body.ay = p.y + f.startOffset.y * (1 - e);
           body.flying = s < 0.85;
+          // Coming in to land, it starts nudging the others aside instead of dropping on top of them.
+          body.ghost = s < 0.6;
           actor.prevAnchor = null;
           continue;
         }
       }
       body.flying = false;
+      body.ghost = false;
       const p = this.projectPlace(actor.place);
       // Move with the map as the camera moves; the springs only handle bumping and settling.
       if (actor.prevAnchor) {
@@ -770,6 +798,7 @@ export class Scene {
       pauseForEvents: this.player.pauseForEvents,
       traces: this.traces,
       view: this.view,
+      hidden: [...this.hidden],
     };
   }
 
