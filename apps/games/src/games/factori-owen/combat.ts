@@ -106,11 +106,11 @@ export function newCombatState() {
 }
 export type CombatState = ReturnType<typeof newCombatState>;
 
-export function spawnNests(g: Game, clusters = 14) {
+export function spawnNests(g: Game, clusters = Math.round((14 * WORLD * WORLD) / (256 * 256))) {
   const w = g.world;
   const c = WORLD / 2;
   let id = 1;
-  for (let tries = 0; tries < 600 && clusters > 0; tries++) {
+  for (let tries = 0; tries < clusters * 40 && clusters > 0; tries++) {
     const x = 8 + Math.floor(w.rand(tries, 77, 3) * (WORLD - 16));
     const y = 8 + Math.floor(w.rand(tries, 78, 3) * (WORLD - 16));
     if (Math.hypot(x - c, y - c) < 62) continue;

@@ -52,6 +52,7 @@ export class Renderer {
   camY = 0;
   dpr = 1;
   private chunks = new Map<number, HTMLCanvasElement>();
+  private world: unknown = null;
   private oreSprites = new Map<string, HTMLCanvasElement>();
   private dark: HTMLCanvasElement = document.createElement('canvas');
 
@@ -79,7 +80,13 @@ export class Renderer {
   private chunk(g: Game, cx: number, cy: number): HTMLCanvasElement {
     const key = (cy << 8) | cx;
     let cv = this.chunks.get(key);
-    if (cv) return cv;
+    if (cv) {
+      // most recently used goes to the back
+      this.chunks.delete(key);
+      this.chunks.set(key, cv);
+      return cv;
+    }
+    if (this.chunks.size >= 48) this.chunks.delete(this.chunks.keys().next().value!);
     cv = document.createElement('canvas');
     cv.width = cv.height = CHUNK * CPX;
     const c = cv.getContext('2d')!;
@@ -171,6 +178,11 @@ export class Renderer {
     const c = this.c;
     const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
     const z = this.zoom;
+    if (g.world !== this.world) {
+      // a different world (new game, loaded save or title scene): drop the old ground pictures
+      this.world = g.world;
+      this.chunks.clear();
+    }
     for (const k of g.world.dirtyChunks) this.invalidate(k);
     g.world.dirtyChunks.clear();
 

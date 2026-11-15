@@ -1,6 +1,9 @@
 // Terrain, resources and trees. Generated from a seed; resources and trees change as they are mined.
 
-export const WORLD = 256;
+/** World size in tiles. 896 × 896 is about 12 times the area of the original 256 × 256. */
+export const WORLD = 896;
+/** How much bigger (by area) than the original 256 × 256 world. */
+const SCALE = (WORLD * WORLD) / (256 * 256);
 
 export const enum Ground { Grass = 0, Dry = 1, Dirt = 2, Sand = 3, Water = 4 }
 export const enum Res { None = 0, Owen = 1, Copper = 2, Coal = 3, Stone = 4 }
@@ -38,6 +41,8 @@ export function fbm(x: number, y: number, seed: number, oct = 4): number {
   return v / total;
 }
 
+const GEN_CACHE = new Map<number, { ground: Uint8Array; res: Uint8Array; amount: Uint32Array; tree: Uint8Array }>();
+
 export class World {
   seed: number;
   ground = new Uint8Array(WORLD * WORLD);
@@ -51,7 +56,18 @@ export class World {
 
   constructor(seed: number) {
     this.seed = seed;
+    const hit = GEN_CACHE.get(seed);
+    if (hit) {
+      this.ground.set(hit.ground);
+      this.res.set(hit.res);
+      this.amount.set(hit.amount);
+      this.tree.set(hit.tree);
+      return;
+    }
     this.generate();
+    // the big world takes a moment to generate, so remember the last few (title scenes reuse theirs)
+    if (GEN_CACHE.size >= 3) GEN_CACHE.delete(GEN_CACHE.keys().next().value!);
+    GEN_CACHE.set(seed, { ground: this.ground.slice(), res: this.res.slice(), amount: this.amount.slice(), tree: this.tree.slice() });
   }
 
   idx(x: number, y: number) {
@@ -102,7 +118,8 @@ export class World {
     for (const [r, dx, dy, rad] of start) this.patch(r, c + dx, c + dy, rad, 900);
     const kinds = [Res.Owen, Res.Copper, Res.Coal, Res.Stone, Res.Owen, Res.Copper];
     let k = 0;
-    for (let tries = 0; tries < 400 && k < 26; tries++) {
+    const patches = Math.round(26 * SCALE);
+    for (let tries = 0; tries < patches * 15 && k < patches; tries++) {
       const px = 10 + Math.floor(hash(tries, 1, s + 91) * (WORLD - 20));
       const py = 10 + Math.floor(hash(tries, 2, s + 91) * (WORLD - 20));
       const d = Math.hypot(px - c, py - c);
@@ -155,20 +172,49 @@ export class World {
     return this.walkable(x, y);
   }
 
+  /** Saves only the tiles that differ from a fresh world with the same seed (mined ore, cut trees). */
   serialize() {
-    return {
-      seed: this.seed,
-      res: b64(this.res),
-      amount: b64(new Uint8Array(this.amount.buffer)),
-      tree: b64(this.tree),
-    };
+    const base = baseline(this.seed);
+    const idx: number[] = [];
+    for (let i = 0; i < WORLD * WORLD; i++) {
+      if (this.res[i] !== base.res[i] || this.amount[i] !== base.amount[i] || this.tree[i] !== base.tree[i]) idx.push(i);
+    }
+    // 10 bytes per changed tile: index, amount, res, tree
+    const buf = new DataView(new ArrayBuffer(idx.length * 10));
+    idx.forEach((i, k) => {
+      buf.setUint32(k * 10, i);
+      buf.setUint32(k * 10 + 4, this.amount[i]);
+      buf.setUint8(k * 10 + 8, this.res[i]);
+      buf.setUint8(k * 10 + 9, this.tree[i]);
+    });
+    return { seed: this.seed, size: WORLD, diff: b64(new Uint8Array(buf.buffer)) };
   }
 
-  static load(data: { seed: number; res: string; amount: string; tree: string }): World {
+  static load(data: { seed: number; size?: number; diff?: string; res?: string; amount?: string; tree?: string }): World {
     const w = new World(data.seed);
-    w.res.set(unb64(data.res));
-    w.amount.set(new Uint32Array(unb64(data.amount).buffer));
-    w.tree.set(unb64(data.tree));
+    if (data.diff && data.size === WORLD) {
+      const bytes = unb64(data.diff);
+      const v = new DataView(bytes.buffer);
+      for (let o = 0; o + 10 <= bytes.length; o += 10) {
+        const i = v.getUint32(o);
+        if (i >= WORLD * WORLD) continue;
+        w.amount[i] = v.getUint32(o + 4);
+        w.res[i] = v.getUint8(o + 8);
+        w.tree[i] = v.getUint8(o + 9);
+      }
+    } else if (data.res && data.amount && data.tree) {
+      // a save from the old, smaller world: lay it over the top-left corner where its buildings are
+      const old = Math.round(Math.sqrt(unb64(data.res).length));
+      const res = unb64(data.res), tree = unb64(data.tree), amount = new Uint32Array(unb64(data.amount).buffer);
+      for (let y = 0; y < old && y < WORLD; y++) {
+        for (let x = 0; x < old && x < WORLD; x++) {
+          const j = y * old + x, i = y * WORLD + x;
+          w.res[i] = res[j];
+          w.amount[i] = amount[j];
+          w.tree[i] = tree[j];
+        }
+      }
+    }
     return w;
   }
 }
@@ -185,4 +231,11 @@ export function unb64(s: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+let base: World | null = null;
+/** A fresh world for a seed, kept so saving doesn't have to regenerate it every time. */
+function baseline(seed: number): World {
+  if (!base || base.seed !== seed) base = new World(seed);
+  return base;
 }

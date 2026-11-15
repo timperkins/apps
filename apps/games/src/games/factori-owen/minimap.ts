@@ -125,7 +125,7 @@ export class Minimap {
   }
 
   draw(g: Game, others: { x: number; y: number }[], frame: number, bigOpen: boolean) {
-    if (g !== this.lastGame || frame - this.last >= 30) {
+    if (g !== this.lastGame || frame - this.last >= 60) {
       this.lastGame = g;
       this.rebuild(g);
       this.last = frame;
