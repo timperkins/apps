@@ -1030,6 +1030,33 @@ export class Renderer {
         }
       }
     }
+    // friends in co-op
+    for (const o of game.others) {
+      if (o.ko || Math.abs(o.x - p.x) > 60 || Math.abs(o.y - p.y) > 60) continue;
+      add(o.x, o.y, () => {
+        const X = this.sx(cam, o.x, o.y), Y = this.sy(cam, o.x, o.y, o.z);
+        ctx.fillStyle = 'rgba(0,0,0,.28)';
+        ctx.beginPath();
+        ctx.ellipse(X, this.sy(cam, o.x, o.y, o.climbing ? o.z : game.world.heightAt(o.x, o.y)) - 1, 10, 4.5, 0, 0, 7);
+        ctx.fill();
+        ctx.save();
+        ctx.translate(X, Y);
+        drawHero(ctx, outfitById(o.outfit), o.face, o.moving || o.climbing ? o.walkT : 0, { swing: o.swingT, swordD: o.swordD, climbing: o.climbing });
+        ctx.font = 'bold 11px ui-rounded, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(0,0,0,.5)';
+        ctx.fillText(o.name, 1, -51);
+        ctx.fillStyle = '#9fe8ff';
+        ctx.fillText(o.name, 0, -52);
+        // their hearts as a small bar
+        const f = Math.max(0, Math.min(1, o.hp / (o.maxHp || 12)));
+        ctx.fillStyle = 'rgba(0,0,0,.55)';
+        ctx.fillRect(-16, -48, 32, 5);
+        ctx.fillStyle = f > 0.5 ? '#ff5a6a' : '#ff9a3a';
+        ctx.fillRect(-15, -47, 30 * f, 3);
+        ctx.restore();
+      });
+    }
     // the hero
     if (!opts.hideHero && !game.knockedOut) {
       add(p.x, p.y, () => {
@@ -1381,6 +1408,11 @@ export class Renderer {
     const rowsY = 18 + Math.floor((slots - 1) / 10) * 28;
     const job = jobById(game.job);
     this.shadowText(job ? `${p.name} · ${job.icon} ${job.name}` : p.name, 14, rowsY + 36, '#fff');
+    if (game.coopLabel || game.others.length) {
+      ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
+      const names = game.others.map((o) => o.name).join(', ');
+      this.shadowText(`${game.coopLabel || 'Co-op'}${names ? ` · with ${names}` : ''} · hits do ¼ heart`, 14, rowsY + 54, '#9fe8ff');
+    }
     if (game.challenge) {
       ctx.textAlign = 'center';
       ctx.font = '900 15px ui-rounded, system-ui, sans-serif';
@@ -1664,6 +1696,7 @@ export class Renderer {
     for (const m of game.minis.list) if (!m.dead) dot(m.homeX, m.homeY, MINI_KINDS[m.kind].color, 6);
     for (const f of game.fires) dot(f.x, f.y, '#ff7a2a', 2.5);
     dot(CX, CY, '#b03ad6', 6);
+    for (const o of game.others) dot(o.x, o.y, '#9fe8ff', 3.5);
     ctx.restore();
     // hero at centre
     ctx.fillStyle = '#fff';

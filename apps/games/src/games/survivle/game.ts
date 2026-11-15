@@ -77,6 +77,9 @@ export interface Enemy {
   ch?: boolean;
   /** Called in by a mini boss. */
   minion?: boolean;
+  /** Where a friend's game last saw it (co-op guests smooth toward this). */
+  tx?: number;
+  ty?: number;
 }
 
 export interface Arrow {
@@ -88,6 +91,7 @@ export interface Arrow {
   life: number;
   dmg: number;
   fromBoss?: boolean;
+  owner?: string;
 }
 
 export interface Chest {
@@ -167,6 +171,49 @@ export interface SaveData {
   minis?: number[];
 }
 
+/** Another hero in a co-op game. */
+export interface Other {
+  id: string;
+  name: string;
+  outfit: string;
+  x: number;
+  y: number;
+  z: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  face: number;
+  walkT: number;
+  moving: boolean;
+  swingT: number;
+  climbing: boolean;
+  hp: number;
+  maxHp: number;
+  ko: boolean;
+  swordD: number;
+}
+
+export interface Target {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** What the co-op link does for the game. */
+export interface NetHooks {
+  hurtRemote(id: string, q: number, fx?: number, fy?: number): void;
+  hitEnemy(id: number, dmg: number, nx: number, ny: number): void;
+  hitBoss(dmg: number): void;
+  hitMini(kind: number, dmg: number): void;
+  shoot(a: Arrow): void;
+  chop(key: number): void;
+  chest(x: number, y: number): void;
+  stone(x: number, y: number): void;
+  reward(owner: string, coins: number, arrows: number): void;
+  bonus(kind: 'mini' | 'challenge', value: string): void;
+}
+
 export interface Work {
   label: string;
   t: number;
@@ -229,6 +276,11 @@ export class Game {
   treeHits = new Map<number, { hits: number; t: number }>();
   boss: Boss;
   minis = new Minis();
+  /** Co-op: 'host' runs the world, 'guest' shows the host's world. */
+  role: 'solo' | 'host' | 'guest' = 'solo';
+  others: Other[] = [];
+  net: NetHooks | null = null;
+  coopLabel = '';
   won = false;
   lost = false;
   time = 0;
@@ -257,6 +309,33 @@ export class Game {
 
   say(key: string, text: string, cooldown?: number) {
     this.onSay?.(key, text, cooldown);
+  }
+
+  /** In co-op every hit does a quarter heart. */
+  get coop() {
+    return this.role === 'guest' || (this.role === 'host' && this.others.length > 0);
+  }
+
+  /** Heroes enemies can go after: you, and friends in co-op. */
+  targets(): Target[] {
+    const list: Target[] = [];
+    if (!this.knockedOut) list.push({ id: 'me', x: this.p.x, y: this.p.y, z: this.p.z });
+    for (const o of this.others) if (!o.ko) list.push({ id: o.id, x: o.x, y: o.y, z: o.z });
+    return list;
+  }
+
+  nearest(x: number, y: number): (Target & { d: number }) | null {
+    let best: (Target & { d: number }) | null = null;
+    for (const t of this.targets()) {
+      const d = Math.hypot(t.x - x, t.y - y);
+      if (!best || d < best.d) best = { ...t, d };
+    }
+    return best;
+  }
+
+  hurtTarget(id: string, q: number, fx?: number, fy?: number) {
+    if (id === 'me') this.hurtPlayer(q, fx, fy);
+    else this.net?.hurtRemote(id, q, fx, fy);
   }
 
   private freshBoss(): Boss {
@@ -352,7 +431,12 @@ export class Game {
       const dx = e.x - p.x, dy = e.y - p.y;
       const d = Math.hypot(dx, dy);
       if (d < 1.8 && Math.abs(e.z - p.z) < 2 && (d < 0.5 || angDiff(ang(dx, dy), p.face) < 1.25)) {
-        this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
+        if (this.role === 'guest') {
+          this.net?.hitEnemy(e.id, dmg, dx / (d || 1), dy / (d || 1));
+          e.hurtT = 0.25;
+          sfx.hit();
+          this.float(e.x, e.y, e.z, `${dmg}`, '#fff');
+        } else this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
         hit = true;
       }
     }
@@ -360,7 +444,11 @@ export class Game {
     if (b.active && !b.dead) {
       const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy);
       if (d < 3.1 && angDiff(ang(dx, dy), p.face) < 1.3) {
-        this.hurtBoss(dmg);
+        if (this.role === 'guest') {
+          this.net?.hitBoss(dmg);
+          b.hurtT = 0.2;
+          sfx.hit();
+        } else this.hurtBoss(dmg);
         hit = true;
       }
     }
@@ -391,6 +479,7 @@ export class Game {
     if (rec.hits < need) return;
     this.treeHits.delete(key);
     this.world.chopped.add(key);
+    this.net?.chop(key);
     const got = t === T.Bush ? 0 : 1 + Math.floor(Math.random() * 2);
     if (got) {
       this.wood += got;
@@ -425,7 +514,9 @@ export class Game {
     p.face = a;
     p.bowCd = 0.5;
     this.arrows--;
-    this.arrowsFlying.push({ x: p.x, y: p.y, z: p.z + 0.9, dx: Math.cos(a), dy: Math.sin(a), life: 1.8, dmg: this.bowDmg });
+    const arrow: Arrow = { x: p.x, y: p.y, z: p.z + 0.9, dx: Math.cos(a), dy: Math.sin(a), life: 1.8, dmg: this.bowDmg };
+    if (this.role === 'guest') this.net?.shoot(arrow);
+    else this.arrowsFlying.push(arrow);
     sfx.bow();
   }
 
@@ -437,6 +528,7 @@ export class Game {
       if (Math.hypot(c.x + 0.5 - p.x, c.y + 0.5 - p.y) < 1.6 && Math.abs(this.world.heightAt(c.x, c.y) - p.z) < 1.5) {
         this.chests.splice(i, 1);
         this.openChest(c);
+        this.net?.chest(c.x, c.y);
         return;
       }
     }
@@ -444,7 +536,8 @@ export class Game {
       if (this.nearTile(st.x, st.y, 2.6)) {
         if (this.stoneDone(st)) return this.toast('You already beat this rock\'s challenge');
         if (this.challenge) return;
-        this.startChallenge(st);
+        if (this.role === 'guest') this.net?.stone(st.x, st.y);
+        else this.startChallenge(st);
         return;
       }
     }
@@ -567,7 +660,7 @@ export class Game {
     this.puff(x, y, this.world.heightAt(x, y), '#6fbf4a', 10, 2);
   }
 
-  private startChallenge(st: { x: number; y: number }) {
+  startChallenge(st: { x: number; y: number }) {
     const c = CHALLENGES[Math.floor(hash(st.x, st.y, this.world.seed + 77) * CHALLENGES.length)];
     this.challenge = { key: `${st.x},${st.y}`, x: st.x + 0.5, y: st.y + 0.5, name: c.name };
     this.enemies = this.enemies.filter((e) => e.aggro);
@@ -595,8 +688,8 @@ export class Game {
     const c = this.challenge;
     if (!c) return;
     const left = this.enemies.filter((e) => e.ch).length;
-    const far = Math.hypot(this.p.x - c.x, this.p.y - c.y) > 45;
-    if (this.knockedOut || far) {
+    const near = this.nearest(c.x, c.y);
+    if (!near || near.d > 45) {
       this.enemies = this.enemies.filter((e) => !e.ch);
       this.challenge = null;
       this.toast('Challenge failed. Try the rock again!');
@@ -605,6 +698,7 @@ export class Game {
     if (left === 0) {
       this.stonesDone.add(c.key);
       this.challenge = null;
+      this.net?.bonus('challenge', c.key);
       if (this.maxHp < MAX_HP_CAP) {
         this.maxHp++;
         this.toast(`Challenge won! +¼ heart forever (${this.maxHp / 4} hearts)`);
@@ -715,6 +809,7 @@ export class Game {
 
   hurtPlayer(q: number, fromX?: number, fromY?: number) {
     const p = this.p;
+    if (this.coop) q = 1; // co-op: every hit is a quarter heart
     if (p.hurtT > 0 || this.knockedOut || this.won) return;
     p.hp = Math.max(0, p.hp - q);
     p.hurtT = 0.8;
@@ -732,7 +827,7 @@ export class Game {
     }
   }
 
-  private hurtEnemy(e: Enemy, dmg: number, nx: number, ny: number) {
+  hurtEnemy(e: Enemy, dmg: number, nx: number, ny: number, owner = 'me') {
     e.hp -= dmg;
     e.hurtT = 0.25;
     e.aggro = true;
@@ -744,9 +839,15 @@ export class Game {
       const k = ENEMY_KINDS[e.kind];
       this.enemies.splice(this.enemies.indexOf(e), 1);
       this.puff(e.x, e.y, e.z, k.body, 16, 3);
+      const bonusArrows = Math.random() < 0.3 ? 2 : 0;
+      if (owner !== 'me') {
+        this.net?.reward(owner, k.coins, bonusArrows);
+        sfx.enemyDie();
+        return;
+      }
       this.coins += k.coins;
       this.float(e.x, e.y, e.z + 0.5, `+${k.coins} coin${k.coins > 1 ? 's' : ''}`, '#ffd34d');
-      if (Math.random() < 0.3) this.arrows += 2;
+      this.arrows += bonusArrows;
       if (this.job === 'guard') {
         this.coins += 3;
         this.float(e.x, e.y, e.z + 1, '+3 pay', '#ffd34d');
@@ -764,7 +865,7 @@ export class Game {
     });
   }
 
-  private hurtBoss(dmg: number) {
+  hurtBoss(dmg: number) {
     const b = this.boss;
     const wasHalf = b.hp > 250;
     b.hp = Math.max(0, b.hp - dmg);
@@ -815,15 +916,62 @@ export class Game {
     }
     this.updateWork(dt);
     this.updateTrader(dt);
-    this.updateEnemies(dt);
-    this.updateChallenge();
-    this.minis.update(this, dt);
+    if (this.role === 'guest') {
+      this.guestTick(dt);
+    } else {
+      this.updateEnemies(dt);
+      this.updateChallenge();
+      this.minis.update(this, dt);
+      this.updateArrows(dt);
+      this.updateBoss(dt);
+      this.updateChests(dt);
+    }
+    for (const o of this.others) {
+      const k = Math.min(1, dt * 12);
+      o.x += (o.tx - o.x) * k;
+      o.y += (o.ty - o.y) * k;
+      o.z += (o.tz - o.z) * k;
+      o.walkT += o.moving ? dt : 0;
+      o.swingT = Math.max(0, o.swingT - dt);
+    }
     this.updateNarrator();
-    this.updateArrows(dt);
-    this.updateBoss(dt);
-    this.updateChests(dt);
     this.updateParticles(dt);
     this.world.prune(Math.floor(this.p.x), Math.floor(this.p.y));
+  }
+
+  /** A co-op guest only smooths what the host sends, and makes the boss's gas. */
+  private guestTick(dt: number) {
+    const k = Math.min(1, dt * 12);
+    for (const e of this.enemies) {
+      if (e.tx !== undefined && e.ty !== undefined) {
+        e.x += (e.tx - e.x) * k;
+        e.y += (e.ty - e.y) * k;
+      }
+      e.hurtT = Math.max(0, e.hurtT - dt);
+      e.hop += dt * (e.aggro ? 9 : 5);
+    }
+    const b = this.boss;
+    b.hurtT = Math.max(0, b.hurtT - dt);
+    if (b.dead) b.deadT += dt;
+    for (const r of b.rings) r.t += dt;
+    for (const h of this.minis.hazards) h.t += dt;
+    for (const o of b.orbs) {
+      o.x += o.dx * 7 * dt;
+      o.y += o.dy * 7 * dt;
+    }
+    for (const sh of this.minis.shots) {
+      sh.x += sh.dx * sh.speed * dt;
+      sh.y += sh.dy * sh.speed * dt;
+    }
+    for (const a of this.arrowsFlying) {
+      a.x += a.dx * 15 * dt;
+      a.y += a.dy * 15 * dt;
+    }
+    this.gasT -= dt;
+    if (!b.dead && this.gasT <= 0 && Math.hypot(this.p.x - b.x, this.p.y - b.y) < 70) {
+      this.gasT = 0.09;
+      this.gas(b.x, b.y, FLOOR_H + 1.6);
+    }
   }
 
   private updateWork(dt: number) {
@@ -921,10 +1069,10 @@ export class Game {
     p.stamina = 1;
     p.climbing = false;
     p.onGround = true;
-    this.enemies = [];
+    if (!this.coop) this.enemies = [];
     this.arrowsFlying = [];
     this.work = null;
-    if (this.boss.active && !this.boss.dead) {
+    if (this.boss.active && !this.boss.dead && this.role !== 'guest' && !this.others.some((o) => !o.ko && inRoom(o.x, o.y))) {
       this.boss = this.freshBoss();
       this.world.sealed = false;
     }
@@ -1096,7 +1244,7 @@ export class Game {
     }
 
     // entering the Dark Beast's room locks the doors
-    if (!this.boss.active && !this.boss.dead && inRoom(p.x, p.y) && p.onGround && p.z <= FLOOR_H + 0.5) {
+    if (this.role !== 'guest' && !this.boss.active && !this.boss.dead && inRoom(p.x, p.y) && p.onGround && p.z <= FLOOR_H + 0.5) {
       this.boss.active = true;
       this.boss.next = 2.5;
       this.world.sealed = true;
@@ -1109,11 +1257,21 @@ export class Game {
   }
 
   private updateEnemies(dt: number) {
-    const p = this.p;
+    const all = this.targets();
+    const p = all.length ? all[Math.floor(Math.random() * all.length)] : this.p;
     const fighting = this.boss.active && !this.boss.dead;
-    // spawn around the hero, but never in the castle
+    if (this.boss.active === false && !this.boss.dead && this.others.some((o) => !o.ko && inRoom(o.x, o.y))) {
+      // a friend walked into the Dark Beast's room
+      this.boss.active = true;
+      this.boss.next = 2.5;
+      this.world.sealed = true;
+      this.enemies = [];
+      sfx.door();
+      this.toast('Your friend entered the Dark Beast\'s room. The doors slam shut!');
+    }
+    // spawn around a hero, but never in the castle
     this.spawnCd -= dt;
-    if (!fighting && !this.challenge && this.spawnCd <= 0 && this.enemies.length < 8 && castleR(p.x, p.y) > 60 && villageAt(p.x, p.y) < 0) {
+    if (!fighting && !this.challenge && this.spawnCd <= 0 && this.enemies.length < 8 + this.others.length * 4 && castleR(p.x, p.y) > 60 && villageAt(p.x, p.y) < 0) {
       this.spawnCd = 2.5;
       const a = Math.random() * Math.PI * 2;
       const d = 34 + Math.random() * 14;
@@ -1130,7 +1288,9 @@ export class Game {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
       const k = ENEMY_KINDS[e.kind];
-      const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
+      const tg = this.nearest(e.x, e.y);
+      const tx = tg ? tg.x : e.x + 999, ty = tg ? tg.y : e.y;
+      const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy);
       if ((d > 75 && !e.ch && !e.minion) || fighting) {
         this.enemies.splice(i, 1);
         continue;
@@ -1138,11 +1298,11 @@ export class Game {
       e.hurtT = Math.max(0, e.hurtT - dt);
       e.atkCd -= dt;
       e.hop += dt * (e.aggro ? 9 : 5);
-      if (d <= AGGRO && !this.knockedOut && !e.aggro) {
+      if (d <= AGGRO && tg && !e.aggro) {
         e.aggro = true;
-        if (!e.ch) this.say(e.kind === 2 ? 'green' : e.kind === 1 ? 'blue' : 'watch', e.kind === 2 ? 'Whoa, a green Murk! Those are tough!' : e.kind === 1 ? 'A blue Murk! Careful!' : ['Watch out!', 'Murk coming!', 'Heads up, an enemy!'][Math.floor(Math.random() * 3)], e.kind ? 30 : 40);
+        if (!e.ch && tg.id === 'me') this.say(e.kind === 2 ? 'green' : e.kind === 1 ? 'blue' : 'watch', e.kind === 2 ? 'Whoa, a green Murk! Those are tough!' : e.kind === 1 ? 'A blue Murk! Careful!' : ['Watch out!', 'Murk coming!', 'Heads up, an enemy!'][Math.floor(Math.random() * 3)], e.kind ? 30 : 40);
       }
-      if (this.knockedOut) e.aggro = false;
+      if (!tg) e.aggro = false;
       let mx = 0, my = 0;
       if (e.aggro && d > 0.75) {
         mx = (dx / d) * k.speed * dt;
@@ -1166,9 +1326,9 @@ export class Game {
       this.moveEnemy(e, mx, my);
       const gh = this.world.heightAt(e.x, e.y);
       e.z += (gh - e.z) * Math.min(1, dt * 12);
-      if (e.aggro && d < 0.95 && Math.abs(e.z - p.z) < 1.3 && e.atkCd <= 0) {
+      if (tg && e.aggro && d < 0.95 && Math.abs(e.z - tg.z) < 1.3 && e.atkCd <= 0) {
         e.atkCd = 1.3;
-        this.hurtPlayer(k.dmg, e.x, e.y);
+        this.hurtTarget(tg.id, k.dmg, e.x, e.y);
       }
     }
   }
@@ -1201,7 +1361,7 @@ export class Game {
       if (!dead) {
         for (const e of this.enemies) {
           if (Math.hypot(e.x - a.x, e.y - a.y) < 0.6 && Math.abs(e.z + 0.5 - a.z) < 1.4) {
-            this.hurtEnemy(e, a.dmg, a.dx, a.dy);
+            this.hurtEnemy(e, a.dmg, a.dx, a.dy, a.owner);
             dead = true;
             break;
           }
@@ -1234,8 +1394,12 @@ export class Game {
     for (const r of b.rings) r.t += dt;
     b.rings = b.rings.filter((r) => r.t < r.max);
     if (!b.active) return;
-    // drift toward the hero, keeping a little distance, staying in the room
-    const dx = p.x - b.x, dy = p.y - b.y, d = Math.hypot(dx, dy) || 1;
+    // drift toward the nearest hero, keeping a little distance, staying in the room
+    const tg = this.nearest(b.x, b.y) ?? { id: 'me', x: p.x, y: p.y, z: p.z, d: 99 };
+    const dx = tg.x - b.x, dy = tg.y - b.y, d = Math.hypot(dx, dy) || 1;
+    const hitAll = (r: number, q: number) => {
+      for (const t of this.targets()) if (Math.hypot(t.x - b.x, t.y - b.y) < r) this.hurtTarget(t.id, q, b.x, b.y);
+    };
     const want = b.state === 'idle' || b.state === 'recover' ? d - 1.9 : 0;
     const sp = (b.hp < 250 ? 1.9 : 1.4) * dt;
     if (Math.abs(want) > 0.2) {
@@ -1267,7 +1431,7 @@ export class Game {
         b.rings.push({ x: b.x, y: b.y, r: 2.4, t: 0, max: 0.35, heavy: false });
         sfx.slam();
         this.shake = 8;
-        if (d < 2.4) this.hurtPlayer(4, b.x, b.y);
+        hitAll(2.4, 4);
       } else {
         const n = b.hp < 250 ? 3 : 1;
         for (let i = 0; i < n; i++) {
@@ -1281,7 +1445,7 @@ export class Game {
       sfx.beastBlast();
       this.shake = 18;
       b.rings.push({ x: b.x, y: b.y, r: 5, t: 0, max: 0.5, heavy: false });
-      if (d <= 5) this.hurtPlayer(6, b.x, b.y);
+      hitAll(5, 6);
       b.state = 'recover';
       b.t = 1;
     } else if (b.state === 'recover' && b.t <= 0) {
@@ -1293,9 +1457,11 @@ export class Game {
       o.x += o.dx * 7 * dt;
       o.y += o.dy * 7 * dt;
       o.life -= dt;
-      if (Math.hypot(o.x - p.x, o.y - p.y) < 0.65 && p.z < FLOOR_H + 1.8) {
-        this.hurtPlayer(4, o.x, o.y);
-        o.life = 0;
+      for (const t of this.targets()) {
+        if (o.life > 0 && Math.hypot(o.x - t.x, o.y - t.y) < 0.65 && t.z < FLOOR_H + 1.8) {
+          this.hurtTarget(t.id, 4, o.x, o.y);
+          o.life = 0;
+        }
       }
       if (o.life <= 0 || !inRoom(o.x, o.y)) b.orbs.splice(i, 1);
     }
@@ -1303,10 +1469,11 @@ export class Game {
 
   /** Keep 10 chests hidden somewhere near the hero: on cliff tops and deep in forests. */
   private updateChests(dt: number) {
-    const p = this.p;
-    this.chests = this.chests.filter((c) => Math.hypot(c.x - p.x, c.y - p.y) < 340);
+    const all = this.targets();
+    const p = all.length ? all[Math.floor(Math.random() * all.length)] : this.p;
+    this.chests = this.chests.filter((c) => (all.length ? all : [this.p]).some((t) => Math.hypot(c.x - t.x, c.y - t.y) < 340));
     this.chestCd -= dt;
-    if (this.chests.length >= MAX_CHESTS || this.chestCd > 0) return;
+    if (this.chests.length >= MAX_CHESTS + this.others.length * 5 || this.chestCd > 0) return;
     this.chestCd = 0.5;
     let best: Chest | null = null, bestScore = 0;
     for (let i = 0; i < 25; i++) {

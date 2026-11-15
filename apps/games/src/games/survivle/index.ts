@@ -7,6 +7,8 @@ import { Renderer, drawHero, drawBeast, type Cam } from './render';
 import { JOBS, OUTFITS, PRICES, bowName, outfitById, swordName, TIME_LIMIT } from './data';
 import { isMuted, setMuted, sfx } from './audio';
 import { CX, CY, FLOOR_H, VILLAGES } from './world';
+import { hostGame, joinGame, type Session } from './coop';
+import { cleanCode } from './net';
 
 const INDEX_KEY = 'survivle-saves';
 const slotKey = (id: string) => `survivle-slot-${id}`;
@@ -178,6 +180,13 @@ const game: GameModule = {
     let raf = 0;
     let last = performance.now();
     let endShown = false;
+    let session: Session | null = null;
+    let hosting = false;
+    const endSession = () => {
+      session?.close();
+      session = null;
+      hosting = false;
+    };
 
     // ---------- screens ----------
     const show = (html: string) => {
@@ -187,6 +196,7 @@ const game: GameModule = {
     function title() {
       mode = 'title';
       overlay = 'none';
+      endSession();
       g = new Game('', 777);
       cam.x = CX + 0.5;
       cam.y = CY + 60;
@@ -199,6 +209,7 @@ const game: GameModule = {
           <div class="sv-menu">
             <button data-a="new" class="sv-btn big">New game</button>
             ${saves.length ? '<button data-a="load" class="sv-btn">Load game</button>' : ''}
+            <button data-a="joinmenu" class="sv-btn">Join a friend</button>
             <button data-a="exit" class="sv-btn ghost">Back to games</button>
           </div>
           ${CONTROLS}
@@ -217,6 +228,79 @@ const game: GameModule = {
       x.translate(60, 60);
       drawBeast(x, 36, titleT, 0, false);
       x.restore();
+    }
+
+    function joinMenu(msg = '') {
+      mode = 'create';
+      newOutfit = 'forest';
+      show(`
+        <div class="sv-panel sv-create">
+          <h2>Join a friend</h2>
+          <canvas class="sv-preview" width="160" height="180"></canvas>
+          <p class="sv-dim">Your friend opens their game, presses Esc, then <b>Play with friends</b> to get a code. In co-op every hit does ¼ heart.</p>
+          <label>Name <input class="sv-name" maxlength="16" placeholder="Type a name" autocomplete="off" value="${esc(readSetting('survivle-coop-name', ''))}"></label>
+          <label>Code <input class="sv-code" maxlength="12" placeholder="ABCDE" autocomplete="off" autocapitalize="characters"></label>
+          ${msg ? `<p class="sv-msg">${esc(msg)}</p>` : ''}
+          <div class="sv-row"><button data-a="back" class="sv-btn ghost">Back</button><button data-a="join" class="sv-btn big">Join</button></div>
+        </div>`);
+      const code = ui.querySelector<HTMLInputElement>('.sv-code')!;
+      for (const inp of ui.querySelectorAll<HTMLInputElement>('input')) {
+        inp.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') join();
+        });
+      }
+      code.addEventListener('input', () => (code.value = cleanCode(code.value)));
+      (ui.querySelector<HTMLInputElement>('.sv-name')!.value ? code : ui.querySelector<HTMLInputElement>('.sv-name')!).focus();
+      drawPreview();
+    }
+
+    async function join() {
+      const name = (ui.querySelector<HTMLInputElement>('.sv-name')?.value.trim() || 'Hero').slice(0, 16);
+      const code = cleanCode(ui.querySelector<HTMLInputElement>('.sv-code')?.value ?? '');
+      if (!code) return joinMenu('Type the code from your friend\'s screen.');
+      writeSetting('survivle-coop-name', name);
+      const btn = ui.querySelector<HTMLButtonElement>('[data-a=join]');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Joining…';
+      }
+      try {
+        const res = await joinGame(code, name, newOutfit, (why) => {
+          if (session?.role !== 'guest') return;
+          session = null;
+          title();
+          g.toast(why);
+          const tag = ui.querySelector('.sv-tag');
+          if (tag) tag.textContent = `${why}.`;
+        });
+        endSession();
+        g = res.game;
+        session = res.session;
+        hookGame();
+        cam.x = g.p.x;
+        cam.y = g.p.y;
+        cam.z = g.p.z;
+        endShown = false;
+        g.toast('Co-op: every hit does ¼ heart');
+        play();
+      } catch (err) {
+        joinMenu((err as Error).message || 'Could not join');
+      }
+    }
+
+    async function openToFriends() {
+      if (session) return;
+      hosting = true;
+      pause();
+      try {
+        session = await hostGame(g, () => overlay === 'pause' && pause());
+        g.coopLabel = `Co-op · code ${session.code}`;
+      } catch (err) {
+        g.toast(`Could not open the game: ${(err as Error).message}`);
+      }
+      hosting = false;
+      if (overlay === 'pause') pause();
     }
 
     let newOutfit = 'forest';
@@ -256,6 +340,7 @@ const game: GameModule = {
     }
 
     function begin() {
+      endSession();
       const input = ui.querySelector<HTMLInputElement>('.sv-name');
       const name = (input?.value.trim() || 'Hero').slice(0, 16);
       g = new Game(name, Math.floor(Math.random() * 1e9));
@@ -324,17 +409,29 @@ const game: GameModule = {
         <div class="sv-dim-bg"><div class="sv-panel">
           <h2>Paused</h2>
           <p class="sv-dim">${esc(g.p.name)} · Darkness in ${fmtTime(g.timeLeft)}</p>
+          ${coopBox()}
           <div class="sv-menu">
             <button data-a="resume" class="sv-btn big">Resume</button>
-            <button data-a="save" class="sv-btn">Save</button>
-            <button data-a="load" class="sv-btn">Load</button>
+            ${g.role === 'guest' ? '' : '<button data-a="save" class="sv-btn">Save</button><button data-a="load" class="sv-btn">Load</button>'}
             <button data-a="gear" class="sv-btn">Gear &amp; clothes</button>
-            <button data-a="savequit" class="sv-btn">Save and quit</button>
+            ${g.role === 'guest' ? '<button data-a="leave" class="sv-btn">Leave game</button>' : '<button data-a="savequit" class="sv-btn">Save and quit</button>'}
             <button data-a="mute" class="sv-btn ghost">${isMuted() ? 'Sound: off' : 'Sound: on'}</button>
           </div>
           ${narratorOptions(voiceName, pitch)}
           ${CONTROLS}
         </div></div>`);
+    }
+
+    function coopBox() {
+      if (g.role === 'guest') return `<p class="sv-coop">Playing in a friend's world (${esc(session?.code ?? '')}). Every hit does ¼ heart. The game keeps going while this menu is open.</p>`;
+      if (session) {
+        const names = g.others.map((o) => esc(o.name)).join(', ');
+        return `<div class="sv-coop"><div>Friends join with this code</div><b class="sv-bigcode">${esc(session.code)}</b>
+          <div>${names ? `Here now: ${names}` : 'Waiting for friends…'} · every hit does ¼ heart</div>
+          <button data-a="stophost" class="sv-btn ghost">Stop playing together</button></div>`;
+      }
+      if (hosting) return '<p class="sv-coop">Opening your game to friends…</p>';
+      return '<button data-a="host" class="sv-btn sv-coop-btn">Play with friends (co-op)</button>';
     }
 
     function save(): boolean {
@@ -368,6 +465,7 @@ const game: GameModule = {
     function loadSlot(id: string) {
       const data = readJSON<SaveData | null>(slotKey(id), null);
       if (!data) return;
+      endSession();
       g = Game.fromSave(data);
       hookGame();
       cam.x = g.p.x;
@@ -425,7 +523,7 @@ const game: GameModule = {
     function endScreen(won: boolean) {
       mode = 'end';
       endShown = true;
-      if (won) save();
+      if (won && g.role !== 'guest') save();
       show(`
         <div class="sv-dim-bg ${won ? 'win' : 'lose'}"><div class="sv-panel">
           <h2>${won ? 'You beat the Dark Beast!' : 'The world went black…'}</h2>
@@ -433,7 +531,7 @@ const game: GameModule = {
             ? `${esc(g.p.name)} saved the land with ${fmtTime(g.timeLeft)} to spare. The gloom is gone and the sun is back.`
             : `Four hours passed and the Dark Beast's gloom covered everything. Load a save and try again!`}</p>
           <div class="sv-menu">
-            ${won ? '<button data-a="keepplaying" class="sv-btn big">Keep exploring</button>' : '<button data-a="load" class="sv-btn big">Load a save</button>'}
+            ${won ? '<button data-a="keepplaying" class="sv-btn big">Keep exploring</button>' : g.role === 'guest' ? '' : '<button data-a="load" class="sv-btn big">Load a save</button>'}
             <button data-a="totitle" class="sv-btn">Title screen</button>
           </div>
         </div></div>`);
@@ -450,6 +548,16 @@ const game: GameModule = {
         case 'exit': return onExit();
         case 'back': return title();
         case 'begin': return begin();
+        case 'joinmenu': return joinMenu();
+        case 'join': return void join();
+        case 'host': return void openToFriends();
+        case 'stophost': {
+          endSession();
+          g.coopLabel = '';
+          g.toast('Your friends were sent home');
+          return pause();
+        }
+        case 'leave': return title();
         case 'resume': case 'close': return play();
         case 'save': {
           const ok = save();
@@ -628,7 +736,9 @@ const game: GameModule = {
         return;
       }
 
-      if (mode === 'play' && overlay === 'none') {
+      session?.tick(dt);
+      if (mode === 'play' && (overlay === 'none' || session)) {
+        if (overlay !== 'none') g.input.up = g.input.down = g.input.left = g.input.right = false;
         // aim from mouse
         const w = R.toWorld(cam, mouse.x, mouse.y, g.p.z + 1);
         g.input.aimX = w.x - g.p.x;
@@ -720,6 +830,7 @@ const game: GameModule = {
       window.removeEventListener('resize', onResize);
       clearTimeout(sayTimer);
       hush();
+      endSession();
       el.remove();
     };
   },

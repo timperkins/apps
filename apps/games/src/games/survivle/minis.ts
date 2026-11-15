@@ -97,17 +97,18 @@ export class Minis {
   }
 
   update(g: Game, dt: number) {
-    const p = g.p;
     for (const m of this.list) {
       if (m.dead) continue;
       const k = MINI_KINDS[m.kind];
-      const dHome = Math.hypot(p.x - m.homeX, p.y - m.homeY);
-      if (!this.seen.has(m.kind) && dHome < 45) {
+      const near = g.nearest(m.homeX, m.homeY);
+      const dHome = near ? near.d : 999;
+      const mine = Math.hypot(g.p.x - m.homeX, g.p.y - m.homeY);
+      if (!this.seen.has(m.kind) && mine < 45) {
         this.seen.add(m.kind);
         g.say(`lair${m.kind}`, 'Something big lives here… be careful!', 60);
       }
       if (!m.active) {
-        if (dHome < 13 && !g.knockedOut) {
+        if (dHome < 13) {
           m.active = true;
           m.t = 1.5;
           sfx.door();
@@ -117,8 +118,8 @@ export class Minis {
         }
         continue;
       }
-      if (dHome > 34 || g.knockedOut) {
-        // you ran away (or got knocked out): it heals up and goes home
+      if (dHome > 34) {
+        // everyone ran away (or got knocked out): it heals up and goes home
         this.reset(m);
         this.shots = [];
         this.hazards = [];
@@ -127,6 +128,7 @@ export class Minis {
       }
       m.hurtT = Math.max(0, m.hurtT - dt);
       m.flash = Math.max(0, m.flash - dt);
+      const p = g.nearest(m.x, m.y) ?? { x: m.x, y: m.y };
       const dx = p.x - m.x, dy = p.y - m.y, d = Math.hypot(dx, dy) || 1;
       if (k.speed && d > 2.2) {
         // walkers chase you
@@ -168,7 +170,7 @@ export class Minis {
   }
 
   private attack(g: Game, m: Mini) {
-    const p = g.p;
+    const p = g.nearest(m.x, m.y) ?? g.p;
     const angry = m.hp < MINI_KINDS[m.kind].hp / 2;
     m.step++;
     m.flash = 0.5;
@@ -257,28 +259,30 @@ export class Minis {
   }
 
   private updateShots(g: Game, dt: number) {
-    const p = g.p;
+    const all = g.targets();
     for (let i = this.shots.length - 1; i >= 0; i--) {
       const s = this.shots[i];
       s.x += s.dx * s.speed * dt;
       s.y += s.dy * s.speed * dt;
       s.life -= dt;
-      if (Math.hypot(s.x - p.x, s.y - p.y) < 0.6 && !p.climbing) {
-        g.hurtPlayer(s.dmg, s.x, s.y);
-        s.life = 0;
+      for (const t of all) {
+        if (s.life > 0 && Math.hypot(s.x - t.x, s.y - t.y) < 0.6 && !(t.id === 'me' && g.p.climbing)) {
+          g.hurtTarget(t.id, s.dmg, s.x, s.y);
+          s.life = 0;
+        }
       }
       if (s.life <= 0) this.shots.splice(i, 1);
     }
   }
 
   private updateHazards(g: Game, dt: number) {
-    const p = g.p;
+    const all = g.targets();
     for (let i = this.hazards.length - 1; i >= 0; i--) {
       const h = this.hazards[i];
       h.t += dt;
       if (!h.hit && h.t >= h.max) {
         h.hit = true;
-        if (Math.hypot(p.x - h.x, p.y - h.y) < h.r) g.hurtPlayer(h.dmg, h.x, h.y);
+        for (const t of all) if (Math.hypot(t.x - h.x, t.y - h.y) < h.r) g.hurtTarget(t.id, h.dmg, h.x, h.y);
       }
       if (h.t >= h.max + h.after) this.hazards.splice(i, 1);
     }
@@ -306,18 +310,38 @@ export class Minis {
     return false;
   }
 
-  private hurt(g: Game, m: Mini, dmg: number) {
-    const k = MINI_KINDS[m.kind];
-    m.hp = Math.max(0, m.hp - dmg);
+  /** The host applies a friend's hit on a mini boss. */
+  hurtKind(g: Game, kind: number, dmg: number) {
+    const m = this.list[kind];
+    if (m && m.active && !m.dead) this.hurt(g, m, dmg, true);
+  }
+
+  private hurt(g: Game, m: Mini, dmg: number, remote = false) {
     m.hurtT = 0.2;
-    sfx.hit();
-    g.float(m.x, m.y, g.world.heightAt(m.x, m.y) + 1.5, `${dmg}`, '#fff');
+    if (!remote) {
+      sfx.hit();
+      g.float(m.x, m.y, g.world.heightAt(m.x, m.y) + 1.5, `${dmg}`, '#fff');
+    }
+    if (g.role === 'guest') {
+      g.net?.hitMini(m.kind, dmg);
+      return;
+    }
+    m.hp = Math.max(0, m.hp - dmg);
     if (m.hp > 0) return;
     m.dead = true;
     m.active = false;
     this.shots = [];
     this.hazards = [];
     g.enemies = g.enemies.filter((e) => !e.minion);
+    g.net?.bonus('mini', String(m.kind));
+    this.reward(g, m);
+  }
+
+  /** Everyone who is playing gets the prize for a beaten mini boss. */
+  reward(g: Game, m: Mini) {
+    const k = MINI_KINDS[m.kind];
+    m.dead = true;
+    m.active = false;
     g.puff(m.x, m.y, g.world.heightAt(m.x, m.y) + 1, k.color, 40, 4);
     const gain = Math.min(4, MAX_HP_CAP - g.maxHp);
     g.maxHp += gain;

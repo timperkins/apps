@@ -72,3 +72,8 @@
 .sv-jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; }
 .sv-item.job { flex-direction: column; align-items: flex-start; gap: 3px; }
 .sv-item.job span { font-size: 12.5px; color: #cdbdee; }
+.sv-coop { margin: 8px 0 12px; padding: 10px 12px; border-radius: 12px; background: rgba(90, 200, 255, .12); color: #bfefff; font-size: 13.5px; text-align: center; }
+.sv-coop .sv-btn { margin-top: 8px; }
+.sv-bigcode { display: block; font-size: 34px; letter-spacing: 6px; color: #fff; margin: 4px 0; }
+.sv-coop-btn { width: 100%; margin-bottom: 10px; }
+.sv-create input.sv-code { text-transform: uppercase; letter-spacing: 3px; }
