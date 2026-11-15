@@ -1078,10 +1078,12 @@ export class Survival {
     Sound.noise(.2, 'lowpass', 1200, .5, .3);
     return true;
   }
-  /** An asteroid hits platform tile (c, r): it cracks, and a cracked one breaks off with whatever was on it. The chest's tiles hold. */
+  /** An asteroid hits platform tile (c, r): an empty tile cracks, and a cracked one breaks off.
+   *  Tiles with something built on them hold (so machines never disappear), and so do the chest's tiles. */
   private crackPlat(c: number, r: number) {
     const key = c + ',' + r;
-    if (this.chestTile(c, r)) return;
+    if (this.chestTile(c, r) || this.taken(c, r) || this.belts.has(key) || this.grabbers.has(key) || this.splitters.has(key)) return;
+    if ([...this.mines, ...this.machines].some(m => dist(m.x, m.y, tileX(c), tileY(r)) < m.r + TILE / 2)) return;
     const n = (this.cracks.get(key) ?? 0) + 1;
     if (n < SPACE.crackHits) { this.cracks.set(key, n); return; }
     this.cracks.delete(key); this.platTiles.delete(key); this.ghosts.delete(key);
