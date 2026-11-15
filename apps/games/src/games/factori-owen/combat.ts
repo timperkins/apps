@@ -72,7 +72,11 @@ export interface Fx {
 export const NEST_HP = 400;
 export const NEST_R = 1.4;
 export const PLAYER_HP = 250;
-const GRACE_TICKS = 60 * 60 * 6; // six quiet minutes before the first attack
+const GRACE_TICKS = 60 * 60 * 10; // ten quiet minutes before the first attack
+/** At least this long between two attack waves. */
+const WAVE_GAP_TICKS = 60 * 60 * 3;
+/** Pollution a nest must soak up before it sends a wave. */
+const ANGER_PER_WAVE = 60;
 const CELL = 32;
 const CELLS = WORLD / CELL;
 
@@ -97,6 +101,7 @@ export function newCombatState() {
     playerHp: PLAYER_HP,
     lastHurt: 0,
     gunCd: 0,
+    lastWave: -1e9,
     reload: 0,
     shootStop: 0,
     muzzle: 0,
@@ -391,14 +396,16 @@ function secondly(g: Game) {
       spawnBug(g, n.x + (Math.random() - 0.5) * 3, n.y + 1.6, pickKind(cs.evolution), n.id, 'idle');
       n.spawnCd = 25;
     }
-    if (n.anger >= 25 && g.tick > GRACE_TICKS) {
-      n.anger -= 25;
-      sendAttack(g, n);
+    if (n.anger >= ANGER_PER_WAVE) {
+      if (g.tick > GRACE_TICKS && g.tick - cs.lastWave >= WAVE_GAP_TICKS) {
+        n.anger -= ANGER_PER_WAVE;
+        if (sendAttack(g, n)) cs.lastWave = g.tick;
+      } else n.anger = ANGER_PER_WAVE; // don't store up waves while waiting
     }
   }
 }
 
-function sendAttack(g: Game, n: Nest) {
+function sendAttack(g: Game, n: Nest): boolean {
   // go for the dirtiest machine within reach
   let best: Entity | null = null, bd = 150;
   for (const e of g.ents.values()) {
@@ -409,13 +416,14 @@ function sendAttack(g: Game, n: Nest) {
       best = e;
     }
   }
-  if (!best) return;
+  if (!best) return false;
   const size = Math.min(14, 2 + Math.round(g.cs.evolution * 10 + Math.random() * 3));
   for (let i = 0; i < size; i++) {
     spawnBug(g, n.x + (Math.random() - 0.5) * 3, n.y + (Math.random() - 0.5) * 3, pickKind(g.cs.evolution), n.id, 'attack', best.cx, best.cy);
   }
   g.events.push('attack');
   g.toast('The bugs are coming!', 4);
+  return true;
 }
 
 function updateBug(g: Game, b: Bug) {
