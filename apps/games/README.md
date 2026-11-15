@@ -32,9 +32,9 @@ An open-world adventure designed by Tim (original code and art). Name your hero,
 - Murks: 95% orange (¼ heart, 10 health), 4% blue (½ heart, 25), 1% green (¾ heart, 35). They only come after you within 30 tiles or once you hurt them.
 - 10 chests at a time hide on cliff tops and in deep forest near you. Each holds a sword or bow at most 5 damage better than your best; the best sword (Starfall Blade) does 15.
 - A trader follows you around. Trade wood for coins, and buy arrows, apples and outfits. You start in green: green shirt, green pants, dark green hood.
-- Two villages (Willowby and Stonebrook) have job boards with 7 jobs: farmer (plant and harvest the village farm), lumberjack, guard, fisher, miner, baker and courier.
+- Two villages next to the starting camp (Willowby and Stonebrook) have job boards with 7 jobs: farmer (plant and harvest the village farm), lumberjack, guard, fisher, miner, baker and courier.
 - A narrator calls out chests, enemies, challenges, villages and the time left, with subtitles. It uses the browser's speech voices; pick the voice and pitch (or words only, or off) on the title screen or the pause menu.
-- Four mini bosses guard lairs in the corners of the map, each with its own look and attacks: the Frost Golem (stomps and ice shards), the Ember Toad (jumps on you, then spits fireballs), the Thorn King (roots from the ground and little helpers) and the Storm Eye (teleports, lightning lines and spark spirals). Beating one gives a permanent heart and 60 coins. Run away and it heals up.
+- Four mini bosses guard lairs in the corners of the map, each with its own look and attacks: the Frost Golem (stomps and ice shards), the Ember Toad (jumps on you, then spits fireballs), the Thorn King (roots from the ground and little helpers) and the Storm Eye (teleports, lightning lines and spark spirals). Beating one gives a permanent heart and 60 coins. Run away and it heals up. Four warp pads at the starting camp take you straight to each lair, and a pad in each lair brings you back.
 - The Dark Beast (500 health) gives off black and purple gas and locks the doors when you enter its room. Its normal attack does 1 heart; its heavy attack takes 4× as long to charge and does 1½.
 
 Saves and narrator settings stay in the browser (localStorage, `survivle-` keys).

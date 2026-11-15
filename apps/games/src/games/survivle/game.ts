@@ -5,9 +5,11 @@ import {
   MAX_UPGRADE, TIME_LIMIT, bowName, jobById, rollEnemyKind, swordName,
 } from './data';
 import { sfx } from './audio';
-import { Minis } from './minis';
+import { MINI_KINDS, Minis } from './minis';
+
+const MINI_NAMES = MINI_KINDS.map((k) => k.name);
 import {
-  BOARD, CX, CY, FLOOR_H, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
+  BOARD, CX, CY, FLOOR_H, WARPS, lairPad, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
   blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
 } from './world';
 
@@ -446,6 +448,11 @@ export class Game {
         return;
       }
     }
+    for (let i = 0; i < WARPS.length; i++) {
+      const w = WARPS[i], back = lairPad(i);
+      if (this.nearTile(w.x, w.y, 1.4)) return this.warp(back.x + 0.5, back.y + 1.5, MINI_NAMES[i]);
+      if (this.nearTile(back.x, back.y, 1.4)) return this.warp(WARPS[i].x + 0.5, WARPS[i].y + 1.5, 'the starting camp');
+    }
     const vi = villageAt(p.x, p.y);
     if (vi >= 0) {
       const v = VILLAGES[vi];
@@ -512,6 +519,24 @@ export class Game {
             return;
           }
     }
+  }
+
+  private warp(x: number, y: number, where: string) {
+    const p = this.p;
+    this.puff(p.x, p.y, p.z, '#b77cff', 20, 3);
+    p.x = x;
+    p.y = y;
+    p.z = this.world.heightAt(x, y);
+    p.vz = 0;
+    p.onGround = true;
+    p.climbing = false;
+    this.trader.x = x + 2;
+    this.trader.y = y + 1;
+    this.enemies = this.enemies.filter((e) => e.ch);
+    this.lastLand = { x, y };
+    this.puff(x, y, p.z, '#b77cff', 20, 3);
+    sfx.chest();
+    this.toast(`Warped to ${where}!`);
   }
 
   private startWork(label: string, max: number, done: () => void) {
@@ -594,6 +619,11 @@ export class Game {
   nearSomething(): string | null {
     const p = this.p;
     for (const c of this.chests) if (Math.hypot(c.x + 0.5 - p.x, c.y + 0.5 - p.y) < 1.6) return 'Open chest';
+    for (let i = 0; i < WARPS.length; i++) {
+      if (this.nearTile(WARPS[i].x, WARPS[i].y, 1.4)) return `Warp to the ${MINI_NAMES[i]}`;
+      const b = lairPad(i);
+      if (this.nearTile(b.x, b.y, 1.4)) return 'Warp back to camp';
+    }
     for (const st of this.stones()) if (this.nearTile(st.x, st.y, 2.6)) return this.stoneDone(st) ? null : this.challenge ? null : 'Take the challenge';
     const vi = villageAt(p.x, p.y);
     if (vi >= 0) {
@@ -864,9 +894,9 @@ export class Game {
       if (vi >= 0) {
         this.say(`v${vi}`, `Welcome to ${VILLAGES[vi].name}! Check the job board to get a job.`, 120);
         if (this.job === 'courier' && this.letterTo === vi) {
-          this.coins += 30;
+          this.coins += 15;
           sfx.coin();
-          this.toast('Letter delivered! +30 coins. Here is one for the other village.');
+          this.toast('Letter delivered! +15 coins. Here is one for the other village.');
           this.letterTo = 1 - vi;
         }
       }

@@ -63,8 +63,8 @@ const inCamp = (x: number, y: number) => Math.abs(x - 5000) <= 8 && Math.abs(y -
 
 /** Two villages where you can get a job. */
 export const VILLAGES = [
-  { name: 'Willowby', x: 5090, y: 5650 },
-  { name: 'Stonebrook', x: 4400, y: 5150 },
+  { name: 'Willowby', x: 5060, y: 5640 },
+  { name: 'Stonebrook', x: 4936, y: 5652 },
 ];
 export const VILLAGE_R = 20;
 /** Houses: top-left corner offsets from the village centre, each 4 × 4 tiles. */
@@ -91,6 +91,14 @@ export const LAIRS = [
   { x: SIZE - 350, y: SIZE - 350, ground: G.Rock },
 ];
 export const LAIR_R = 16;
+/** Warp pads at the starting camp, one to each lair, and a pad in each lair back to camp. */
+export const WARPS = [
+  { x: 4994, y: 5606 },
+  { x: 4998, y: 5607 },
+  { x: 5002, y: 5607 },
+  { x: 5006, y: 5606 },
+];
+export const lairPad = (i: number) => ({ x: LAIRS[i].x, y: LAIRS[i].y + 11 });
 
 function lairDist(x: number, y: number) {
   let d = 1e9;

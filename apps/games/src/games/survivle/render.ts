@@ -3,7 +3,7 @@
 import { CROP_TIME, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
 import type { Game, Particle } from './game';
 import { MINI_KINDS, type Mini } from './minis';
-import { BOARD, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, gen, hash, tG, tH, tT } from './world';
+import { BOARD, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, WARPS, gen, hash, lairPad, tG, tH, tT } from './world';
 
 export const TW = 48;
 export const TH = 24;
@@ -636,6 +636,44 @@ export class Renderer {
         ctx.fillText('Trader', 1, -51);
         ctx.fillStyle = '#fff3c4';
         ctx.fillText('Trader', 0, -52);
+        ctx.restore();
+      });
+    }
+    // warp pads: four at the camp, one in each lair
+    const pads: { x: number; y: number; col: string; label: string }[] = [];
+    WARPS.forEach((w, i) => {
+      pads.push({ x: w.x, y: w.y, col: MINI_KINDS[i].color, label: MINI_KINDS[i].name });
+      const b = lairPad(i);
+      pads.push({ x: b.x, y: b.y, col: '#b77cff', label: 'Camp' });
+    });
+    for (const pd of pads) {
+      if (Math.abs(pd.x - cam.x) > 50 || Math.abs(pd.y - cam.y) > 50) continue;
+      const h = game.world.heightAt(pd.x, pd.y);
+      add(pd.x, pd.y, () => {
+        const X = this.sx(cam, pd.x + 0.5, pd.y + 0.5), Y = this.sy(cam, pd.x + 0.5, pd.y + 0.5, h);
+        ctx.save();
+        ctx.fillStyle = '#4a4458';
+        ctx.beginPath();
+        ctx.ellipse(X, Y, 20, 9, 0, 0, 7);
+        ctx.fill();
+        ctx.strokeStyle = pd.col;
+        ctx.lineWidth = 3;
+        ctx.shadowColor = pd.col;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(X, Y, 15 + Math.sin(t * 4) * 2, 6.5 + Math.sin(t * 4), 0, 0, 7);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = pd.col;
+        ctx.fillRect(X - 10, Y - 30, 20, 30);
+        ctx.globalAlpha = 1;
+        ctx.font = 'bold 10px ui-rounded, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(0,0,0,.6)';
+        ctx.fillText(pd.label, X + 1, Y - 33);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(pd.label, X, Y - 34);
         ctx.restore();
       });
     }

@@ -15,9 +15,9 @@ export interface MiniKind {
 }
 
 export const MINI_KINDS: MiniKind[] = [
-  { name: 'Frost Golem', hp: 150, radius: 1.3, speed: 1.1, color: '#8fe0ff', intro: 'Brr! A Frost Golem! Watch out for its stomp and ice shards!' },
+  { name: 'Frost Golem', hp: 150, radius: 1.3, speed: 2.4, color: '#8fe0ff', intro: 'Brr! A Frost Golem! Watch out for its stomp and ice shards!' },
   { name: 'Ember Toad', hp: 130, radius: 1.3, speed: 0, color: '#ff7a2a', intro: 'An Ember Toad! Move when you see its shadow, it is going to jump on you!' },
-  { name: 'Thorn King', hp: 180, radius: 1.3, speed: 0.7, color: '#6fbf4a', intro: 'The Thorn King! Watch the ground for roots, and beat its little helpers!' },
+  { name: 'Thorn King', hp: 180, radius: 1.3, speed: 1.9, color: '#6fbf4a', intro: 'The Thorn King! Watch the ground for roots, and beat its little helpers!' },
   { name: 'Storm Eye', hp: 160, radius: 1.1, speed: 0, color: '#c9a6ff', intro: 'A Storm Eye! It teleports and shoots lightning. Keep moving!' },
 ];
 
@@ -129,6 +129,7 @@ export class Minis {
       m.flash = Math.max(0, m.flash - dt);
       const dx = p.x - m.x, dy = p.y - m.y, d = Math.hypot(dx, dy) || 1;
       if (k.speed && d > 2.2) {
+        // walkers chase you
         m.x += (dx / d) * k.speed * dt;
         m.y += (dy / d) * k.speed * dt;
       }
@@ -185,21 +186,21 @@ export class Minis {
           }
           sfx.orb();
         }
-        m.t = angry ? 1.7 : 2.3;
+        m.t = angry ? 1.2 : 1.7;
         break;
       }
       case 1: {
         // Ember Toad: leaps onto where you are (shadow first), then spits fireballs
         if (m.step % 3 !== 0) {
           const tx = p.x, ty = p.y;
-          this.hazards.push({ x: tx, y: ty, r: 2.2, t: 0, max: 1.15, dmg: 3, color: '#ff7a2a', after: 0.3, hit: false });
-          m.leap = { fx: m.x, fy: m.y, tx, ty, t: 0, max: 1.15 };
+          this.hazards.push({ x: tx, y: ty, r: 2.2, t: 0, max: 0.95, dmg: 3, color: '#ff7a2a', after: 0.3, hit: false });
+          m.leap = { fx: m.x, fy: m.y, tx, ty, t: 0, max: 0.95 };
           sfx.jump();
         } else {
           this.aimShots(m, angry ? 5 : 3, 0.3, 7.5, 2, '#ffb03a', p.x, p.y);
           sfx.bow();
         }
-        m.t = angry ? 1.5 : 2.1;
+        m.t = angry ? 1.1 : 1.5;
         break;
       }
       case 2: {
@@ -219,7 +220,7 @@ export class Minis {
           }
           sfx.chop();
         }
-        m.t = angry ? 1.6 : 2.2;
+        m.t = angry ? 1.2 : 1.6;
         break;
       }
       case 3: {
@@ -231,7 +232,7 @@ export class Minis {
           m.y = p.y + Math.sin(a) * 5;
           g.puff(m.x, m.y, g.world.heightAt(m.x, m.y) + 1.5, '#fff3a0', 14, 3);
           sfx.orb();
-          m.t = 0.6;
+          m.t = 0.4;
           break;
         }
         if (m.step % 3 === 2) {
@@ -249,7 +250,7 @@ export class Minis {
           }
           sfx.orb();
         }
-        m.t = angry ? 1.4 : 2;
+        m.t = angry ? 1 : 1.4;
         break;
       }
     }

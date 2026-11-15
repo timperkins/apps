@@ -120,7 +120,7 @@ export const JOBS: Job[] = [
   { id: 'fisher', name: 'Fisher', icon: '🎣', desc: 'Stand next to water and press E to fish. Each fish sells for 4 coins.' },
   { id: 'miner', name: 'Miner', icon: '⛏', desc: 'Stand on or next to gray rock and press E to mine. 3 coins, and sometimes a gem worth 20.' },
   { id: 'baker', name: 'Baker', icon: '🍞', desc: 'Press E at the village oven to bake bread. Earn 2 coins a loaf and keep one to eat (heals 1 heart).' },
-  { id: 'courier', name: 'Courier', icon: '✉', desc: 'Carry a letter to the other village. Walk into it to deliver for 30 coins, then take the next letter back.' },
+  { id: 'courier', name: 'Courier', icon: '✉', desc: 'Carry a letter to the other village. Walk into it to deliver for 15 coins, then take the next letter back.' },
 ];
 export const jobById = (id: string | null) => JOBS.find((j) => j.id === id) ?? null;
 
