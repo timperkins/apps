@@ -98,3 +98,37 @@ export const BOSS_HP = 500;
 export const TIME_LIMIT = 4 * 60 * 60;
 /** Hearts are counted in quarters: 3 hearts = 12. */
 export const MAX_HP = 12;
+
+/** Most permanent health you can reach from challenge rocks: 20 hearts. */
+export const MAX_HP_CAP = 80;
+export const ACORN_HEAL = 1;
+export const FOOD_HEAL = 4;
+/** Seconds for a farm crop to grow. */
+export const CROP_TIME = 40;
+
+export interface Job {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+}
+
+export const JOBS: Job[] = [
+  { id: 'farmer', name: 'Farmer', icon: '🌾', desc: 'You get the village farm. Press E on a farm tile to plant, wait for it to grow, then press E again to harvest for 3 coins.' },
+  { id: 'lumberjack', name: 'Lumberjack', icon: '🪓', desc: 'Earn 2 coins for every tree you chop down.' },
+  { id: 'guard', name: 'Guard', icon: '🛡', desc: 'Earn 3 coins for every Murk you defeat.' },
+  { id: 'fisher', name: 'Fisher', icon: '🎣', desc: 'Stand next to water and press E to fish. Each fish sells for 4 coins.' },
+  { id: 'miner', name: 'Miner', icon: '⛏', desc: 'Stand on or next to gray rock and press E to mine. 3 coins, and sometimes a gem worth 20.' },
+  { id: 'baker', name: 'Baker', icon: '🍞', desc: 'Press E at the village oven to bake bread. Earn 2 coins a loaf and keep one to eat (heals 1 heart).' },
+  { id: 'courier', name: 'Courier', icon: '✉', desc: 'Carry a letter to the other village. Walk into it to deliver for 30 coins, then take the next letter back.' },
+];
+export const jobById = (id: string | null) => JOBS.find((j) => j.id === id) ?? null;
+
+/** Challenges at the glowing rocks: which Murks you have to beat (0 orange, 1 blue, 2 green). */
+export const CHALLENGES: { name: string; kinds: number[] }[] = [
+  { name: 'Two greens', kinds: [2, 2] },
+  { name: 'A bunch of oranges', kinds: [0, 0, 0, 0, 0, 0, 0, 0] },
+  { name: 'Three blues', kinds: [1, 1, 1] },
+  { name: 'A green and four oranges', kinds: [2, 0, 0, 0, 0] },
+  { name: 'Two blues and three oranges', kinds: [1, 1, 0, 0, 0] },
+];

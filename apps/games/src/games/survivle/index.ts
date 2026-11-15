@@ -4,9 +4,9 @@ import './style.css';
 import type { GameModule } from '../types';
 import { Game, type SaveData } from './game';
 import { Renderer, drawHero, drawBeast, type Cam } from './render';
-import { OUTFITS, PRICES, bowName, outfitById, swordName, TIME_LIMIT } from './data';
+import { JOBS, OUTFITS, PRICES, bowName, outfitById, swordName, TIME_LIMIT } from './data';
 import { isMuted, setMuted, sfx } from './audio';
-import { CX, CY, FLOOR_H } from './world';
+import { CX, CY, FLOOR_H, VILLAGES } from './world';
 
 const INDEX_KEY = 'survivle-saves';
 const slotKey = (id: string) => `survivle-slot-${id}`;
@@ -49,26 +49,127 @@ const CONTROLS = `
     <div><b>Space</b> swing sword (chops trees too)</div>
     <div><b>Shift</b> shoot bow · aim with the mouse</div>
     <div><b>Z</b> jump · walk into a cliff to climb</div>
-    <div><b>E</b> open chests · trade</div>
-    <div><b>C</b> campfire (3 wood) · <b>H</b> eat apple</div>
+    <div><b>E</b> chests · trader · jobs · glowing rocks</div>
+    <div><b>C</b> campfire (3 wood) · <b>H</b> eat (acorn ¼ heart, apple 1)</div>
     <div><b>I</b> gear &amp; clothes · <b>Esc</b> pause</div>
   </div>`;
+
+const VOICE_KEY = 'survivle-voice';
+const PITCH_KEY = 'survivle-pitch';
+function readSetting(key: string, fallback: string) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeSetting(key: string, v: string) {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    /* ignore */
+  }
+}
+const PITCHES: Record<string, number> = { low: 0.6, normal: 1, high: 1.6 };
+
+function voices(): SpeechSynthesisVoice[] {
+  if (!('speechSynthesis' in window)) return [];
+  const all = speechSynthesis.getVoices();
+  const en = all.filter((v) => v.lang.toLowerCase().startsWith('en'));
+  return (en.length ? en : all).slice(0, 30);
+}
+
+function narratorOptions(cur: string, pitch: string) {
+  const vs = voices();
+  return `
+    <div class="sv-voice">
+      <label>Narrator
+        <select data-set="voice">
+          <option value="auto" ${cur === 'auto' ? 'selected' : ''}>Default voice</option>
+          ${vs.map((v) => `<option value="${esc(v.name)}" ${cur === v.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}
+          <option value="subs" ${cur === 'subs' ? 'selected' : ''}>Words only (no voice)</option>
+          <option value="off" ${cur === 'off' ? 'selected' : ''}>Off</option>
+        </select>
+      </label>
+      <label>Pitch
+        <select data-set="pitch">
+          <option value="low" ${pitch === 'low' ? 'selected' : ''}>Low</option>
+          <option value="normal" ${pitch === 'normal' ? 'selected' : ''}>Normal</option>
+          <option value="high" ${pitch === 'high' ? 'selected' : ''}>High</option>
+        </select>
+      </label>
+    </div>`;
+}
 
 const game: GameModule = {
   mount(root, { onExit }) {
     const el = document.createElement('div');
     el.className = 'sv';
     el.tabIndex = 0;
-    el.innerHTML = `<canvas class="sv-canvas"></canvas><div class="sv-ui"></div>`;
+    el.innerHTML = `<canvas class="sv-canvas"></canvas><div class="sv-say" hidden></div><div class="sv-ui"></div>`;
     root.appendChild(el);
     const cv = el.querySelector('canvas')!;
+    const sayEl = el.querySelector<HTMLDivElement>('.sv-say')!;
+
+    // ---------- narrator ----------
+    let voiceName = readSetting(VOICE_KEY, 'auto');
+    let pitch = readSetting(PITCH_KEY, 'normal');
+    const lastSaid = new Map<string, number>();
+    let quietUntil = 0;
+    let sayTimer = 0;
+    function speak(text: string, urgent: boolean) {
+      sayEl.textContent = text;
+      sayEl.hidden = false;
+      sayEl.classList.remove('in');
+      void sayEl.offsetWidth;
+      sayEl.classList.add('in');
+      clearTimeout(sayTimer);
+      sayTimer = window.setTimeout(() => (sayEl.hidden = true), 2600 + text.length * 45);
+      if (voiceName === 'subs' || !('speechSynthesis' in window)) return;
+      try {
+        if (urgent) speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        const v = voices().find((x) => x.name === voiceName);
+        if (v) u.voice = v;
+        u.pitch = PITCHES[pitch] ?? 1;
+        u.rate = 1.05;
+        speechSynthesis.speak(u);
+      } catch {
+        /* speech not available */
+      }
+    }
+    function narrate(key: string, text: string, cooldown = 40) {
+      if (voiceName === 'off') return;
+      const now = performance.now() / 1000;
+      if ((lastSaid.get(key) ?? -1e9) + cooldown > now) return;
+      const urgent = cooldown <= 10 || cooldown >= 999;
+      if (now < quietUntil && !urgent) return;
+      lastSaid.set(key, now);
+      quietUntil = now + 4;
+      speak(text, urgent);
+    }
+    function hush() {
+      sayEl.hidden = true;
+      try {
+        if ('speechSynthesis' in window) speechSynthesis.cancel();
+      } catch {
+        /* ignore */
+      }
+    }
+    if ('speechSynthesis' in window) speechSynthesis.addEventListener?.('voiceschanged', () => {
+      const sel = ui.querySelector<HTMLSelectElement>('select[data-set=voice]');
+      if (sel && sel.options.length <= 3) {
+        const holder = sel.closest('.sv-voice');
+        if (holder) holder.outerHTML = narratorOptions(voiceName, pitch);
+      }
+    });
     const ui = el.querySelector<HTMLDivElement>('.sv-ui')!;
     const R = new Renderer(cv);
     R.resize();
 
     type Mode = 'title' | 'create' | 'cutscene' | 'play' | 'end';
     let mode: Mode = 'title';
-    let overlay: 'none' | 'pause' | 'gear' | 'shop' | 'load' = 'none';
+    let overlay: 'none' | 'pause' | 'gear' | 'shop' | 'load' | 'jobs' = 'none';
     let g = new Game('', 12345);
     const cam: Cam = { x: CX + 0.5, y: CY + 30, z: FLOOR_H };
     let titleT = 0;
@@ -101,6 +202,7 @@ const game: GameModule = {
             <button data-a="exit" class="sv-btn ghost">Back to games</button>
           </div>
           ${CONTROLS}
+          ${narratorOptions(voiceName, pitch)}
           <p class="sv-note">Best on a computer with a keyboard and mouse.</p>
         </div>`);
       drawOrb();
@@ -158,8 +260,29 @@ const game: GameModule = {
       const name = (input?.value.trim() || 'Hero').slice(0, 16);
       g = new Game(name, Math.floor(Math.random() * 1e9));
       g.p.outfit = newOutfit;
-      g.onShop = openShop;
+      hookGame();
       startCutscene();
+    }
+
+    function hookGame() {
+      g.onShop = openShop;
+      g.onJobs = jobsMenu;
+      g.onSay = narrate;
+    }
+
+    function jobsMenu(vi: number) {
+      overlay = 'jobs';
+      const v = VILLAGES[vi];
+      show(`
+        <div class="sv-dim-bg"><div class="sv-panel wide">
+          <h2>${esc(v.name)} job board</h2>
+          <p class="sv-dim">Pick a job to earn coins. You can have one job at a time and change it here whenever you like.</p>
+          <div class="sv-jobs">
+            ${JOBS.map((j) => `<button class="sv-item job ${g.job === j.id ? 'on' : ''}" data-a="takejob" data-id="${j.id}" data-v="${vi}">
+              <b>${j.icon} ${j.name}</b><span>${j.desc}</span></button>`).join('')}
+          </div>
+          <div class="sv-row">${g.job ? '<button data-a="quitjob" class="sv-btn ghost">Quit my job</button>' : ''}<button data-a="close" class="sv-btn big">Done</button></div>
+        </div></div>`);
     }
 
     function startCutscene() {
@@ -185,6 +308,10 @@ const game: GameModule = {
     }
 
     function play() {
+      if (mode === 'cutscene') {
+        hush();
+        setTimeout(() => g.say('start', 'Here we go! Follow the road north to the castle. That trader will follow you wherever you go.', 5), 600);
+      }
       mode = 'play';
       overlay = 'none';
       show('');
@@ -205,6 +332,7 @@ const game: GameModule = {
             <button data-a="savequit" class="sv-btn">Save and quit</button>
             <button data-a="mute" class="sv-btn ghost">${isMuted() ? 'Sound: off' : 'Sound: on'}</button>
           </div>
+          ${narratorOptions(voiceName, pitch)}
           ${CONTROLS}
         </div></div>`);
     }
@@ -241,7 +369,7 @@ const game: GameModule = {
       const data = readJSON<SaveData | null>(slotKey(id), null);
       if (!data) return;
       g = Game.fromSave(data);
-      g.onShop = openShop;
+      hookGame();
       cam.x = g.p.x;
       cam.y = g.p.y;
       cam.z = g.p.z;
@@ -378,7 +506,33 @@ const game: GameModule = {
           return shopHtml(`You're wearing ${o.name} now!`);
         }
         case 'keepplaying': return play();
+        case 'takejob': {
+          g.takeJob(b.dataset.id!, Number(b.dataset.v));
+          return play();
+        }
+        case 'quitjob': {
+          g.quitJob();
+          g.toast('You quit your job');
+          return play();
+        }
       }
+    });
+
+    ui.addEventListener('change', (e) => {
+      const sel = e.target as HTMLSelectElement;
+      if (sel.dataset.set === 'voice') {
+        voiceName = sel.value;
+        writeSetting(VOICE_KEY, voiceName);
+      } else if (sel.dataset.set === 'pitch') {
+        pitch = sel.value;
+        writeSetting(PITCH_KEY, pitch);
+      } else return;
+      lastSaid.delete('test');
+      quietUntil = 0;
+      narrate('test', voiceName === 'off' ? '' : 'Hi! I will help you on your adventure.', 0);
+    });
+    ui.addEventListener('keydown', (e) => {
+      if ((e.target as HTMLElement).tagName === 'SELECT') e.stopPropagation();
     });
 
     // ---------- input ----------
@@ -386,7 +540,8 @@ const game: GameModule = {
       ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
     };
     const onKey = (e: KeyboardEvent, down: boolean) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || (tag === 'SELECT' && e.code !== 'Escape')) return;
       const dir = keyMap[e.code];
       if (dir) {
         g.input[dir] = down;
@@ -528,6 +683,8 @@ const game: GameModule = {
         m.z += dz * dt * 0.9;
       }
       cut.motes = cut.motes.filter((m) => m.life > 0);
+      if (form > 0.3 && Math.random() < 0.5) g.gas(CX + 0.5, CY + 0.5, bz);
+      g.updateParticles(dt);
       // camera: castle, then fly to the hero
       if (t > 10.5) {
         const k = Math.min(1, (t - 10.5) / 3);
@@ -561,6 +718,8 @@ const game: GameModule = {
       window.removeEventListener('keyup', ku);
       window.removeEventListener('blur', blur);
       window.removeEventListener('resize', onResize);
+      clearTimeout(sayTimer);
+      hush();
       el.remove();
     };
   },

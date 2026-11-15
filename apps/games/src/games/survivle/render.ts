@@ -1,8 +1,8 @@
 // Isometric drawing for Survivle: terrain with cliffs, trees, the hero, Murks, chests, traders,
 // campfires, the castle, the Dark Beast, the spreading darkness and the HUD.
-import { ENEMY_KINDS, MAX_HP, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
+import { CROP_TIME, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
 import type { Game, Particle } from './game';
-import { CX, CY, FLOOR_H, G, SIZE, T, gen, hash, tG, tH, tT } from './world';
+import { BOARD, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, gen, hash, tG, tH, tT } from './world';
 
 export const TW = 48;
 export const TH = 24;
@@ -15,12 +15,12 @@ const SPR = 2; // sprite resolution multiplier
 const TOP: Record<number, string> = {
   [G.Grass]: '#63b04b', [G.Forest]: '#4c9641', [G.Sand]: '#e3d08f', [G.Water]: '#3b7fc6', [G.Rock]: '#918c84',
   [G.Snow]: '#eef3f8', [G.Dirt]: '#a8895a', [G.Path]: '#cda86c', [G.Bridge]: '#9b6b3c', [G.Gloom]: '#5e5373',
-  [G.Stone]: '#8c8996', [G.Floor]: '#6e6b78', [G.Dark]: '#2b2039',
+  [G.Stone]: '#8c8996', [G.Floor]: '#6e6b78', [G.Dark]: '#2b2039', [G.Roof]: '#c4533a', [G.Farm]: '#7a5230',
 };
 const SIDE: Record<number, string> = {
   [G.Grass]: '#8a6c4c', [G.Forest]: '#7d6045', [G.Sand]: '#c7ad6a', [G.Water]: '#2c5f96', [G.Rock]: '#77726b',
   [G.Snow]: '#b7c2cf', [G.Dirt]: '#866945', [G.Path]: '#a5814e', [G.Bridge]: '#6d4823', [G.Gloom]: '#463c58',
-  [G.Stone]: '#74717f', [G.Floor]: '#5a5764', [G.Dark]: '#1d1528',
+  [G.Stone]: '#74717f', [G.Floor]: '#5a5764', [G.Dark]: '#1d1528', [G.Roof]: '#d8b98a', [G.Farm]: '#5e3d22',
 };
 
 const SIDE_L: Record<number, string> = {};
@@ -114,6 +114,24 @@ function tileSprite(g: number, shade: number, variant: number): HTMLCanvasElemen
     x.moveTo(HW + HW / 2, HH / 2);
     x.lineTo(HW / 2, HH / 2 + HH);
     x.stroke();
+  } else if (g === G.Farm) {
+    x.strokeStyle = 'rgba(40,20,5,.5)';
+    x.lineWidth = 1.5;
+    for (let i = -2; i < 6; i++) {
+      x.beginPath();
+      x.moveTo(i * 10, 0);
+      x.lineTo(i * 10 + 24, TH);
+      x.stroke();
+    }
+  } else if (g === G.Roof) {
+    x.strokeStyle = 'rgba(90,20,10,.35)';
+    x.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      x.beginPath();
+      x.moveTo(i * 6, HH - i * 3);
+      x.lineTo(i * 6 + HW, HH - i * 3 + HH);
+      x.stroke();
+    }
   } else if (g === G.Dark) {
     if (variant === 0) {
       x.strokeStyle = 'rgba(190,90,255,.35)';
@@ -491,7 +509,11 @@ export class Renderer {
             ctx.closePath();
             ctx.fill();
           }
-          if (!lowGfx && (h - Math.min(hx, hy) >= 2)) {
+          if (g === G.Roof && hy < h && (ix + iy) % 2 === 0) {
+            ctx.fillStyle = (ix * 7 + iy) % 3 === 0 ? '#5a3a1e' : '#ffe08a';
+            ctx.fillRect(px - HW / 2 - 4, py + HH + 10, 8, (ix * 7 + iy) % 3 === 0 ? 18 : 8);
+          }
+          if (!lowGfx && g !== G.Roof && (h - Math.min(hx, hy) >= 2)) {
             // rock layers
             ctx.strokeStyle = 'rgba(0,0,0,.13)';
             ctx.lineWidth = 1;
@@ -584,50 +606,196 @@ export class Renderer {
         ctx.restore();
       });
     }
-    // traders
-    for (const tr of game.traders()) {
-      const h = game.world.heightAt(tr.x, tr.y);
-      add(tr.x + 0.5, tr.y + 0.5, () => {
-        const X = this.sx(cam, tr.x + 0.5, tr.y + 0.5), Y = this.sy(cam, tr.x + 0.5, tr.y + 0.5, h);
+    // the trader who follows you
+    {
+      const tr = game.trader;
+      add(tr.x, tr.y, () => {
+        const X = this.sx(cam, tr.x, tr.y), Y = this.sy(cam, tr.x, tr.y, tr.z);
         ctx.save();
         ctx.translate(X, Y);
-        // tent
-        ctx.fillStyle = 'rgba(0,0,0,.2)';
+        ctx.fillStyle = 'rgba(0,0,0,.25)';
         ctx.beginPath();
-        ctx.ellipse(-14, 2, 30, 10, 0, 0, 7);
+        ctx.ellipse(0, 0, 11, 5, 0, 0, 7);
+        ctx.fill();
+        // big backpack
+        ctx.fillStyle = '#8a5a2b';
+        ctx.beginPath();
+        ctx.roundRect(-13, -40, 26, 26, 5);
         ctx.fill();
         ctx.fillStyle = '#c9473a';
+        ctx.fillRect(-13, -32, 26, 4);
+        ctx.fillStyle = '#d9b44a';
         ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-14, -42);
-        ctx.lineTo(12, 0);
-        ctx.closePath();
+        ctx.arc(9, -44, 5, 0, 7);
         ctx.fill();
-        ctx.fillStyle = '#f2e6c9';
-        ctx.beginPath();
-        ctx.moveTo(-30, 0);
-        ctx.lineTo(-14, -30);
-        ctx.lineTo(-20, 0);
-        ctx.closePath();
-        ctx.fill();
-        ctx.fillStyle = '#3a1f14';
-        ctx.beginPath();
-        ctx.moveTo(-17, 0);
-        ctx.lineTo(-14, -14);
-        ctx.lineTo(-11, 0);
-        ctx.fill();
-        // trader
-        ctx.translate(16, 0);
-        drawHero(ctx, { id: '', name: '', shirt: '#8a5ab8', pants: '#4a3a2a', hood: '#d6a43c', price: 0 }, Math.PI * 0.75, 0, { scale: 0.95 });
-        ctx.fillStyle = '#fff3c4';
+        drawHero(ctx, { id: '', name: '', shirt: '#8a5ab8', pants: '#4a3a2a', hood: '#d6a43c', price: 0 }, tr.face, tr.walkT, { scale: 0.95 });
         ctx.font = 'bold 11px ui-rounded, system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Trader', 0, -50);
-        // coin sign
-        ctx.fillStyle = '#ffd34d';
+        ctx.fillStyle = 'rgba(0,0,0,.5)';
+        ctx.fillText('Trader', 1, -51);
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillText('Trader', 0, -52);
+        ctx.restore();
+      });
+    }
+    // glowing challenge rocks
+    for (const st of game.stones()) {
+      const h = game.world.heightAt(st.x, st.y);
+      const done = game.stoneDone(st);
+      add(st.x + 0.5, st.y + 0.5, () => {
+        const X = this.sx(cam, st.x + 0.5, st.y + 0.5), Y = this.sy(cam, st.x + 0.5, st.y + 0.5, h);
+        ctx.save();
+        ctx.translate(X, Y);
+        ctx.fillStyle = 'rgba(0,0,0,.3)';
         ctx.beginPath();
-        ctx.arc(0, -62 + Math.sin(t * 3) * 2, 6, 0, 7);
+        ctx.ellipse(0, 2, 26, 10, 0, 0, 7);
         ctx.fill();
+        if (!done) {
+          const gl = ctx.createRadialGradient(0, -24, 4, 0, -24, 46);
+          gl.addColorStop(0, `rgba(90,200,255,${0.35 + 0.15 * Math.sin(t * 3)})`);
+          gl.addColorStop(1, 'rgba(90,200,255,0)');
+          ctx.fillStyle = gl;
+          ctx.fillRect(-46, -70, 92, 92);
+        }
+        ctx.fillStyle = '#5d6270';
+        ctx.beginPath();
+        ctx.moveTo(-24, 0);
+        ctx.lineTo(-20, -30);
+        ctx.lineTo(-8, -48);
+        ctx.lineTo(10, -46);
+        ctx.lineTo(22, -26);
+        ctx.lineTo(24, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#4a4e5a';
+        ctx.beginPath();
+        ctx.moveTo(4, 0);
+        ctx.lineTo(10, -46);
+        ctx.lineTo(22, -26);
+        ctx.lineTo(24, 0);
+        ctx.closePath();
+        ctx.fill();
+        // blue pattern
+        ctx.strokeStyle = done ? '#7a8090' : `rgba(110,215,255,${0.75 + 0.25 * Math.sin(t * 4)})`;
+        ctx.lineWidth = 2.5;
+        if (!done) {
+          ctx.shadowColor = '#5ad0ff';
+          ctx.shadowBlur = 10;
+        }
+        ctx.beginPath();
+        ctx.moveTo(-12, -8);
+        ctx.lineTo(-12, -30);
+        ctx.lineTo(0, -38);
+        ctx.lineTo(12, -30);
+        ctx.lineTo(12, -8);
+        ctx.moveTo(-6, -14);
+        ctx.lineTo(0, -24);
+        ctx.lineTo(6, -14);
+        ctx.moveTo(0, -24);
+        ctx.lineTo(0, -32);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, -20, 3, 0, 7);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      });
+    }
+    // villages: job board, oven, villagers
+    VILLAGES.forEach((v, vi) => {
+      if (Math.abs(v.x - cam.x) > 60 || Math.abs(v.y - cam.y) > 60) return;
+      const bh = game.world.heightAt(v.x + BOARD.x, v.y + BOARD.y);
+      add(v.x + BOARD.x + 0.5, v.y + BOARD.y + 0.5, () => {
+        const X = this.sx(cam, v.x + BOARD.x + 0.5, v.y + BOARD.y + 0.5), Y = this.sy(cam, v.x + BOARD.x + 0.5, v.y + BOARD.y + 0.5, bh);
+        ctx.save();
+        ctx.translate(X, Y);
+        ctx.fillStyle = '#5a3a1e';
+        ctx.fillRect(-14, -30, 4, 30);
+        ctx.fillRect(10, -30, 4, 30);
+        ctx.fillStyle = '#9b6b3c';
+        ctx.fillRect(-18, -46, 36, 22);
+        ctx.fillStyle = '#f2e6c9';
+        ctx.fillRect(-14, -43, 12, 9);
+        ctx.fillRect(1, -42, 13, 8);
+        ctx.fillRect(-6, -33, 12, 6);
+        ctx.font = 'bold 11px ui-rounded, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(0,0,0,.5)';
+        ctx.fillText('Jobs', 1, -51);
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillText('Jobs', 0, -52);
+        ctx.restore();
+      });
+      const oh = game.world.heightAt(v.x + OVEN.x, v.y + OVEN.y);
+      add(v.x + OVEN.x + 0.5, v.y + OVEN.y + 0.5, () => {
+        const X = this.sx(cam, v.x + OVEN.x + 0.5, v.y + OVEN.y + 0.5), Y = this.sy(cam, v.x + OVEN.x + 0.5, v.y + OVEN.y + 0.5, oh);
+        ctx.save();
+        ctx.translate(X, Y);
+        ctx.fillStyle = '#9a8f86';
+        ctx.beginPath();
+        ctx.arc(0, -10, 16, Math.PI, 0);
+        ctx.lineTo(16, 0);
+        ctx.lineTo(-16, 0);
+        ctx.fill();
+        ctx.fillStyle = '#2a1a10';
+        ctx.beginPath();
+        ctx.arc(0, -4, 7, Math.PI, 0);
+        ctx.lineTo(7, 0);
+        ctx.lineTo(-7, 0);
+        ctx.fill();
+        ctx.fillStyle = `rgba(255,140,40,${0.6 + 0.3 * Math.sin(t * 9)})`;
+        ctx.beginPath();
+        ctx.ellipse(0, -2, 4, 2.5, 0, 0, 7);
+        ctx.fill();
+        ctx.restore();
+      });
+      const looks: Outfit[] = [
+        { id: '', name: '', shirt: '#d98a3a', pants: '#5a4a3a', hood: '#7a3a1a', price: 0 },
+        { id: '', name: '', shirt: '#4aa0b8', pants: '#3a3a4a', hood: '#20506a', price: 0 },
+        { id: '', name: '', shirt: '#e0d0b0', pants: '#6a5a3a', hood: '#a07040', price: 0 },
+        { id: '', name: '', shirt: '#b04a6a', pants: '#3a2a3a', hood: '#602040', price: 0 },
+      ];
+      looks.forEach((lk, k) => {
+        const a = t * 0.25 + k * 1.7 + vi;
+        const r = 6 + (k % 2) * 3;
+        const wx = v.x + 0.5 + Math.cos(a) * r, wy = v.y + 0.5 + Math.sin(a) * r * 0.8;
+        const hz = game.world.heightAt(wx, wy);
+        add(wx, wy, () => {
+          ctx.save();
+          ctx.translate(this.sx(cam, wx, wy), this.sy(cam, wx, wy, hz));
+          ctx.fillStyle = 'rgba(0,0,0,.22)';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 9, 4, 0, 0, 7);
+          ctx.fill();
+          drawHero(ctx, lk, a + Math.PI / 2, t, { scale: 0.9 });
+          ctx.restore();
+        });
+      });
+    });
+    // crops on the farm
+    for (const [key, at] of game.farm) {
+      const fx = Math.floor(key / SIZE), fy = key % SIZE;
+      if (Math.abs(fx - cam.x) > 50 || Math.abs(fy - cam.y) > 50) continue;
+      const k = Math.min(1, (game.elapsed - at) / CROP_TIME);
+      const h = game.world.heightAt(fx, fy);
+      add(fx + 0.5, fy + 0.5, () => {
+        const X = this.sx(cam, fx + 0.5, fy + 0.5), Y = this.sy(cam, fx + 0.5, fy + 0.5, h);
+        ctx.save();
+        ctx.translate(X, Y);
+        for (let i = -1; i <= 1; i++) {
+          ctx.strokeStyle = '#5fc048';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(i * 8, 2);
+          ctx.lineTo(i * 8, 2 - 5 - k * 16);
+          ctx.stroke();
+          if (k >= 1) {
+            ctx.fillStyle = '#f2c43a';
+            ctx.beginPath();
+            ctx.ellipse(i * 8, -16, 3, 6, 0, 0, 7);
+            ctx.fill();
+          }
+        }
         ctx.restore();
       });
     }
@@ -855,7 +1023,13 @@ export class Renderer {
     const ctx = this.ctx;
     const X = this.sx(cam, q.x, q.y), Y = this.sy(cam, q.x, q.y, q.z);
     const a = Math.max(0, q.life / q.max);
-    if (q.text) {
+    if (q.gas) {
+      ctx.globalAlpha = Math.min(0.45, a * 0.5);
+      ctx.fillStyle = q.color;
+      ctx.beginPath();
+      ctx.arc(X, Y, q.size, 0, 7);
+      ctx.fill();
+    } else if (q.text) {
       ctx.globalAlpha = Math.min(1, a * 2);
       ctx.font = `900 ${q.size}px ui-rounded, system-ui, sans-serif`;
       ctx.textAlign = 'center';
@@ -916,13 +1090,33 @@ export class Renderer {
     const p = game.p;
     const W = this.W, H = this.H;
     // hearts
-    for (let i = 0; i < MAX_HP / 4; i++) {
-      const fill = Math.max(0, Math.min(4, p.hp - i * 4)) / 4;
-      this.heart(18 + i * 34, 18, 13, fill);
+    const slots = Math.ceil(game.maxHp / 4);
+    for (let i = 0; i < slots; i++) {
+      const cap = Math.min(4, game.maxHp - i * 4);
+      const fill = Math.max(0, Math.min(cap, p.hp - i * 4)) / 4;
+      this.heart(18 + (i % 10) * 30, 18 + Math.floor(i / 10) * 28, 11.5, fill, cap / 4);
     }
     ctx.font = 'bold 13px ui-rounded, system-ui, sans-serif';
     ctx.textAlign = 'left';
-    this.shadowText(p.name, 14, 58, '#fff');
+    const rowsY = 18 + Math.floor((slots - 1) / 10) * 28;
+    const job = jobById(game.job);
+    this.shadowText(job ? `${p.name} · ${job.icon} ${job.name}` : p.name, 14, rowsY + 36, '#fff');
+    if (game.challenge) {
+      ctx.textAlign = 'center';
+      ctx.font = '900 15px ui-rounded, system-ui, sans-serif';
+      this.shadowText(`Challenge: ${game.challenge.name} · ${game.enemies.filter((e) => e.ch).length} left`, this.W / 2, 100, '#7fdcff');
+    }
+    if (game.work) {
+      const w = game.work;
+      const X = this.sx(cam, p.x, p.y), Y = this.sy(cam, p.x, p.y, p.z) - 78;
+      ctx.fillStyle = 'rgba(0,0,0,.6)';
+      ctx.fillRect(X - 30, Y, 60, 8);
+      ctx.fillStyle = '#ffd34d';
+      ctx.fillRect(X - 29, Y + 1, 58 * Math.min(1, w.t / w.max), 6);
+      ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      this.shadowText(`${w.label}…`, X, Y - 4, '#fff');
+    }
 
     // timer
     const left = game.timeLeft;
@@ -954,19 +1148,39 @@ export class Renderer {
         this.shadowText(`Castle ${Math.round(dist).toLocaleString()} tiles`, W / 2, 76, '#d9c6ff');
       }
     }
+    if (game.job === 'courier' && game.letterTo !== null) {
+      const v = VILLAGES[game.letterTo];
+      const dx = v.x + 0.5 - p.x, dy = v.y + 0.5 - p.y;
+      const a = Math.atan2((dx + dy) / 2, dx - dy);
+      ctx.save();
+      ctx.translate(W / 2 + 150, 52);
+      ctx.rotate(a);
+      ctx.fillStyle = '#ffd34d';
+      ctx.beginPath();
+      ctx.moveTo(12, 0);
+      ctx.lineTo(-6, -6);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      this.shadowText(`✉ ${v.name} ${Math.round(Math.hypot(dx, dy))}`, W / 2 + 150, 76, '#ffe9a0');
+    }
     // boss bar
     const b = game.boss;
     if (b.active && !b.dead) {
       const bw = Math.min(440, W - 60);
       ctx.fillStyle = 'rgba(0,0,0,.6)';
-      ctx.fillRect(W / 2 - bw / 2 - 3, H - 112, bw + 6, 18);
+      ctx.fillRect(W / 2 - bw / 2 - 3, H - 182, bw + 6, 18);
       const gr = ctx.createLinearGradient(W / 2 - bw / 2, 0, W / 2 + bw / 2, 0);
       gr.addColorStop(0, '#5a1a8a');
       gr.addColorStop(1, '#c03ad6');
       ctx.fillStyle = gr;
-      ctx.fillRect(W / 2 - bw / 2, H - 109, (bw * b.hp) / 500, 12);
+      ctx.fillRect(W / 2 - bw / 2, H - 179, (bw * b.hp) / 500, 12);
       ctx.font = '900 13px ui-rounded, system-ui, sans-serif';
-      this.shadowText(`The Dark Beast  ${b.hp} / 500`, W / 2, H - 118, '#f0d8ff');
+      this.shadowText(`The Dark Beast  ${b.hp} / 500`, W / 2, H - 188, '#f0d8ff');
     }
 
     // stamina ring next to the hero
@@ -990,6 +1204,7 @@ export class Renderer {
       ['🪵', `${game.wood}`],
       ['🪙', `${game.coins}`],
       ['🍎', `${game.apples}`],
+      ['🌰', `${game.acorns}`],
     ];
     ctx.font = 'bold 13px ui-rounded, system-ui, sans-serif';
     let total = 0;
@@ -1021,7 +1236,7 @@ export class Renderer {
     ctx.font = 'bold 15px ui-rounded, system-ui, sans-serif';
     game.toasts.forEach((tt, i) => {
       const w = ctx.measureText(tt.text).width + 30;
-      const y = 100 + i * 36;
+      const y = (game.challenge ? 112 : 100) + i * 36;
       ctx.globalAlpha = Math.min(1, tt.t * 2);
       ctx.fillStyle = 'rgba(20,14,34,.88)';
       ctx.beginPath();
@@ -1054,7 +1269,7 @@ export class Renderer {
     ctx.fillText(s, x, y);
   }
 
-  heart(x: number, y: number, r: number, fill: number) {
+  heart(x: number, y: number, r: number, fill: number, part = 1) {
     const ctx = this.ctx;
     const path = () => {
       ctx.beginPath();
@@ -1063,6 +1278,15 @@ export class Renderer {
       ctx.bezierCurveTo(x + r * 0.75, y - r * 1.2, x + r * 1.5, y - r * 0.1, x, y + r * 0.95);
       ctx.closePath();
     };
+    if (part < 1) {
+      // a heart you have only part of: draw just that slice of the outline
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, r * 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part);
+      ctx.closePath();
+      ctx.clip();
+    }
     path();
     ctx.fillStyle = 'rgba(40,10,20,.7)';
     ctx.fill();
@@ -1082,6 +1306,7 @@ export class Renderer {
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
+    if (part < 1) ctx.restore();
   }
 
   /** Small map in the corner, built a few rows per frame so it never stutters. */
@@ -1141,7 +1366,8 @@ export class Renderer {
       ctx.arc(dx, dy, r, 0, 7);
       ctx.fill();
     };
-    for (const tr of game.traders()) dot(tr.x, tr.y, '#ffd34d', 3);
+    for (const st of game.stones()) if (!game.stoneDone(st)) dot(st.x, st.y, '#5ad0ff', 3);
+    for (const v of VILLAGES) dot(v.x, v.y, '#ff9a5a', 5);
     for (const f of game.fires) dot(f.x, f.y, '#ff7a2a', 2.5);
     dot(CX, CY, '#b03ad6', 6);
     ctx.restore();
@@ -1162,4 +1388,5 @@ const MINI_COL: Record<number, [number, number, number]> = {
   [G.Grass]: [99, 176, 75], [G.Forest]: [60, 130, 52], [G.Sand]: [227, 208, 143], [G.Water]: [59, 127, 198],
   [G.Rock]: [145, 140, 132], [G.Snow]: [238, 243, 248], [G.Dirt]: [168, 137, 90], [G.Path]: [215, 180, 120],
   [G.Bridge]: [155, 107, 60], [G.Gloom]: [94, 83, 115], [G.Stone]: [140, 137, 150], [G.Floor]: [110, 107, 120], [G.Dark]: [60, 30, 80],
+  [G.Roof]: [196, 83, 58], [G.Farm]: [122, 82, 48],
 };

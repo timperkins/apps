@@ -61,3 +61,14 @@
 .sv-cut-text.in { animation: sv-fade 1s; }
 .sv-skip { position: absolute; right: 18px; bottom: 14px; color: #a993c9; font-size: 13px; }
 @keyframes sv-fade { from { opacity: 0; transform: translate(-50%, 10px); } }
+.sv-say { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); max-width: min(640px, 92%); pointer-events: none; z-index: 2;
+  background: rgba(20,14,34,.85); border: 2px solid #ffd34d; color: #fff; font-weight: 800; padding: 8px 16px; border-radius: 16px; text-align: center; }
+.sv-say::before { content: '🗣 '; }
+.sv-say.in { animation: sv-pop .25s; }
+@keyframes sv-pop { from { transform: translateX(-50%) scale(.85); opacity: 0; } }
+.sv-voice { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: #cdbdee; }
+.sv-voice label { display: flex; flex-direction: column; gap: 3px; text-align: left; font-weight: 700; }
+.sv-voice select { font: inherit; background: #120c1c; color: #fff; border: 2px solid #6b4fa0; border-radius: 8px; padding: 5px 8px; max-width: 260px; }
+.sv-jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; }
+.sv-item.job { flex-direction: column; align-items: flex-start; gap: 3px; }
+.sv-item.job span { font-size: 12.5px; color: #cdbdee; }

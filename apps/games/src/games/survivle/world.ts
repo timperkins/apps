@@ -1,18 +1,19 @@
-// The land of Survivle: 20,000 × 20,000 tiles, made from a seed one 32 × 32 chunk at a time as you
+// The land of Survivle: 10,000 × 10,000 tiles, made from a seed one 32 × 32 chunk at a time as you
 // explore, so only the part near you is ever in memory. Heights are whole "levels" so cliffs are crisp.
 
-export const SIZE = 20000;
-export const CX = 10000;
-export const CY = 10000;
-export const START_X = 10000.5;
-export const START_Y = 11200.5;
+export const SIZE = 10000;
+export const CX = 5000;
+export const CY = 5000;
+export const START_X = 5000.5;
+export const START_Y = 5600.5;
+const ROAD_END = 615;
 /** Height of the castle floor. */
 export const FLOOR_H = 5;
 /** The Dark Beast's room is every tile within this many tiles (square) of the castle centre. */
 export const ROOM_R = 10;
 export const CHUNK = 32;
 
-export const enum G { Grass = 0, Forest, Sand, Water, Rock, Snow, Dirt, Path, Bridge, Gloom, Stone, Floor, Dark }
+export const enum G { Grass = 0, Forest, Sand, Water, Rock, Snow, Dirt, Path, Bridge, Gloom, Stone, Floor, Dark, Roof, Farm }
 export const enum T { None = 0, Oak, Pine, Bush }
 
 export const tH = (v: number) => v & 255;
@@ -57,8 +58,36 @@ export function isDoor(x: number, y: number) {
   const dx = x - CX, dy = y - CY;
   return (dy === 11 || dy === 12) && Math.abs(dx) <= 1;
 }
-const onPath = (dx: number, dy: number) => Math.abs(dx) <= 1 && dy > 34 && dy < 1215;
-const inCamp = (x: number, y: number) => Math.abs(x - 10000) <= 8 && Math.abs(y - 11200) <= 8;
+const onPath = (dx: number, dy: number) => Math.abs(dx) <= 1 && dy > 34 && dy < ROAD_END;
+const inCamp = (x: number, y: number) => Math.abs(x - 5000) <= 8 && Math.abs(y - 5600) <= 8;
+
+/** Two villages where you can get a job. */
+export const VILLAGES = [
+  { name: 'Willowby', x: 5090, y: 5650 },
+  { name: 'Stonebrook', x: 4400, y: 5150 },
+];
+export const VILLAGE_R = 20;
+/** Houses: top-left corner offsets from the village centre, each 4 × 4 tiles. */
+const HOUSES = [[-15, -15], [-7, -16], [5, -15], [12, -12], [-16, -5], [-16, 6], [-12, 13], [7, 13], [14, 4]];
+/** The farm field, relative to the village centre. */
+export const FARM = { x0: 4, y0: 2, w: 7, h: 6 };
+/** Job board and bakery oven, relative to the village centre. */
+export const BOARD = { x: 0, y: -3 };
+export const OVEN = { x: -4, y: 2 };
+
+export function villageAt(x: number, y: number): number {
+  for (let i = 0; i < VILLAGES.length; i++) {
+    const v = VILLAGES[i];
+    if (Math.max(Math.abs(x - v.x), Math.abs(y - v.y)) <= VILLAGE_R) return i;
+  }
+  return -1;
+}
+
+function villageDist(x: number, y: number) {
+  let d = 1e9;
+  for (const v of VILLAGES) d = Math.min(d, Math.max(Math.abs(x - v.x), Math.abs(y - v.y)));
+  return d;
+}
 
 function castleTile(dx: number, dy: number, r: number): number {
   const F = FLOOR_H;
@@ -85,12 +114,13 @@ export function gen(x: number, y: number, seed: number): number {
   const r = Math.max(Math.abs(dx), Math.abs(dy));
   if (r <= 34) return castleTile(dx, dy, r);
   const path = onPath(dx, dy);
-  const camp = inCamp(x, y);
+  const vd = villageDist(x, y);
+  const camp = inCamp(x, y) || vd <= VILLAGE_R;
   const n = fbm(x / 260, y / 260, seed, 4);
   const m = fbm(x / 70, y / 70, seed + 7, 3);
   if (n < 0.36 && r >= 140) {
-    if (path) return pack(1, G.Bridge, 0);
-    if (!camp) return pack(0, G.Water, 0);
+    if (path && dx === 0) return pack(1, G.Bridge, 0); // a narrow, one-tile bridge
+    if (!camp && vd > VILLAGE_R + 2) return pack(0, G.Water, 0);
   }
   let h = 1 + Math.floor(Math.max(0, n - 0.36) * 22);
   // cliffs and plateaus, ramping down to the road and the starting camp so those stay open
@@ -99,14 +129,23 @@ export function gen(x: number, y: number, seed: number): number {
   if (m > 0.7) lift += 3;
   if (lift) {
     let k = 1;
-    if (dy > 34 && dy < 1215) k = Math.min(k, Math.max(0, (Math.abs(dx) - 1) / 7));
-    const cd = Math.max(Math.abs(x - 10000), Math.abs(y - 11200));
+    if (dy > 34 && dy < ROAD_END) k = Math.min(k, Math.max(0, (Math.abs(dx) - 1) / 7));
+    const cd = Math.max(Math.abs(x - 5000), Math.abs(y - 5600));
     k = Math.min(k, Math.max(0, (cd - 8) / 12));
+    k = Math.min(k, Math.max(0, (vd - VILLAGE_R) / 12));
     h += Math.round(lift * k);
   }
   if (r < 140) {
     const k = Math.max(0, (r - 90) / 50);
     h = Math.round(FLOOR_H + (h - FLOOR_H) * k);
+  }
+  const vi = vd <= VILLAGE_R ? villageAt(x, y) : -1;
+  if (vi >= 0) {
+    const lx = x - VILLAGES[vi].x, ly = y - VILLAGES[vi].y;
+    if (HOUSES.some(([hx, hy]) => lx >= hx && lx < hx + 4 && ly >= hy && ly < hy + 4)) return pack(h + 3, G.Roof, 0);
+    if (lx >= FARM.x0 && lx < FARM.x0 + FARM.w && ly >= FARM.y0 && ly < FARM.y0 + FARM.h) return pack(h, G.Farm, 0);
+    if (Math.max(Math.abs(lx), Math.abs(ly)) <= 5 || lx === 0 || ly === 0) return pack(h, G.Path, 0);
+    return pack(h, G.Grass, hash(x, y, seed + 3) < 0.04 ? T.Bush : 0);
   }
   let g: number;
   if (path) g = G.Path;
@@ -180,20 +219,15 @@ export class World {
   }
 }
 
-/** A trader's camp in the 160 × 160 region (rx, ry), or null. Same answer every time for a seed. */
-export function traderIn(rx: number, ry: number, world: World): { x: number; y: number } | null {
+/** A glowing challenge rock in the 250 × 250 region (rx, ry), or null. Same answer every time for a seed. */
+export function stoneIn(rx: number, ry: number, world: World): { x: number; y: number } | null {
   const s = world.seed;
-  const x = rx * 160 + 30 + Math.floor(hash(rx, ry, s + 31) * 100);
-  const y = ry * 160 + 30 + Math.floor(hash(rx, ry, s + 37) * 100);
-  if (castleR(x, y) < 150) return null;
-  if (hash(rx, ry, s + 41) > 0.6) return null;
-  const h = tH(world.tile(x, y));
-  for (let j = -1; j <= 1; j++)
-    for (let i = -1; i <= 1; i++) {
-      const v = world.tile(x + i, y + j);
-      if (tG(v) === G.Water || tH(v) !== h || blocksMove(v)) return null;
-    }
+  if (rx === 19 && ry === 22) return { x: 4993, y: 5594 }; // one right by the starting camp
+  if (hash(rx, ry, s + 41) > 0.75) return null;
+  const x = rx * 250 + 30 + Math.floor(hash(rx, ry, s + 31) * 190);
+  const y = ry * 250 + 30 + Math.floor(hash(rx, ry, s + 37) * 190);
+  if (castleR(x, y) < 150 || villageDist(x, y) < VILLAGE_R + 6) return null;
+  const v = world.tile(x, y);
+  if (tG(v) === G.Water || blocksMove(v)) return null;
   return { x, y };
 }
-
-export const START_TRADER = { x: 10004, y: 11196 };

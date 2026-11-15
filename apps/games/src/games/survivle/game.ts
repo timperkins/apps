@@ -1,13 +1,13 @@
 // Survivle's game state and rules: the hero, cliffs and climbing, swords and bows, enemies, chests,
 // campfires, traders and the Dark Beast. No drawing here.
 import {
-  BOSS_HP, CAMPFIRE_WOOD, ENEMY_KINDS, MAX_BOW, MAX_HP, MAX_SWORD, MAX_UPGRADE, TIME_LIMIT,
-  bowName, rollEnemyKind, swordName,
+  ACORN_HEAL, BOSS_HP, CAMPFIRE_WOOD, CHALLENGES, CROP_TIME, ENEMY_KINDS, FOOD_HEAL, MAX_BOW, MAX_HP, MAX_HP_CAP, MAX_SWORD,
+  MAX_UPGRADE, TIME_LIMIT, bowName, jobById, rollEnemyKind, swordName,
 } from './data';
 import { sfx } from './audio';
 import {
-  CX, CY, FLOOR_H, G, ROOM_R, SIZE, START_TRADER, START_X, START_Y, T, World,
-  blocksMove, castleR, hash, inRoom, tG, tH, tT, traderIn,
+  BOARD, CX, CY, FLOOR_H, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
+  blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
 } from './world';
 
 export const GRAVITY = 32;
@@ -70,6 +70,8 @@ export interface Enemy {
   wanderA: number;
   wanderT: number;
   hop: number;
+  /** Part of a challenge-rock fight. */
+  ch?: boolean;
 }
 
 export interface Arrow {
@@ -105,6 +107,8 @@ export interface Particle {
   color: string;
   size: number;
   text?: string;
+  /** Gas that floats up and spreads instead of falling. */
+  gas?: boolean;
 }
 
 export interface Boss {
@@ -148,6 +152,22 @@ export interface SaveData {
   chests: Chest[];
   won: boolean;
   savedAt: number;
+  acorns?: number;
+  maxHp?: number;
+  stones?: string[];
+  job?: string | null;
+  jobVillage?: number;
+  farm?: [number, number][];
+  letterTo?: number | null;
+}
+
+export interface Work {
+  label: string;
+  t: number;
+  max: number;
+  x: number;
+  y: number;
+  done: () => void;
 }
 
 const ang = (dx: number, dy: number) => Math.atan2(dy, dx);
@@ -171,7 +191,29 @@ export class Game {
   wood = 0;
   coins = 0;
   apples = 0;
+  acorns = 0;
+  maxHp = MAX_HP;
   elapsed = 0;
+  /** The trader who follows you around. */
+  trader = { x: START_X + 3, y: START_Y - 2, z: 0, walkT: 0, face: 0 };
+  stonesDone = new Set<string>();
+  challenge: { key: string; x: number; y: number; name: string } | null = null;
+  job: string | null = null;
+  jobVillage = 0;
+  /** Planted farm tiles: tile key -> play time when planted. */
+  farm = new Map<number, number>();
+  letterTo: number | null = null;
+  work: Work | null = null;
+  onJobs: ((village: number) => void) | null = null;
+  /** Narrator: say a line (key keeps it from repeating too often). */
+  onSay: ((key: string, text: string, cooldown?: number) => void) | null = null;
+  private seen = new Set<string>();
+  private stoneCache: { x: number; y: number }[] = [];
+  private stoneAt = { x: -1e9, y: -1e9 };
+  private lastLand = { x: START_X, y: START_Y };
+  private lastHour = -1;
+  private wasVillage = -1;
+  private gasT = 0;
   fires: Fire[] = [];
   spawn = { x: START_X, y: START_Y };
   chests: Chest[] = [];
@@ -191,8 +233,6 @@ export class Game {
   private nextId = 1;
   private spawnCd = 4;
   private chestCd = 0;
-  private traderCache: { x: number; y: number }[] = [];
-  private traderAt = { x: -1e9, y: -1e9 };
   private fireTick = 0;
 
   constructor(name: string, seed: number, id = `s${Date.now().toString(36)}`) {
@@ -204,7 +244,12 @@ export class Game {
       staminaWait: 0, swingT: 0, swingCd: 0, bowCd: 0, hurtT: 0, inWater: false,
     };
     this.p.z = this.world.heightAt(this.p.x, this.p.y);
+    this.trader.z = this.world.heightAt(this.trader.x, this.trader.y);
     this.boss = this.freshBoss();
+  }
+
+  say(key: string, text: string, cooldown?: number) {
+    this.onSay?.(key, text, cooldown);
   }
 
   private freshBoss(): Boss {
@@ -249,19 +294,32 @@ export class Game {
   }
 
   traders(): { x: number; y: number }[] {
+    return [{ x: this.trader.x - 0.5, y: this.trader.y - 0.5 }];
+  }
+
+  /** Glowing challenge rocks near the hero. */
+  stones(): { x: number; y: number }[] {
     const p = this.p;
-    if (Math.abs(p.x - this.traderAt.x) > 40 || Math.abs(p.y - this.traderAt.y) > 40) {
-      this.traderAt = { x: p.x, y: p.y };
-      const list = [START_TRADER];
-      const rx = Math.floor(p.x / 160), ry = Math.floor(p.y / 160);
+    if (Math.abs(p.x - this.stoneAt.x) > 60 || Math.abs(p.y - this.stoneAt.y) > 60) {
+      this.stoneAt = { x: p.x, y: p.y };
+      const list: { x: number; y: number }[] = [];
+      const rx = Math.floor(p.x / 250), ry = Math.floor(p.y / 250);
       for (let j = -1; j <= 1; j++)
         for (let i = -1; i <= 1; i++) {
-          const t = traderIn(rx + i, ry + j, this.world);
+          const t = stoneIn(rx + i, ry + j, this.world);
           if (t) list.push(t);
         }
-      this.traderCache = list;
+      this.stoneCache = list;
     }
-    return this.traderCache;
+    return this.stoneCache;
+  }
+
+  stoneDone(st: { x: number; y: number }) {
+    return this.stonesDone.has(`${st.x},${st.y}`);
+  }
+
+  private nearTile(x: number, y: number, r: number) {
+    return Math.hypot(x + 0.5 - this.p.x, y + 0.5 - this.p.y) < r;
   }
 
   // ---------- actions ----------
@@ -331,6 +389,15 @@ export class Game {
       this.float(tx + 0.5, ty + 0.5, h, `+${got} wood`, '#e9c58a');
       sfx.treeFall();
     }
+    if (t !== T.Bush) {
+      this.acorns++;
+      this.float(tx + 0.5, ty + 0.5, h + 1.2, '+1 acorn', '#d9a35a');
+      if (this.job === 'lumberjack') {
+        this.coins += 2;
+        this.float(tx + 0.5, ty + 0.5, h + 1.8, '+2 coins', '#ffd34d');
+      }
+      this.say('chop', 'Nice chop! Trees give you wood and an acorn.', 600);
+    }
     if (Math.random() < (t === T.Oak ? 0.18 : t === T.Bush ? 0.12 : 0.04)) {
       this.apples++;
       this.float(tx + 0.5, ty + 0.5, h + 0.6, '+1 apple', '#ff7a6b');
@@ -365,17 +432,171 @@ export class Game {
         return;
       }
     }
+    for (const st of this.stones()) {
+      if (this.nearTile(st.x, st.y, 2.6)) {
+        if (this.stoneDone(st)) return this.toast('You already beat this rock\'s challenge');
+        if (this.challenge) return;
+        this.startChallenge(st);
+        return;
+      }
+    }
+    const vi = villageAt(p.x, p.y);
+    if (vi >= 0) {
+      const v = VILLAGES[vi];
+      if (this.nearTile(v.x + BOARD.x, v.y + BOARD.y, 2.2)) {
+        this.onJobs?.(vi);
+        return;
+      }
+      if (this.job === 'baker' && this.nearTile(v.x + OVEN.x, v.y + OVEN.y, 2.2)) {
+        this.startWork('Baking', 4, () => {
+          this.coins += 2;
+          this.apples++;
+          sfx.coin();
+          this.toast('Fresh bread! +2 coins, and a loaf to eat');
+        });
+        return;
+      }
+      if (this.job === 'farmer') {
+        const tx = Math.floor(p.x), ty = Math.floor(p.y);
+        if (tG(this.world.tile(tx, ty)) === G.Farm) {
+          const key = tx * SIZE + ty;
+          const planted = this.farm.get(key);
+          if (planted === undefined) {
+            this.farm.set(key, this.elapsed);
+            sfx.eat();
+            this.float(p.x, p.y, p.z, 'Planted!', '#9be37a');
+          } else if (this.elapsed - planted >= CROP_TIME) {
+            this.farm.delete(key);
+            this.coins += 3;
+            sfx.coin();
+            this.float(p.x, p.y, p.z, '+3 coins', '#ffd34d');
+          } else this.toast(`Still growing… ${Math.ceil(CROP_TIME - (this.elapsed - planted))}s`);
+          return;
+        }
+      }
+    }
     for (const t of this.traders()) {
       if (Math.hypot(t.x + 0.5 - p.x, t.y + 0.5 - p.y) < 2.2) {
         this.onShop?.();
         return;
       }
     }
+    if (this.job === 'fisher') {
+      for (let j = -1; j <= 1; j++)
+        for (let i = -1; i <= 1; i++)
+          if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === G.Water && !p.inWater) {
+            this.startWork('Fishing', 3, () => {
+              this.coins += 4;
+              sfx.coin();
+              this.toast('Caught a fish! Sold for 4 coins');
+            });
+            return;
+          }
+    }
+    if (this.job === 'miner') {
+      for (let j = -1; j <= 1; j++)
+        for (let i = -1; i <= 1; i++)
+          if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === G.Rock) {
+            this.startWork('Mining', 2.5, () => {
+              const gem = Math.random() < 0.15;
+              this.coins += gem ? 20 : 3;
+              sfx.coin();
+              this.toast(gem ? 'A shiny gem! +20 coins' : 'Mined some ore. +3 coins');
+            });
+            return;
+          }
+    }
+  }
+
+  private startWork(label: string, max: number, done: () => void) {
+    if (this.work) return;
+    this.work = { label, t: 0, max, x: this.p.x, y: this.p.y, done };
+  }
+
+  takeJob(id: string, village: number) {
+    this.job = id;
+    this.jobVillage = village;
+    this.letterTo = id === 'courier' ? 1 - village : null;
+    const j = jobById(id);
+    this.toast(`You're a ${j?.name} now!`);
+    if (id === 'courier') this.say('courier', `Take this letter to ${VILLAGES[1 - village].name}. Follow the yellow arrow!`, 5);
+    else this.say('job', `Good luck with your new job!`, 5);
+  }
+
+  quitJob() {
+    this.job = null;
+    this.letterTo = null;
+  }
+
+  private startChallenge(st: { x: number; y: number }) {
+    const c = CHALLENGES[Math.floor(hash(st.x, st.y, this.world.seed + 77) * CHALLENGES.length)];
+    this.challenge = { key: `${st.x},${st.y}`, x: st.x + 0.5, y: st.y + 0.5, name: c.name };
+    this.enemies = this.enemies.filter((e) => e.aggro);
+    c.kinds.forEach((kind, i) => {
+      const a = (i / c.kinds.length) * Math.PI * 2;
+      let ex = st.x + 0.5 + Math.cos(a) * 6, ey = st.y + 0.5 + Math.sin(a) * 6;
+      const v = this.world.tile(Math.floor(ex), Math.floor(ey));
+      if (tG(v) === G.Water || blocksMove(v)) {
+        ex = st.x + 0.5 + Math.cos(a) * 2;
+        ey = st.y + 0.5 + Math.sin(a) * 2;
+      }
+      this.enemies.push({
+        id: this.nextId++, kind, x: ex, y: ey, z: this.world.heightAt(ex, ey), hp: ENEMY_KINDS[kind].hp, aggro: true, atkCd: 1.5,
+        hurtT: 0, kx: 0, ky: 0, wanderA: 0, wanderT: 0, hop: Math.random() * 6, ch: true,
+      });
+      this.puff(ex, ey, this.world.heightAt(ex, ey), '#5ad0ff', 12, 2);
+    });
+    this.shake = 8;
+    sfx.door();
+    this.toast(`Challenge: ${c.name}! Win for a permanent quarter heart.`);
+    this.say('challenge', 'Here they come! Beat them all!', 10);
+  }
+
+  private updateChallenge() {
+    const c = this.challenge;
+    if (!c) return;
+    const left = this.enemies.filter((e) => e.ch).length;
+    const far = Math.hypot(this.p.x - c.x, this.p.y - c.y) > 45;
+    if (this.knockedOut || far) {
+      this.enemies = this.enemies.filter((e) => !e.ch);
+      this.challenge = null;
+      this.toast('Challenge failed. Try the rock again!');
+      return;
+    }
+    if (left === 0) {
+      this.stonesDone.add(c.key);
+      this.challenge = null;
+      if (this.maxHp < MAX_HP_CAP) {
+        this.maxHp++;
+        this.toast(`Challenge won! +¼ heart forever (${this.maxHp / 4} hearts)`);
+      } else this.toast('Challenge won! You already have the most hearts (20).');
+      this.p.hp = this.maxHp;
+      sfx.chest();
+      this.puff(c.x, c.y, this.world.heightAt(c.x, c.y) + 1, '#5ad0ff', 30, 3);
+      this.say('chwin', 'You won! You got stronger!', 20);
+    }
   }
 
   nearSomething(): string | null {
     const p = this.p;
     for (const c of this.chests) if (Math.hypot(c.x + 0.5 - p.x, c.y + 0.5 - p.y) < 1.6) return 'Open chest';
+    for (const st of this.stones()) if (this.nearTile(st.x, st.y, 2.6)) return this.stoneDone(st) ? null : this.challenge ? null : 'Take the challenge';
+    const vi = villageAt(p.x, p.y);
+    if (vi >= 0) {
+      const v = VILLAGES[vi];
+      if (this.nearTile(v.x + BOARD.x, v.y + BOARD.y, 2.2)) return 'Job board';
+      if (this.job === 'baker' && this.nearTile(v.x + OVEN.x, v.y + OVEN.y, 2.2)) return 'Bake bread';
+      if (this.job === 'farmer' && tG(this.world.tile(Math.floor(p.x), Math.floor(p.y))) === G.Farm) {
+        const pl = this.farm.get(Math.floor(p.x) * SIZE + Math.floor(p.y));
+        return pl === undefined ? 'Plant' : this.elapsed - pl >= CROP_TIME ? 'Harvest' : null;
+      }
+    }
+    if (this.job === 'fisher' || this.job === 'miner') {
+      const want = this.job === 'fisher' ? G.Water : G.Rock;
+      for (let j = -1; j <= 1; j++)
+        for (let i = -1; i <= 1; i++)
+          if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === want && !p.inWater) return this.job === 'fisher' ? 'Fish' : 'Mine';
+    }
     for (const t of this.traders()) if (Math.hypot(t.x + 0.5 - p.x, t.y + 0.5 - p.y) < 2.2) return 'Trade';
     return null;
   }
@@ -407,6 +628,7 @@ export class Game {
       this.coins += 20;
       this.toast(`Found 20 coins and ${extraArrows} arrows`);
     }
+    this.say('chestopen', ['Ooh, nice!', 'Awesome loot!', 'Look what you found!'][Math.floor(Math.random() * 3)], 30);
   }
 
   campfire() {
@@ -432,10 +654,16 @@ export class Game {
   }
 
   eat() {
-    if (this.apples <= 0) return this.toast('No apples. Some trees drop them.');
-    if (this.p.hp >= MAX_HP) return this.toast('Your hearts are already full');
-    this.apples--;
-    this.p.hp = Math.min(MAX_HP, this.p.hp + 4);
+    const p = this.p;
+    if (p.hp >= this.maxHp) return this.toast('Your hearts are already full');
+    const missing = this.maxHp - p.hp;
+    if (this.apples > 0 && (missing >= FOOD_HEAL || this.acorns <= 0)) {
+      this.apples--;
+      p.hp = Math.min(this.maxHp, p.hp + FOOD_HEAL);
+    } else if (this.acorns > 0) {
+      this.acorns--;
+      p.hp = Math.min(this.maxHp, p.hp + ACORN_HEAL);
+    } else return this.toast('Nothing to eat. Chop trees for acorns!');
     sfx.eat();
   }
 
@@ -453,6 +681,7 @@ export class Game {
       const dx = p.x - fromX, dy = p.y - fromY, d = Math.hypot(dx, dy) || 1;
       this.tryMove(p, (dx / d) * 0.6, (dy / d) * 0.6, false);
     }
+    if (p.hp > 0 && p.hp <= 4) this.say('lowhp', "You're hurt! Eat something with H, or rest by a fire.", 45);
     if (p.hp <= 0) {
       this.knockedOut = 2.2;
       this.toast('You were knocked out!');
@@ -474,14 +703,28 @@ export class Game {
       this.coins += k.coins;
       this.float(e.x, e.y, e.z + 0.5, `+${k.coins} coin${k.coins > 1 ? 's' : ''}`, '#ffd34d');
       if (Math.random() < 0.3) this.arrows += 2;
+      if (this.job === 'guard') {
+        this.coins += 3;
+        this.float(e.x, e.y, e.z + 1, '+3 pay', '#ffd34d');
+      }
       sfx.enemyDie();
       sfx.coin();
     }
   }
 
+  gas(x: number, y: number, z: number) {
+    const a = Math.random() * Math.PI * 2, r = 1.1 + Math.random() * 0.4;
+    this.particles.push({
+      x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, z: z + 1 + Math.random() * 0.8, vx: Math.cos(a) * 0.5, vy: Math.sin(a) * 0.5,
+      vz: 1 + Math.random(), life: 1.8, max: 1.8, color: Math.random() < 0.5 ? '#7a34c0' : '#0b0612', size: 4 + Math.random() * 4, gas: true,
+    });
+  }
+
   private hurtBoss(dmg: number) {
     const b = this.boss;
+    const wasHalf = b.hp > 250;
     b.hp = Math.max(0, b.hp - dmg);
+    if (wasHalf && b.hp <= 250 && b.hp > 0) this.say('bhalf', "It's getting weaker! Keep going!", 999);
     b.hurtT = 0.2;
     sfx.hit();
     this.float(b.x, b.y, FLOOR_H + 2.4, `${dmg}`, '#e9c6ff');
@@ -494,6 +737,7 @@ export class Game {
       this.world.sealed = false;
       sfx.win();
       this.toast('The Dark Beast is defeated!');
+      this.say('won', 'You did it! The Dark Beast is gone and the land is saved!', 999);
     }
   }
 
@@ -525,12 +769,101 @@ export class Game {
     } else {
       this.updatePlayer(dt);
     }
+    this.updateWork(dt);
+    this.updateTrader(dt);
     this.updateEnemies(dt);
+    this.updateChallenge();
+    this.updateNarrator();
     this.updateArrows(dt);
     this.updateBoss(dt);
     this.updateChests(dt);
     this.updateParticles(dt);
     this.world.prune(Math.floor(this.p.x), Math.floor(this.p.y));
+  }
+
+  private updateWork(dt: number) {
+    const w = this.work;
+    if (!w) return;
+    if (Math.hypot(this.p.x - w.x, this.p.y - w.y) > 0.3 || this.knockedOut) {
+      this.work = null;
+      return;
+    }
+    w.t += dt;
+    if (w.t >= w.max) {
+      this.work = null;
+      w.done();
+    }
+  }
+
+  private updateTrader(dt: number) {
+    const t = this.trader, p = this.p;
+    const dx = p.x - t.x, dy = p.y - t.y, d = Math.hypot(dx, dy);
+    if (d > 22 || (inRoom(t.x, t.y) && !inRoom(p.x, p.y))) {
+      // catch up when left far behind (or never follow into the Dark Beast's room)
+      const a = p.face + Math.PI;
+      t.x = p.x + Math.cos(a) * 3;
+      t.y = p.y + Math.sin(a) * 3;
+      if (inRoom(t.x, t.y)) {
+        t.x = CX + 0.5;
+        t.y = CY + 15.5;
+      }
+    } else if (d > 3 && !inRoom(p.x, p.y)) {
+      const sp = Math.min(d - 3, (d > 8 ? 6 : 4.4) * dt);
+      t.x += (dx / d) * sp;
+      t.y += (dy / d) * sp;
+      t.walkT += dt;
+      t.face = Math.atan2(dy, dx);
+    }
+    const gh = this.world.heightAt(t.x, t.y);
+    t.z += (gh - t.z) * Math.min(1, dt * 10);
+  }
+
+  private updateNarrator() {
+    const p = this.p;
+    // time
+    const hoursLeft = Math.ceil(this.timeLeft / 3600);
+    if (this.lastHour < 0) this.lastHour = hoursLeft;
+    if (hoursLeft < this.lastHour && !this.won) {
+      this.lastHour = hoursLeft;
+      this.say(`h${hoursLeft}`, hoursLeft === 1 ? 'Only one hour left! Hurry to the castle!' : `${hoursLeft} hours left before the world goes black.`, 5);
+    }
+    if (this.timeLeft < 600 && this.timeLeft > 590 && !this.won) this.say('10min', 'Ten minutes left! Go, go, go!', 9999);
+    // things you can see
+    for (const c of this.chests) {
+      const k = `c${c.x},${c.y}`;
+      if (!this.seen.has(k) && Math.hypot(c.x - p.x, c.y - p.y) < 13) {
+        this.seen.add(k);
+        this.say('chest', ["Look, there's a chest!", 'Is that a chest over there?', 'A treasure chest! Go get it!'][Math.floor(Math.random() * 3)], 20);
+      }
+    }
+    for (const st of this.stones()) {
+      const k = `s${st.x},${st.y}`;
+      if (!this.seen.has(k) && !this.stoneDone(st) && Math.hypot(st.x - p.x, st.y - p.y) < 14) {
+        this.seen.add(k);
+        this.say('stone', 'A glowing rock! Press E next to it to take its challenge.', 30);
+      }
+    }
+    const vi = villageAt(p.x, p.y);
+    if (vi !== this.wasVillage) {
+      this.wasVillage = vi;
+      if (vi >= 0) {
+        this.say(`v${vi}`, `Welcome to ${VILLAGES[vi].name}! Check the job board to get a job.`, 120);
+        if (this.job === 'courier' && this.letterTo === vi) {
+          this.coins += 30;
+          sfx.coin();
+          this.toast('Letter delivered! +30 coins. Here is one for the other village.');
+          this.letterTo = 1 - vi;
+        }
+      }
+    }
+    const cr = castleR(p.x, p.y);
+    if (cr < 140 && cr > 40 && !this.won) this.say('castle', 'The castle… I can feel the gloom. Be brave.', 300);
+    if (p.climbing && p.stamina < 0.3) this.say('hang', 'Hang on! Your stamina is running out!', 25);
+    if (p.inWater && !this.seen.has('swim')) {
+      this.seen.add('swim');
+      this.say('swim', 'Time for a swim! Swimming uses stamina, so do not go too far.', 60);
+    }
+    if (p.inWater && p.stamina < 0.3) this.say('swimlow', 'Swim to shore, quick!', 20);
   }
 
   private respawn() {
@@ -539,12 +872,13 @@ export class Game {
     p.y = this.spawn.y;
     p.z = this.world.heightAt(p.x, p.y);
     p.vz = 0;
-    p.hp = MAX_HP;
+    p.hp = this.maxHp;
     p.stamina = 1;
     p.climbing = false;
     p.onGround = true;
     this.enemies = [];
     this.arrowsFlying = [];
+    this.work = null;
     if (this.boss.active && !this.boss.dead) {
       this.boss = this.freshBoss();
       this.world.sealed = false;
@@ -579,7 +913,7 @@ export class Game {
     const sealedIn = this.world.sealed && inRoom(p.x, p.y);
     if (!blocksMove(wv) && tH(wv) > p.z + 0.5 && p.onGround && p.stamina > 0.02 && !sealedIn && tG(wv) !== G.Water) {
       p.pushT += this.stepDt;
-      if (p.pushT > 0.18) {
+      if (p.pushT > 0.04) {
         p.climbing = true;
         p.climbDX = dirX;
         p.climbDY = dirY;
@@ -680,12 +1014,28 @@ export class Game {
           const q = Math.ceil(fell - SAFE_FALL);
           this.hurtPlayer(q);
           this.toast(`Ouch! Fell ${Math.round(fell)} levels`);
+          this.say('fall', 'Ouch! That was a long way down.', 30);
         } else if (fell > 1.5) sfx.land();
       }
     } else p.z = Math.max(p.z, ground === g2 ? ground : g2);
 
-    // stamina refills on the ground
-    if (p.onGround) {
+    // swimming uses stamina like climbing; run out and you sink back to shore
+    if (p.inWater && p.onGround) {
+      p.stamina -= CLIMB_DRAIN * dt;
+      p.staminaWait = 1;
+      if (p.stamina <= 0) {
+        p.stamina = 0.35;
+        p.x = this.lastLand.x;
+        p.y = this.lastLand.y;
+        p.z = this.world.heightAt(p.x, p.y);
+        this.toast('Too tired to swim! You washed back to shore.');
+        this.hurtPlayer(2);
+      }
+    } else if (p.onGround && tG(this.world.tile(Math.floor(p.x), Math.floor(p.y))) !== G.Water) {
+      this.lastLand = { x: p.x, y: p.y };
+    }
+    // stamina refills on dry ground
+    if (p.onGround && !p.inWater) {
       p.staminaWait -= dt;
       if (p.staminaWait <= 0) p.stamina = Math.min(1, p.stamina + 0.4 * dt);
     }
@@ -694,7 +1044,7 @@ export class Game {
     this.fireTick += dt;
     if (this.fireTick > 1.5) {
       this.fireTick = 0;
-      if (p.hp < MAX_HP && this.fires.some((f) => Math.hypot(f.x + 0.5 - p.x, f.y + 0.5 - p.y) < 2.6)) {
+      if (p.hp < this.maxHp && this.fires.some((f) => Math.hypot(f.x + 0.5 - p.x, f.y + 0.5 - p.y) < 2.6)) {
         p.hp++;
         this.float(p.x, p.y, p.z, '+¼', '#ff9bb0');
       }
@@ -709,6 +1059,7 @@ export class Game {
       this.shake = 14;
       sfx.door();
       this.toast('The doors slam shut! There is no way out. Defeat the Dark Beast!');
+      this.say('boss', "There's no way out! Fight the Dark Beast!", 5);
     }
   }
 
@@ -717,13 +1068,13 @@ export class Game {
     const fighting = this.boss.active && !this.boss.dead;
     // spawn around the hero, but never in the castle
     this.spawnCd -= dt;
-    if (!fighting && this.spawnCd <= 0 && this.enemies.length < 8 && castleR(p.x, p.y) > 60) {
+    if (!fighting && !this.challenge && this.spawnCd <= 0 && this.enemies.length < 8 && castleR(p.x, p.y) > 60 && villageAt(p.x, p.y) < 0) {
       this.spawnCd = 2.5;
       const a = Math.random() * Math.PI * 2;
       const d = 34 + Math.random() * 14;
       const ex = p.x + Math.cos(a) * d, ey = p.y + Math.sin(a) * d;
       const v = this.world.tile(Math.floor(ex), Math.floor(ey));
-      if (tG(v) !== G.Water && !blocksMove(v) && castleR(ex, ey) > 40) {
+      if (tG(v) !== G.Water && !blocksMove(v) && castleR(ex, ey) > 40 && villageAt(ex, ey) < 0) {
         const kind = rollEnemyKind(Math.random());
         this.enemies.push({
           id: this.nextId++, kind, x: Math.floor(ex) + 0.5, y: Math.floor(ey) + 0.5, z: tH(v), hp: ENEMY_KINDS[kind].hp,
@@ -735,14 +1086,17 @@ export class Game {
       const e = this.enemies[i];
       const k = ENEMY_KINDS[e.kind];
       const dx = p.x - e.x, dy = p.y - e.y, d = Math.hypot(dx, dy);
-      if (d > 75 || fighting) {
+      if ((d > 75 && !e.ch) || fighting) {
         this.enemies.splice(i, 1);
         continue;
       }
       e.hurtT = Math.max(0, e.hurtT - dt);
       e.atkCd -= dt;
       e.hop += dt * (e.aggro ? 9 : 5);
-      if (d <= AGGRO && !this.knockedOut) e.aggro = true;
+      if (d <= AGGRO && !this.knockedOut && !e.aggro) {
+        e.aggro = true;
+        if (!e.ch) this.say(e.kind === 2 ? 'green' : e.kind === 1 ? 'blue' : 'watch', e.kind === 2 ? 'Whoa, a green Murk! Those are tough!' : e.kind === 1 ? 'A blue Murk! Careful!' : ['Watch out!', 'Murk coming!', 'Heads up, an enemy!'][Math.floor(Math.random() * 3)], e.kind ? 30 : 40);
+      }
       if (this.knockedOut) e.aggro = false;
       let mx = 0, my = 0;
       if (e.aggro && d > 0.75) {
@@ -777,7 +1131,7 @@ export class Game {
   private moveEnemy(e: Enemy, mx: number, my: number) {
     const ok = (nx: number, ny: number) => {
       const v = this.world.tile(Math.floor(nx), Math.floor(ny));
-      if (blocksMove(v) || tG(v) === G.Water || castleR(nx, ny) <= 33) return false;
+      if (blocksMove(v) || tG(v) === G.Water || castleR(nx, ny) <= 33 || villageAt(nx, ny) >= 0) return false;
       const th = tH(v);
       return th - e.z <= 1.05 && e.z - th <= 3;
     };
@@ -825,6 +1179,12 @@ export class Game {
       return;
     }
     b.hurtT = Math.max(0, b.hurtT - dt);
+    // black and purple gas pours off the Dark Beast
+    this.gasT -= dt;
+    if (this.gasT <= 0 && Math.hypot(this.p.x - b.x, this.p.y - b.y) < 70) {
+      this.gasT = 0.09;
+      this.gas(b.x, b.y, FLOOR_H + 1.6);
+    }
     for (const r of b.rings) r.t += dt;
     b.rings = b.rings.filter((r) => r.t < r.max);
     if (!b.active) return;
@@ -849,6 +1209,7 @@ export class Game {
           b.t = 2.4; // 4× as long as a normal attack
           b.rings.push({ x: b.x, y: b.y, r: 5, t: 0, max: 2.4, heavy: true });
           sfx.beastWind();
+          this.say('heavy', "It's charging a big attack! Get away from it!", 15);
         } else {
           b.state = 'wind';
           b.t = 0.6;
@@ -927,16 +1288,20 @@ export class Game {
     if (best && bestScore >= 2) this.chests.push(best);
   }
 
-  private updateParticles(dt: number) {
+  updateParticles(dt: number) {
     for (const q of this.particles) {
       q.life -= dt;
       q.x += q.vx * dt;
       q.y += q.vy * dt;
       q.z += q.vz * dt;
-      if (!q.text) q.vz -= 8 * dt;
+      if (q.gas) {
+        q.size += dt * 9;
+        q.vx *= 0.98;
+        q.vy *= 0.98;
+      } else if (!q.text) q.vz -= 8 * dt;
     }
     this.particles = this.particles.filter((q) => q.life > 0);
-    if (this.particles.length > 400) this.particles.splice(0, this.particles.length - 400);
+    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
   }
 
   // ---------- saving ----------
@@ -948,7 +1313,8 @@ export class Game {
       x: p.x, y: p.y, z: p.z, hp: Math.max(1, p.hp), elapsed: this.elapsed, swords: this.swords, bows: this.bows,
       sword: this.sword, bow: this.bow, arrows: this.arrows, wood: this.wood, coins: this.coins, apples: this.apples,
       chopped: [...this.world.chopped].slice(-20000), fires: this.fires, spawn: this.spawn, chests: this.chests,
-      won: this.won, savedAt: Date.now(),
+      won: this.won, savedAt: Date.now(), acorns: this.acorns, maxHp: this.maxHp, stones: [...this.stonesDone], job: this.job,
+      jobVillage: this.jobVillage, farm: [...this.farm], letterTo: this.letterTo,
     };
   }
 
@@ -971,6 +1337,13 @@ export class Game {
     g.chests = s.chests;
     g.won = s.won;
     g.p.hp = s.hp;
+    g.acorns = s.acorns ?? 0;
+    g.maxHp = s.maxHp ?? MAX_HP;
+    g.stonesDone = new Set(s.stones ?? []);
+    g.job = s.job ?? null;
+    g.jobVillage = s.jobVillage ?? 0;
+    g.farm = new Map(s.farm ?? []);
+    g.letterTo = s.letterTo ?? null;
     // If saved inside the locked room, start just outside its door so the fight starts fresh.
     if (inRoom(s.x, s.y) && !s.won) {
       g.p.x = CX + 0.5;
@@ -981,6 +1354,10 @@ export class Game {
     }
     g.p.z = g.world.heightAt(g.p.x, g.p.y);
     if (s.z > g.p.z) g.p.z = s.z;
+    g.trader.x = g.p.x + 2;
+    g.trader.y = g.p.y + 2;
+    g.trader.z = g.world.heightAt(g.trader.x, g.trader.y);
+    g.lastLand = { x: g.p.x, y: g.p.y };
     return g;
   }
 }
