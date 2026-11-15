@@ -60,7 +60,8 @@ export class Timeline {
       for (const id of event.people) {
         const person = this.people.get(id);
         if (!person) throw new Error(`Event ${event.id} names unknown person ${id}`);
-        if (person.kind === 'child' || !event.place) continue;
+        // Weddings happen away from home, so they don't move anyone.
+        if (person.kind === 'child' || event.type === 'marriage' || !event.place) continue;
         const list = this.stops.get(id) ?? [];
         list.push({ t, place: event.place, eventId: event.id });
         this.stops.set(id, list);

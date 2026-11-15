@@ -10,8 +10,10 @@ there is no database. Dates are `YYYY-MM`. Events in the same month play in list
 
 - `people`: friends (`kind: "friend"`, unique `color`, optional `photo` under `public/faces/`;
   initials show until there is one) and children
-  (`kind: "child"`, `sex`, `motherId`). Children always stay with their mother.
-- `events`: `birth` (a place for friends, none for children), `marriage` (two people and a place) and
+  (`kind: "child"`, `sex`, `motherId`). Children always stay with their mother (or their father,
+  when the mother isn't in the app).
+- `events`: `birth` (a place for friends, none for children), `marriage` (two people, or one when the
+  spouse isn't in the app, and an optional place; nobody moves there) and
   `move` (everyone who moves together, and the new place).
 
 `npm test` checks the data: ids resolve, dates are valid, everyone is born once and before anything

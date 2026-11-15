@@ -20,8 +20,9 @@ describe('data', () => {
         expect(Math.abs(e.place.lng)).toBeLessThanOrEqual(180);
         expect(e.place.name.length).toBeGreaterThan(0);
       }
-      if (e.type !== 'birth') expect(e.place, e.id).toBeDefined();
-      if (e.type === 'marriage') expect(e.people).toHaveLength(2);
+      if (e.type === 'move') expect(e.place, e.id).toBeDefined();
+      if (e.type === 'marriage') expect(e.people.length, e.id).toBeGreaterThanOrEqual(1);
+      if (e.type === 'marriage') expect(e.people.length, e.id).toBeLessThanOrEqual(2);
     }
   });
 
@@ -40,7 +41,7 @@ describe('data', () => {
     }
   });
 
-  it('gives every child a mother who is a friend born before them', () => {
+  it('gives every child a parent who is a friend born before them', () => {
     for (const p of people) {
       if (p.kind !== 'child') continue;
       const mother = byId.get(p.motherId);

@@ -22,7 +22,7 @@ export interface Child {
   name: string;
   kind: 'child';
   sex: 'female' | 'male';
-  /** A child is always drawn with its mother. */
+  /** The parent a child is always drawn with: the mother, or the father when she isn't in the app. */
   motherId: string;
   order: number;
 }
@@ -46,8 +46,10 @@ export interface MarriageEvent {
   id: string;
   type: 'marriage';
   date: MonthString;
-  people: [string, string];
-  place: Place;
+  /** Both partners, or just one when the spouse isn't in the app. */
+  people: string[];
+  /** Where the wedding was. Nobody moves there: the couple stays where they live. */
+  place?: Place;
 }
 
 export interface MoveEvent {

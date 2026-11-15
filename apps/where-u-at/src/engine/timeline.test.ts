@@ -60,7 +60,9 @@ describe('Timeline', () => {
   it('keeps people at their latest place', () => {
     expect(tl.placeAt('bob', at('2009-12'))).toEqual(tokyo);
     expect(tl.placeAt('bob', at('2010-01'))).toEqual(paris);
-    expect(tl.placeAt('ann', at('2012-06'))).toEqual(bali);
+    // The wedding is in Bali, but nobody moves there.
+    expect(tl.placeAt('ann', at('2012-06'))).toEqual(lisbon);
+    expect(tl.placeAt('ann', at('2012-07'))).toEqual(paris);
     expect(tl.placeAt('ann', at('2020-01'))).toEqual(tokyo);
   });
 
@@ -71,14 +73,15 @@ describe('Timeline', () => {
   });
 
   it('gives couples who move together side-by-side lanes', () => {
-    const toParis = tl.legs.filter((l) => l.eventId === '5');
-    expect(toParis.map((l) => [l.personId, l.lane, l.laneCount])).toEqual([
+    const toTokyo = tl.legs.filter((l) => l.eventId === '7');
+    expect(toTokyo.map((l) => [l.personId, l.lane, l.laneCount])).toEqual([
       ['ann', 0, 2],
       ['bob', 1, 2],
     ]);
-    // Flying to the wedding from different cities: separate trips, one lane each.
-    const toBali = tl.legs.filter((l) => l.eventId === '4');
-    expect(toBali.every((l) => l.laneCount === 1)).toBe(true);
+    // Moving in together from different cities: separate trips, one lane each.
+    const toParis = tl.legs.filter((l) => l.eventId === '5');
+    expect(toParis.map((l) => [l.personId, l.laneCount])).toEqual([['ann', 1]]);
+    expect(tl.legs.some((l) => l.eventId === '4')).toBe(false);
   });
 
   it('lists the events crossed between two times', () => {
