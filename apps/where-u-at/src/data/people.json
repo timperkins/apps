@@ -20,7 +20,7 @@
     "name": "Hesper",
     "kind": "friend",
     "color": "#8E44AD",
-    "photo": "",
+    "photo": "faces/hesper.jpg",
     "order": 2
   },
   {
@@ -28,7 +28,7 @@
     "name": "Brinn",
     "kind": "friend",
     "color": "#13A89E",
-    "photo": "",
+    "photo": "faces/brinn.jpg",
     "order": 3
   },
   {
@@ -36,7 +36,7 @@
     "name": "Rachel Barnes",
     "kind": "friend",
     "color": "#E0A100",
-    "photo": "",
+    "photo": "faces/rachel.jpg",
     "order": 4
   },
   {
@@ -44,7 +44,7 @@
     "name": "Tyler",
     "kind": "friend",
     "color": "#5B3A8F",
-    "photo": "",
+    "photo": "faces/tyler.jpg",
     "order": 5
   },
   {
@@ -52,7 +52,7 @@
     "name": "Celine Beard Olvera",
     "kind": "friend",
     "color": "#B04FD0",
-    "photo": "",
+    "photo": "faces/celine.jpg",
     "order": 6
   },
   {
@@ -60,7 +60,7 @@
     "name": "Ben Olvera",
     "kind": "friend",
     "color": "#5A6B1F",
-    "photo": "",
+    "photo": "faces/ben.jpg",
     "order": 7
   },
   {
@@ -68,7 +68,7 @@
     "name": "Emily Kasper",
     "kind": "friend",
     "color": "#7CB518",
-    "photo": "",
+    "photo": "faces/emily.jpg",
     "order": 8
   },
   {
@@ -84,7 +84,7 @@
     "name": "Alec",
     "kind": "friend",
     "color": "#D7263D",
-    "photo": "",
+    "photo": "faces/alec.jpg",
     "order": 10
   },
   {
@@ -92,7 +92,7 @@
     "name": "Freyja Kohler",
     "kind": "friend",
     "color": "#8C1C13",
-    "photo": "",
+    "photo": "faces/freyja.jpg",
     "order": 11
   },
   {
@@ -100,7 +100,7 @@
     "name": "Peter",
     "kind": "friend",
     "color": "#8B5A2B",
-    "photo": "",
+    "photo": "faces/peter.jpg",
     "order": 12
   },
   {
@@ -108,7 +108,7 @@
     "name": "Alec Livingston",
     "kind": "friend",
     "color": "#4A4A4A",
-    "photo": "",
+    "photo": "faces/alec-livingston.jpg",
     "order": 13
   },
   {
@@ -116,7 +116,7 @@
     "name": "Todd",
     "kind": "friend",
     "color": "#0B6E6E",
-    "photo": "",
+    "photo": "faces/todd.jpg",
     "order": 14
   },
   {
@@ -124,7 +124,7 @@
     "name": "Paul",
     "kind": "friend",
     "color": "#B33F00",
-    "photo": "",
+    "photo": "faces/paul.jpg",
     "order": 15
   },
   {
@@ -132,7 +132,7 @@
     "name": "Clark",
     "kind": "friend",
     "color": "#6E7F80",
-    "photo": "",
+    "photo": "faces/clark.jpg",
     "order": 16
   },
   {
