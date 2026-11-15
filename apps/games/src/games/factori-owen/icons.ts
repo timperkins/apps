@@ -215,6 +215,53 @@ export function drawItem(c: Ctx, item: ItemId) {
       c.fillStyle = '#1b1f2a';
       c.fillRect(0.44, 0.36, 0.2, 0.22);
       break;
+    case 'owen-ammo':
+      c.fillStyle = '#5466a8';
+      roundRect(c, 0.2, 0.3, 0.6, 0.5, 0.06);
+      c.fill();
+      c.fillStyle = '#9fb0e6';
+      roundRect(c, 0.2, 0.26, 0.6, 0.46, 0.06);
+      c.fill();
+      for (let i = 0; i < 3; i++) {
+        c.fillStyle = '#e0a53c';
+        c.fillRect(0.28 + i * 0.16, 0.12, 0.1, 0.2);
+        c.beginPath();
+        c.arc(0.33 + i * 0.16, 0.12, 0.05, Math.PI, 0);
+        c.fill();
+      }
+      owenO(c, 0.5, 0.5, 0.1, '#30406f');
+      break;
+    case 'rail-ammo':
+      c.save();
+      c.translate(0.5, 0.5);
+      c.rotate(-0.7);
+      c.fillStyle = '#5c6270';
+      c.fillRect(-0.38, -0.1, 0.6, 0.2);
+      c.fillStyle = '#c9ced8';
+      c.beginPath();
+      c.moveTo(0.22, -0.1);
+      c.lineTo(0.42, 0);
+      c.lineTo(0.22, 0.1);
+      c.fill();
+      c.fillStyle = '#5adcff';
+      c.fillRect(-0.3, -0.04, 0.48, 0.08);
+      c.restore();
+      break;
+    case 'rail-gun':
+      c.save();
+      c.translate(0.5, 0.52);
+      c.rotate(-0.5);
+      c.fillStyle = '#39424f';
+      c.fillRect(-0.42, -0.08, 0.84, 0.16);
+      c.fillStyle = '#7d8a9b';
+      c.fillRect(-0.1, -0.13, 0.58, 0.06);
+      c.fillRect(-0.1, 0.07, 0.58, 0.06);
+      c.fillStyle = '#5adcff';
+      c.fillRect(0, -0.03, 0.42, 0.06);
+      c.fillStyle = '#6b4126';
+      c.fillRect(-0.36, 0.06, 0.12, 0.22);
+      c.restore();
+      break;
     case 'red-pack': flask(c, '#e0414a', '#ffb3b3'); break;
     case 'green-pack': flask(c, '#43c463', '#c5ffd0'); break;
     default:

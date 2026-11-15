@@ -67,5 +67,10 @@ export const sfx = {
   error: () => tone(140, 0.18, 'sawtooth', 0.05, -40),
   rotate: () => tone(400, 0.05, 'square', 0.03, 120),
   research: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, 'triangle', 0.07, 0, i * 0.12)),
+  shot: () => { noise(0.05, 0.12, 2500); tone(220, 0.05, 'square', 0.02, -100); },
+  rail: () => { tone(1800, 0.4, 'sawtooth', 0.05, -1600); noise(0.3, 0.25, 600); },
+  hurt: () => tone(200, 0.12, 'sawtooth', 0.06, -80),
+  boom: () => { noise(0.5, 0.5, 180); tone(90, 0.4, 'sine', 0.12, -50); },
+  alarm: () => [0, 1, 2].forEach((i) => tone(660, 0.18, 'square', 0.04, -200, i * 0.25)),
   win: () => [392, 523, 659, 784, 659, 784, 1046].forEach((f, i) => tone(f, 0.35, 'triangle', 0.08, 0, i * 0.15)),
 };

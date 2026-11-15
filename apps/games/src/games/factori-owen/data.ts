@@ -11,9 +11,10 @@ export type ItemId =
   | 'burner-drill' | 'electric-drill'
   | 'stone-furnace' | 'assembler' | 'lab'
   | 'pole' | 'generator' | 'solar-panel'
-  | 'owen-monument';
+  | 'owen-monument'
+  | 'owen-ammo' | 'rail-ammo' | 'rail-gun' | 'gun-turret' | 'rail-turret' | 'wall';
 
-export type Category = 'logistics' | 'production' | 'intermediate' | 'science';
+export type Category = 'logistics' | 'production' | 'intermediate' | 'science' | 'military';
 
 export interface ItemDef {
   id: ItemId;
@@ -59,6 +60,12 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   'generator': { id: 'generator', name: 'Coal generator', stack: 10, place: 'generator', category: 'production' },
   'solar-panel': { id: 'solar-panel', name: 'Solar panel', stack: 50, place: 'solar-panel', category: 'production' },
   'owen-monument': { id: 'owen-monument', name: 'The Great Owen Monument', stack: 1, place: 'owen-monument', category: 'production', desc: 'Build it to win.' },
+  'owen-ammo': { id: 'owen-ammo', name: 'Owen bullets', stack: 200, category: 'military', desc: 'A magazine of 10 rounds for your pistol and gun turrets. Hold Space to shoot.' },
+  'rail-ammo': { id: 'rail-ammo', name: 'Rail slug', stack: 50, category: 'military', desc: 'One shot for a rail gun. Pierces every bug in a line.' },
+  'rail-gun': { id: 'rail-gun', name: 'Rail gun', stack: 1, category: 'military', desc: 'Carry it and hold Space to fire rail slugs a long way. Slow, but nothing survives.' },
+  'gun-turret': { id: 'gun-turret', name: 'Gun turret', stack: 50, place: 'gun-turret', category: 'military', desc: 'Shoots bugs automatically. Load it with Owen bullets.' },
+  'rail-turret': { id: 'rail-turret', name: 'Rail gun turret', stack: 10, place: 'rail-turret', category: 'military', desc: 'Huge range. Needs power and rail slugs.' },
+  'wall': { id: 'wall', name: 'Stone wall', stack: 100, place: 'wall', category: 'military', desc: 'Bugs have to chew through it.' },
 };
 
 export type EntityType =
@@ -67,9 +74,10 @@ export type EntityType =
   | 'burner-inserter' | 'inserter' | 'long-inserter' | 'fast-inserter'
   | 'burner-drill' | 'electric-drill'
   | 'stone-furnace' | 'assembler' | 'lab'
-  | 'pole' | 'generator' | 'solar-panel' | 'owen-monument';
+  | 'pole' | 'generator' | 'solar-panel' | 'owen-monument'
+  | 'gun-turret' | 'rail-turret' | 'wall';
 
-export type Kind = 'chest' | 'belt' | 'inserter' | 'drill' | 'furnace' | 'assembler' | 'lab' | 'pole' | 'generator' | 'solar' | 'monument';
+export type Kind = 'chest' | 'belt' | 'inserter' | 'drill' | 'furnace' | 'assembler' | 'lab' | 'pole' | 'generator' | 'solar' | 'monument' | 'turret' | 'wall';
 
 export interface EntityDef {
   type: EntityType;
@@ -87,6 +95,11 @@ export interface EntityDef {
   area?: number;         // drill mining area (square side)
   output?: number;       // generator / solar max watts
   mineTime: number;      // seconds for the player to pick it up
+  hp?: number;
+  range?: number;        // turret
+  ammo?: ItemId;         // turret
+  damage?: number;       // turret, per shot
+  fireRate?: number;     // turret shots/s
 }
 
 export const ENTITIES: Record<EntityType, EntityDef> = {
@@ -107,8 +120,19 @@ export const ENTITIES: Record<EntityType, EntityDef> = {
   'pole': { type: 'pole', kind: 'pole', w: 1, h: 1, item: 'pole', mineTime: 0.1 },
   'generator': { type: 'generator', kind: 'generator', w: 3, h: 3, item: 'generator', output: 900e3, mineTime: 0.3 },
   'solar-panel': { type: 'solar-panel', kind: 'solar', w: 3, h: 3, item: 'solar-panel', output: 60e3, mineTime: 0.3 },
-  'owen-monument': { type: 'owen-monument', kind: 'monument', w: 5, h: 5, item: 'owen-monument', mineTime: 1 },
+  'owen-monument': { type: 'owen-monument', kind: 'monument', w: 5, h: 5, item: 'owen-monument', mineTime: 1, hp: 5000 },
+  'gun-turret': { type: 'gun-turret', kind: 'turret', w: 2, h: 2, item: 'gun-turret', mineTime: 0.4, hp: 400, range: 18, ammo: 'owen-ammo', damage: 6, fireRate: 6 },
+  'rail-turret': { type: 'rail-turret', kind: 'turret', w: 3, h: 3, item: 'rail-turret', mineTime: 0.5, hp: 1000, range: 40, ammo: 'rail-ammo', damage: 400, fireRate: 0.4, power: 400e3, electric: true },
+  'wall': { type: 'wall', kind: 'wall', w: 1, h: 1, item: 'wall', mineTime: 0.2, hp: 350 },
 };
+
+const DEFAULT_HP: Record<Kind, number> = {
+  chest: 150, belt: 80, inserter: 100, drill: 250, furnace: 200, assembler: 300, lab: 200,
+  pole: 100, generator: 400, solar: 200, monument: 5000, turret: 400, wall: 350,
+};
+export function maxHp(t: EntityType): number {
+  return ENTITIES[t].hp ?? DEFAULT_HP[ENTITIES[t].kind];
+}
 
 export const POLE_WIRE_REACH = 7.5;
 export const POLE_SUPPLY_RADIUS = 2.5;
@@ -159,6 +183,13 @@ export const RECIPES: Recipe[] = [
   r('lab', 1, 2, [['circuit', 10], ['owen-gear', 10], ['belt', 4]]),
   r('solar-panel', 1, 10, [['steel-plate', 5], ['circuit', 15], ['copper-plate', 15]], { unlock: 'solar' }),
   r('owen-monument', 1, 30, [['steel-plate', 100], ['circuit', 200], ['stone-brick', 200], ['green-pack', 50]], { unlock: 'monument' }),
+  // military
+  r('owen-ammo', 1, 1, [['owen-plate', 4]]),
+  r('gun-turret', 1, 8, [['owen-gear', 10], ['copper-plate', 10], ['owen-plate', 20]]),
+  r('wall', 1, 0.5, [['stone-brick', 5]], { unlock: 'military' }),
+  r('rail-ammo', 1, 3, [['steel-plate', 2], ['copper-plate', 2], ['circuit', 1]], { unlock: 'rail-guns' }),
+  r('rail-gun', 1, 10, [['steel-plate', 10], ['circuit', 15], ['owen-gear', 5]], { unlock: 'rail-guns' }),
+  r('rail-turret', 1, 15, [['steel-plate', 20], ['circuit', 25], ['owen-gear', 10], ['gun-turret', 1]], { unlock: 'rail-guns' }),
   // science
   r('red-pack', 1, 5, [['copper-plate', 1], ['owen-gear', 1]]),
   r('green-pack', 1, 6, [['inserter', 1], ['belt', 1]], { unlock: 'green-science' }),
@@ -185,6 +216,8 @@ export const TECHS: Tech[] = [
   { id: 'steel', name: 'Owen steel', desc: 'Smelt Owen plates into Owen steel. Unlocks steel crates.', packs: ['red-pack'], units: 50, time: 5, requires: [] },
   { id: 'fast-inserter', name: 'Fast robo arms', desc: 'Robo arms that swing almost three times faster.', packs: ['red-pack', 'green-pack'], units: 30, time: 15, requires: ['green-science'] },
   { id: 'solar', name: 'Solar energy', desc: 'Free power from the sun, during the day.', packs: ['red-pack', 'green-pack'], units: 100, time: 10, requires: ['green-science', 'steel'] },
+  { id: 'military', name: 'Military', desc: 'Stone walls to slow the bugs down.', packs: ['red-pack'], units: 10, time: 15, requires: [] },
+  { id: 'rail-guns', name: 'Rail guns', desc: 'A handheld rail gun, rail gun turrets and rail slugs. Fires straight through whole swarms.', packs: ['red-pack', 'green-pack'], units: 75, time: 15, requires: ['steel', 'green-science', 'military'] },
   { id: 'monument', name: 'The Great Owen', desc: 'Build a monument to Owen to finish the game.', packs: ['red-pack', 'green-pack'], units: 200, time: 15, requires: ['solar', 'fast-inserter', 'logistics'] },
 ];
 export const TECH_BY_ID: Record<string, Tech> = Object.fromEntries(TECHS.map((t) => [t.id, t]));
@@ -194,6 +227,7 @@ export const PLAYER_START: [ItemId, number][] = [
   ['wood', 4],
   ['burner-drill', 1],
   ['stone-furnace', 1],
+  ['owen-ammo', 10],
 ];
 
 /** How many ingredient crafts an assembler/furnace buffers before inserters stop feeding it. */

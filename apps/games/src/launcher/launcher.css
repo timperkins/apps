@@ -26,7 +26,7 @@ html, body { margin: 0; height: 100%; background: #1b1f44; color: #fbeedd; font-
 }
 .board h1 { margin: 0; font-size: clamp(30px, 6vw, 46px); letter-spacing: .02em; color: #ffe3a0; text-shadow: 0 3px 0 #3a2416; }
 .board .sub { margin: 4px 0 18px; color: #f3d6b3; }
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
 .card {
   display: flex; flex-direction: column; text-decoration: none; color: inherit; background: #f4e3c8; color: #3a2416;
   border-radius: 12px; overflow: hidden; box-shadow: 0 4px 0 #3a2416; transition: transform .12s, box-shadow .12s; position: relative;

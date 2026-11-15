@@ -1,6 +1,7 @@
 // Draws the world, buildings and overlays onto the main canvas.
-import { ENTITIES, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
-import { beltItemPos, drawBelt, drawBuilding, drawPlayer, drawTree, inserterArm, inserterBase, inserterHand, type Look } from './art';
+import { ENTITIES, maxHp, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
+import { BUG_KINDS, NEST_HP } from './combat';
+import { beltItemPos, DEFAULT_LOOK, drawBelt, drawBug, drawBuilding, drawNest, drawPlayer, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, type Look, type PlayerLook } from './art';
 import { iconCanvas } from './icons';
 import { DX, DY, drillOut, TPS, type Dir, type Entity, type Game } from './sim';
 import { Ground, Res, WORLD } from './world';
@@ -44,6 +45,9 @@ export class Renderer {
   cv: HTMLCanvasElement;
   c: CanvasRenderingContext2D;
   zoom = 36;
+  look: PlayerLook = DEFAULT_LOOK;
+  /** Extra players to draw (multiplayer). */
+  others: { x: number; y: number; dir: number; moving: boolean; look: PlayerLook; name: string }[] = [];
   camX = 0;
   camY = 0;
   dpr = 1;
@@ -253,9 +257,34 @@ export class Renderer {
         const t = w.tree[y * WORLD + x];
         if (t) tall.push({ y: y + 1, f: () => drawTree(c, x, y, t, Math.sin(time * 1.3 + x * 0.7 + y * 0.3)) });
       }
-    tall.push({ y: g.py + 0.3, f: () => drawPlayer(c, g.px, g.py, g.pdir, g.pmoving, time, !!ov.mining) });
+    if (!g.playerDead) tall.push({ y: g.py + 0.3, f: () => drawPlayer(c, g.px, g.py, g.pdir, g.pmoving, time, !!ov.mining, this.look) });
+    for (const o of this.others) tall.push({ y: o.y + 0.3, f: () => drawPlayer(c, o.x, o.y, o.dir, o.moving, time, false, o.look) });
+    const inView = (x: number, y: number, r: number) => x + r > x0 && x - r < x1 && y + r > y0 - 1 && y - r < y1;
+    for (const n of g.cs.nests)
+      if (inView(n.x, n.y, 2)) tall.push({ y: n.y + 1, f: () => drawNest(c, n.x, n.y, time * 2 + n.pulse, n.hp / NEST_HP) });
+    for (const b of g.cs.bugs)
+      if (inView(b.x, b.y, 1)) {
+        const k = BUG_KINDS[b.kind];
+        tall.push({ y: b.y + k.size * 0.4, f: () => drawBug(c, b.x, b.y, b.angle, k.size, k.color, k.shell, b.anim) });
+      }
+    // splats lie on the ground
+    for (const f of g.cs.fx)
+      if (f.kind === 'splat') {
+        c.globalAlpha = Math.min(1, f.t / 60) * 0.7;
+        c.fillStyle = f.color ?? '#6a8a2a';
+        for (let i = 0; i < 5; i++) {
+          c.beginPath();
+          c.arc(f.x0 + Math.cos(i * 2.4) * 0.25 * (i % 3), f.y0 + Math.sin(i * 2.4) * 0.2 * (i % 3), 0.18 - i * 0.02, 0, Math.PI * 2);
+          c.fill();
+        }
+        c.globalAlpha = 1;
+      }
     tall.sort((a, b) => a.y - b.y);
     for (const t of tall) t.f();
+
+    // turret heads
+    for (const e of vis)
+      if (e.def.kind === 'turret') drawTurretHead(c, e.type, e.x, e.y, e.t || -Math.PI / 2, e.type === 'rail-turret' ? e.progress : 1);
 
     // inserter arms and their cargo on top
     for (const e of vis)
@@ -285,8 +314,103 @@ export class Renderer {
           }
         }
 
+    this.effects(g);
     this.night(g, vis, W, H, x0, y0);
+    this.labels(g, vis, inView);
     this.overlays(g, ov);
+  }
+
+  private effects(g: Game) {
+    const c = this.c;
+    for (const f of g.cs.fx) {
+      const a = f.t / f.life;
+      if (f.kind === 'bullet') {
+        c.strokeStyle = `rgba(255,230,120,${a})`;
+        c.lineWidth = 0.05;
+        c.beginPath();
+        c.moveTo(f.x0, f.y0);
+        c.lineTo(f.x1, f.y1);
+        c.stroke();
+        c.fillStyle = `rgba(255,250,200,${a})`;
+        c.beginPath();
+        c.arc(f.x1, f.y1, 0.08, 0, Math.PI * 2);
+        c.fill();
+      } else if (f.kind === 'rail') {
+        c.lineCap = 'round';
+        c.strokeStyle = `rgba(60,200,255,${a * 0.5})`;
+        c.lineWidth = 0.5 * a + 0.1;
+        c.beginPath();
+        c.moveTo(f.x0, f.y0);
+        c.lineTo(f.x1, f.y1);
+        c.stroke();
+        c.strokeStyle = `rgba(230,250,255,${a})`;
+        c.lineWidth = 0.12 * a + 0.02;
+        c.stroke();
+      } else if (f.kind === 'boom') {
+        const r = (1 - a) * 2 + 0.3;
+        c.fillStyle = `rgba(255,${150 + a * 100},60,${a * 0.8})`;
+        c.beginPath();
+        c.arc(f.x0, f.y0, r, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = `rgba(80,70,70,${a * 0.5})`;
+        c.beginPath();
+        c.arc(f.x0 + 0.3, f.y0 - (1 - a), r * 0.7, 0, Math.PI * 2);
+        c.fill();
+      } else if (f.kind === 'bite') {
+        c.strokeStyle = `rgba(255,80,60,${a})`;
+        c.lineWidth = 0.06;
+        c.beginPath();
+        c.arc(f.x0, f.y0, 0.3 + (1 - a) * 0.3, 0, Math.PI * 2);
+        c.stroke();
+      }
+    }
+  }
+
+  private labels(g: Game, vis: Entity[], inView: (x: number, y: number, r: number) => boolean) {
+    const c = this.c;
+    // damaged buildings show a health bar
+    for (const e of vis) {
+      const m = maxHp(e.type);
+      if (e.hp >= m) continue;
+      const w = Math.min(1.6, e.def.w * 0.8);
+      const x = e.cx - w / 2, y = e.y - 0.25;
+      c.fillStyle = 'rgba(0,0,0,.6)';
+      c.fillRect(x, y, w, 0.12);
+      c.fillStyle = e.hp / m > 0.5 ? '#57d38c' : e.hp / m > 0.25 ? '#f2b632' : '#ff5b4b';
+      c.fillRect(x + 0.02, y + 0.02, (w - 0.04) * (e.hp / m), 0.08);
+    }
+    // bug names float above them
+    if (this.zoom >= 14) {
+      c.textAlign = 'center';
+      c.textBaseline = 'bottom';
+      for (const b of g.cs.bugs) {
+        if (!inView(b.x, b.y, 1)) continue;
+        const k = BUG_KINDS[b.kind];
+        const fs = Math.max(0.3, 11 / this.zoom);
+        c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
+        const ty = b.y - k.size * 0.6 - 0.05;
+        c.lineWidth = fs * 0.25;
+        c.strokeStyle = 'rgba(0,0,0,.75)';
+        c.strokeText(b.name, b.x, ty);
+        c.fillStyle = b.mode === 'idle' ? '#e8eef7' : '#ffb3a8';
+        c.fillText(b.name, b.x, ty);
+        if (b.hp < k.hp) {
+          c.fillStyle = 'rgba(0,0,0,.6)';
+          c.fillRect(b.x - 0.3, ty + 0.02, 0.6, 0.07);
+          c.fillStyle = '#ff5b4b';
+          c.fillRect(b.x - 0.3, ty + 0.02, 0.6 * (b.hp / k.hp), 0.07);
+        }
+      }
+      for (const o of this.others) {
+        const fs = Math.max(0.3, 12 / this.zoom);
+        c.font = `700 ${fs}px ui-rounded, system-ui, sans-serif`;
+        c.lineWidth = fs * 0.25;
+        c.strokeStyle = 'rgba(0,0,0,.75)';
+        c.strokeText(o.name, o.x, o.y - 0.55);
+        c.fillStyle = '#9fe0ff';
+        c.fillText(o.name, o.x, o.y - 0.55);
+      }
+    }
   }
 
   private building(e: Entity, l: Look) {

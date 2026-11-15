@@ -1,11 +1,22 @@
 // The simulation: entities, power, research, hand crafting and the player.
 import {
-  ENTITIES, INPUT_BUFFER_CRAFTS, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
+  ENTITIES, INPUT_BUFFER_CRAFTS, maxHp, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
   RECIPE_BY_ID, SMELT_BY_INPUT, TECHS, TECH_BY_ID,
   type EntityType, type ItemId, type Recipe,
 } from './data';
 import { Inventory, type Stack } from './inventory';
 import { RES_ITEM, Res, World, WORLD } from './world';
+import { newCombatState, nestBlocks, playerFire, PLAYER_HP, spawnNests, updateCombat, type CombatState } from './combat';
+
+export interface RemotePlayer {
+  x: number;
+  y: number;
+  dir: number;
+  moving: boolean;
+  hp: number;
+  name: string;
+  dead: boolean;
+}
 
 export const TPS = 60;
 export const DX = [0, 1, 0, -1];
@@ -54,6 +65,7 @@ export class Entity {
   working = false;
   status = '';
   anim = 0;
+  hp: number;
 
   constructor(id: number, type: EntityType, x: number, y: number, dir: Dir) {
     this.id = id;
@@ -62,6 +74,7 @@ export class Entity {
     this.y = y;
     this.dir = dir;
     const def = ENTITIES[type];
+    this.hp = maxHp(type);
     if (def.kind === 'chest') this.inv = new Inventory(def.slots ?? 16);
   }
 
@@ -115,15 +128,57 @@ export class Game {
   toasts: Toast[] = [];
   /** Events the renderer/audio can react to (cleared by the consumer). */
   events: string[] = [];
+  // combat
+  enemies = true;
+  cs: CombatState = newCombatState();
+  kills = 0;
+  nestsDestroyed = 0;
+  pistolRounds = 0;
+  playerDead = 0; // ticks until respawn
+  killedBy = '';
+  shooting = false;
+  aim: { x: number; y: number } | null = null;
+  /** Guest copy of a hosted game: the host runs bugs, turrets and research. */
+  remote = false;
+  /** Guests send shots to the host instead of resolving them. */
+  onFire: ((weapon: 'pistol' | 'rail', aim?: { x: number; y: number }) => void) | null = null;
+  /** Other players in a multiplayer game (host side), by id. */
+  others = new Map<string, RemotePlayer>();
+  /** Damage dealt to other players this tick, for the host to send out. */
+  hurtOthers: [string, number, string][] = [];
+  /** Tiles changed by mining, for the host to send out. */
+  tileChanges = new Set<number>();
+  spawnX = WORLD / 2 + 0.5;
+  spawnY = WORLD / 2 + 0.5;
 
   constructor(world: World) {
     this.world = world;
   }
 
-  static fresh(seed: number): Game {
+  static fresh(seed: number, enemies = true): Game {
     const g = new Game(new World(seed));
+    g.enemies = enemies;
     for (const [item, n] of PLAYER_START) g.inv.add(item, n);
+    if (enemies) spawnNests(g);
     return g;
+  }
+
+  killPlayer(by: string) {
+    if (this.playerDead) return;
+    this.playerDead = 60 * 4;
+    this.killedBy = by;
+    this.events.push('died');
+  }
+
+  private updatePlayerLife() {
+    if (!this.playerDead) return;
+    this.playerDead--;
+    if (this.playerDead === 0) {
+      this.px = this.spawnX;
+      this.py = this.spawnY;
+      this.cs.playerHp = PLAYER_HP;
+      this.toast('You woke up back at the start.', 3);
+    }
   }
 
   // ---------- helpers ----------
@@ -160,6 +215,7 @@ export class Game {
         if (this.grid[ty * WORLD + tx]) return false;
         if (this.playerOverlaps(tx, ty) && solid(type)) return false;
       }
+    if (nestBlocks(this, x, y, d.w, d.h)) return false;
     if (d.kind === 'drill') {
       if (!this.drillHasOre(x, y, d.w, d.area ?? d.w)) return false;
     }
@@ -247,7 +303,7 @@ export class Game {
       if (d <= POLE_WIRE_REACH) near.push([d, o]);
     }
     near.sort((a, b) => a[0] - b[0]);
-    for (const [, o] of near.slice(0, 5)) {
+    for (const [, o] of near.slice(0, 2)) {
       e.wire.push(o.id);
       o.wire.push(e.id);
     }
@@ -360,6 +416,10 @@ export class Game {
       const cap = hand ? stack : ing[1] * INPUT_BUFFER_CRAFTS;
       return Math.max(0, cap - have);
     }
+    if (d.kind === 'turret') {
+      if (item !== d.ammo) return 0;
+      return Math.max(0, (hand ? stack : 10) - (e.input[item] ?? 0));
+    }
     if (d.kind === 'lab') {
       if (item !== 'red-pack' && item !== 'green-pack') return 0;
       const have = e.input[item] ?? 0;
@@ -402,7 +462,7 @@ export class Game {
       }
       return null;
     }
-    if ((d.kind === 'furnace' || d.kind === 'assembler') && e.output && want(e.output.item)) {
+    if ((d.kind === 'furnace' || d.kind === 'assembler' || d.kind === 'drill') && e.output && want(e.output.item)) {
       const it = e.output.item;
       e.output.n--;
       if (e.output.n <= 0) e.output = null;
@@ -485,6 +545,7 @@ export class Game {
       case 'drill': return e.pending ? 0 : d.power;
       case 'assembler': return e.crafting ? d.power : d.power * 0.03;
       case 'lab': return e.crafting ? d.power : d.power * 0.03;
+      case 'turret': return e.progress < 1 ? d.power : d.power * 0.01;
     }
     return d.power;
   }
@@ -534,7 +595,12 @@ export class Game {
       const [ox, oy] = drillOut(e);
       const t = this.entAt(ox, oy);
       if (t && this.insert(t, e.pending, 1) === 1) e.pending = null;
-      else {
+      else if (!t && (!e.output || (e.output.item === e.pending && e.output.n < 50))) {
+        // nothing in front: keep the ore inside until someone collects it
+        if (e.output) e.output.n++;
+        else e.output = { item: e.pending, n: 1 };
+        e.pending = null;
+      } else {
         e.working = false;
         e.status = t ? 'Output full' : 'Nothing to output into';
         return;
@@ -890,6 +956,10 @@ export class Game {
   // ---------- player ----------
 
   movePlayer(mx: number, my: number) {
+    if (this.playerDead) {
+      this.pmoving = false;
+      return;
+    }
     const sp = 6 / TPS;
     this.pmoving = mx !== 0 || my !== 0;
     if (this.pmoving) {
@@ -933,10 +1003,13 @@ export class Game {
         case 'drill': this.updateDrill(e); break;
         case 'furnace': this.updateFurnace(e); break;
         case 'assembler': this.updateAssembler(e); break;
-        case 'lab': this.updateLab(e); break;
+        case 'lab': if (!this.remote) this.updateLab(e); break;
       }
     }
     this.updateCrafting();
+    if (this.shooting && !this.playerDead) playerFire(this, this.aim ?? undefined);
+    updateCombat(this);
+    this.updatePlayerLife();
     this.toasts = this.toasts.filter((t) => t.until > this.tick);
   }
 
@@ -953,40 +1026,19 @@ export class Game {
 
   // ---------- save ----------
 
-  serialize() {
-    const ents = [...this.ents.values()].map((e) => ({
+  serializeEnts() {
+    return [...this.ents.values()].map((e) => ({
       i: e.id, t: e.type, x: e.x, y: e.y, d: e.dir,
       f: e.fuel, b: e.burn, in: e.input, o: e.output, r: e.recipe, c: e.crafting, p: e.progress,
-      inv: e.inv?.toJSON(), it: e.items, h: e.held, ph: e.phase, tt: e.t, pe: e.pending, cu: e.cursor, w: e.wire,
+      inv: e.inv?.toJSON(), it: e.items, hp: e.hp, h: e.held, ph: e.phase, tt: e.t, pe: e.pending, cu: e.cursor, w: e.wire,
     }));
-    return {
-      v: 1,
-      world: this.world.serialize(),
-      tick: this.tick,
-      ents,
-      px: this.px, py: this.py,
-      inv: this.inv.toJSON(),
-      queue: this.craftQueue, cp: this.craftProgress,
-      researched: [...this.researched], research: this.research, units: this.researchUnits,
-      produced: this.produced, won: this.won,
-    };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  static load(s: any): Game {
-    const g = new Game(World.load(s.world));
-    g.tick = s.tick ?? 0;
-    g.px = s.px;
-    g.py = s.py;
-    g.inv.load(s.inv ?? []);
-    g.craftQueue = (s.queue ?? []).filter((j: CraftJob) => RECIPE_BY_ID[j.recipe]);
-    g.craftProgress = s.cp ?? 0;
-    g.researched = new Set(s.researched ?? []);
-    g.research = s.research ?? null;
-    g.researchUnits = s.units ?? {};
-    g.produced = s.produced ?? {};
-    g.won = !!s.won;
-    for (const d of s.ents ?? []) {
+  loadEnts(list: any[]) {
+    this.ents.clear();
+    this.grid.fill(0);
+    for (const d of list) {
       if (!ENTITIES[d.t as EntityType]) continue;
       const e = new Entity(d.i, d.t, d.x, d.y, d.d);
       e.fuel = d.f ?? null;
@@ -1004,12 +1056,60 @@ export class Game {
       e.pending = d.pe ?? null;
       e.cursor = d.cu ?? 0;
       e.wire = d.w ?? [];
-      g.ents.set(e.id, e);
-      g.nextId = Math.max(g.nextId, e.id + 1);
+      if (typeof d.hp === 'number') e.hp = d.hp;
+      this.ents.set(e.id, e);
+      this.nextId = Math.max(this.nextId, e.id + 1);
       const def = e.def;
-      for (let j = 0; j < def.h; j++) for (let i = 0; i < def.w; i++) g.grid[(e.y + j) * WORLD + e.x + i] = e.id;
+      for (let j = 0; j < def.h; j++) for (let i = 0; i < def.w; i++) this.grid[(e.y + j) * WORLD + e.x + i] = e.id;
     }
-    for (const e of g.ents.values()) if (e.def.kind === 'belt') g.updateCurves(e.x, e.y);
+    for (const e of this.ents.values()) if (e.def.kind === 'belt') this.updateCurves(e.x, e.y);
+    this.netsDirty = true;
+  }
+
+  serialize() {
+    const ents = this.serializeEnts();
+    return {
+      v: 1,
+      world: this.world.serialize(),
+      tick: this.tick,
+      ents,
+      px: this.px, py: this.py,
+      inv: this.inv.toJSON(),
+      queue: this.craftQueue, cp: this.craftProgress,
+      researched: [...this.researched], research: this.research, units: this.researchUnits,
+      produced: this.produced, won: this.won,
+      enemies: this.enemies,
+      bugs: this.cs.bugs, nests: this.cs.nests, evo: this.cs.evolution, php: this.cs.playerHp,
+      pol: Array.from(this.cs.pollution, (v) => Math.round(v * 100) / 100),
+      kills: this.kills, nd: this.nestsDestroyed, pr: this.pistolRounds,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static load(s: any): Game {
+    const g = new Game(World.load(s.world));
+    g.tick = s.tick ?? 0;
+    g.px = s.px;
+    g.py = s.py;
+    g.inv.load(s.inv ?? []);
+    g.craftQueue = (s.queue ?? []).filter((j: CraftJob) => RECIPE_BY_ID[j.recipe]);
+    g.craftProgress = s.cp ?? 0;
+    g.researched = new Set(s.researched ?? []);
+    g.research = s.research ?? null;
+    g.researchUnits = s.units ?? {};
+    g.produced = s.produced ?? {};
+    g.won = !!s.won;
+    g.enemies = s.enemies ?? true;
+    g.cs.bugs = s.bugs ?? [];
+    g.cs.nests = s.nests ?? [];
+    g.cs.nextBug = g.cs.bugs.reduce((m: number, b: { id: number }) => Math.max(m, b.id + 1), 1);
+    g.cs.evolution = s.evo ?? 0;
+    g.cs.playerHp = s.php ?? PLAYER_HP;
+    if (Array.isArray(s.pol)) g.cs.pollution.set(s.pol.slice(0, g.cs.pollution.length));
+    g.kills = s.kills ?? 0;
+    g.nestsDestroyed = s.nd ?? 0;
+    g.pistolRounds = s.pr ?? 0;
+    g.loadEnts(s.ents ?? []);
     g.netsDirty = true;
     return g;
   }
@@ -1019,6 +1119,7 @@ export function solid(type: EntityType): boolean {
   const k = ENTITIES[type].kind;
   return k !== 'belt';
 }
+
 
 /** Tile a drill drops its ore onto. */
 export function drillOut(e: Entity): [number, number] {

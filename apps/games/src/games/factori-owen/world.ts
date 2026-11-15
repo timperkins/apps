@@ -46,6 +46,8 @@ export class World {
   tree = new Uint8Array(WORLD * WORLD); // 0 none, 1..4 variant
   /** Bumped when ground-cache chunks must redraw (a tile was depleted). */
   dirtyChunks = new Set<number>();
+  /** Set by multiplayer hosts to learn which tiles were mined. */
+  changed: Set<number> | null = null;
 
   constructor(seed: number) {
     this.seed = seed;
@@ -135,6 +137,7 @@ export class World {
     const i = this.idx(x, y);
     if (!this.res[i] || !this.amount[i]) return false;
     this.amount[i]--;
+    this.changed?.add(i);
     if (this.amount[i] === 0) {
       this.res[i] = Res.None;
       this.dirtyChunks.add(((y >> 5) << 8) | (x >> 5));

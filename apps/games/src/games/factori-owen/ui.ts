@@ -3,8 +3,9 @@ import { ENTITIES, ITEMS, RECIPES, RECIPE_BY_ID, TECHS, TECH_BY_ID, type Categor
 import { iconURL } from './icons';
 import { sfx } from './audio';
 import type { Entity, Game } from './sim';
+import type { Actions } from './actions';
 
-export type PanelMode = null | 'inventory' | 'entity' | 'research' | 'menu' | 'help';
+export type PanelMode = null | 'inventory' | 'entity' | 'research' | 'menu' | 'help' | 'load';
 
 export interface UIState {
   game: Game;
@@ -14,11 +15,11 @@ export interface UIState {
   cursor: ItemId | null;
   hotbar: (ItemId | null)[];
   pickRecipe: boolean;
-  confirmNew: boolean;
-  onExit: () => void;
-  onNewGame: () => void;
-  onSave: () => void;
+  act: Actions;
   setCursor: (item: ItemId | null) => void;
+  /** Esc menu and load screen live in index.ts */
+  menuHtml: () => string;
+  onMenu: (act: string, el: HTMLElement) => boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
@@ -84,6 +85,7 @@ const TABS: [Category, string][] = [
   ['production', 'Production'],
   ['intermediate', 'Parts'],
   ['science', 'Science'],
+  ['military', 'Military'],
 ];
 
 function craftingPanel(ui: UIState) {
@@ -167,7 +169,7 @@ function entityPanel(ui: UIState): string {
       break;
     }
     case 'drill':
-      body += `<div class="fo-row"><label>Mining</label>${bar(e.progress)}</div><p class="fo-note">Drops ore in front of the yellow arrow. Press R while hovering to turn it.</p>`;
+      body += `<div class="fo-row"><label>Mining</label>${bar(e.progress)}${slot(e.output?.item ?? null, e.output?.n ?? 0, 'data-act="take-output"')}</div><p class="fo-note">Drops ore into whatever is in front of the yellow arrow (a furnace, chest or belt). With nothing there it keeps up to 50 inside: click the slot to collect them. Press R while hovering to turn it.</p>`;
       break;
     case 'generator':
       body += `<p class="fo-note">Burns fuel to power everything on its pole network. Up to ${(d.output ?? 0) / 1000} kW.</p>`;
@@ -183,6 +185,15 @@ function entityPanel(ui: UIState): string {
     case 'belt':
       body += `<p class="fo-note">${e.items.length} item(s) on this tile.</p>`;
       break;
+    case 'turret': {
+      const ammo = d.ammo!;
+      body += `<div class="fo-row"><label>Ammo</label>${slot(ammo, e.input[ammo] ?? 0, `data-act="take-input" data-id="${ammo}"`, e.input[ammo] ? '' : 'want')}</div>`;
+      body += `<p class="fo-note">Range ${d.range} tiles. ${e.type === 'rail-turret' ? 'Needs power to charge each shot. ' : ''}Robo arms can load it too.</p>`;
+      break;
+    }
+    case 'wall':
+      body += `<p class="fo-note">Bugs have to chew through walls before they reach your factory.</p>`;
+      break;
     case 'pole':
       body += `<p class="fo-note">Powers machines inside the blue square and links to poles up to 7 tiles away. Connected to ${e.wire.length} pole(s).</p>`;
       break;
@@ -190,7 +201,7 @@ function entityPanel(ui: UIState): string {
       body += `<p class="fo-note">Owen is proud of you.</p>`;
       break;
   }
-  const accepts = d.kind !== 'belt' && d.kind !== 'inserter' && d.kind !== 'pole' && d.kind !== 'solar' && d.kind !== 'monument';
+  const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall'].includes(d.kind);
   return `<div class="fo-cols">
     <section><h3>${icon(d.item)} ${esc(name)}</h3>${body}</section>
     ${accepts ? `<section><h3>Inventory</h3>${inventoryGrid(g, 'give')}<p class="fo-note">Click an item to put it in.</p></section>` : ''}
@@ -223,19 +234,6 @@ function researchPanel(ui: UIState) {
   return `<h3>Research</h3><p class="fo-note">Labs need power and science packs. Pick a technology, then feed your labs.</p><div class="fo-techs">${cards}</div>`;
 }
 
-function menuPanel(ui: UIState) {
-  if (ui.confirmNew)
-    return `<h3>Start a new factory?</h3><p class="fo-note">Your current factory will be deleted.</p>
-    <div class="fo-menu"><button class="fo-btn danger" data-act="new-yes">Yes, start over</button><button class="fo-btn" data-act="new-no">Keep playing</button></div>`;
-  return `<h3>Factori-owen</h3><div class="fo-menu">
-    <button class="fo-btn" data-act="close">Resume</button>
-    <button class="fo-btn" data-act="help">How to play</button>
-    <button class="fo-btn" data-act="save">Save now</button>
-    <button class="fo-btn" data-act="new">New game</button>
-    <button class="fo-btn" data-act="exit">Back to the cabin</button>
-  </div><p class="fo-note">The game saves itself every 30 seconds.</p>`;
-}
-
 function helpPanel() {
   return `<h3>How to play</h3>
   <div class="fo-help">
@@ -249,8 +247,13 @@ function helpPanel() {
     <li>Left-click a building to open it, then click inventory items to load fuel, ore or ingredients.</li>
   </ul>
   <p><b>First steps:</b> put your burner drill on Owen ore and give it wood or coal. Point its yellow arrow at the stone furnace so the ore drops straight in. Add fuel to the furnace too, and Owen plates come out.</p>
-  <p><b>On a phone:</b> use the stick to walk, tap to build or open, press and hold to mine.</p>
+  <p><b>Bugs:</b> Calvin, Archie, Mom, Dad and Roger live in nests far from the start. Pollution from your machines makes them angry, and after a few quiet minutes they come for your factory. Hold <kbd>Space</kbd> to shoot the closest bug, build gun turrets and load them with Owen bullets, and research Rail guns for the big stuff.</p>
+  <p><b>On a phone:</b> use the stick to walk, tap to build or open, press and hold to mine, and hold Shoot to fire.</p>
   </div><button class="fo-btn" data-act="close">Got it</button>`;
+}
+
+export function helpHtml() {
+  return helpPanel();
 }
 
 export function renderPanel(el: HTMLElement, ui: UIState) {
@@ -270,7 +273,8 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
       html = researchPanel(ui);
       break;
     case 'menu':
-      html = menuPanel(ui);
+    case 'load':
+      html = ui.menuHtml();
       break;
     case 'help':
       html = helpPanel();
@@ -290,13 +294,8 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
   const id = el.dataset.id ?? '';
   const i = Number(el.dataset.i ?? -1);
   const e = ui.entity;
-  const toInv = (item: ItemId, n: number) => {
-    const k = g.inv.add(item, n);
-    if (k < n) g.toast('Inventory full');
-    return k;
-  };
   switch (act) {
-    case 'close': ui.panel = null; ui.confirmNew = false; break;
+    case 'close': ui.panel = null; break;
     case 'tab': ui.tab = id as Category; break;
     case 'sort': g.inv.sort(); break;
     case 'craft': {
@@ -322,79 +321,32 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
       const s = g.inv.slots[i];
       if (!s || !e) break;
       const n = button === 2 ? Math.ceil(s.n / 2) : s.n;
-      const k = g.insert(e, s.item, n, true);
-      if (k > 0) {
-        g.inv.slots[i]!.n -= k;
-        if (g.inv.slots[i]!.n <= 0) g.inv.slots[i] = null;
-        sfx.click();
-      } else {
+      const name = s.item;
+      if (ui.act.give(e, i, n)) sfx.click();
+      else {
         sfx.error();
-        g.toast(`The ${ITEMS[e.def.item].name.toLowerCase()} can't use ${ITEMS[s.item].name.toLowerCase()}`);
+        g.toast(`The ${ITEMS[e.def.item].name.toLowerCase()} can't use ${ITEMS[name].name.toLowerCase()}`);
       }
       break;
     }
-    case 'take-fuel':
-      if (e?.fuel) {
-        const k = toInv(e.fuel.item, e.fuel.n);
-        e.fuel.n -= k;
-        if (e.fuel.n <= 0) e.fuel = null;
-      }
-      break;
-    case 'take-output':
-      if (e?.output) {
-        const k = toInv(e.output.item, e.output.n);
-        e.output.n -= k;
-        if (e.output.n <= 0) e.output = null;
-      }
-      break;
-    case 'take-input': {
-      if (!e) break;
-      const item = (id || Object.keys(e.input).find((k) => e.input[k as ItemId])) as ItemId | undefined;
-      if (item && e.input[item]) {
-        const k = toInv(item, e.input[item]!);
-        e.input[item]! -= k;
-        if (!e.input[item]) delete e.input[item];
-      }
-      break;
-    }
-    case 'take-chest': {
-      const s = e?.inv?.slots[i];
-      if (s) {
-        const k = toInv(s.item, s.n);
-        s.n -= k;
-        if (s.n <= 0) e!.inv!.slots[i] = null;
-      }
-      break;
-    }
+    case 'take-fuel': if (e) ui.act.take(e, 'fuel'); break;
+    case 'take-output': if (e) ui.act.take(e, 'output'); break;
+    case 'take-input': if (e) ui.act.take(e, 'input', id || undefined); break;
+    case 'take-chest': if (e) ui.act.take(e, 'chest', i); break;
     case 'set-recipe':
       if (e) {
-        if (e.recipe !== id) {
-          // hand back anything loaded for the old recipe
-          for (const [k, v] of Object.entries(e.input)) toInv(k as ItemId, v ?? 0);
-          e.input = {};
-          if (e.crafting) {
-            for (const [it, n] of RECIPE_BY_ID[e.crafting].ing) toInv(it, n);
-            e.crafting = null;
-            e.progress = 0;
-          }
-        }
-        e.recipe = id;
+        ui.act.setRecipe(e, id);
         ui.pickRecipe = false;
       }
       break;
     case 'change-recipe': ui.pickRecipe = true; break;
     case 'open-research': ui.panel = 'research'; break;
     case 'research':
-      g.research = id;
+      ui.act.research(id);
       sfx.click();
       break;
     case 'help': ui.panel = 'help'; break;
-    case 'save': ui.onSave(); g.toast('Saved'); ui.panel = null; break;
-    case 'new': ui.confirmNew = true; break;
-    case 'new-no': ui.confirmNew = false; break;
-    case 'new-yes': ui.confirmNew = false; ui.panel = null; ui.onNewGame(); break;
-    case 'exit': ui.onExit(); return false;
-    default: return false;
+    default: return ui.onMenu(act, el);
   }
   return true;
 }

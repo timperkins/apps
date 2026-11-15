@@ -2,5 +2,13 @@
   "name": "games",
   "type": "hosting",
   "domain": "games.trom.dev",
-  "hostingSite": "trom-games"
+  "hostingSite": "trom-games",
+  "firestore": {
+    "prod": "games",
+    "preview": "games-preview"
+  },
+  "ttlCollections": [
+    "hosts",
+    "rtc"
+  ]
 }

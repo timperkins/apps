@@ -7,5 +7,17 @@
       "**/.*",
       "**/node_modules/**"
     ]
-  }
+  },
+  "firestore": [
+    {
+      "database": "games",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "games-preview",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
 }

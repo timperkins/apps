@@ -411,6 +411,29 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
         }
       break;
     }
+    case 'turret': {
+      const rail = type === 'rail-turret';
+      box(c, x, y, w, h, rail ? '#4a5563' : '#6a6f76', rail ? '#5d6a7b' : '#868c94', rail ? '#272e38' : '#3b3f45');
+      if (l.noPower) break;
+      break;
+    }
+    case 'wall': {
+      c.fillStyle = 'rgba(0,0,0,.3)';
+      c.fillRect(x + 0.08, y + 0.2, 0.96, 0.9);
+      c.fillStyle = '#8a7a66';
+      c.fillRect(x, y + 0.08, 1, 0.92);
+      c.fillStyle = '#b8a688';
+      c.fillRect(x, y - 0.1, 1, 0.82);
+      c.strokeStyle = '#8a7a66';
+      c.lineWidth = 0.04;
+      c.beginPath();
+      c.moveTo(x, y + 0.3); c.lineTo(x + 1, y + 0.3);
+      c.moveTo(x + 0.5, y - 0.1); c.lineTo(x + 0.5, y + 0.3);
+      c.moveTo(x + 0.25, y + 0.3); c.lineTo(x + 0.25, y + 0.72);
+      c.moveTo(x + 0.75, y + 0.3); c.lineTo(x + 0.75, y + 0.72);
+      c.stroke();
+      break;
+    }
     case 'monument': {
       shadow(c, x, y, w, h);
       c.fillStyle = '#8f8173';
@@ -472,6 +495,7 @@ export function drawEntityIcon(c: Ctx, type: EntityType) {
     c.translate(0.04, 0.04);
     c.scale(0.92 / s, 0.92 / s);
     drawBuilding(c, type, 0, 0, { ...look, dir: 2 });
+    if (d.kind === 'turret') drawTurretHead(c, type, 0, 0, -0.6, 1);
   }
   c.restore();
 }
@@ -525,7 +549,29 @@ function lighten(hex: string) {
 
 // ---------- the player ----------
 
-export function drawPlayer(c: Ctx, x: number, y: number, dir: number, moving: boolean, time: number, mining: boolean) {
+export interface PlayerLook {
+  hair: string;
+  hairStyle: number; // 0 short, 1 long, 2 spiky, 3 bald
+  skin: string;
+  armor: string;
+  trim: string;
+  helmet: string;
+}
+
+export const DEFAULT_LOOK: PlayerLook = {
+  hair: '#5a3a22', hairStyle: 0, skin: '#e9b98f', armor: '#3d6fa8', trim: '#f2b632', helmet: '#f2b632',
+};
+
+export const LOOK_OPTIONS = {
+  hair: ['#5a3a22', '#1e1a18', '#d9a441', '#b5462d', '#e9e4da', '#6a4bd1', '#2fa36b', '#ff6fae'],
+  skin: ['#f6d2b5', '#e9b98f', '#c98f62', '#9b6640', '#6b4128'],
+  armor: ['#3d6fa8', '#b8443a', '#3f8a4a', '#6b4fb0', '#2d2f36', '#d08a2a', '#2a9d9a', '#c9ced8'],
+  trim: ['#f2b632', '#e8eef7', '#ff6b5b', '#57d38c', '#63b8ff', '#1e1a18'],
+  helmet: ['#f2b632', '#e8eef7', '#ff6b5b', '#3d6fa8', '#57d38c', '#2d2f36'],
+  hairStyle: ['Short', 'Long', 'Spiky', 'Bald'],
+};
+
+export function drawPlayer(c: Ctx, x: number, y: number, dir: number, moving: boolean, time: number, mining: boolean, look: PlayerLook = DEFAULT_LOOK) {
   const bob = moving ? Math.sin(time * 14) * 0.04 : 0;
   c.fillStyle = 'rgba(0,0,0,.3)';
   c.beginPath();
@@ -538,41 +584,214 @@ export function drawPlayer(c: Ctx, x: number, y: number, dir: number, moving: bo
   c.ellipse(x - 0.11, y + 0.24 + step, 0.08, 0.06, 0, 0, Math.PI * 2);
   c.ellipse(x + 0.11, y + 0.24 - step, 0.08, 0.06, 0, 0, Math.PI * 2);
   c.fill();
-  // body (overalls)
-  c.fillStyle = '#3d6fa8';
+  // armor
+  c.fillStyle = look.armor;
   c.beginPath();
   c.ellipse(x, y + 0.02 + bob, 0.24, 0.27, 0, 0, Math.PI * 2);
   c.fill();
-  // backpack faces away from where we look
+  c.fillStyle = look.trim;
+  c.fillRect(x - 0.22, y + 0.06 + bob, 0.44, 0.05);
+  c.fillRect(x - 0.03, y - 0.2 + bob, 0.06, 0.26);
   if (dir === 0) {
     c.fillStyle = '#7c5b3a';
     c.fillRect(x - 0.15, y - 0.06 + bob, 0.3, 0.22);
   }
   // arms
   const swing = mining ? Math.sin(time * 18) * 0.15 : 0;
-  c.fillStyle = '#e9b98f';
+  c.fillStyle = look.skin;
   const ax = [0, 0.26, 0, -0.26][dir];
   c.beginPath();
   c.arc(x - 0.24 + (dir === 3 ? -0.05 : 0), y + 0.05 + bob + swing, 0.07, 0, Math.PI * 2);
   c.arc(x + 0.24 + (dir === 1 ? 0.05 : 0), y + 0.05 + bob - swing, 0.07, 0, Math.PI * 2);
   c.fill();
+  const hx = x + ax * 0.2, hy = y - 0.26 + bob;
+  // long hair falls behind the head
+  if (look.hairStyle === 1) {
+    c.fillStyle = look.hair;
+    c.beginPath();
+    c.ellipse(hx, hy + 0.06, 0.18, 0.2, 0, 0, Math.PI * 2);
+    c.fill();
+  }
   // head
-  c.fillStyle = '#e9b98f';
+  c.fillStyle = look.skin;
   c.beginPath();
-  c.arc(x + ax * 0.2, y - 0.26 + bob, 0.15, 0, Math.PI * 2);
+  c.arc(hx, hy, 0.15, 0, Math.PI * 2);
   c.fill();
-  // hard hat
-  c.fillStyle = '#f2b632';
+  // hair peeking out under the helmet
+  if (look.hairStyle !== 3) {
+    c.fillStyle = look.hair;
+    if (look.hairStyle === 2) {
+      c.beginPath();
+      for (let i = -2; i <= 2; i++) {
+        c.moveTo(hx + i * 0.06 - 0.04, hy - 0.08);
+        c.lineTo(hx + i * 0.07, hy - 0.28);
+        c.lineTo(hx + i * 0.06 + 0.04, hy - 0.08);
+      }
+      c.fill();
+    } else {
+      // sideburns and a fringe under the helmet brim
+      c.beginPath();
+      c.ellipse(hx - 0.13, hy + 0.0, 0.05, 0.09, 0, 0, Math.PI * 2);
+      c.ellipse(hx + 0.13, hy + 0.0, 0.05, 0.09, 0, 0, Math.PI * 2);
+      c.fill();
+      c.fillRect(hx - 0.15, hy - 0.06, 0.3, 0.06);
+      if (dir === 0) c.fillRect(hx - 0.15, hy - 0.06, 0.3, 0.17);
+    }
+  }
+  // helmet
+  c.fillStyle = look.helmet;
   c.beginPath();
-  c.arc(x + ax * 0.2, y - 0.3 + bob, 0.16, Math.PI, 0);
+  c.arc(hx, hy - 0.04, 0.16, Math.PI, 0);
   c.fill();
-  c.fillRect(x + ax * 0.2 - 0.2, y - 0.31 + bob, 0.4, 0.05);
+  c.fillRect(hx - 0.2, hy - 0.05, 0.4, 0.05);
   if (dir !== 0) {
     c.fillStyle = '#2b2b2b';
     const ex = [0, 0.07, 0, -0.07][dir];
     c.beginPath();
-    c.arc(x + ax * 0.2 + ex - (dir === 2 ? 0.05 : 0), y - 0.22 + bob, 0.025, 0, Math.PI * 2);
-    if (dir === 2) c.arc(x + 0.05, y - 0.22 + bob, 0.025, 0, Math.PI * 2);
+    c.arc(hx + ex - (dir === 2 ? 0.05 : 0), hy + 0.04, 0.025, 0, Math.PI * 2);
+    if (dir === 2) c.arc(hx + 0.05, hy + 0.04, 0.025, 0, Math.PI * 2);
     c.fill();
   }
+}
+
+// ---------- bugs ----------
+
+export function drawBug(c: Ctx, x: number, y: number, angle: number, size: number, color: string, shell: string, anim: number) {
+  c.save();
+  c.translate(x, y);
+  c.fillStyle = 'rgba(0,0,0,.28)';
+  c.beginPath();
+  c.ellipse(0.05, 0.08, size * 0.6, size * 0.4, 0, 0, Math.PI * 2);
+  c.fill();
+  c.rotate(angle);
+  const s = size;
+  // legs
+  c.strokeStyle = '#2a2018';
+  c.lineWidth = s * 0.08;
+  c.lineCap = 'round';
+  for (let i = -1; i <= 1; i++) {
+    const w = Math.sin(anim * 0.4 + i * 2) * s * 0.15;
+    for (const side of [-1, 1]) {
+      c.beginPath();
+      c.moveTo(i * s * 0.22, 0);
+      c.lineTo(i * s * 0.25 + w * side, side * s * 0.38);
+      c.lineTo(i * s * 0.32 + w * side, side * s * 0.55);
+      c.stroke();
+    }
+  }
+  // abdomen + head
+  c.fillStyle = shell;
+  c.beginPath();
+  c.ellipse(-s * 0.15, 0, s * 0.42, s * 0.3, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = color;
+  c.beginPath();
+  c.ellipse(-s * 0.12, 0, s * 0.34, s * 0.24, 0, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = shell;
+  c.lineWidth = s * 0.05;
+  c.beginPath();
+  c.moveTo(-s * 0.46, 0);
+  c.lineTo(s * 0.18, 0);
+  c.stroke();
+  c.fillStyle = shell;
+  c.beginPath();
+  c.arc(s * 0.3, 0, s * 0.16, 0, Math.PI * 2);
+  c.fill();
+  // mandibles + eyes
+  c.strokeStyle = '#2a2018';
+  c.lineWidth = s * 0.06;
+  c.beginPath();
+  const m = Math.sin(anim * 0.5) * 0.3;
+  c.moveTo(s * 0.4, -s * 0.06);
+  c.quadraticCurveTo(s * 0.6, -s * (0.16 + m * 0.1), s * 0.6, 0);
+  c.moveTo(s * 0.4, s * 0.06);
+  c.quadraticCurveTo(s * 0.6, s * (0.16 + m * 0.1), s * 0.6, 0);
+  c.stroke();
+  c.fillStyle = '#ffeb6b';
+  c.beginPath();
+  c.arc(s * 0.36, -s * 0.07, s * 0.04, 0, Math.PI * 2);
+  c.arc(s * 0.36, s * 0.07, s * 0.04, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+}
+
+export function drawNest(c: Ctx, x: number, y: number, pulse: number, hpFrac: number) {
+  c.fillStyle = 'rgba(0,0,0,.3)';
+  c.beginPath();
+  c.ellipse(x + 0.1, y + 0.25, 1.6, 1.0, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#4a2f4f';
+  c.beginPath();
+  c.ellipse(x, y + 0.1, 1.5, 1.05, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#6b3f6e';
+  c.beginPath();
+  c.ellipse(x - 0.1, y - 0.05, 1.25, 0.85, 0, 0, Math.PI * 2);
+  c.fill();
+  const g = 0.5 + Math.sin(pulse) * 0.25;
+  for (const [dx, dy, r] of [[-0.5, -0.1, 0.28], [0.45, 0.05, 0.24], [0, 0.4, 0.22], [0.1, -0.45, 0.18]] as const) {
+    c.fillStyle = '#251827';
+    c.beginPath();
+    c.ellipse(x + dx, y + dy, r, r * 0.7, 0, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = `rgba(190,255,90,${g * 0.6})`;
+    c.beginPath();
+    c.ellipse(x + dx, y + dy + r * 0.1, r * 0.5, r * 0.3, 0, 0, Math.PI * 2);
+    c.fill();
+  }
+  // spikes
+  c.fillStyle = '#2f1d33';
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + 0.3;
+    const px = x + Math.cos(a) * 1.25, py = y + Math.sin(a) * 0.85;
+    c.beginPath();
+    c.moveTo(px - 0.1, py);
+    c.lineTo(px + Math.cos(a) * 0.35, py + Math.sin(a) * 0.25 - 0.2);
+    c.lineTo(px + 0.1, py);
+    c.fill();
+  }
+  if (hpFrac < 1) {
+    c.fillStyle = 'rgba(0,0,0,.6)';
+    c.fillRect(x - 0.8, y - 1.3, 1.6, 0.14);
+    c.fillStyle = '#ff5b4b';
+    c.fillRect(x - 0.78, y - 1.28, 1.56 * hpFrac, 0.1);
+  }
+}
+
+export function drawTurretHead(c: Ctx, type: EntityType, x: number, y: number, angle: number, charge: number) {
+  const d = ENTITIES[type];
+  const cx = x + d.w / 2, cy = y + d.h / 2 - 0.2;
+  c.save();
+  c.translate(cx, cy);
+  c.rotate(angle);
+  if (type === 'rail-turret') {
+    c.fillStyle = '#39424f';
+    c.beginPath();
+    c.arc(0, 0, 0.85, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#5b6878';
+    c.fillRect(0, -0.32, 1.9, 0.18);
+    c.fillRect(0, 0.14, 1.9, 0.18);
+    c.fillStyle = `rgba(90,220,255,${0.3 + charge * 0.7})`;
+    c.fillRect(0.2, -0.12, 1.6 * charge, 0.24);
+    c.fillStyle = '#7d8a9b';
+    c.beginPath();
+    c.arc(0, 0, 0.5, 0, Math.PI * 2);
+    c.fill();
+    owenO(c, 0, 0, 0.18, '#2b3440');
+  } else {
+    c.fillStyle = '#5a6470';
+    c.beginPath();
+    c.arc(0, 0, 0.55, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#2f353d';
+    c.fillRect(0.2, -0.17, 0.85, 0.12);
+    c.fillRect(0.2, 0.05, 0.85, 0.12);
+    c.fillStyle = '#e3b341';
+    c.beginPath();
+    c.arc(0, 0, 0.28, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.restore();
 }
