@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// Rules for the "games" database (Factori-owen multiplayer). Every device signs in anonymously.
+// hosts/{uid}: a game someone has opened to join, listed on the Join screen.
+// hosts/{uid}/rtc/{guestUid}: the WebRTC offer from a joining player and the host's answer.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /hosts/{hostUid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.auth.uid == hostUid
+        && request.resource.data.name is string && request.resource.data.name.size() <= 24
+        && request.resource.data.world is string && request.resource.data.world.size() <= 32
+        && request.resource.data.players is int
+        && request.resource.data.expiresAt is timestamp;
+      allow delete: if signedIn() && request.auth.uid == hostUid;
+
+      match /rtc/{guestUid} {
+        allow read: if signedIn() && (request.auth.uid == guestUid || request.auth.uid == hostUid);
+        allow create: if signedIn()
+          && request.auth.uid == guestUid
+          && exists(/databases/$(database)/documents/hosts/$(hostUid))
+          && !('answer' in request.resource.data);
+        allow update: if signedIn() && (
+          (request.auth.uid == guestUid && !('answer' in request.resource.data))
+          || (request.auth.uid == hostUid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer']))
+        );
+        allow delete: if signedIn() && (request.auth.uid == guestUid || request.auth.uid == hostUid);
+      }
+    }
+  }
+}
