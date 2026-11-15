@@ -68,6 +68,7 @@ export const sfx = {
   rotate: () => tone(400, 0.05, 'square', 0.03, 120),
   research: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, 'triangle', 0.07, 0, i * 0.12)),
   shot: () => { noise(0.05, 0.12, 2500); tone(220, 0.05, 'square', 0.02, -100); },
+  reload: () => { noise(0.04, 0.12, 3000); tone(300, 0.05, 'square', 0.03, -60); tone(420, 0.04, 'square', 0.035, 0, 1.25); tone(620, 0.05, 'square', 0.04, 0, 1.35); },
   rail: () => { tone(1800, 0.4, 'sawtooth', 0.05, -1600); noise(0.3, 0.25, 600); },
   hurt: () => tone(200, 0.12, 'sawtooth', 0.06, -80),
   boom: () => { noise(0.5, 0.5, 180); tone(90, 0.4, 'sine', 0.12, -50); },

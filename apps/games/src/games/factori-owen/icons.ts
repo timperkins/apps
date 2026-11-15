@@ -264,6 +264,8 @@ export function drawItem(c: Ctx, item: ItemId) {
       break;
     case 'red-pack': flask(c, '#e0414a', '#ffb3b3'); break;
     case 'green-pack': flask(c, '#43c463', '#c5ffd0'); break;
+    case 'military-pack': flask(c, '#6b7280', '#d1d5db'); break;
+    case 'advanced-pack': flask(c, '#3b82f6', '#bfdbfe'); break;
     default:
       if (ITEMS[item].place) drawEntityIcon(c, ITEMS[item].place!);
   }

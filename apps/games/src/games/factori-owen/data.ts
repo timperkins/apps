@@ -4,7 +4,7 @@ export type ItemId =
   | 'wood' | 'coal' | 'stone' | 'owen-ore' | 'copper-ore'
   | 'owen-plate' | 'copper-plate' | 'stone-brick' | 'steel-plate'
   | 'owen-gear' | 'owen-stick' | 'copper-cable' | 'circuit'
-  | 'red-pack' | 'green-pack'
+  | 'red-pack' | 'green-pack' | 'military-pack' | 'advanced-pack'
   | 'wooden-chest' | 'owen-chest' | 'steel-chest'
   | 'belt' | 'fast-belt'
   | 'burner-inserter' | 'inserter' | 'long-inserter' | 'fast-inserter'
@@ -40,8 +40,10 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   'owen-stick': { id: 'owen-stick', name: 'Owen stick', stack: 100, category: 'intermediate' },
   'copper-cable': { id: 'copper-cable', name: 'Copper cable', stack: 200, category: 'intermediate' },
   'circuit': { id: 'circuit', name: 'Circuit board', stack: 200, category: 'intermediate' },
-  'red-pack': { id: 'red-pack', name: 'Red science pack', stack: 200, category: 'science' },
-  'green-pack': { id: 'green-pack', name: 'Green science pack', stack: 200, category: 'science' },
+  'red-pack': { id: 'red-pack', name: 'Automation science pack', stack: 200, category: 'science' },
+  'green-pack': { id: 'green-pack', name: 'Logistic science pack', stack: 200, category: 'science' },
+  'military-pack': { id: 'military-pack', name: 'Military science pack', stack: 200, category: 'science' },
+  'advanced-pack': { id: 'advanced-pack', name: 'Advanced science pack', stack: 200, category: 'science' },
   'wooden-chest': { id: 'wooden-chest', name: 'Wooden crate', stack: 50, fuel: 2e6, place: 'wooden-chest', category: 'logistics' },
   'owen-chest': { id: 'owen-chest', name: 'Owen crate', stack: 50, place: 'owen-chest', category: 'logistics' },
   'steel-chest': { id: 'steel-chest', name: 'Owen steel crate', stack: 50, place: 'steel-chest', category: 'logistics' },
@@ -193,6 +195,8 @@ export const RECIPES: Recipe[] = [
   // science
   r('red-pack', 1, 5, [['copper-plate', 1], ['owen-gear', 1]]),
   r('green-pack', 1, 6, [['inserter', 1], ['belt', 1]], { unlock: 'green-science' }),
+  r('military-pack', 2, 10, [['owen-ammo', 1], ['wall', 2], ['steel-plate', 1]], { unlock: 'military-science' }),
+  r('advanced-pack', 2, 20, [['circuit', 3], ['steel-plate', 2], ['fast-inserter', 1]], { unlock: 'advanced-science' }),
 ];
 
 export const RECIPE_BY_ID: Record<string, Recipe> = Object.fromEntries(RECIPES.map((x) => [x.id, x]));
@@ -212,14 +216,24 @@ export interface Tech {
 export const TECHS: Tech[] = [
   { id: 'automation', name: 'Automation', desc: 'Assemblers craft things for you. Also unlocks the long robo arm.', packs: ['red-pack'], units: 10, time: 10, requires: [] },
   { id: 'logistics', name: 'Logistics', desc: 'Fast conveyor belts move items twice as quickly.', packs: ['red-pack'], units: 20, time: 10, requires: [] },
-  { id: 'green-science', name: 'Logistic science', desc: 'Unlocks the green science pack.', packs: ['red-pack'], units: 40, time: 5, requires: ['automation'] },
+  { id: 'military', name: 'Military', desc: 'Stone walls to slow the bugs down.', packs: ['red-pack'], units: 10, time: 15, requires: [] },
   { id: 'steel', name: 'Owen steel', desc: 'Smelt Owen plates into Owen steel. Unlocks steel crates.', packs: ['red-pack'], units: 50, time: 5, requires: [] },
+  { id: 'green-science', name: 'Logistic science pack', desc: 'Unlocks the logistic (green) science pack.', packs: ['red-pack'], units: 40, time: 5, requires: ['automation', 'logistics'] },
   { id: 'fast-inserter', name: 'Fast robo arms', desc: 'Robo arms that swing almost three times faster.', packs: ['red-pack', 'green-pack'], units: 30, time: 15, requires: ['green-science'] },
   { id: 'solar', name: 'Solar energy', desc: 'Free power from the sun, during the day.', packs: ['red-pack', 'green-pack'], units: 100, time: 10, requires: ['green-science', 'steel'] },
-  { id: 'military', name: 'Military', desc: 'Stone walls to slow the bugs down.', packs: ['red-pack'], units: 10, time: 15, requires: [] },
-  { id: 'rail-guns', name: 'Rail guns', desc: 'A handheld rail gun, rail gun turrets and rail slugs. Fires straight through whole swarms.', packs: ['red-pack', 'green-pack'], units: 75, time: 15, requires: ['steel', 'green-science', 'military'] },
-  { id: 'monument', name: 'The Great Owen', desc: 'Build a monument to Owen to finish the game.', packs: ['red-pack', 'green-pack'], units: 200, time: 15, requires: ['solar', 'fast-inserter', 'logistics'] },
+  { id: 'military-science', name: 'Military science pack', desc: 'Unlocks the military (grey) science pack.', packs: ['red-pack', 'green-pack'], units: 30, time: 10, requires: ['military', 'steel', 'green-science'] },
+  { id: 'weapon-damage', name: 'Owen bullet damage', desc: 'Your gun and gun turrets do 50% more damage.', packs: ['red-pack', 'green-pack', 'military-pack'], units: 50, time: 15, requires: ['military-science'] },
+  { id: 'advanced-science', name: 'Advanced science pack', desc: 'Unlocks the advanced (blue) science pack.', packs: ['red-pack', 'green-pack'], units: 75, time: 15, requires: ['fast-inserter', 'steel'] },
+  { id: 'rail-guns', name: 'Rail guns', desc: 'A handheld rail gun, rail gun turrets and rail slugs. Fires straight through whole swarms.', packs: ['red-pack', 'green-pack', 'military-pack', 'advanced-pack'], units: 75, time: 15, requires: ['military-science', 'advanced-science'] },
+  { id: 'monument', name: 'The Great Owen', desc: 'Build a monument to Owen to finish the game.', packs: ['red-pack', 'green-pack', 'military-pack', 'advanced-pack'], units: 200, time: 15, requires: ['rail-guns', 'solar', 'weapon-damage'] },
 ];
+/** Icon shown on each research card. */
+export const TECH_ICON: Record<string, ItemId> = {
+  automation: 'assembler', logistics: 'fast-belt', military: 'wall', steel: 'steel-plate', 'green-science': 'green-pack',
+  'fast-inserter': 'fast-inserter', solar: 'solar-panel', 'military-science': 'military-pack', 'weapon-damage': 'owen-ammo',
+  'advanced-science': 'advanced-pack', 'rail-guns': 'rail-gun', monument: 'owen-monument',
+};
+export const SCIENCE_PACKS: ItemId[] = ['red-pack', 'green-pack', 'military-pack', 'advanced-pack'];
 export const TECH_BY_ID: Record<string, Tech> = Object.fromEntries(TECHS.map((t) => [t.id, t]));
 
 export const PLAYER_START: [ItemId, number][] = [

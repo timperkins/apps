@@ -1,7 +1,7 @@
 // Draws the world, buildings and overlays onto the main canvas.
 import { ENTITIES, maxHp, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
-import { BUG_KINDS, NEST_HP } from './combat';
-import { beltItemPos, DEFAULT_LOOK, drawBelt, drawBug, drawBuilding, drawNest, drawPlayer, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, type Look, type PlayerLook } from './art';
+import { BUG_KINDS, NEST_HP, playerWeapon, RELOAD_TICKS } from './combat';
+import { beltItemPos, DEFAULT_LOOK, DIR_ANGLE, drawBelt, drawBug, drawBuilding, drawEngineer, drawNest, type GunKind, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, type Look, type PlayerLook } from './art';
 import { iconCanvas } from './icons';
 import { DX, DY, drillOut, TPS, type Dir, type Entity, type Game } from './sim';
 import { Ground, Res, WORLD } from './world';
@@ -257,8 +257,23 @@ export class Renderer {
         const t = w.tree[y * WORLD + x];
         if (t) tall.push({ y: y + 1, f: () => drawTree(c, x, y, t, Math.sin(time * 1.3 + x * 0.7 + y * 0.3)) });
       }
-    if (!g.playerDead) tall.push({ y: g.py + 0.3, f: () => drawPlayer(c, g.px, g.py, g.pdir, g.pmoving, time, !!ov.mining, this.look) });
-    for (const o of this.others) tall.push({ y: o.y + 0.3, f: () => drawPlayer(c, o.x, o.y, o.dir, o.moving, time, false, o.look) });
+    if (!g.playerDead) {
+      const recent = g.cs.gunCd > 0 || g.cs.reload > 0 || g.shooting;
+      const angle = recent ? g.cs.aimAngle : DIR_ANGLE[g.pdir];
+      const gun: GunKind = playerWeapon(g) === 'rail' ? 'rail' : 'pistol';
+      const rel = g.cs.reload > 0 ? 1 - g.cs.reload / RELOAD_TICKS : 0;
+      tall.push({ y: g.py + 0.3, f: () => drawEngineer(c, g.px, g.py, g.pdir, g.pmoving, time, !!ov.mining, this.look, ov.mining ? null : gun, angle, g.cs.muzzle, rel) });
+      if (g.cs.reload > 0) {
+        // reload bar over the head
+        tall.push({ y: 1e9, f: () => {
+          c.fillStyle = 'rgba(0,0,0,.6)';
+          c.fillRect(g.px - 0.4, g.py - 0.75, 0.8, 0.1);
+          c.fillStyle = '#f2b632';
+          c.fillRect(g.px - 0.38, g.py - 0.73, 0.76 * rel, 0.06);
+        } });
+      }
+    }
+    for (const o of this.others) tall.push({ y: o.y + 0.3, f: () => drawEngineer(c, o.x, o.y, o.dir, o.moving, time, false, o.look, 'pistol', DIR_ANGLE[o.dir], 0, 0) });
     const inView = (x: number, y: number, r: number) => x + r > x0 && x - r < x1 && y + r > y0 - 1 && y - r < y1;
     for (const n of g.cs.nests)
       if (inView(n.x, n.y, 2)) tall.push({ y: n.y + 1, f: () => drawNest(c, n.x, n.y, time * 2 + n.pulse, n.hp / NEST_HP) });

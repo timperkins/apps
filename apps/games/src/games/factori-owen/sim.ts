@@ -1,12 +1,13 @@
 // The simulation: entities, power, research, hand crafting and the player.
 import {
-  ENTITIES, INPUT_BUFFER_CRAFTS, maxHp, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
+  ENTITIES, INPUT_BUFFER_CRAFTS, maxHp, SCIENCE_PACKS, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
   RECIPE_BY_ID, SMELT_BY_INPUT, TECHS, TECH_BY_ID,
   type EntityType, type ItemId, type Recipe,
 } from './data';
 import { Inventory, type Stack } from './inventory';
-import { RES_ITEM, Res, World, WORLD } from './world';
-import { newCombatState, nestBlocks, playerFire, PLAYER_HP, spawnNests, updateCombat, type CombatState } from './combat';
+import { b64, RES_ITEM, Res, unb64, World, WORLD } from './world';
+import { packExplored, unpackExplored } from './minimap';
+import { newCombatState, nestBlocks, playerFire, PLAYER_HP, PLAYER_SPEED, spawnNests, updateCombat, type CombatState } from './combat';
 
 export interface RemotePlayer {
   x: number;
@@ -148,6 +149,9 @@ export class Game {
   hurtOthers: [string, number, string][] = [];
   /** Tiles changed by mining, for the host to send out. */
   tileChanges = new Set<number>();
+  /** 1 where the player has seen the tile (for the map). */
+  explored = new Uint8Array(WORLD * WORLD);
+  exploredAt = -1;
   spawnX = WORLD / 2 + 0.5;
   spawnY = WORLD / 2 + 0.5;
 
@@ -421,7 +425,7 @@ export class Game {
       return Math.max(0, (hand ? stack : 10) - (e.input[item] ?? 0));
     }
     if (d.kind === 'lab') {
-      if (item !== 'red-pack' && item !== 'green-pack') return 0;
+      if (!SCIENCE_PACKS.includes(item)) return 0;
       const have = e.input[item] ?? 0;
       return Math.max(0, (hand ? stack : 4) - have);
     }
@@ -960,7 +964,12 @@ export class Game {
       this.pmoving = false;
       return;
     }
-    const sp = 6 / TPS;
+    if (this.cs.shootStop > 0) {
+      // planted to shoot: no walking for a moment
+      mx = 0;
+      my = 0;
+    }
+    const sp = PLAYER_SPEED / TPS;
     this.pmoving = mx !== 0 || my !== 0;
     if (this.pmoving) {
       const l = Math.hypot(mx, my);
@@ -1082,6 +1091,7 @@ export class Game {
       bugs: this.cs.bugs, nests: this.cs.nests, evo: this.cs.evolution, php: this.cs.playerHp,
       pol: Array.from(this.cs.pollution, (v) => Math.round(v * 100) / 100),
       kills: this.kills, nd: this.nestsDestroyed, pr: this.pistolRounds,
+      exp: b64(packExplored(this.explored)),
     };
   }
 
@@ -1099,6 +1109,7 @@ export class Game {
     g.researchUnits = s.units ?? {};
     g.produced = s.produced ?? {};
     g.won = !!s.won;
+    if (s.exp) unpackExplored(unb64(s.exp), g.explored);
     g.enemies = s.enemies ?? true;
     g.cs.bugs = s.bugs ?? [];
     g.cs.nests = s.nests ?? [];

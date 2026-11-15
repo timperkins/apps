@@ -9,7 +9,8 @@ import { RES_NAME, WORLD } from './world';
 import { iconURL } from './icons';
 import { localActions, type Actions } from './actions';
 import { DEFAULT_LOOK, drawPlayer, LOOK_OPTIONS, type PlayerLook } from './art';
-import { PLAYER_HP, playerWeapon, WEAPONS } from './combat';
+import { MAG_SIZE, PLAYER_HP, playerWeapon, WEAPONS } from './combat';
+import { explore, Minimap } from './minimap';
 import { buildScene, pickScene, SCENE_SECONDS, type Scene } from './scenes';
 import type { GameModule } from '../types';
 import type { GuestSession, HostSession } from './mp';
@@ -116,6 +117,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
           <button class="fo-mini" data-btn="mute" title="Sound (M)">Sound</button>
           <button class="fo-mini" data-btn="menu" title="Menu (Esc)">Menu</button>
         </div>
+        <canvas class="fo-minimap" title="Map (N): click to open the whole map"></canvas>
         <div class="fo-mpstatus" hidden></div>
       </div>
       <div class="fo-health"><div class="fo-hp"><i></i></div><span class="fo-weapon"></span></div>
@@ -136,6 +138,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       <div class="fo-dead" hidden></div>
       <div class="fo-win" hidden><h2>Owen is proud of you!</h2><p>You built the Great Owen Monument. Your factory lives on: keep building, or quit to the title screen.</p><button class="fo-btn" data-win="ok">Keep building</button></div>
     </div>
+    <div class="fo-bigmap" hidden><div class="fo-bigmap-box"><h3>Map <span class="fo-sub">yellow is you · red is a bug nest</span></h3><canvas></canvas><button class="fo-btn" data-bigmap="close">Close (N)</button></div></div>
     <div class="fo-title"></div>
     <div class="fo-fade"></div>
     <div class="fo-tip" hidden></div>
@@ -159,6 +162,15 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   const hpEl = $('.fo-hp i');
   const weaponEl = $('.fo-weapon');
   const mpEl = $('.fo-mpstatus');
+  const bigMapEl = $('.fo-bigmap');
+  const minimap = new Minimap($<HTMLCanvasElement>('.fo-minimap'), $<HTMLCanvasElement>('.fo-bigmap canvas'));
+  const toggleBigMap = (open = bigMapEl.hidden) => {
+    bigMapEl.hidden = !open;
+  };
+  $('.fo-minimap').addEventListener('click', () => toggleBigMap());
+  bigMapEl.addEventListener('click', (ev) => {
+    if (ev.target === bigMapEl || (ev.target as HTMLElement).dataset.bigmap) toggleBigMap(false);
+  });
   const touchMode = matchMedia('(pointer: coarse)').matches;
   wrap.classList.toggle('touch', touchMode);
 
@@ -680,7 +692,8 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (k === 'e') togglePanel('inventory');
       else if (k === 't') togglePanel('research');
       else if (k === 'escape') {
-        if (ui.panel) ui.panel = null;
+        if (!bigMapEl.hidden) toggleBigMap(false);
+        else if (ui.panel) ui.panel = null;
         else if (ui.cursor) ui.cursor = null;
         else {
           ui.panel = 'menu';
@@ -690,6 +703,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       } else if (k === 'r') rotate();
       else if (k === 'q') pipette();
       else if (k === 'm') toggleMute();
+      else if (k === 'n') toggleBigMap();
       else if (/^[0-9]$/.test(k)) selectHot((Number(k) + 9) % 10);
     }
     if (k === ' ' || k === 'c') {
@@ -1047,6 +1061,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (ev === 'shot') sfx.shot();
       if (ev === 'turret' && Math.random() < 0.5) sfx.shot();
       if (ev === 'rail') sfx.rail();
+      if (ev === 'reload') sfx.reload();
       if (ev === 'hurt') sfx.hurt();
       if (ev === 'attack') sfx.alarm();
       if (ev === 'nest') sfx.boom();
@@ -1102,6 +1117,8 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     }
     handleEvents();
     renderer.others = guest ? guest.others : host ? host.views() : [];
+    explore(game, game.px, game.py);
+    minimap.draw(game, renderer.others, frame, !bigMapEl.hidden);
 
     renderer.camX += (game.px - renderer.camX) * Math.min(1, dt * 10);
     renderer.camY += (game.py - renderer.camY) * Math.min(1, dt * 10);
@@ -1164,7 +1181,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     weaponEl.innerHTML = wk === 'rail'
       ? `<img src="${iconURL('rail-gun')}" alt="">${game.inv.count('rail-ammo')}`
       : wk === 'pistol'
-        ? `<img src="${iconURL('owen-ammo')}" alt="">${game.inv.count('owen-ammo') * 10 + game.pistolRounds}`
+        ? `<img src="${iconURL('owen-ammo')}" alt="">${game.cs.reload > 0 ? '<em>Reloading…</em>' : `${game.pistolRounds}/${MAG_SIZE}`}<span class="fo-sub">+${game.inv.count('owen-ammo')}</span>`
         : `<span class="fo-sub">No ammo</span>`;
     weaponEl.title = wk ? `${WEAPONS[wk].name}: hold Space to shoot` : 'Craft Owen bullets';
     deadEl.hidden = !game.playerDead;

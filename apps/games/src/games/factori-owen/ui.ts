@@ -1,5 +1,5 @@
 // HTML panels: inventory + crafting, building windows, research, hotbar and HUD.
-import { ENTITIES, ITEMS, RECIPES, RECIPE_BY_ID, TECHS, TECH_BY_ID, type Category, type ItemId, type Recipe } from './data';
+import { ENTITIES, ITEMS, RECIPES, RECIPE_BY_ID, SCIENCE_PACKS, TECH_ICON, TECHS, TECH_BY_ID, type Category, type ItemId, type Recipe } from './data';
 import { iconURL } from './icons';
 import { sfx } from './audio';
 import type { Entity, Game } from './sim';
@@ -15,6 +15,8 @@ export interface UIState {
   cursor: ItemId | null;
   hotbar: (ItemId | null)[];
   pickRecipe: boolean;
+  /** Technology picked in the research tree. */
+  techSel?: string | null;
   act: Actions;
   setCursor: (item: ItemId | null) => void;
   /** Esc menu and load screen live in index.ts */
@@ -162,7 +164,7 @@ function entityPanel(ui: UIState): string {
     }
     case 'lab': {
       const t = g.research ? TECH_BY_ID[g.research] : null;
-      body += `<div class="fo-row">${(['red-pack', 'green-pack'] as ItemId[]).map((p) => slot(p, e.input[p] ?? 0, `data-act="take-input" data-id="${p}"`)).join('')}</div>`;
+      body += `<div class="fo-row">${SCIENCE_PACKS.map((p) => slot(p, e.input[p] ?? 0, `data-act="take-input" data-id="${p}"`)).join('')}</div>`;
       body += t
         ? `<div class="fo-sub">Researching ${esc(t.name)}: ${g.researchUnits[t.id] ?? 0} / ${t.units}</div>${bar((g.researchUnits[t.id] ?? 0) / t.units)}`
         : `<button class="fo-btn" data-act="open-research">Choose research</button>`;
@@ -208,30 +210,104 @@ function entityPanel(ui: UIState): string {
   </div>`;
 }
 
+interface TreeNode { id: string; depth: number; x: number; y: number }
+
+const NODE_W = 132, NODE_H = 92, COL = 156, ROW = 128, PAD = 16;
+
+/** Lays the technologies out as a tree: each one sits a row below its deepest prerequisite. */
+const TREE: { nodes: Record<string, TreeNode>; width: number; height: number } = (() => {
+  const depth: Record<string, number> = {};
+  const d = (id: string): number =>
+    (depth[id] ??= TECH_BY_ID[id].requires.reduce((m, r) => Math.max(m, d(r) + 1), 0));
+  TECHS.forEach((t) => d(t.id));
+  const rows: string[][] = [];
+  for (const t of TECHS) (rows[depth[t.id]] ??= []).push(t.id);
+  const pos: Record<string, number> = {};
+  const place = () => rows.forEach((r) => r.forEach((id, i) => (pos[id] = i - (r.length - 1) / 2)));
+  place();
+  const kids = (id: string) => TECHS.filter((t) => t.requires.includes(id)).map((t) => t.id);
+  const mean = (ids: string[], fb: number) => (ids.length ? ids.reduce((s, x) => s + pos[x], 0) / ids.length : fb);
+  // a few passes of "sit near the things you connect to" to untangle the lines
+  for (let pass = 0; pass < 4; pass++) {
+    for (let i = 1; i < rows.length; i++) {
+      rows[i].sort((a, b) => mean(TECH_BY_ID[a].requires, pos[a]) - mean(TECH_BY_ID[b].requires, pos[b]));
+      place();
+    }
+    for (let i = rows.length - 2; i >= 0; i--) {
+      rows[i].sort((a, b) => mean(kids(a), pos[a]) - mean(kids(b), pos[b]));
+      place();
+    }
+  }
+  const widest = Math.max(...rows.map((r) => r.length));
+  const width = (widest - 1) * COL + NODE_W + PAD * 2;
+  const nodes: Record<string, TreeNode> = {};
+  for (const t of TECHS) {
+    nodes[t.id] = { id: t.id, depth: depth[t.id], x: width / 2 + pos[t.id] * COL - NODE_W / 2, y: PAD + depth[t.id] * ROW };
+  }
+  return { nodes, width, height: PAD * 2 + (rows.length - 1) * ROW + NODE_H };
+})();
+
+function techState(g: Game, id: string) {
+  return g.researched.has(id) ? 'done' : g.research === id ? 'cur' : g.canResearch(id) ? 'can' : 'locked';
+}
+
 function researchPanel(ui: UIState) {
   const g = ui.game;
-  const cards = TECHS.map((t) => {
-    const done = g.researched.has(t.id);
-    const can = g.canResearch(t.id);
-    const cur = g.research === t.id;
-    const units = g.researchUnits[t.id] ?? 0;
-    const cost = t.packs.map((p) => `${icon(p, 'sm')}`).join('') + ` × ${t.units} · ${t.time}s each`;
-    const needs = t.requires.length && !done && !can
-      ? `<div class="fo-sub">Needs: ${t.requires.map((r) => esc(TECH_BY_ID[r].name)).join(', ')}</div>`
-      : '';
-    const unlocks = RECIPES.filter((r) => r.unlock === t.id).map((r) => icon(r.out, 'sm')).join('');
-    return `<div class="fo-tech ${done ? 'done' : can ? 'can' : 'locked'} ${cur ? 'cur' : ''}">
-      <h4>${esc(t.name)}${done ? ' ✓' : ''}</h4>
-      <p>${esc(t.desc)}</p>
-      <div class="fo-unl">${unlocks}</div>
-      <div class="fo-cost">${cost}</div>
-      ${needs}
-      ${!done && units > 0 ? bar(units / t.units) : ''}
-      ${can && !cur ? `<button class="fo-btn" data-act="research" data-id="${t.id}">Research</button>` : ''}
-      ${cur ? `<div class="fo-sub">In progress: put science packs in a powered lab</div>` : ''}
+  const sel = TECH_BY_ID[ui.techSel ?? ''] ?? TECH_BY_ID[g.research ?? ''] ?? TECHS.find((t) => g.canResearch(t.id)) ?? TECHS[TECHS.length - 1];
+  // prerequisite lines
+  const lines = TECHS.flatMap((t) =>
+    t.requires.map((r) => {
+      const a = TREE.nodes[r], b = TREE.nodes[t.id];
+      const x1 = a.x + NODE_W / 2, y1 = a.y + NODE_H, x2 = b.x + NODE_W / 2, y2 = b.y;
+      const my = y2 - 14;
+      const st = g.researched.has(r) ? 'done' : 'locked';
+      const hot = t.id === sel.id || r === sel.id ? 'hot' : '';
+      return `<path class="${st} ${hot}" d="M${x1} ${y1} V${my - 10} Q${x1} ${my} ${x1 + Math.sign(x2 - x1) * Math.min(10, Math.abs(x2 - x1))} ${my} H${
+        x2 - Math.sign(x2 - x1) * Math.min(10, Math.abs(x2 - x1))
+      } Q${x2} ${my} ${x2} ${my + 10} V${y2}"/>`;
+    }),
+  ).sort((a, b) => Number(a.includes(' hot"')) - Number(b.includes(' hot"'))).join('');
+  const nodes = TECHS.map((t) => {
+    const n = TREE.nodes[t.id];
+    const st = techState(g, t.id);
+    const u = g.researchUnits[t.id] ?? 0;
+    return `<div class="fo-tnode ${st} ${t.id === sel.id ? 'sel' : ''}" data-act="tech-sel" data-id="${t.id}" style="left:${n.x}px;top:${n.y}px">
+      <div class="fo-tnode-ic">${icon(TECH_ICON[t.id] ?? 'red-pack')}</div>
+      <div class="fo-tnode-name">${esc(t.name)}</div>
+      <div class="fo-tnode-cost">${t.packs.map((p) => icon(p, 'xs')).join('')}<span>${t.units}</span></div>
+      ${st === 'done' ? '<b class="fo-tnode-tick">✓</b>' : u > 0 ? bar(u / t.units) : ''}
     </div>`;
   }).join('');
-  return `<h3>Research</h3><p class="fo-note">Labs need power and science packs. Pick a technology, then feed your labs.</p><div class="fo-techs">${cards}</div>`;
+
+  const st = techState(g, sel.id);
+  const u = g.researchUnits[sel.id] ?? 0;
+  const unlocks = RECIPES.filter((r) => r.unlock === sel.id);
+  const leadsTo = TECHS.filter((t) => t.requires.includes(sel.id));
+  const chip = (id: string) =>
+    `<button class="fo-tchip ${techState(g, id)}" data-act="tech-sel" data-id="${id}">${icon(TECH_ICON[id] ?? 'red-pack', 'xs')}${esc(TECH_BY_ID[id].name)}</button>`;
+  const detail = `<div class="fo-tdetail ${st}">
+    <div class="fo-tdetail-head">${icon(TECH_ICON[sel.id] ?? 'red-pack', 'lg')}<div><h4>${esc(sel.name)}</h4><span class="fo-tstatus">${
+      st === 'done' ? 'Researched' : st === 'cur' ? 'Researching' : st === 'can' ? 'Ready to research' : 'Locked'
+    }</span></div></div>
+    <p>${esc(sel.desc)}</p>
+    <h5>Cost</h5>
+    <div class="fo-tcost">${sel.packs.map((p) => `<span>${icon(p, 'sm')}${esc(ITEMS[p].name.replace(' science pack', ''))}</span>`).join('')}</div>
+    <div class="fo-sub">${sel.units} of each · ${sel.time}s per unit in a lab</div>
+    ${st !== 'done' && u > 0 ? `<div class="fo-tprog">${bar(u / sel.units)}<span>${u}/${sel.units}</span></div>` : ''}
+    ${unlocks.length ? `<h5>Unlocks</h5><div class="fo-tunl">${unlocks.map((r) => `<span data-tip="item:${r.out}">${icon(r.out, 'sm')}</span>`).join('')}</div>` : ''}
+    ${sel.requires.length ? `<h5>Needs</h5><div class="fo-tchips">${sel.requires.map(chip).join('')}</div>` : ''}
+    ${leadsTo.length ? `<h5>Leads to</h5><div class="fo-tchips">${leadsTo.map((t) => chip(t.id)).join('')}</div>` : ''}
+    ${st === 'can' ? `<button class="fo-btn fo-tgo" data-act="research" data-id="${sel.id}">Research</button>` : ''}
+    ${st === 'cur' ? `<div class="fo-note">Put ${sel.packs.map((p) => esc(ITEMS[p].name.toLowerCase())).join(', ')} in a powered lab.</div>` : ''}
+    ${st === 'locked' ? `<div class="fo-note">Research the technologies it needs first.</div>` : ''}
+  </div>`;
+  return `<h3>Research</h3>
+  <div class="fo-rtree">
+    <div class="fo-tree-wrap"><div class="fo-tree" style="width:${TREE.width}px;height:${TREE.height}px">
+      <svg width="${TREE.width}" height="${TREE.height}">${lines}</svg>${nodes}
+    </div></div>
+    ${detail}
+  </div>`;
 }
 
 function helpPanel() {
@@ -241,13 +317,15 @@ function helpPanel() {
   <ul>
     <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · mouse wheel zooms</li>
     <li><b>Hold right-click</b> on ore, rocks or trees to mine them by hand. Right-click a building to pick it up.</li>
-    <li><kbd>E</kbd> inventory and crafting · <kbd>T</kbd> research · <kbd>Esc</kbd> menu</li>
+    <li><kbd>E</kbd> inventory and crafting · <kbd>T</kbd> research tree · <kbd>N</kbd> map · <kbd>Esc</kbd> menu</li>
     <li>Click an item (or press <kbd>1</kbd>–<kbd>0</kbd>) to hold it, then <b>left-click</b> to build. Drag to lay belts.</li>
     <li><kbd>R</kbd> rotates · <kbd>Q</kbd> picks the building under the mouse, or empties your hand</li>
     <li>Left-click a building to open it, then click inventory items to load fuel, ore or ingredients.</li>
   </ul>
   <p><b>First steps:</b> put your burner drill on Owen ore and give it wood or coal. Point its yellow arrow at the stone furnace so the ore drops straight in. Add fuel to the furnace too, and Owen plates come out.</p>
-  <p><b>Bugs:</b> Calvin, Archie, Mom, Dad and Roger live in nests far from the start. Pollution from your machines makes them angry, and after a few quiet minutes they come for your factory. Hold <kbd>Space</kbd> to shoot the closest bug, build gun turrets and load them with Owen bullets, and research Rail guns for the big stuff.</p>
+  <p><b>Bugs:</b> Calvin, Archie, Mom, Dad and Roger live in nests far from the start. Pollution from your machines makes them angry, and after a few quiet minutes they come for your factory. They run almost as fast as you (95%) and chase anyone who comes within 10 tiles. Hold <kbd>Space</kbd> to shoot the closest bug with your gun: each shot plants your feet for a second, and a new magazine of 10 Owen bullets takes 1.45 seconds to load. Build gun turrets and load them with Owen bullets, and research Rail guns for the big stuff.</p>
+  <p><b>Science:</b> there are 4 science packs: automation (red), logistic (green), military (grey) and advanced (blue). Press <kbd>T</kbd> to open the research tree, click a technology to see what it needs and unlocks, then feed those packs to powered labs.</p>
+  <p><b>Map:</b> the map in the top right fills in as you explore. Click it or press <kbd>N</kbd> for the whole map.</p>
   <p><b>On a phone:</b> use the stick to walk, tap to build or open, press and hold to mine, and hold Shoot to fire.</p>
   </div><button class="fo-btn" data-act="close">Got it</button>`;
 }
@@ -280,7 +358,14 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
       html = helpPanel();
       break;
   }
+  // keep scroll positions when the panel redraws itself
+  const scrolls = [...el.querySelectorAll<HTMLElement>('.fo-tree-wrap, .fo-tdetail')].map((x) => [x.scrollLeft, x.scrollTop]);
+  const keep = el.scrollTop;
   el.innerHTML = `<button class="fo-x" data-act="close" aria-label="Close">×</button>${html}`;
+  el.querySelectorAll<HTMLElement>('.fo-tree-wrap, .fo-tdetail').forEach((x, i) => {
+    if (scrolls[i]) [x.scrollLeft, x.scrollTop] = scrolls[i];
+  });
+  el.scrollTop = keep;
   el.hidden = !ui.panel;
   el.className = `fo-panel p-${ui.panel}`;
 }
@@ -341,6 +426,7 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
       break;
     case 'change-recipe': ui.pickRecipe = true; break;
     case 'open-research': ui.panel = 'research'; break;
+    case 'tech-sel': ui.techSel = id; break;
     case 'research':
       ui.act.research(id);
       sfx.click();

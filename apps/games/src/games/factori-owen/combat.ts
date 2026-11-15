@@ -4,6 +4,16 @@ import type { Entity, Game } from './sim';
 import { WORLD } from './world';
 
 export const BUG_NAMES = ['Calvin', 'Archie', 'Mom', 'Dad', 'Roger'];
+/** The player walks 6 tiles/s; bugs run at 95% of that. */
+export const PLAYER_SPEED = 6;
+export const BUG_SPEED = PLAYER_SPEED * 0.95;
+/** Bugs attack anyone inside a 20 by 20 tile square around them. */
+export const AGGRO_HALF = 10;
+/** Seconds to put a new magazine in the gun. */
+export const RELOAD_TICKS = Math.round(1.45 * 60);
+export const MAG_SIZE = 10;
+/** After shooting while walking you stand still this long. */
+export const SHOOT_STOP_TICKS = 60;
 
 export interface BugKind {
   name: string;
@@ -16,9 +26,9 @@ export interface BugKind {
 }
 
 export const BUG_KINDS: BugKind[] = [
-  { name: 'Small bug', hp: 15, speed: 2.6, damage: 7, size: 0.32, color: '#7fbf3f', shell: '#4e8a22' },
-  { name: 'Big bug', hp: 80, speed: 2.3, damage: 16, size: 0.48, color: '#e08a2e', shell: '#a8561a' },
-  { name: 'Huge bug', hp: 380, speed: 2.0, damage: 35, size: 0.7, color: '#a35ad8', shell: '#6a2c9a' },
+  { name: 'Small bug', hp: 15, speed: BUG_SPEED, damage: 7, size: 0.32, color: '#7fbf3f', shell: '#4e8a22' },
+  { name: 'Big bug', hp: 80, speed: BUG_SPEED, damage: 16, size: 0.48, color: '#e08a2e', shell: '#a8561a' },
+  { name: 'Huge bug', hp: 380, speed: BUG_SPEED, damage: 35, size: 0.7, color: '#a35ad8', shell: '#6a2c9a' },
 ];
 
 export interface Bug {
@@ -67,7 +77,7 @@ const CELL = 32;
 const CELLS = WORLD / CELL;
 
 export const WEAPONS = {
-  pistol: { name: 'Pistol', range: 16, cooldown: 12, damage: 6, ammo: 'owen-ammo' as ItemId },
+  pistol: { name: 'Gun', range: 16, cooldown: 12, damage: 6, ammo: 'owen-ammo' as ItemId },
   rail: { name: 'Rail gun', range: 34, cooldown: 100, damage: 600, ammo: 'rail-ammo' as ItemId },
 };
 
@@ -87,6 +97,10 @@ export function newCombatState() {
     playerHp: PLAYER_HP,
     lastHurt: 0,
     gunCd: 0,
+    reload: 0,
+    shootStop: 0,
+    muzzle: 0,
+    aimAngle: Math.PI / 2,
     railShots: 0,
   };
 }
@@ -236,7 +250,7 @@ function shoot(g: Game, x: number, y: number, t: Target, dmg: number) {
 
 export function playerWeapon(g: Game): keyof typeof WEAPONS | null {
   if (g.inv.count('rail-gun') > 0 && g.inv.count('rail-ammo') > 0) return 'rail';
-  if (g.inv.count('owen-ammo') > 0 || g.pistolRounds > 0) return 'pistol';
+  if (g.inv.count('owen-ammo') > 0 || g.pistolRounds > 0 || g.cs.reload > 0) return 'pistol';
   return null;
 }
 
@@ -250,7 +264,7 @@ export function playerFireFrom(g: Game, x: number, y: number, wk: keyof typeof W
   if (!t && aim) t = { x: aim.x, y: aim.y };
   if (wk === 'rail') railShot(g, x, y - 0.1, t!.x, t!.y, wpn.range, wpn.damage);
   else {
-    if (t!.bug || t!.nest) shoot(g, x, y - 0.1, t!, wpn.damage);
+    if (t!.bug || t!.nest) shoot(g, x, y - 0.1, t!, wpn.damage * damageMult(g));
     else g.cs.fx.push({ kind: 'bullet', x0: x, y0: y - 0.1, x1: t!.x, y1: t!.y, t: 4, life: 4 });
     g.events.push('shot');
   }
@@ -273,11 +287,21 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
   if (wk === 'rail') g.inv.remove('rail-ammo', 1);
   else {
     if (g.pistolRounds <= 0) {
-      g.inv.remove('owen-ammo', 1);
-      g.pistolRounds = 10;
+      // empty: put a new magazine in (takes 1.45 s)
+      if (cs.reload === 0 && g.inv.count('owen-ammo') > 0) {
+        cs.reload = RELOAD_TICKS;
+        g.events.push('reload');
+      }
+      return;
     }
     g.pistolRounds--;
+    if (g.pistolRounds === 0 && g.inv.count('owen-ammo') > 0) {
+      cs.reload = RELOAD_TICKS;
+      g.events.push('reload');
+    }
   }
+  if (g.pmoving) cs.shootStop = SHOOT_STOP_TICKS;
+  cs.muzzle = 5;
   if (g.onFire) {
     g.onFire(wk, aim);
     const tx = t?.x ?? aim!.x, ty = t?.y ?? aim!.y;
@@ -291,7 +315,11 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
     }
   } else playerFireFrom(g, g.px, g.py, wk, aim);
   cs.gunCd = wpn.cooldown;
-  if (t) g.pdir = Math.abs(t.x - g.px) > Math.abs(t.y - g.py) ? (t.x > g.px ? 1 : 3) : t.y > g.py ? 2 : 0;
+  const tx = t?.x ?? aim?.x, ty = t?.y ?? aim?.y;
+  if (tx !== undefined && ty !== undefined) {
+    cs.aimAngle = Math.atan2(ty - g.py, tx - g.px);
+    g.pdir = Math.abs(tx - g.px) > Math.abs(ty - g.py) ? (tx > g.px ? 1 : 3) : ty > g.py ? 2 : 0;
+  }
 }
 
 // ---------- the big update ----------
@@ -299,6 +327,17 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
 export function updateCombat(g: Game) {
   const cs = g.cs;
   if (cs.gunCd > 0) cs.gunCd--;
+  if (cs.shootStop > 0) cs.shootStop--;
+  if (cs.muzzle > 0) cs.muzzle--;
+  if (cs.reload === 0 && g.pistolRounds === 0 && !g.playerDead && g.inv.count('owen-ammo') > 0) {
+    // an empty gun loads itself as soon as you have bullets
+    cs.reload = RELOAD_TICKS;
+    g.events.push('reload');
+  }
+  if (cs.reload > 0) {
+    cs.reload--;
+    if (cs.reload === 0 && g.inv.remove('owen-ammo', 1) === 1) g.pistolRounds = MAG_SIZE;
+  }
   // player regenerates after a while
   if (g.tick - cs.lastHurt > 600 && cs.playerHp < PLAYER_HP) cs.playerHp = Math.min(PLAYER_HP, cs.playerHp + 0.25);
   for (const f of cs.fx) f.t--;
@@ -397,11 +436,11 @@ function updateBug(g: Game, b: Bug) {
       who = id;
     }
   }
-  if (pd < (b.mode === 'idle' ? 7 : 9)) b.mode = 'chase';
+  if (Math.abs(px - b.x) <= AGGRO_HALF && Math.abs(py - b.y) <= AGGRO_HALF) b.mode = 'chase';
 
   let tx = b.tx, ty = b.ty;
   if (b.mode === 'chase') {
-    if (pd > 24) {
+    if (pd > AGGRO_HALF * 3) {
       b.mode = b.nest && cs.nests.some((n) => n.id === b.nest) ? 'idle' : 'attack';
       const n = cs.nests.find((q) => q.id === b.nest);
       if (n) {
@@ -540,7 +579,7 @@ function updateTurrets(g: Game) {
         e.burn = 10; // rounds in the loaded magazine
       }
       e.burn--;
-      shoot(g, e.cx, e.cy - 0.3, t, d.damage!);
+      shoot(g, e.cx, e.cy - 0.3, t, d.damage! * damageMult(g));
       e.anim = Math.round(60 / d.fireRate!);
       e.status = 'Firing';
       g.events.push('turret');
@@ -550,4 +589,8 @@ function updateTurrets(g: Game) {
 
 export function healthFrac(e: Entity) {
   return e.hp / maxHp(e.type);
+}
+
+export function damageMult(g: Game) {
+  return g.researched.has('weapon-damage') ? 1.5 : 1;
 }

@@ -654,6 +654,76 @@ export function drawPlayer(c: Ctx, x: number, y: number, dir: number, moving: bo
   }
 }
 
+export type GunKind = 'pistol' | 'rail';
+
+/** The gun in the engineer's hands, pointing along `angle`. */
+export function drawGun(c: Ctx, x: number, y: number, angle: number, gun: GunKind, muzzle: number, reloading: number) {
+  c.save();
+  c.translate(x, y + 0.02);
+  c.rotate(angle);
+  const flip = Math.cos(angle) < 0 ? -1 : 1;
+  c.scale(1, flip);
+  // a reload tips the gun down
+  if (reloading > 0) c.rotate(0.6 * Math.sin(reloading * Math.PI));
+  if (gun === 'rail') {
+    c.fillStyle = '#39424f';
+    c.fillRect(0.08, -0.06, 0.62, 0.12);
+    c.fillStyle = '#7d8a9b';
+    c.fillRect(0.3, -0.09, 0.42, 0.04);
+    c.fillRect(0.3, 0.05, 0.42, 0.04);
+    c.fillStyle = '#5adcff';
+    c.fillRect(0.34, -0.02, 0.36, 0.04);
+    c.fillStyle = '#6b4126';
+    c.fillRect(0.1, 0.04, 0.09, 0.14);
+  } else {
+    c.fillStyle = '#2b2f36';
+    c.fillRect(0.12, -0.05, 0.42, 0.1);
+    c.fillStyle = '#4b5563';
+    c.fillRect(0.12, -0.07, 0.3, 0.04);
+    c.fillStyle = '#6b4126';
+    c.beginPath();
+    c.moveTo(0.14, 0.04);
+    c.lineTo(0.24, 0.04);
+    c.lineTo(0.2, 0.2);
+    c.lineTo(0.1, 0.2);
+    c.fill();
+    // magazine
+    c.fillStyle = '#9fb0e6';
+    c.fillRect(0.28, 0.04, 0.07, 0.11);
+  }
+  // hands on the grip
+  c.fillStyle = '#e9b98f';
+  c.beginPath();
+  c.arc(0.17, 0.06, 0.06, 0, Math.PI * 2);
+  c.fill();
+  if (muzzle > 0) {
+    const end = gun === 'rail' ? 0.72 : 0.56;
+    c.fillStyle = gun === 'rail' ? `rgba(120,230,255,${muzzle / 5})` : `rgba(255,220,90,${muzzle / 5})`;
+    c.beginPath();
+    c.moveTo(end, 0);
+    c.lineTo(end + 0.22, -0.1);
+    c.lineTo(end + 0.3, 0);
+    c.lineTo(end + 0.22, 0.1);
+    c.closePath();
+    c.fill();
+  }
+  c.restore();
+}
+
+/** The engineer plus their gun, drawn in the right order for where they aim. */
+export function drawEngineer(
+  c: Ctx, x: number, y: number, dir: number, moving: boolean, time: number, mining: boolean, look: PlayerLook,
+  gun: GunKind | null, angle: number, muzzle: number, reloading: number,
+) {
+  const behind = gun && Math.sin(angle) < -0.35;
+  if (gun && behind) drawGun(c, x, y, angle, gun, muzzle, reloading);
+  drawPlayer(c, x, y, dir, moving, time, mining, look);
+  if (gun && !behind) drawGun(c, x, y, angle, gun, muzzle, reloading);
+}
+
+/** How the gun is carried for each facing (up, right, down, left) when not aiming: tipped to the side so it shows. */
+export const DIR_ANGLE = [-Math.PI / 2 + 0.75, 0.35, Math.PI / 2 - 0.6, Math.PI - 0.35];
+
 // ---------- bugs ----------
 
 export function drawBug(c: Ctx, x: number, y: number, angle: number, size: number, color: string, shell: string, anim: number) {
