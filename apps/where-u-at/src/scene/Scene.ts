@@ -262,12 +262,12 @@ export class Scene {
   };
 
   private markBirths(crossed: TimedEvent[]) {
-    for (const { event } of crossed) {
-      if (event.type === 'birth') {
-        for (const id of event.people) {
-          const actor = this.byId.get(id);
-          if (actor) actor.justBorn = true;
-        }
+    for (const { event, t } of crossed) {
+      for (const id of event.people) {
+        // Births, and spouses who first appear at their wedding.
+        if (event.type !== 'birth' && this.timeline.birthTime(id) !== t) continue;
+        const actor = this.byId.get(id);
+        if (actor) actor.justBorn = true;
       }
     }
   }

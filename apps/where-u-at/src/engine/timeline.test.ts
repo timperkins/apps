@@ -88,6 +88,18 @@ describe('Timeline', () => {
     expect(tl.eventsBetween(at('2012-05'), at('2012-07')).map((e) => e.event.id)).toEqual(['4', '5']);
   });
 
+  it('lets a spouse with no birth join at the wedding, where their partner lives', () => {
+    const joiner = new Timeline(
+      [...people, { id: 'cy', name: 'Cy', kind: 'friend', color: '#8E44AD', photo: '', order: 3 }],
+      [...events, { id: '8', type: 'marriage', date: '2020-01', people: ['bob', 'cy'] }, { id: '9', type: 'move', date: '2021-01', people: ['bob', 'cy'], place: paris }],
+      monthIndex('2026-10'),
+    );
+    expect(joiner.placeAt('cy', at('2019-12'))).toBeNull();
+    expect(joiner.placeAt('cy', at('2020-01'))).toEqual(tokyo);
+    expect(joiner.placeAt('cy', at('2021-01'))).toEqual(paris);
+    expect(joiner.legs.filter((l) => l.eventId === '9').map((l) => l.laneCount)).toEqual([2, 2]);
+  });
+
   it('finds partners', () => {
     expect(tl.partnerOf('ann')).toBe('bob');
   });

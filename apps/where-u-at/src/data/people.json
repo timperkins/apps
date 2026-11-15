@@ -120,6 +120,22 @@
     "order": 14
   },
   {
+    "id": "paul",
+    "name": "Paul",
+    "kind": "friend",
+    "color": "#B33F00",
+    "photo": "",
+    "order": 15
+  },
+  {
+    "id": "clark",
+    "name": "Clark",
+    "kind": "friend",
+    "color": "#6E7F80",
+    "photo": "",
+    "order": 16
+  },
+  {
     "id": "penny-owen",
     "name": "Owen",
     "kind": "child",

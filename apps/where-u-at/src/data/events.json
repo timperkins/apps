@@ -747,12 +747,7 @@
     "people": [
       "hillary",
       "todd"
-    ],
-    "place": {
-      "name": "Idaho Falls, ID",
-      "lat": 43.49,
-      "lng": -112.03
-    }
+    ]
   },
   {
     "id": "e059",
@@ -1086,12 +1081,7 @@
     "people": [
       "tim",
       "penny"
-    ],
-    "place": {
-      "name": "Seattle, WA",
-      "lat": 47.61,
-      "lng": -122.33
-    }
+    ]
   },
   {
     "id": "e085",
@@ -1569,7 +1559,8 @@
     "type": "marriage",
     "date": "2016-07",
     "people": [
-      "hesper"
+      "hesper",
+      "paul"
     ]
   },
   {
@@ -1577,13 +1568,9 @@
     "type": "marriage",
     "date": "2016-08",
     "people": [
-      "alec-livingston"
-    ],
-    "place": {
-      "name": "Provo, UT",
-      "lat": 40.23,
-      "lng": -111.66
-    }
+      "alec-livingston",
+      "clark"
+    ]
   },
   {
     "id": "e123",
@@ -1603,7 +1590,8 @@
     "type": "move",
     "date": "2016-09",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "Provo, UT",
@@ -1681,7 +1669,8 @@
     "type": "move",
     "date": "2017-05",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "San Diego, CA",
@@ -1708,7 +1697,8 @@
     "type": "move",
     "date": "2017-09",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "Provo, UT",
@@ -1775,12 +1765,7 @@
     "people": [
       "rachel",
       "tyler"
-    ],
-    "place": {
-      "name": "La Jolla, CA",
-      "lat": 32.84,
-      "lng": -117.27
-    }
+    ]
   },
   {
     "id": "e138",
@@ -1789,12 +1774,7 @@
     "people": [
       "celine",
       "ben"
-    ],
-    "place": {
-      "name": "Brigham City, UT",
-      "lat": 41.51,
-      "lng": -112.02
-    }
+    ]
   },
   {
     "id": "e139",
@@ -1840,12 +1820,12 @@
     "type": "move",
     "date": "2018-05",
     "people": [
-      "alec-livingston"
+      "todd"
     ],
     "place": {
-      "name": "San Diego, CA",
-      "lat": 32.72,
-      "lng": -117.16
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
     }
   },
   {
@@ -1853,12 +1833,13 @@
     "type": "move",
     "date": "2018-05",
     "people": [
-      "todd"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
-      "name": "Bremerton, WA",
-      "lat": 47.57,
-      "lng": -122.63
+      "name": "San Diego, CA",
+      "lat": 32.72,
+      "lng": -117.16
     }
   },
   {
@@ -1905,7 +1886,8 @@
     "type": "move",
     "date": "2018-09",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "Provo, UT",
@@ -1931,7 +1913,8 @@
     "type": "move",
     "date": "2019-06",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "Gig Harbor, WA",
@@ -1957,7 +1940,8 @@
     "type": "marriage",
     "date": "2019-12",
     "people": [
-      "emily"
+      "emily",
+      "peter"
     ]
   },
   {
@@ -1965,7 +1949,8 @@
     "type": "move",
     "date": "2019-12",
     "people": [
-      "hesper"
+      "hesper",
+      "paul"
     ],
     "place": {
       "name": "Bremerton, WA",
@@ -2020,12 +2005,7 @@
     "people": [
       "brinn",
       "alec"
-    ],
-    "place": {
-      "name": "Oakland, CA",
-      "lat": 37.8,
-      "lng": -122.27
-    }
+    ]
   },
   {
     "id": "e157",
@@ -2087,7 +2067,8 @@
     "type": "move",
     "date": "2021-04",
     "people": [
-      "alec-livingston"
+      "alec-livingston",
+      "clark"
     ],
     "place": {
       "name": "Bremerton, WA",

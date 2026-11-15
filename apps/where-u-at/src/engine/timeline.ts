@@ -68,11 +68,25 @@ export class Timeline {
       }
     }
 
+    // A spouse we know nothing else about joins at the wedding, wherever their partner lives.
+    for (const { event, t } of this.events) {
+      if (event.type !== 'marriage') continue;
+      for (const id of event.people) {
+        if (this.births.has(id)) continue;
+        const partner = event.people.find((p) => p !== id);
+        const place = partner ? this.placeAt(partner, t) : null;
+        if (!place) continue;
+        this.births.set(id, t);
+        this.stops.set(id, [{ t, place, eventId: event.id }, ...(this.stops.get(id) ?? [])]);
+      }
+    }
+
     this.legs = this.buildLegs();
     this.start = this.events.length ? Math.floor(this.events[0].t) - 6 : end - 12;
     this.end = end;
   }
 
+  /** When someone was born, or joined at their wedding if we don't know their birth. */
   birthTime(id: string): number | undefined {
     return this.births.get(id);
   }

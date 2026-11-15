@@ -26,9 +26,16 @@ describe('data', () => {
     }
   });
 
-  it('gives everyone exactly one birth, before any of their other events', () => {
+  it('gives everyone one birth (or a wedding to join at), before any of their other events', () => {
     for (const p of people) {
       const births = events.filter((e) => e.type === 'birth' && e.people.includes(p.id));
+      if (births.length === 0 && p.kind === 'friend') {
+        // A spouse we know nothing else about joins at their wedding.
+        const first = events.find((e) => e.people.includes(p.id));
+        expect(first?.type, p.id).toBe('marriage');
+        expect(first?.people, p.id).toHaveLength(2);
+        continue;
+      }
       expect(births, p.id).toHaveLength(1);
       const born = monthIndex(births[0].date);
       for (const e of events.filter((e) => e.type !== 'birth' && e.people.includes(p.id))) {
@@ -46,7 +53,7 @@ describe('data', () => {
       if (p.kind !== 'child') continue;
       const mother = byId.get(p.motherId);
       expect(mother?.kind, p.id).toBe('friend');
-      const birth = (id: string) => monthIndex(events.find((e) => e.type === 'birth' && e.people.includes(id))!.date);
+      const birth = (id: string) => monthIndex(events.find((e) => e.people.includes(id))!.date);
       expect(birth(p.id) - birth(p.motherId)).toBeGreaterThan(16 * 12);
       // Children follow their mother, so they never appear in moves or marriages.
       expect(events.some((e) => e.type !== 'birth' && e.people.includes(p.id))).toBe(false);
