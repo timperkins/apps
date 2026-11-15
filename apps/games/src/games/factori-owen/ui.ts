@@ -265,13 +265,19 @@ const TREE: { nodes: Record<string, TreeNode>; width: number; height: number } =
       place();
     }
   }
-  const widest = Math.max(...rows.map((r) => r.length));
+  // long rows wrap onto extra lines so the tree stays narrow and scrolls down instead of sideways
+  const MAX = 5;
+  const lines: string[][] = [];
+  for (const row of rows) for (let i = 0; i < row.length; i += MAX) lines.push(row.slice(i, i + MAX));
+  const widest = Math.max(...lines.map((l) => l.length));
   const width = (widest - 1) * COL + NODE_W + PAD * 2;
   const nodes: Record<string, TreeNode> = {};
-  for (const t of TECHS) {
-    nodes[t.id] = { id: t.id, depth: depth[t.id], x: width / 2 + pos[t.id] * COL - NODE_W / 2, y: PAD + depth[t.id] * ROW };
-  }
-  return { nodes, width, height: PAD * 2 + (rows.length - 1) * ROW + NODE_H };
+  lines.forEach((line, li) =>
+    line.forEach((id, i) => {
+      nodes[id] = { id, depth: depth[id], x: width / 2 + (i - (line.length - 1) / 2) * COL - NODE_W / 2, y: PAD + li * ROW };
+    }),
+  );
+  return { nodes, width, height: PAD * 2 + (lines.length - 1) * ROW + NODE_H };
 })();
 
 function techState(g: Game, id: string) {
@@ -423,6 +429,8 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
     if (scrolls[i]) [x.scrollLeft, x.scrollTop] = scrolls[i];
   });
   el.scrollTop = keep;
+  el.hidden = !ui.panel;
+  el.className = `fo-panel p-${ui.panel}`;
   const wrap = el.querySelector<HTMLElement>('.fo-tree-wrap');
   const sel = el.querySelector<HTMLElement>('.fo-tnode.sel');
   if (wrap && sel && (!scrolls.length || ui.techJump)) {
@@ -435,8 +443,6 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
     }
   }
   ui.techJump = false;
-  el.hidden = !ui.panel;
-  el.className = `fo-panel p-${ui.panel}`;
 }
 
 /** Handles a click inside a panel. Returns true if the panel should re-render. */
