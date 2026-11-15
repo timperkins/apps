@@ -10,7 +10,19 @@ const ROAD_END = 615;
 /** Height of the castle floor. */
 export const FLOOR_H = 5;
 /** The Dark Beast's room is every tile within this many tiles (square) of the castle centre. */
-export const ROOM_R = 10;
+export const ROOM_R = 30;
+/** The whole castle (room, keep walls, courtyard, outer wall, gloom) fits in this square radius. */
+export const CASTLE_R = 54;
+/** Low walls in the Dark Beast's room to hide behind: [x, y, horizontal] from the centre, 5 tiles long. */
+export const BARRICADES: [number, number, boolean][] = [
+  [-22, -22, true], [22, -22, true], [-22, 22, true], [22, 22, true],
+  [-11, -22, false], [11, -22, false], [-11, 22, false], [11, 22, false],
+  [-22, -10, false], [22, -10, false], [-22, 10, false], [22, 10, false],
+  [-12, -12, true], [12, -12, true], [-12, 12, true], [12, 12, true],
+  [0, -16, true], [-16, 0, false], [16, 0, false], [0, 17, true],
+];
+const barricadeAt = (dx: number, dy: number) =>
+  BARRICADES.some(([bx, by, h]) => (h ? dy === by && dx >= bx - 2 && dx <= bx + 2 : dx === bx && dy >= by - 2 && dy <= by + 2));
 export const CHUNK = 32;
 
 export const enum G { Grass = 0, Forest, Sand, Water, Rock, Snow, Dirt, Path, Bridge, Gloom, Stone, Floor, Dark, Roof, Farm }
@@ -56,9 +68,9 @@ export const castleR = (x: number, y: number) => Math.max(Math.abs(Math.floor(x)
 export const inRoom = (x: number, y: number) => castleR(x, y) <= ROOM_R;
 export function isDoor(x: number, y: number) {
   const dx = x - CX, dy = y - CY;
-  return (dy === 11 || dy === 12) && Math.abs(dx) <= 1;
+  return (dy === ROOM_R + 1 || dy === ROOM_R + 2) && Math.abs(dx) <= 1;
 }
-const onPath = (dx: number, dy: number) => Math.abs(dx) <= 1 && dy > 34 && dy < ROAD_END;
+const onPath = (dx: number, dy: number) => Math.abs(dx) <= 1 && dy > CASTLE_R && dy < ROAD_END;
 const inCamp = (x: number, y: number) => Math.abs(x - 5000) <= 8 && Math.abs(y - 5600) <= 8;
 
 /** Two villages where you can get a job. */
@@ -74,6 +86,8 @@ export const FARM = { x0: 4, y0: 2, w: 7, h: 6 };
 /** Job board and bakery oven, relative to the village centre. */
 export const BOARD = { x: 0, y: -3 };
 export const OVEN = { x: -4, y: 2 };
+/** The grocery store's stall and the spot where shoppers stand. */
+export const STORE = { x: -8, y: -8 };
 
 export function villageAt(x: number, y: number): number {
   for (let i = 0; i < VILLAGES.length; i++) {
@@ -114,18 +128,20 @@ function villageDist(x: number, y: number) {
 
 function castleTile(dx: number, dy: number, r: number): number {
   const F = FLOOR_H;
-  if (r >= 30) {
-    if (dy >= 30 && Math.abs(dx) <= 2) return pack(F, G.Floor, 0); // the gate
-    if (r <= 32) return pack(F + (Math.abs(dx) >= 29 && Math.abs(dy) >= 29 ? 8 : 5), G.Stone, 0);
+  const W = CASTLE_R - 4; // outer wall
+  if (r >= W) {
+    if (dy >= W && Math.abs(dx) <= 2) return pack(F, G.Floor, 0); // the gate
+    if (r <= W + 2) return pack(F + (Math.abs(dx) >= W - 1 && Math.abs(dy) >= W - 1 ? 8 : 5), G.Stone, 0);
     return pack(F, G.Gloom, 0);
   }
-  if (r >= 11 && r <= 12) {
-    if (dy >= 11 && Math.abs(dx) <= 1) return pack(F, G.Floor, 0); // the keep's door
+  if (r === ROOM_R + 1 || r === ROOM_R + 2) {
+    if (dy > ROOM_R && Math.abs(dx) <= 1) return pack(F, G.Floor, 0); // the keep's door
     return pack(F + 4, G.Stone, 0);
   }
-  if (r <= ROOM_R) return pack(F, G.Dark, 0);
+  if (r <= ROOM_R) return pack(barricadeAt(dx, dy) ? F + 2 : F, barricadeAt(dx, dy) ? G.Stone : G.Dark, 0);
   // courtyard, with a few pillars
-  if (((Math.abs(dx) === 20 && Math.abs(dy) % 5 === 0) || (Math.abs(dy) === 20 && Math.abs(dx) % 5 === 0)) && !(dy > 0 && Math.abs(dx) <= 2))
+  const P = ROOM_R + 10;
+  if (((Math.abs(dx) === P && Math.abs(dy) % 5 === 0) || (Math.abs(dy) === P && Math.abs(dx) % 5 === 0)) && !(dy > 0 && Math.abs(dx) <= 2))
     return pack(F + 3, G.Stone, 0);
   return pack(F, G.Floor, 0);
 }
@@ -135,7 +151,7 @@ export function gen(x: number, y: number, seed: number): number {
   if (x < 1 || y < 1 || x >= SIZE - 1 || y >= SIZE - 1) return OOB;
   const dx = x - CX, dy = y - CY;
   const r = Math.max(Math.abs(dx), Math.abs(dy));
-  if (r <= 34) return castleTile(dx, dy, r);
+  if (r <= CASTLE_R) return castleTile(dx, dy, r);
   const path = onPath(dx, dy);
   const vd = villageDist(x, y);
   const ld = lairDist(x, y);
@@ -153,7 +169,7 @@ export function gen(x: number, y: number, seed: number): number {
   if (m > 0.7) lift += 3;
   if (lift) {
     let k = 1;
-    if (dy > 34 && dy < ROAD_END) k = Math.min(k, Math.max(0, (Math.abs(dx) - 1) / 7));
+    if (dy > CASTLE_R && dy < ROAD_END) k = Math.min(k, Math.max(0, (Math.abs(dx) - 1) / 7));
     const cd = Math.max(Math.abs(x - 5000), Math.abs(y - 5600));
     k = Math.min(k, Math.max(0, (cd - 8) / 12));
     k = Math.min(k, Math.max(0, (vd - VILLAGE_R) / 12));
@@ -175,7 +191,8 @@ export function gen(x: number, y: number, seed: number): number {
     if (HOUSES.some(([hx, hy]) => lx >= hx && lx < hx + 4 && ly >= hy && ly < hy + 4)) return pack(h + 3, G.Roof, 0);
     if (lx >= FARM.x0 && lx < FARM.x0 + FARM.w && ly >= FARM.y0 && ly < FARM.y0 + FARM.h) return pack(h, G.Farm, 0);
     if (Math.max(Math.abs(lx), Math.abs(ly)) <= 5 || lx === 0 || ly === 0) return pack(h, G.Path, 0);
-    return pack(h, G.Grass, hash(x, y, seed + 3) < 0.04 ? T.Bush : 0);
+    const nearStore = Math.max(Math.abs(lx - STORE.x), Math.abs(ly - STORE.y)) <= 3;
+    return pack(h, G.Grass, hash(x, y, seed + 3) < 0.04 && !nearStore ? T.Bush : 0);
   }
   let g: number;
   if (path) g = G.Path;

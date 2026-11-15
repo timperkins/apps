@@ -1,9 +1,9 @@
 // Isometric drawing for Survivle: terrain with cliffs, trees, the hero, Murks, chests, traders,
 // campfires, the castle, the Dark Beast, the spreading darkness and the HUD.
-import { CROP_TIME, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
+import { CROP_TIME, GOODS, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
 import type { Game, Particle } from './game';
 import { MINI_KINDS, type Mini } from './minis';
-import { BOARD, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, WARPS, gen, hash, lairPad, tG, tH, tT } from './world';
+import { BOARD, STORE, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, WARPS, gen, hash, lairPad, tG, tH, tT } from './world';
 
 export const TW = 48;
 export const TH = 24;
@@ -788,12 +788,85 @@ export class Renderer {
         ctx.fill();
         ctx.restore();
       });
+      // the grocery store stall
+      const sx0 = v.x + STORE.x + 0.5, sy0 = v.y + STORE.y + 0.5;
+      const sh = game.world.heightAt(sx0, sy0);
+      const mine = game.job === 'grocer' && game.jobVillage === vi;
+      add(sx0, sy0, () => {
+        ctx.save();
+        ctx.translate(this.sx(cam, sx0, sy0), this.sy(cam, sx0, sy0, sh));
+        // counter and shelves
+        ctx.fillStyle = '#7a4f2a';
+        ctx.fillRect(-34, -22, 68, 22);
+        ctx.fillStyle = '#9b6b3c';
+        ctx.fillRect(-34, -26, 68, 6);
+        ctx.fillRect(-34, -14, 68, 3);
+        // goods in four bins
+        GOODS.forEach((gd, i) => {
+          const n = mine ? Math.min(6, game.shelves[gd.id]) : 2 + ((i + vi) % 3);
+          ctx.fillStyle = gd.color;
+          for (let k = 0; k < n; k++) {
+            ctx.beginPath();
+            ctx.arc(-26 + i * 17 + (k % 3) * 4, -29 - Math.floor(k / 3) * 4, 3, 0, 7);
+            ctx.fill();
+          }
+        });
+        // posts and a striped awning
+        ctx.fillStyle = '#5a3a1e';
+        ctx.fillRect(-36, -62, 4, 40);
+        ctx.fillRect(32, -62, 4, 40);
+        for (let i = 0; i < 6; i++) {
+          ctx.fillStyle = i % 2 ? '#f4efe6' : '#3e9b3a';
+          ctx.beginPath();
+          ctx.moveTo(-40 + i * 13.3, -64);
+          ctx.lineTo(-40 + (i + 1) * 13.3, -64);
+          ctx.lineTo(-40 + (i + 1) * 13.3, -54);
+          ctx.quadraticCurveTo(-40 + (i + 0.5) * 13.3, -48, -40 + i * 13.3, -54);
+          ctx.fill();
+        }
+        ctx.font = 'bold 11px ui-rounded, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        const label = mine ? `Your store · ${GOODS.reduce((n, gd) => n + game.shelves[gd.id], 0)} on the shelves` : 'Grocery store';
+        ctx.fillStyle = 'rgba(0,0,0,.5)';
+        ctx.fillText(label, 1, -69);
+        ctx.fillStyle = '#d9ffc4';
+        ctx.fillText(label, 0, -70);
+        ctx.restore();
+      });
       const looks: Outfit[] = [
         { id: '', name: '', shirt: '#d98a3a', pants: '#5a4a3a', hood: '#7a3a1a', price: 0 },
         { id: '', name: '', shirt: '#4aa0b8', pants: '#3a3a4a', hood: '#20506a', price: 0 },
         { id: '', name: '', shirt: '#e0d0b0', pants: '#6a5a3a', hood: '#a07040', price: 0 },
         { id: '', name: '', shirt: '#b04a6a', pants: '#3a2a3a', hood: '#602040', price: 0 },
       ];
+      if (mine) {
+        for (const sp of game.shoppers) {
+          const hz = game.world.heightAt(sp.x, sp.y);
+          add(sp.x, sp.y, () => {
+            ctx.save();
+            ctx.translate(this.sx(cam, sp.x, sp.y), this.sy(cam, sp.x, sp.y, hz));
+            ctx.fillStyle = 'rgba(0,0,0,.22)';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 9, 4, 0, 0, 7);
+            ctx.fill();
+            const face = sp.phase === 'shop' ? -Math.PI * 0.75 : Math.atan2(sp.ty - sp.y, sp.tx - sp.x);
+            drawHero(ctx, looks[sp.look], face, sp.phase === 'shop' ? 0 : t, { scale: 0.9 });
+            if (sp.got) {
+              const gd = GOODS.find((q) => q.id === sp.got)!;
+              ctx.fillStyle = gd.color;
+              ctx.beginPath();
+              ctx.arc(8, -22, 4, 0, 7);
+              ctx.fill();
+            }
+            if (sp.phase === 'shop') {
+              ctx.font = '14px system-ui';
+              ctx.textAlign = 'center';
+              ctx.fillText('🛒', 0, -50);
+            }
+            ctx.restore();
+          });
+        }
+      }
       looks.forEach((lk, k) => {
         const a = t * 0.25 + k * 1.7 + vi;
         const r = 6 + (k % 2) * 3;
@@ -998,23 +1071,57 @@ export class Renderer {
             ctx.restore();
           });
         }
+        // the warning line before a dash
+        const D = b.dash;
+        if (D && D.t < D.warn) {
+          add(D.fx, D.fy, () => {
+            const k = D.t / D.warn;
+            const len = Math.hypot(D.tx - D.fx, D.ty - D.fy) || 1;
+            const nx = -(D.ty - D.fy) / len * 1.3, ny = (D.tx - D.fx) / len * 1.3;
+            ctx.save();
+            ctx.fillStyle = `rgba(255,60,140,${0.18 + 0.25 * k + 0.1 * Math.sin(t * 20)})`;
+            ctx.beginPath();
+            ctx.moveTo(this.sx(cam, D.fx + nx, D.fy + ny), this.sy(cam, D.fx + nx, D.fy + ny, FLOOR_H));
+            ctx.lineTo(this.sx(cam, D.tx + nx, D.ty + ny), this.sy(cam, D.tx + nx, D.ty + ny, FLOOR_H));
+            ctx.lineTo(this.sx(cam, D.tx - nx, D.ty - ny), this.sy(cam, D.tx - nx, D.ty - ny, FLOOR_H));
+            ctx.lineTo(this.sx(cam, D.fx - nx, D.fy - ny), this.sy(cam, D.fx - nx, D.fy - ny, FLOOR_H));
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          });
+        }
+        const small = b.split > 0 ? 0.72 : 1;
         add(b.x, b.y, () => {
           const X = this.sx(cam, b.x, b.y), Y = this.sy(cam, b.x, b.y, bz);
           const fy = this.sy(cam, b.x, b.y, FLOOR_H);
           ctx.save();
           ctx.fillStyle = 'rgba(0,0,0,.35)';
           ctx.beginPath();
-          ctx.ellipse(X, fy, 34 * form, 13 * form, 0, 0, 7);
+          ctx.ellipse(X, fy, 34 * form * small, 13 * form * small, 0, 0, 7);
           ctx.fill();
           ctx.translate(X, Y);
           if (b.dead) {
             ctx.globalAlpha = Math.max(0, 1 - b.deadT / 2);
             ctx.scale(1 + b.deadT, 1 + b.deadT);
           }
-          const glow = b.state === 'wind' ? 1 - b.t / 0.6 : b.state === 'heavy' ? 1 - b.t / 2.4 : 0;
-          drawBeast(ctx, 38 * form, t, glow, b.hurtT > 0);
+          const glow = b.state === 'wind' ? 1 - b.t / 0.6 : b.state === 'heavy' ? 1 - b.t / 2.4 : b.state === 'nova' ? 1 - b.t / 1.1 : b.state === 'dash' ? 1 : 0;
+          drawBeast(ctx, 38 * form * small, t, glow, b.hurtT > 0);
           ctx.restore();
         });
+        for (const c of b.clones) {
+          add(c.x, c.y, () => {
+            const X = this.sx(cam, c.x, c.y), Y = this.sy(cam, c.x, c.y, FLOOR_H + 1.4 + Math.sin(t * 2.3 + c.x) * 0.25);
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,0,.3)';
+            ctx.beginPath();
+            ctx.ellipse(X, this.sy(cam, c.x, c.y, FLOOR_H), 24, 9, 0, 0, 7);
+            ctx.fill();
+            ctx.translate(X, Y);
+            ctx.globalAlpha = 0.92;
+            drawBeast(ctx, 27, t + c.x, c.wind > 0 ? 1 - c.wind / 0.6 : 0, b.hurtT > 0);
+            ctx.restore();
+          });
+        }
         for (const o of b.orbs) {
           add(o.x, o.y, () => {
             const X = this.sx(cam, o.x, o.y), Y = this.sy(cam, o.x, o.y, FLOOR_H + 1);
@@ -1408,6 +1515,12 @@ export class Renderer {
     const rowsY = 18 + Math.floor((slots - 1) / 10) * 28;
     const job = jobById(game.job);
     this.shadowText(job ? `${p.name} · ${job.icon} ${job.name}` : p.name, 14, rowsY + 36, '#fff');
+    if (game.job === 'grocer') {
+      ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
+      const carry = GOODS.map((gd) => `${gd.icon}${gd.id === 'wood' ? game.wood : game.goods[gd.id]}`).join(' ');
+      const on = GOODS.reduce((n, gd) => n + game.shelves[gd.id], 0);
+      this.shadowText(`Carrying ${carry} · ${on} on the shelves`, 14, rowsY + 72, '#d9ffc4');
+    }
     if (game.coopLabel || game.others.length) {
       ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
       const names = game.others.map((o) => o.name).join(', ');
@@ -1492,7 +1605,7 @@ export class Renderer {
       ctx.fillStyle = gr;
       ctx.fillRect(W / 2 - bw / 2, H - 179, (bw * b.hp) / 500, 12);
       ctx.font = '900 13px ui-rounded, system-ui, sans-serif';
-      this.shadowText(`The Dark Beast  ${b.hp} / 500`, W / 2, H - 188, '#f0d8ff');
+      this.shadowText(b.split > 0 ? `The Dark Beast ×3  ${b.hp} / 500 · joins back in ${Math.ceil(b.split)}s` : `The Dark Beast  ${b.hp} / 500`, W / 2, H - 188, '#f0d8ff');
     }
 
     const mb = game.minis.current();

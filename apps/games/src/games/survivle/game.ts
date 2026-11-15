@@ -2,15 +2,15 @@
 // campfires, traders and the Dark Beast. No drawing here.
 import {
   ACORN_HEAL, BOSS_HP, CAMPFIRE_WOOD, CHALLENGES, CROP_TIME, ENEMY_KINDS, FOOD_HEAL, MAX_BOW, MAX_HP, MAX_HP_CAP, MAX_SWORD,
-  MAX_UPGRADE, TIME_LIMIT, bowName, jobById, rollEnemyKind, swordName,
+  GOODS, type GoodId, MAX_UPGRADE, TIME_LIMIT, bowName, jobById, rollEnemyKind, swordName,
 } from './data';
 import { sfx } from './audio';
 import { MINI_KINDS, Minis } from './minis';
 
 const MINI_NAMES = MINI_KINDS.map((k) => k.name);
 import {
-  BOARD, CX, CY, FLOOR_H, WARPS, lairPad, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
-  blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
+  BOARD, STORE, CX, CY, FLOOR_H, WARPS, lairPad, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
+  CASTLE_R, blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
 } from './world';
 
 export const GRAVITY = 32;
@@ -20,7 +20,7 @@ const CLIMB_SPEED = 1.6; // levels per second
 const CLIMB_DRAIN = 0.12; // 12% of the stamina ring per second
 const SAFE_FALL = 4; // levels you can drop without getting hurt
 const AGGRO = 30; // tiles
-const MAX_CHESTS = 10;
+const MAX_CHESTS = 25;
 
 export interface Input {
   up: boolean;
@@ -125,7 +125,7 @@ export interface Boss {
   y: number;
   hp: number;
   active: boolean;
-  state: 'idle' | 'wind' | 'heavy' | 'recover';
+  state: 'idle' | 'wind' | 'heavy' | 'recover' | 'nova' | 'dash';
   t: number;
   next: number;
   hurtT: number;
@@ -133,6 +133,21 @@ export interface Boss {
   orbs: { x: number; y: number; dx: number; dy: number; life: number }[];
   dead: boolean;
   deadT: number;
+  /** While split, two copies fight next to it (all three share one health bar). */
+  clones: Clone[];
+  /** Seconds left split into three. */
+  split: number;
+  splits: number;
+  /** A charge straight across the room: a warning line first, then a rush. */
+  dash: { fx: number; fy: number; tx: number; ty: number; t: number; warn: number; hit: string[] } | null;
+}
+
+export interface Clone {
+  x: number;
+  y: number;
+  cd: number;
+  hurtT: number;
+  wind: number;
 }
 
 export interface SaveData {
@@ -169,6 +184,20 @@ export interface SaveData {
   farm?: [number, number][];
   letterTo?: number | null;
   minis?: number[];
+  goods?: Record<string, number>;
+  shelves?: Record<string, number>;
+}
+
+/** A villager shopping at your grocery store. */
+export interface Shopper {
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  phase: 'in' | 'shop' | 'out';
+  t: number;
+  look: number;
+  got: GoodId | null;
 }
 
 /** Another hero in a co-op game. */
@@ -256,6 +285,11 @@ export class Game {
   /** Planted farm tiles: tile key -> play time when planted. */
   farm = new Map<number, number>();
   letterTo: number | null = null;
+  /** Grocery store: what you are carrying to sell, and what is on the shelves. */
+  goods: Record<GoodId, number> = { veg: 0, ore: 0, wood: 0, meat: 0 };
+  shelves: Record<GoodId, number> = { veg: 0, ore: 0, wood: 0, meat: 0 };
+  shoppers: Shopper[] = [];
+  private shopperCd = 3;
   work: Work | null = null;
   onJobs: ((village: number) => void) | null = null;
   /** Narrator: say a line (key keeps it from repeating too often). */
@@ -333,13 +367,20 @@ export class Game {
     return best;
   }
 
+  /** Where the Dark Beast is: one body, or three while it is split. */
+  beastBodies(): { x: number; y: number; r: number }[] {
+    const b = this.boss;
+    if (!b.active || b.dead) return [];
+    return [{ x: b.x, y: b.y, r: b.split > 0 ? 0.75 : 1 }, ...b.clones.map((c) => ({ x: c.x, y: c.y, r: 0.75 }))];
+  }
+
   hurtTarget(id: string, q: number, fx?: number, fy?: number) {
     if (id === 'me') this.hurtPlayer(q, fx, fy);
     else this.net?.hurtRemote(id, q, fx, fy);
   }
 
   private freshBoss(): Boss {
-    return { x: CX + 0.5, y: CY + 0.5, hp: BOSS_HP, active: false, state: 'idle', t: 0, next: 2, hurtT: 0, rings: [], orbs: [], dead: false, deadT: 0 };
+    return { x: CX + 0.5, y: CY + 0.5, hp: BOSS_HP, active: false, state: 'idle', t: 0, next: 2, hurtT: 0, rings: [], orbs: [], dead: false, deadT: 0, clones: [], split: 0, splits: 0, dash: null };
   }
 
   get swordDmg() {
@@ -441,16 +482,17 @@ export class Game {
       }
     }
     const b = this.boss;
-    if (b.active && !b.dead) {
-      const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy);
-      if (d < 3.1 && angDiff(ang(dx, dy), p.face) < 1.3) {
-        if (this.role === 'guest') {
-          this.net?.hitBoss(dmg);
-          b.hurtT = 0.2;
-          sfx.hit();
-        } else this.hurtBoss(dmg);
-        hit = true;
-      }
+    const body = this.beastBodies().find((q) => {
+      const dx = q.x - p.x, dy = q.y - p.y;
+      return Math.hypot(dx, dy) < 2.3 + q.r * 0.8 && angDiff(ang(dx, dy), p.face) < 1.3;
+    });
+    if (body) {
+      if (this.role === 'guest') {
+        this.net?.hitBoss(dmg);
+        b.hurtT = 0.2;
+        sfx.hit();
+      } else this.hurtBoss(dmg);
+      hit = true;
     }
     if (this.minis.swordHit(this, dmg, (dx, dy) => angDiff(ang(dx, dy), p.face) < 1.3)) hit = true;
     if (hit) return;
@@ -562,7 +604,11 @@ export class Game {
         });
         return;
       }
-      if (this.job === 'farmer') {
+      if (this.job === 'grocer' && vi === this.jobVillage && this.nearTile(v.x + STORE.x, v.y + STORE.y, 2.6)) {
+        this.stockShelves();
+        return;
+      }
+      if (this.job === 'farmer' || this.job === 'grocer') {
         const tx = Math.floor(p.x), ty = Math.floor(p.y);
         if (tG(this.world.tile(tx, ty)) === G.Farm) {
           const key = tx * SIZE + ty;
@@ -573,9 +619,15 @@ export class Game {
             this.float(p.x, p.y, p.z, 'Planted!', '#9be37a');
           } else if (this.elapsed - planted >= CROP_TIME) {
             this.farm.delete(key);
-            this.coins += 3;
-            sfx.coin();
-            this.float(p.x, p.y, p.z, '+3 coins', '#ffd34d');
+            if (this.job === 'grocer') {
+              this.goods.veg += 2;
+              sfx.eat();
+              this.float(p.x, p.y, p.z, '+2 veggies for the store', '#9be37a');
+            } else {
+              this.coins += 3;
+              sfx.coin();
+              this.float(p.x, p.y, p.z, '+3 coins', '#ffd34d');
+            }
           } else this.toast(`Still growing… ${Math.ceil(CROP_TIME - (this.elapsed - planted))}s`);
           return;
         }
@@ -599,11 +651,17 @@ export class Game {
             return;
           }
     }
-    if (this.job === 'miner') {
+    if (this.job === 'miner' || this.job === 'grocer') {
       for (let j = -1; j <= 1; j++)
         for (let i = -1; i <= 1; i++)
           if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === G.Rock) {
             this.startWork('Mining', 2.5, () => {
+              if (this.job === 'grocer') {
+                this.goods.ore++;
+                sfx.chop();
+                this.toast('Mined some ore for the store');
+                return;
+              }
               const gem = Math.random() < 0.15;
               this.coins += gem ? 20 : 3;
               sfx.coin();
@@ -645,6 +703,85 @@ export class Game {
     this.toast(`You're a ${j?.name} now!`);
     if (id === 'courier') this.say('courier', `Take this letter to ${VILLAGES[1 - village].name}. Follow the yellow arrow!`, 5);
     else this.say('job', `Good luck with your new job!`, 5);
+  }
+
+  addMeat(x: number, y: number, z: number) {
+    this.goods.meat++;
+    this.float(x, y, z + 1, '+1 meat', '#ff9a8a');
+  }
+
+  /** Put everything you are carrying on the store shelves (wood too). */
+  stockShelves() {
+    const carried = this.goods.veg + this.goods.ore + this.goods.meat + this.wood;
+    if (!carried) {
+      const on = GOODS.reduce((n, g) => n + this.shelves[g.id], 0);
+      this.toast(on ? `${on} things on the shelves. Go get more to sell!` : 'Nothing to stock. Farm, mine, chop and beat Murks for meat!');
+      return;
+    }
+    this.goods.wood += this.wood;
+    this.wood = 0;
+    for (const g of GOODS) {
+      this.shelves[g.id] += this.goods[g.id];
+      this.goods[g.id] = 0;
+    }
+    sfx.chest();
+    this.toast(`Stocked ${carried} thing${carried > 1 ? 's' : ''}! Villagers will come and buy them.`);
+    this.shopperCd = Math.min(this.shopperCd, 1.5);
+  }
+
+  /** Villagers walk to your store, take something off a shelf, pay and walk home. */
+  private updateStore(dt: number) {
+    if (this.job !== 'grocer') {
+      this.shoppers = [];
+      return;
+    }
+    const v = VILLAGES[this.jobVillage];
+    const sx = v.x + STORE.x + 0.5, sy = v.y + STORE.y + 1.8;
+    const stocked = GOODS.filter((g) => this.shelves[g.id] > 0);
+    this.shopperCd -= dt;
+    if (stocked.length && this.shopperCd <= 0 && this.shoppers.length < 3 && Math.hypot(this.p.x - v.x, this.p.y - v.y) < 120) {
+      this.shopperCd = 5 + Math.random() * 4;
+      const a = Math.random() * Math.PI * 2;
+      const fx = v.x + 0.5 + Math.cos(a) * 9, fy = v.y + 0.5 + Math.sin(a) * 9;
+      this.shoppers.push({ x: fx, y: fy, tx: sx + (Math.random() - 0.5) * 2, ty: sy + Math.random() * 0.6, phase: 'in', t: 0, look: Math.floor(Math.random() * 4), got: null });
+    }
+    for (let i = this.shoppers.length - 1; i >= 0; i--) {
+      const s = this.shoppers[i];
+      s.t += dt;
+      if (s.phase === 'shop') {
+        if (s.t > 1.6) {
+          const left = GOODS.filter((g) => this.shelves[g.id] > 0);
+          if (left.length) {
+            const g = left[Math.floor(Math.random() * left.length)];
+            this.shelves[g.id]--;
+            s.got = g.id;
+            this.coins += g.price;
+            const near = Math.hypot(this.p.x - s.x, this.p.y - s.y) < 30;
+            if (near) {
+              sfx.coin();
+              this.float(s.x, s.y, this.world.heightAt(s.x, s.y) + 1.6, `+${g.price} coins`, '#ffd34d');
+            } else this.toast(`A villager bought ${g.name} at your store: +${g.price} coins`);
+          }
+          s.phase = 'out';
+          const a = Math.random() * Math.PI * 2;
+          s.tx = v.x + 0.5 + Math.cos(a) * 12;
+          s.ty = v.y + 0.5 + Math.sin(a) * 12;
+          s.t = 0;
+        }
+        continue;
+      }
+      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
+      if (d < 0.2) {
+        if (s.phase === 'in') {
+          s.phase = 'shop';
+          s.t = 0;
+        } else this.shoppers.splice(i, 1);
+        continue;
+      }
+      const sp = Math.min(d, 2.2 * dt);
+      s.x += (dx / d) * sp;
+      s.y += (dy / d) * sp;
+    }
   }
 
   quitJob() {
@@ -724,16 +861,17 @@ export class Game {
       const v = VILLAGES[vi];
       if (this.nearTile(v.x + BOARD.x, v.y + BOARD.y, 2.2)) return 'Job board';
       if (this.job === 'baker' && this.nearTile(v.x + OVEN.x, v.y + OVEN.y, 2.2)) return 'Bake bread';
-      if (this.job === 'farmer' && tG(this.world.tile(Math.floor(p.x), Math.floor(p.y))) === G.Farm) {
+      if (this.job === 'grocer' && vi === this.jobVillage && this.nearTile(v.x + STORE.x, v.y + STORE.y, 2.6)) return 'Stock the shelves';
+      if ((this.job === 'farmer' || this.job === 'grocer') && tG(this.world.tile(Math.floor(p.x), Math.floor(p.y))) === G.Farm) {
         const pl = this.farm.get(Math.floor(p.x) * SIZE + Math.floor(p.y));
         return pl === undefined ? 'Plant' : this.elapsed - pl >= CROP_TIME ? 'Harvest' : null;
       }
     }
-    if (this.job === 'fisher' || this.job === 'miner') {
+    if (this.job === 'fisher' || this.job === 'miner' || this.job === 'grocer') {
       const want = this.job === 'fisher' ? G.Water : G.Rock;
       for (let j = -1; j <= 1; j++)
         for (let i = -1; i <= 1; i++)
-          if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === want && !p.inWater) return this.job === 'fisher' ? 'Fish' : 'Mine';
+          if (tG(this.world.tile(Math.floor(p.x) + i, Math.floor(p.y) + j)) === want && !p.inWater) return this.job === 'fisher' ? 'Fish' : this.job === 'grocer' ? 'Mine ore' : 'Mine';
     }
     for (const t of this.traders()) if (Math.hypot(t.x + 0.5 - p.x, t.y + 0.5 - p.y) < 2.2) return 'Trade';
     return null;
@@ -741,7 +879,7 @@ export class Game {
 
   private openChest(c: Chest) {
     sfx.chest();
-    this.chestCd = 15;
+    this.chestCd = 5;
     const h = this.world.heightAt(c.x, c.y);
     this.puff(c.x + 0.5, c.y + 0.5, h, '#ffe27a', 18, 2.5);
     const bestS = Math.max(...this.swords), bestB = Math.max(...this.bows);
@@ -848,6 +986,7 @@ export class Game {
       this.coins += k.coins;
       this.float(e.x, e.y, e.z + 0.5, `+${k.coins} coin${k.coins > 1 ? 's' : ''}`, '#ffd34d');
       this.arrows += bonusArrows;
+      if (this.job === 'grocer') this.addMeat(e.x, e.y, e.z);
       if (this.job === 'guard') {
         this.coins += 3;
         this.float(e.x, e.y, e.z + 1, '+3 pay', '#ffd34d');
@@ -878,6 +1017,9 @@ export class Game {
       b.deadT = 0;
       b.rings = [];
       b.orbs = [];
+      b.clones = [];
+      b.split = 0;
+      b.dash = null;
       this.won = true;
       this.world.sealed = false;
       sfx.win();
@@ -915,6 +1057,7 @@ export class Game {
       this.updatePlayer(dt);
     }
     this.updateWork(dt);
+    this.updateStore(dt);
     this.updateTrader(dt);
     if (this.role === 'guest') {
       this.guestTick(dt);
@@ -998,7 +1141,7 @@ export class Game {
       t.y = p.y + Math.sin(a) * 3;
       if (inRoom(t.x, t.y)) {
         t.x = CX + 0.5;
-        t.y = CY + 15.5;
+        t.y = CY + ROOM_R + 5.5;
       }
     } else if (d > 3 && !inRoom(p.x, p.y)) {
       const sp = Math.min(d - 3, (d > 8 ? 6 : 4.4) * dt);
@@ -1271,13 +1414,13 @@ export class Game {
     }
     // spawn around a hero, but never in the castle
     this.spawnCd -= dt;
-    if (!fighting && !this.challenge && this.spawnCd <= 0 && this.enemies.length < 8 + this.others.length * 4 && castleR(p.x, p.y) > 60 && villageAt(p.x, p.y) < 0) {
+    if (!fighting && !this.challenge && this.spawnCd <= 0 && this.enemies.length < 8 + this.others.length * 4 && castleR(p.x, p.y) > CASTLE_R + 26 && villageAt(p.x, p.y) < 0) {
       this.spawnCd = 2.5;
       const a = Math.random() * Math.PI * 2;
       const d = 34 + Math.random() * 14;
       const ex = p.x + Math.cos(a) * d, ey = p.y + Math.sin(a) * d;
       const v = this.world.tile(Math.floor(ex), Math.floor(ey));
-      if (tG(v) !== G.Water && !blocksMove(v) && castleR(ex, ey) > 40 && villageAt(ex, ey) < 0) {
+      if (tG(v) !== G.Water && !blocksMove(v) && castleR(ex, ey) > CASTLE_R + 6 && villageAt(ex, ey) < 0) {
         const kind = rollEnemyKind(Math.random());
         this.enemies.push({
           id: this.nextId++, kind, x: Math.floor(ex) + 0.5, y: Math.floor(ey) + 0.5, z: tH(v), hp: ENEMY_KINDS[kind].hp,
@@ -1336,7 +1479,7 @@ export class Game {
   private moveEnemy(e: Enemy, mx: number, my: number) {
     const ok = (nx: number, ny: number) => {
       const v = this.world.tile(Math.floor(nx), Math.floor(ny));
-      if (blocksMove(v) || tG(v) === G.Water || castleR(nx, ny) <= 33 || villageAt(nx, ny) >= 0) return false;
+      if (blocksMove(v) || tG(v) === G.Water || castleR(nx, ny) <= CASTLE_R - 1 || villageAt(nx, ny) >= 0) return false;
       const th = tH(v);
       return th - e.z <= 1.05 && e.z - th <= 3;
     };
@@ -1368,7 +1511,7 @@ export class Game {
         }
       }
       const b = this.boss;
-      if (!dead && b.active && !b.dead && Math.hypot(b.x - a.x, b.y - a.y) < 1.4) {
+      if (!dead && b.active && !b.dead && this.beastBodies().some((q) => Math.hypot(q.x - a.x, q.y - a.y) < 1.4 * q.r)) {
         this.hurtBoss(a.dmg);
         dead = true;
       }
@@ -1413,8 +1556,36 @@ export class Game {
     b.t -= dt;
     if (b.state === 'idle') {
       b.next -= dt;
-      if (b.next <= 0) {
-        if (Math.random() < 0.3) {
+      const r = Math.random();
+      if (b.next <= 0 && b.split <= 0 && ((b.splits === 0 && b.hp <= 350) || (b.splits === 1 && b.hp <= 150))) {
+        // it splits into three for 40 seconds
+        b.splits++;
+        b.split = 40;
+        b.clones = [-1, 1].map((s) => ({ x: b.x + s * 3, y: b.y + s * 1.5, cd: 1.5 + Math.random(), hurtT: 0, wind: 0 }));
+        for (const c of b.clones) this.puff(c.x, c.y, FLOOR_H + 1.6, '#9b3ad6', 24, 4);
+        sfx.beastBlast();
+        this.shake = 14;
+        this.toast('The Dark Beast splits into three!');
+        this.say('split', 'Whoa, there are three of them now! Hit any of them. They join back together in 40 seconds.', 5);
+        b.next = 2;
+      } else if (b.next <= 0 && r < 0.18) {
+        // gloom nova: a ring of orbs in every direction. Hide behind a barricade!
+        b.state = 'nova';
+        b.t = 1.1;
+        b.rings.push({ x: b.x, y: b.y, r: 3, t: 0, max: 1.1, heavy: true });
+        sfx.beastWind();
+        this.say('nova', 'It is about to shoot everywhere! Hide behind a barricade!', 12);
+      } else if (b.next <= 0 && r < 0.38) {
+        // shadow dash: a warning line, then it rushes straight across the room
+        const len = Math.min(16, d + 5), lim = ROOM_R - 1.4;
+        const tx = Math.min(CX + 0.5 + lim, Math.max(CX + 0.5 - lim, b.x + (dx / d) * len));
+        const ty = Math.min(CY + 0.5 + lim, Math.max(CY + 0.5 - lim, b.y + (dy / d) * len));
+        b.state = 'dash';
+        b.dash = { fx: b.x, fy: b.y, tx, ty, t: 0, warn: 0.85, hit: [] };
+        sfx.orb();
+        this.say('dash', 'It is going to charge! Get out of the line!', 12);
+      } else if (b.next <= 0) {
+        if (r < 0.6) {
           b.state = 'heavy';
           b.t = 2.4; // 4× as long as a normal attack
           b.rings.push({ x: b.x, y: b.y, r: 5, t: 0, max: 2.4, heavy: true });
@@ -1441,6 +1612,39 @@ export class Game {
       }
       b.state = 'recover';
       b.t = 0.7;
+    } else if (b.state === 'nova' && b.t <= 0) {
+      const n = b.hp < 250 ? 20 : 14;
+      const a0 = Math.random() * Math.PI;
+      for (let i = 0; i < n; i++) {
+        const a = a0 + (i / n) * Math.PI * 2;
+        b.orbs.push({ x: b.x, y: b.y, dx: Math.cos(a), dy: Math.sin(a), life: 4.5 });
+      }
+      sfx.beastBlast();
+      this.shake = 10;
+      b.state = 'recover';
+      b.t = 1;
+    } else if (b.state === 'dash' && b.dash) {
+      const D = b.dash;
+      D.t += dt;
+      if (D.t > D.warn) {
+        const f = Math.min(1, (D.t - D.warn) / 0.5);
+        b.x = D.fx + (D.tx - D.fx) * f;
+        b.y = D.fy + (D.ty - D.fy) * f;
+        if (Math.random() < 0.6) this.gas(b.x, b.y, FLOOR_H + 1.2);
+        for (const t of this.targets()) {
+          if (!D.hit.includes(t.id) && Math.hypot(t.x - b.x, t.y - b.y) < 1.6) {
+            D.hit.push(t.id);
+            this.hurtTarget(t.id, 4, b.x, b.y);
+          }
+        }
+        if (f >= 1) {
+          b.dash = null;
+          b.state = 'recover';
+          b.t = 0.9;
+          sfx.slam();
+          this.shake = 8;
+        }
+      }
     } else if (b.state === 'heavy' && b.t <= 0) {
       sfx.beastBlast();
       this.shake = 18;
@@ -1463,11 +1667,74 @@ export class Game {
           o.life = 0;
         }
       }
+      // barricades stop orbs
+      if (tH(this.world.tile(Math.floor(o.x), Math.floor(o.y))) > FLOOR_H + 0.5) {
+        o.life = 0;
+        this.puff(o.x, o.y, FLOOR_H + 1, '#9b3ad6', 5, 1.5);
+      }
       if (o.life <= 0 || !inRoom(o.x, o.y)) b.orbs.splice(i, 1);
+    }
+    this.updateClones(dt);
+  }
+
+  /** The two extra copies while the Dark Beast is split. */
+  private updateClones(dt: number) {
+    const b = this.boss;
+    if (b.split <= 0) return;
+    b.split -= dt;
+    if (b.split <= 0) {
+      for (const c of b.clones) this.puff(c.x, c.y, FLOOR_H + 1.6, '#9b3ad6', 20, 3);
+      b.clones = [];
+      this.toast('The Dark Beast pulls itself back together');
+      sfx.beastWind();
+      return;
+    }
+    const lim = ROOM_R - 1.4;
+    for (const c of b.clones) {
+      c.hurtT = Math.max(0, c.hurtT - dt);
+      const tg = this.nearest(c.x, c.y);
+      if (!tg) continue;
+      const dx = tg.x - c.x, dy = tg.y - c.y, d = Math.hypot(dx, dy) || 1;
+      // copies keep a little apart from each other so they surround you
+      let px = 0, py = 0;
+      for (const o of [b, ...b.clones]) {
+        if (o === c) continue;
+        const ox = c.x - o.x, oy = c.y - o.y, od = Math.hypot(ox, oy);
+        if (od < 4 && od > 0.01) { px += (ox / od) * (4 - od); py += (oy / od) * (4 - od); }
+      }
+      const want = d - 2.4;
+      if (Math.abs(want) > 0.2) {
+        c.x += (dx / d) * Math.sign(want) * Math.min(2.1 * dt, Math.abs(want));
+        c.y += (dy / d) * Math.sign(want) * Math.min(2.1 * dt, Math.abs(want));
+      }
+      c.x += px * dt;
+      c.y += py * dt;
+      c.x = Math.min(CX + 0.5 + lim, Math.max(CX + 0.5 - lim, c.x));
+      c.y = Math.min(CY + 0.5 + lim, Math.max(CY + 0.5 - lim, c.y));
+      if (c.wind > 0) {
+        c.wind -= dt;
+        if (c.wind <= 0) {
+          if (d < 3) {
+            b.rings.push({ x: c.x, y: c.y, r: 2.2, t: 0, max: 0.35, heavy: false });
+            sfx.slam();
+            for (const t of this.targets()) if (Math.hypot(t.x - c.x, t.y - c.y) < 2.2) this.hurtTarget(t.id, 3, c.x, c.y);
+          } else {
+            const a = ang(dx, dy);
+            b.orbs.push({ x: c.x, y: c.y, dx: Math.cos(a), dy: Math.sin(a), life: 3.5 });
+            sfx.orb();
+          }
+        }
+        continue;
+      }
+      c.cd -= dt;
+      if (c.cd <= 0) {
+        c.cd = 2 + Math.random() * 1.4;
+        c.wind = 0.6;
+      }
     }
   }
 
-  /** Keep 10 chests hidden somewhere near the hero: on cliff tops and deep in forests. */
+  /** Keep 25 chests hidden somewhere near the hero: on cliff tops and deep in forests. */
   private updateChests(dt: number) {
     const all = this.targets();
     const p = all.length ? all[Math.floor(Math.random() * all.length)] : this.p;
@@ -1480,7 +1747,7 @@ export class Game {
       const a = Math.random() * Math.PI * 2;
       const d = 45 + Math.random() * 230;
       const x = Math.floor(p.x + Math.cos(a) * d), y = Math.floor(p.y + Math.sin(a) * d);
-      if (castleR(x, y) < 40) continue;
+      if (castleR(x, y) < CASTLE_R + 6) continue;
       const v = this.world.tile(x, y);
       const g = tG(v);
       if (g === G.Water || g === G.Path || g === G.Bridge || tT(v) !== T.None) continue;
@@ -1528,7 +1795,7 @@ export class Game {
       chopped: [...this.world.chopped].slice(-20000), fires: this.fires, spawn: this.spawn, chests: this.chests,
       won: this.won, savedAt: Date.now(), acorns: this.acorns, maxHp: this.maxHp, stones: [...this.stonesDone], job: this.job,
       jobVillage: this.jobVillage, farm: [...this.farm], letterTo: this.letterTo,
-      minis: this.minis.defeated(),
+      minis: this.minis.defeated(), goods: this.goods, shelves: this.shelves,
     };
   }
 
@@ -1559,10 +1826,12 @@ export class Game {
     g.farm = new Map(s.farm ?? []);
     g.letterTo = s.letterTo ?? null;
     g.minis = new Minis(s.minis ?? []);
+    if (s.goods) Object.assign(g.goods, s.goods);
+    if (s.shelves) Object.assign(g.shelves, s.shelves);
     // If saved inside the locked room, start just outside its door so the fight starts fresh.
     if (inRoom(s.x, s.y) && !s.won) {
       g.p.x = CX + 0.5;
-      g.p.y = CY + 15.5;
+      g.p.y = CY + ROOM_R + 5.5;
     } else {
       g.p.x = s.x;
       g.p.y = s.y;

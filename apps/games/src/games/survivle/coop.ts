@@ -51,7 +51,7 @@ interface Snap {
   en: [number, number, number, number, number, number, number, number, number][];
   ar: [number, number, number, number, number, number][];
   chests: [number, number][];
-  boss: { x: number; y: number; hp: number; active: boolean; state: string; dead: boolean; deadT: number; hurtT: number; rings: Game['boss']['rings']; orbs: Game['boss']['orbs'] };
+  boss: { x: number; y: number; hp: number; active: boolean; state: string; dead: boolean; deadT: number; hurtT: number; rings: Game['boss']['rings']; orbs: Game['boss']['orbs']; clones: Game['boss']['clones']; split: number; dash: Game['boss']['dash'] };
   minis: { x: number; y: number; lift: number; hp: number; active: boolean; dead: boolean; hurtT: number; flash: number }[];
   shots: Game['minis']['shots'];
   hazards: Game['minis']['hazards'];
@@ -213,7 +213,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
         en: g.enemies.map((e) => [e.id, e.kind, r2(e.x), r2(e.y), r2(e.z), e.aggro ? 1 : 0, r2(e.hurtT), e.ch ? 1 : 0, e.minion ? 1 : 0]),
         ar: g.arrowsFlying.map((a) => [r2(a.x), r2(a.y), r2(a.z), r2(a.dx), r2(a.dy), r2(a.life)]),
         chests: g.chests.map((c) => [c.x, c.y]),
-        boss: { x: r2(b.x), y: r2(b.y), hp: b.hp, active: b.active, state: b.state, dead: b.dead, deadT: b.deadT, hurtT: b.hurtT, rings: b.rings, orbs: b.orbs },
+        boss: { x: r2(b.x), y: r2(b.y), hp: b.hp, active: b.active, state: b.state, dead: b.dead, deadT: b.deadT, hurtT: b.hurtT, rings: b.rings, orbs: b.orbs, clones: b.clones, split: b.split, dash: b.dash },
         minis: g.minis.list.map((q) => ({ x: r2(q.x), y: r2(q.y), lift: r2(q.lift), hp: q.hp, active: q.active, dead: q.dead, hurtT: q.hurtT, flash: q.flash })),
         shots: g.minis.shots,
         hazards: g.minis.hazards,
@@ -295,6 +295,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
         g.coins += m.coins;
         g.arrows += m.arrows;
         g.float(g.p.x, g.p.y, g.p.z + 1.5, `+${m.coins} coin${m.coins > 1 ? 's' : ''}`, '#ffd34d');
+        if (g.job === 'grocer') g.addMeat(g.p.x, g.p.y, g.p.z + 0.5);
         if (g.job === 'guard') {
           g.coins += 3;
           g.float(g.p.x, g.p.y, g.p.z + 2, '+3 pay', '#ffd34d');
@@ -387,6 +388,9 @@ function applySnap(g: Game, s: Snap, myId: string) {
   if (s.boss.hurtT > b.hurtT) b.hurtT = s.boss.hurtT;
   b.rings = s.boss.rings;
   b.orbs = s.boss.orbs;
+  b.clones = s.boss.clones;
+  b.split = s.boss.split;
+  b.dash = s.boss.dash;
   // mini bosses
   s.minis.forEach((q, i) => {
     const m = g.minis.list[i];

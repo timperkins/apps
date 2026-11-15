@@ -120,8 +120,17 @@ export const JOBS: Job[] = [
   { id: 'fisher', name: 'Fisher', icon: '🎣', desc: 'Stand next to water and press E to fish. Each fish sells for 4 coins.' },
   { id: 'miner', name: 'Miner', icon: '⛏', desc: 'Stand on or next to gray rock and press E to mine. 3 coins, and sometimes a gem worth 20.' },
   { id: 'baker', name: 'Baker', icon: '🍞', desc: 'Press E at the village oven to bake bread. Earn 2 coins a loaf and keep one to eat (heals 1 heart).' },
+  { id: 'grocer', name: 'Grocery store', icon: '🛒', desc: 'Run the village store. Farm, mine, chop trees and beat Murks for meat, then press E at the store to stock the shelves. Villagers come in, pick things off the shelves and pay you.' },
   { id: 'courier', name: 'Courier', icon: '✉', desc: 'Carry a letter to the other village. Walk into it to deliver for 15 coins, then take the next letter back.' },
 ];
+/** What the grocery store sells, and what villagers pay. */
+export const GOODS = [
+  { id: 'veg', name: 'veggies', icon: '🥕', price: 4, color: '#f08a2c' },
+  { id: 'ore', name: 'ore', icon: '🪨', price: 5, color: '#9aa3ad' },
+  { id: 'wood', name: 'wood', icon: '🪵', price: 3, color: '#9b6b3c' },
+  { id: 'meat', name: 'meat', icon: '🍖', price: 6, color: '#c8574a' },
+] as const;
+export type GoodId = (typeof GOODS)[number]['id'];
 export const jobById = (id: string | null) => JOBS.find((j) => j.id === id) ?? null;
 
 /** Challenges at the glowing rocks: which Murks you have to beat (0 orange, 1 blue, 2 green). */
