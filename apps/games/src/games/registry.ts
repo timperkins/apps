@@ -20,4 +20,23 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./factori-owen/index'),
   },
+  {
+    id: 'space-defender',
+    title: 'Space Defender',
+    tagline: 'Hold out on a platform in space: shoot asteroids, catch their stone and build.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#05060f"/>
+      <g fill="#fff8e0"><circle cx="10" cy="10" r="1"/><circle cx="34" cy="68" r="1.2"/><circle cx="104" cy="12" r="1"/><circle cx="112" cy="58" r="1.3"/><circle cx="62" cy="6" r=".8"/><circle cx="8" cy="50" r=".9"/></g>
+      <g transform="translate(38 30)">
+        <rect width="44" height="34" rx="2" fill="#5d6577"/>
+        <path d="M11 0V34M22 0V34M33 0V34M0 11H44M0 22H44" stroke="#3e4454" stroke-width="1.2"/>
+        <rect x="16" y="11" width="12" height="12" rx="2" fill="#a0713f" stroke="#6b4626" stroke-width="1.5"/>
+        <circle cx="10" cy="27" r="3.5" fill="#e9eef7"/><circle cx="10" cy="27" r="2" fill="#6fb6ff"/>
+      </g>
+      <path d="M82 40L104 22" stroke="#c9b79c" stroke-width="2"/><circle cx="105" cy="21" r="3" fill="none" stroke="#c9b79c" stroke-width="1.5"/>
+      <path d="M20 22l4-5 5 1 2 5-3 4-6 0z" fill="#8a7d70"/><path d="M90 66l3-4 4 1 1 4-3 2z" fill="#8a7d70"/>
+      <path d="M48 30L30 18" stroke="#ffe066" stroke-width="1.5" stroke-dasharray="3 2"/>
+    </svg>`,
+    load: () => import('./space-defender/index'),
+  },
 ];
