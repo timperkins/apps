@@ -60,10 +60,24 @@ export class Timeline {
       for (const id of event.people) {
         const person = this.people.get(id);
         if (!person) throw new Error(`Event ${event.id} names unknown person ${id}`);
-        if (person.kind === 'child' || !event.place) continue;
+        // Weddings happen away from home, so they don't move anyone.
+        if (person.kind === 'child' || event.type === 'marriage' || !event.place) continue;
         const list = this.stops.get(id) ?? [];
         list.push({ t, place: event.place, eventId: event.id });
         this.stops.set(id, list);
+      }
+    }
+
+    // A spouse we know nothing else about joins at the wedding, wherever their partner lives.
+    for (const { event, t } of this.events) {
+      if (event.type !== 'marriage') continue;
+      for (const id of event.people) {
+        if (this.births.has(id)) continue;
+        const partner = event.people.find((p) => p !== id);
+        const place = partner ? this.placeAt(partner, t) : null;
+        if (!place) continue;
+        this.births.set(id, t);
+        this.stops.set(id, [{ t, place, eventId: event.id }, ...(this.stops.get(id) ?? [])]);
       }
     }
 
@@ -72,6 +86,7 @@ export class Timeline {
     this.end = end;
   }
 
+  /** When someone was born, or joined at their wedding if we don't know their birth. */
   birthTime(id: string): number | undefined {
     return this.births.get(id);
   }

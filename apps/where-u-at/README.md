@@ -9,9 +9,12 @@ Everything lives in `src/data/people.json` and `src/data/events.json` and is bun
 there is no database. Dates are `YYYY-MM`. Events in the same month play in list order.
 
 - `people`: friends (`kind: "friend"`, unique `color`, optional `photo` under `public/faces/`;
-  initials show until there is one) and children
-  (`kind: "child"`, `sex`, `motherId`). Children always stay with their mother.
-- `events`: `birth` (a place for friends, none for children), `marriage` (two people and a place) and
+  initials show until there is one; a friend with no birth joins at their wedding, wherever their
+  partner lives) and children
+  (`kind: "child"`, `sex`, `motherId`). Children always stay with their mother (or their father,
+  when the mother isn't in the app).
+- `events`: `birth` (a place for friends, none for children), `marriage` (two people; shown wherever the
+  couple lives, and nobody moves) and and
   `move` (everyone who moves together, and the new place).
 
 `npm test` checks the data: ids resolve, dates are valid, everyone is born once and before anything

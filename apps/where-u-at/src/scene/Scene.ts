@@ -262,12 +262,12 @@ export class Scene {
   };
 
   private markBirths(crossed: TimedEvent[]) {
-    for (const { event } of crossed) {
-      if (event.type === 'birth') {
-        for (const id of event.people) {
-          const actor = this.byId.get(id);
-          if (actor) actor.justBorn = true;
-        }
+    for (const { event, t } of crossed) {
+      for (const id of event.people) {
+        // Births, and spouses who first appear at their wedding.
+        if (event.type !== 'birth' && this.timeline.birthTime(id) !== t) continue;
+        const actor = this.byId.get(id);
+        if (actor) actor.justBorn = true;
       }
     }
   }
@@ -419,10 +419,14 @@ export class Scene {
         }
       } else if (event.type === 'marriage') {
         const a = this.byId.get(event.people[0]);
-        const b = this.byId.get(event.people[1]);
+        // A spouse who isn't in the app: the halo goes around one bubble.
+        const b = event.people[1] ? this.byId.get(event.people[1]) : a;
         if (!a?.body.active || !b?.body.active) continue;
-        this.weddings.push({ a, b, start: this.clock });
-        this.setLabel(a, `Married in ${event.place.name}`, 3.4);
+        // Partners who still live apart each get their own halo.
+        const together = Math.hypot(a.body.x - b.body.x, a.body.y - b.body.y) < FRIEND_R * 6;
+        if (together) this.weddings.push({ a, b, start: this.clock });
+        else this.weddings.push({ a, b: a, start: this.clock }, { a: b, b, start: this.clock });
+        this.setLabel(a, event.place ? `Married in ${event.place.name}` : 'Just married!', 3.4);
       }
     }
   }

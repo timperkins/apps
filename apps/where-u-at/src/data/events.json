@@ -2,6 +2,32 @@
   {
     "id": "e001",
     "type": "birth",
+    "date": "1987-02",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Veneta, OR",
+      "lat": 44.05,
+      "lng": -123.35
+    }
+  },
+  {
+    "id": "e002",
+    "type": "birth",
+    "date": "1988-01",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Lethbridge, AB",
+      "lat": 49.69,
+      "lng": -112.84
+    }
+  },
+  {
+    "id": "e003",
+    "type": "birth",
     "date": "1988-08",
     "people": [
       "tim"
@@ -13,7 +39,59 @@
     }
   },
   {
-    "id": "e002",
+    "id": "e004",
+    "type": "birth",
+    "date": "1991-05",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e005",
+    "type": "birth",
+    "date": "1991-08",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Willard, UT",
+      "lat": 41.41,
+      "lng": -112.04
+    }
+  },
+  {
+    "id": "e006",
+    "type": "birth",
+    "date": "1991-12",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Albuquerque, NM",
+      "lat": 35.08,
+      "lng": -106.65
+    }
+  },
+  {
+    "id": "e007",
+    "type": "move",
+    "date": "1992-05",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Concord, CA",
+      "lat": 37.98,
+      "lng": -122.03
+    }
+  },
+  {
+    "id": "e008",
     "type": "birth",
     "date": "1992-10",
     "people": [
@@ -26,9 +104,61 @@
     }
   },
   {
-    "id": "e003",
+    "id": "e009",
+    "type": "birth",
+    "date": "1992-11",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Rexburg, ID",
+      "lat": 43.83,
+      "lng": -111.79
+    }
+  },
+  {
+    "id": "e010",
+    "type": "birth",
+    "date": "1993-02",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Albuquerque, NM",
+      "lat": 35.08,
+      "lng": -106.65
+    }
+  },
+  {
+    "id": "e011",
     "type": "move",
-    "date": "1993-10",
+    "date": "1993-03",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Los Lunas, NM",
+      "lat": 34.81,
+      "lng": -106.73
+    }
+  },
+  {
+    "id": "e012",
+    "type": "birth",
+    "date": "1994-09",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e013",
+    "type": "move",
+    "date": "1994-09",
     "people": [
       "penny"
     ],
@@ -39,7 +169,124 @@
     }
   },
   {
-    "id": "e004",
+    "id": "e014",
+    "type": "move",
+    "date": "1994-09",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Victoria, BC",
+      "lat": 48.43,
+      "lng": -123.37
+    }
+  },
+  {
+    "id": "e015",
+    "type": "move",
+    "date": "1994-11",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Maryland",
+      "lat": 39.05,
+      "lng": -76.64
+    }
+  },
+  {
+    "id": "e016",
+    "type": "birth",
+    "date": "1995-01",
+    "people": [
+      "peter"
+    ],
+    "place": {
+      "name": "San Luis Obispo, CA",
+      "lat": 35.28,
+      "lng": -120.66
+    }
+  },
+  {
+    "id": "e017",
+    "type": "move",
+    "date": "1995-11",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Rexburg, ID",
+      "lat": 43.83,
+      "lng": -111.79
+    }
+  },
+  {
+    "id": "e018",
+    "type": "birth",
+    "date": "1996-02",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Hayward, CA",
+      "lat": 37.67,
+      "lng": -122.08
+    }
+  },
+  {
+    "id": "e019",
+    "type": "birth",
+    "date": "1997-04",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Salt Lake City, UT",
+      "lat": 40.76,
+      "lng": -111.89
+    }
+  },
+  {
+    "id": "e020",
+    "type": "birth",
+    "date": "1997-07",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Guilford, CT",
+      "lat": 41.28,
+      "lng": -72.68
+    }
+  },
+  {
+    "id": "e021",
+    "type": "birth",
+    "date": "1997-10",
+    "people": [
+      "rachel"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e022",
+    "type": "move",
+    "date": "1998-02",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "American Fork, UT",
+      "lat": 40.38,
+      "lng": -111.8
+    }
+  },
+  {
+    "id": "e023",
     "type": "move",
     "date": "1998-07",
     "people": [
@@ -52,7 +299,254 @@
     }
   },
   {
-    "id": "e005",
+    "id": "e024",
+    "type": "move",
+    "date": "1998-07",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "St. Louis, MO",
+      "lat": 38.63,
+      "lng": -90.2
+    }
+  },
+  {
+    "id": "e025",
+    "type": "move",
+    "date": "1999-08",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Key West, FL",
+      "lat": 24.56,
+      "lng": -81.78
+    }
+  },
+  {
+    "id": "e026",
+    "type": "move",
+    "date": "1999-10",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e027",
+    "type": "move",
+    "date": "2000-01",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Danville, CA",
+      "lat": 37.82,
+      "lng": -122
+    }
+  },
+  {
+    "id": "e028",
+    "type": "move",
+    "date": "2000-04",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Dallas, TX",
+      "lat": 32.78,
+      "lng": -96.8
+    }
+  },
+  {
+    "id": "e029",
+    "type": "move",
+    "date": "2000-06",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Key West, FL",
+      "lat": 24.56,
+      "lng": -81.78
+    }
+  },
+  {
+    "id": "e030",
+    "type": "move",
+    "date": "2000-10",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Sandy, UT",
+      "lat": 40.57,
+      "lng": -111.86
+    }
+  },
+  {
+    "id": "e031",
+    "type": "move",
+    "date": "2000-10",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Coeur d'Alene, ID",
+      "lat": 47.68,
+      "lng": -116.78
+    }
+  },
+  {
+    "id": "e032",
+    "type": "move",
+    "date": "2001-08",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Las Vegas, NV",
+      "lat": 36.17,
+      "lng": -115.14
+    }
+  },
+  {
+    "id": "e033",
+    "type": "move",
+    "date": "2002-08",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e034",
+    "type": "move",
+    "date": "2005-07",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Prosser, WA",
+      "lat": 46.21,
+      "lng": -119.77
+    }
+  },
+  {
+    "id": "e035",
+    "type": "move",
+    "date": "2005-08",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e036",
+    "type": "move",
+    "date": "2005-08",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e037",
+    "type": "move",
+    "date": "2006-05",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e038",
+    "type": "move",
+    "date": "2006-05",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e039",
+    "type": "move",
+    "date": "2006-08",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "McMinnville, OR",
+      "lat": 45.21,
+      "lng": -123.2
+    }
+  },
+  {
+    "id": "e040",
+    "type": "move",
+    "date": "2006-08",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e041",
+    "type": "move",
+    "date": "2007-02",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Napoli, Italy",
+      "lat": 40.85,
+      "lng": 14.27
+    }
+  },
+  {
+    "id": "e042",
+    "type": "move",
+    "date": "2007-05",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Siena, Italy",
+      "lat": 43.32,
+      "lng": 11.33
+    }
+  },
+  {
+    "id": "e043",
     "type": "move",
     "date": "2007-06",
     "people": [
@@ -65,7 +559,72 @@
     }
   },
   {
-    "id": "e006",
+    "id": "e044",
+    "type": "move",
+    "date": "2007-06",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Payson, UT",
+      "lat": 40.04,
+      "lng": -111.73
+    }
+  },
+  {
+    "id": "e045",
+    "type": "move",
+    "date": "2007-07",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "McMinnville, OR",
+      "lat": 45.21,
+      "lng": -123.2
+    }
+  },
+  {
+    "id": "e046",
+    "type": "move",
+    "date": "2007-08",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Rome, Italy",
+      "lat": 41.9,
+      "lng": 12.5
+    }
+  },
+  {
+    "id": "e047",
+    "type": "move",
+    "date": "2008-01",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Webster, NY",
+      "lat": 43.21,
+      "lng": -77.43
+    }
+  },
+  {
+    "id": "e048",
+    "type": "move",
+    "date": "2008-02",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Napoli, Italy",
+      "lat": 40.85,
+      "lng": 14.27
+    }
+  },
+  {
+    "id": "e049",
     "type": "move",
     "date": "2008-04",
     "people": [
@@ -78,7 +637,46 @@
     }
   },
   {
-    "id": "e007",
+    "id": "e050",
+    "type": "move",
+    "date": "2008-05",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e051",
+    "type": "move",
+    "date": "2008-08",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Siena, Italy",
+      "lat": 43.32,
+      "lng": 11.33
+    }
+  },
+  {
+    "id": "e052",
+    "type": "move",
+    "date": "2008-09",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Rome, Italy",
+      "lat": 41.9,
+      "lng": 12.5
+    }
+  },
+  {
+    "id": "e053",
     "type": "move",
     "date": "2008-10",
     "people": [
@@ -91,7 +689,33 @@
     }
   },
   {
-    "id": "e008",
+    "id": "e054",
+    "type": "move",
+    "date": "2008-12",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e055",
+    "type": "move",
+    "date": "2009-01",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e056",
     "type": "move",
     "date": "2009-02",
     "people": [
@@ -104,7 +728,29 @@
     }
   },
   {
-    "id": "e009",
+    "id": "e057",
+    "type": "move",
+    "date": "2009-05",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e058",
+    "type": "marriage",
+    "date": "2009-08",
+    "people": [
+      "hillary",
+      "todd"
+    ]
+  },
+  {
+    "id": "e059",
     "type": "move",
     "date": "2009-08",
     "people": [
@@ -117,7 +763,59 @@
     }
   },
   {
-    "id": "e010",
+    "id": "e060",
+    "type": "move",
+    "date": "2009-08",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Logan, UT",
+      "lat": 41.74,
+      "lng": -111.83
+    }
+  },
+  {
+    "id": "e061",
+    "type": "move",
+    "date": "2009-08",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e062",
+    "type": "move",
+    "date": "2009-09",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Logan, UT",
+      "lat": 41.74,
+      "lng": -111.83
+    }
+  },
+  {
+    "id": "e063",
+    "type": "move",
+    "date": "2009-09",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e064",
     "type": "move",
     "date": "2010-01",
     "people": [
@@ -130,7 +828,33 @@
     }
   },
   {
-    "id": "e011",
+    "id": "e065",
+    "type": "move",
+    "date": "2010-05",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "McMinnville, OR",
+      "lat": 45.21,
+      "lng": -123.2
+    }
+  },
+  {
+    "id": "e066",
+    "type": "move",
+    "date": "2010-07",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Tyler, TX",
+      "lat": 32.35,
+      "lng": -95.3
+    }
+  },
+  {
+    "id": "e067",
     "type": "move",
     "date": "2010-08",
     "people": [
@@ -143,12 +867,241 @@
     }
   },
   {
-    "id": "e012",
+    "id": "e068",
+    "type": "move",
+    "date": "2010-08",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Logan, UT",
+      "lat": 41.74,
+      "lng": -111.83
+    }
+  },
+  {
+    "id": "e069",
+    "type": "move",
+    "date": "2011-05",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Annecy, France",
+      "lat": 45.9,
+      "lng": 6.13
+    }
+  },
+  {
+    "id": "e070",
+    "type": "move",
+    "date": "2011-05",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Grand Prairie, TX",
+      "lat": 32.75,
+      "lng": -97
+    }
+  },
+  {
+    "id": "e071",
+    "type": "move",
+    "date": "2011-05",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e072",
+    "type": "move",
+    "date": "2011-06",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Garland, TX",
+      "lat": 32.91,
+      "lng": -96.64
+    }
+  },
+  {
+    "id": "e073",
+    "type": "move",
+    "date": "2011-09",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Rexburg, ID",
+      "lat": 43.83,
+      "lng": -111.79
+    }
+  },
+  {
+    "id": "e074",
+    "type": "move",
+    "date": "2011-11",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Allen, TX",
+      "lat": 33.1,
+      "lng": -96.67
+    }
+  },
+  {
+    "id": "e075",
+    "type": "move",
+    "date": "2011-12",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e076",
+    "type": "move",
+    "date": "2011-12",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Sydney, Australia",
+      "lat": -33.87,
+      "lng": 151.21
+    }
+  },
+  {
+    "id": "e077",
+    "type": "move",
+    "date": "2011-12",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e078",
+    "type": "move",
+    "date": "2012-02",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Suva, Fiji",
+      "lat": -18.14,
+      "lng": 178.44
+    }
+  },
+  {
+    "id": "e079",
+    "type": "move",
+    "date": "2012-03",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Dallas, TX",
+      "lat": 32.78,
+      "lng": -96.8
+    }
+  },
+  {
+    "id": "e080",
+    "type": "move",
+    "date": "2012-04",
+    "people": [
+      "rachel"
+    ],
+    "place": {
+      "name": "Carlsbad, CA",
+      "lat": 33.16,
+      "lng": -117.35
+    }
+  },
+  {
+    "id": "e081",
+    "type": "move",
+    "date": "2012-05",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Fort Worth, TX",
+      "lat": 32.76,
+      "lng": -97.33
+    }
+  },
+  {
+    "id": "e082",
+    "type": "move",
+    "date": "2012-06",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Coeur d'Alene, ID",
+      "lat": 47.68,
+      "lng": -116.78
+    }
+  },
+  {
+    "id": "e083",
+    "type": "move",
+    "date": "2012-07",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e084",
     "type": "marriage",
     "date": "2012-08",
     "people": [
       "tim",
       "penny"
+    ]
+  },
+  {
+    "id": "e085",
+    "type": "move",
+    "date": "2012-08",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Logan, UT",
+      "lat": 41.74,
+      "lng": -111.83
+    }
+  },
+  {
+    "id": "e086",
+    "type": "move",
+    "date": "2012-08",
+    "people": [
+      "ben"
     ],
     "place": {
       "name": "Provo, UT",
@@ -157,7 +1110,308 @@
     }
   },
   {
-    "id": "e013",
+    "id": "e087",
+    "type": "move",
+    "date": "2012-10",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Azle, TX",
+      "lat": 32.9,
+      "lng": -97.55
+    }
+  },
+  {
+    "id": "e088",
+    "type": "move",
+    "date": "2013-05",
+    "people": [
+      "hesper"
+    ],
+    "place": {
+      "name": "Seattle, WA",
+      "lat": 47.61,
+      "lng": -122.33
+    }
+  },
+  {
+    "id": "e089",
+    "type": "move",
+    "date": "2013-05",
+    "people": [
+      "hillary",
+      "todd"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e090",
+    "type": "move",
+    "date": "2013-06",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "San Pedro, CA",
+      "lat": 33.74,
+      "lng": -118.29
+    }
+  },
+  {
+    "id": "e091",
+    "type": "move",
+    "date": "2013-06",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Denton, TX",
+      "lat": 33.21,
+      "lng": -97.13
+    }
+  },
+  {
+    "id": "e092",
+    "type": "move",
+    "date": "2013-09",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Logan, UT",
+      "lat": 41.74,
+      "lng": -111.83
+    }
+  },
+  {
+    "id": "e093",
+    "type": "move",
+    "date": "2013-09",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e094",
+    "type": "move",
+    "date": "2013-10",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e095",
+    "type": "move",
+    "date": "2013-11",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Rexburg, ID",
+      "lat": 43.83,
+      "lng": -111.79
+    }
+  },
+  {
+    "id": "e096",
+    "type": "birth",
+    "date": "2014-01",
+    "people": [
+      "hillary-reggie"
+    ],
+    "place": {
+      "name": "Jackson, WY",
+      "lat": 43.48,
+      "lng": -110.76
+    }
+  },
+  {
+    "id": "e097",
+    "type": "move",
+    "date": "2014-01",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "San Diego, CA",
+      "lat": 32.72,
+      "lng": -117.16
+    }
+  },
+  {
+    "id": "e098",
+    "type": "move",
+    "date": "2014-01",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e099",
+    "type": "move",
+    "date": "2014-01",
+    "people": [
+      "peter"
+    ],
+    "place": {
+      "name": "São Paulo, Brazil",
+      "lat": -23.55,
+      "lng": -46.63
+    }
+  },
+  {
+    "id": "e100",
+    "type": "move",
+    "date": "2014-05",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Webster, NY",
+      "lat": 43.21,
+      "lng": -77.43
+    }
+  },
+  {
+    "id": "e101",
+    "type": "move",
+    "date": "2014-06",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e102",
+    "type": "move",
+    "date": "2014-06",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e103",
+    "type": "move",
+    "date": "2014-08",
+    "people": [
+      "hillary",
+      "todd"
+    ],
+    "place": {
+      "name": "Boise, ID",
+      "lat": 43.62,
+      "lng": -116.2
+    }
+  },
+  {
+    "id": "e104",
+    "type": "move",
+    "date": "2014-09",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Pittsburgh, PA",
+      "lat": 40.44,
+      "lng": -80
+    }
+  },
+  {
+    "id": "e105",
+    "type": "move",
+    "date": "2014-09",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e106",
+    "type": "move",
+    "date": "2014-09",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e107",
+    "type": "move",
+    "date": "2015-01",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Willard, UT",
+      "lat": 41.41,
+      "lng": -112.04
+    }
+  },
+  {
+    "id": "e108",
+    "type": "move",
+    "date": "2015-05",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Webster, NY",
+      "lat": 43.21,
+      "lng": -77.43
+    }
+  },
+  {
+    "id": "e109",
+    "type": "birth",
+    "date": "2015-06",
+    "people": [
+      "hillary-ivy"
+    ],
+    "place": {
+      "name": "Boise, ID",
+      "lat": 43.62,
+      "lng": -116.2
+    }
+  },
+  {
+    "id": "e110",
     "type": "move",
     "date": "2015-06",
     "people": [
@@ -171,15 +1425,261 @@
     }
   },
   {
-    "id": "e014",
+    "id": "e111",
+    "type": "move",
+    "date": "2015-07",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Port Orchard, WA",
+      "lat": 47.54,
+      "lng": -122.64
+    }
+  },
+  {
+    "id": "e112",
+    "type": "move",
+    "date": "2015-08",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e113",
+    "type": "move",
+    "date": "2015-08",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e114",
+    "type": "move",
+    "date": "2015-09",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e115",
     "type": "birth",
     "date": "2015-10",
     "people": [
-      "penny-son-1"
+      "penny-owen"
+    ],
+    "place": {
+      "name": "American Fork, UT",
+      "lat": 40.38,
+      "lng": -111.8
+    }
+  },
+  {
+    "id": "e116",
+    "type": "move",
+    "date": "2015-11",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Comayagüela, Honduras",
+      "lat": 14.08,
+      "lng": -87.21
+    }
+  },
+  {
+    "id": "e117",
+    "type": "move",
+    "date": "2016-01",
+    "people": [
+      "peter"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e118",
+    "type": "move",
+    "date": "2016-04",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Guilford, CT",
+      "lat": 41.28,
+      "lng": -72.68
+    }
+  },
+  {
+    "id": "e119",
+    "type": "move",
+    "date": "2016-05",
+    "people": [
+      "ben"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e120",
+    "type": "move",
+    "date": "2016-05",
+    "people": [
+      "alec-livingston"
+    ],
+    "place": {
+      "name": "Webster, NY",
+      "lat": 43.21,
+      "lng": -77.43
+    }
+  },
+  {
+    "id": "e121",
+    "type": "marriage",
+    "date": "2016-07",
+    "people": [
+      "hesper",
+      "paul"
     ]
   },
   {
-    "id": "e015",
+    "id": "e122",
+    "type": "marriage",
+    "date": "2016-08",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ]
+  },
+  {
+    "id": "e123",
+    "type": "move",
+    "date": "2016-08",
+    "people": [
+      "rachel"
+    ],
+    "place": {
+      "name": "Zhongshan, China",
+      "lat": 22.52,
+      "lng": 113.39
+    }
+  },
+  {
+    "id": "e124",
+    "type": "move",
+    "date": "2016-09",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e125",
+    "type": "move",
+    "date": "2016-10",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Dominican Republic",
+      "lat": 18.74,
+      "lng": -70.16
+    }
+  },
+  {
+    "id": "e126",
+    "type": "move",
+    "date": "2017-01",
+    "people": [
+      "rachel"
+    ],
+    "place": {
+      "name": "Rexburg, ID",
+      "lat": 43.83,
+      "lng": -111.79
+    }
+  },
+  {
+    "id": "e127",
+    "type": "move",
+    "date": "2017-01",
+    "people": [
+      "celine"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e128",
+    "type": "move",
+    "date": "2017-01",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e129",
+    "type": "move",
+    "date": "2017-02",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Douglas, GA",
+      "lat": 31.51,
+      "lng": -82.85
+    }
+  },
+  {
+    "id": "e130",
+    "type": "move",
+    "date": "2017-05",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "San Diego, CA",
+      "lat": 32.72,
+      "lng": -117.16
+    }
+  },
+  {
+    "id": "e131",
     "type": "move",
     "date": "2017-06",
     "people": [
@@ -193,15 +1693,322 @@
     }
   },
   {
-    "id": "e016",
+    "id": "e132",
+    "type": "move",
+    "date": "2017-09",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e133",
     "type": "birth",
     "date": "2017-10",
     "people": [
-      "penny-son-2"
+      "penny-roger"
+    ],
+    "place": {
+      "name": "Mountain View, CA",
+      "lat": 37.39,
+      "lng": -122.08
+    }
+  },
+  {
+    "id": "e134",
+    "type": "move",
+    "date": "2017-11",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "American Fork, UT",
+      "lat": 40.38,
+      "lng": -111.8
+    }
+  },
+  {
+    "id": "e135",
+    "type": "move",
+    "date": "2017-12",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "American Fork, UT",
+      "lat": 40.38,
+      "lng": -111.8
+    }
+  },
+  {
+    "id": "e136",
+    "type": "move",
+    "date": "2018-02",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Hamilton, GA",
+      "lat": 32.76,
+      "lng": -84.87
+    }
+  },
+  {
+    "id": "e137",
+    "type": "marriage",
+    "date": "2018-04",
+    "people": [
+      "rachel",
+      "tyler"
     ]
   },
   {
-    "id": "e017",
+    "id": "e138",
+    "type": "marriage",
+    "date": "2018-04",
+    "people": [
+      "celine",
+      "ben"
+    ]
+  },
+  {
+    "id": "e139",
+    "type": "move",
+    "date": "2018-04",
+    "people": [
+      "rachel"
+    ],
+    "place": {
+      "name": "Port Orchard, WA",
+      "lat": 47.54,
+      "lng": -122.64
+    }
+  },
+  {
+    "id": "e140",
+    "type": "move",
+    "date": "2018-04",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Guilford, CT",
+      "lat": 41.28,
+      "lng": -72.68
+    }
+  },
+  {
+    "id": "e141",
+    "type": "move",
+    "date": "2018-05",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Port Orchard, WA",
+      "lat": 47.54,
+      "lng": -122.64
+    }
+  },
+  {
+    "id": "e142",
+    "type": "move",
+    "date": "2018-05",
+    "people": [
+      "todd"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e143",
+    "type": "move",
+    "date": "2018-05",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "San Diego, CA",
+      "lat": 32.72,
+      "lng": -117.16
+    }
+  },
+  {
+    "id": "e144",
+    "type": "move",
+    "date": "2018-07",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e145",
+    "type": "move",
+    "date": "2018-07",
+    "people": [
+      "hillary"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e146",
+    "type": "move",
+    "date": "2018-09",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e147",
+    "type": "move",
+    "date": "2018-09",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "Provo, UT",
+      "lat": 40.23,
+      "lng": -111.66
+    }
+  },
+  {
+    "id": "e148",
+    "type": "birth",
+    "date": "2019-06",
+    "people": [
+      "hillary-hank"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e149",
+    "type": "move",
+    "date": "2019-06",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "Gig Harbor, WA",
+      "lat": 47.33,
+      "lng": -122.58
+    }
+  },
+  {
+    "id": "e150",
+    "type": "move",
+    "date": "2019-08",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Seattle, WA",
+      "lat": 47.61,
+      "lng": -122.33
+    }
+  },
+  {
+    "id": "e151",
+    "type": "marriage",
+    "date": "2019-12",
+    "people": [
+      "emily",
+      "peter"
+    ]
+  },
+  {
+    "id": "e152",
+    "type": "move",
+    "date": "2019-12",
+    "people": [
+      "hesper",
+      "paul"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e153",
+    "type": "move",
+    "date": "2020-02",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Gorst, WA",
+      "lat": 47.53,
+      "lng": -122.7
+    }
+  },
+  {
+    "id": "e154",
+    "type": "move",
+    "date": "2020-06",
+    "people": [
+      "rachel",
+      "tyler"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e155",
+    "type": "move",
+    "date": "2020-09",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Monmouth, OR",
+      "lat": 44.85,
+      "lng": -123.23
+    }
+  },
+  {
+    "id": "e156",
+    "type": "marriage",
+    "date": "2020-11",
+    "people": [
+      "brinn",
+      "alec"
+    ]
+  },
+  {
+    "id": "e157",
     "type": "move",
     "date": "2020-11",
     "people": [
@@ -215,7 +2022,34 @@
     }
   },
   {
-    "id": "e018",
+    "id": "e158",
+    "type": "move",
+    "date": "2020-11",
+    "people": [
+      "brinn",
+      "alec"
+    ],
+    "place": {
+      "name": "Salt Lake City, UT",
+      "lat": 40.76,
+      "lng": -111.89
+    }
+  },
+  {
+    "id": "e159",
+    "type": "birth",
+    "date": "2021-03",
+    "people": [
+      "alec-livingston-isla"
+    ],
+    "place": {
+      "name": "Tacoma, WA",
+      "lat": 47.25,
+      "lng": -122.44
+    }
+  },
+  {
+    "id": "e160",
     "type": "move",
     "date": "2021-03",
     "people": [
@@ -229,19 +2063,240 @@
     }
   },
   {
-    "id": "e019",
+    "id": "e161",
+    "type": "move",
+    "date": "2021-04",
+    "people": [
+      "alec-livingston",
+      "clark"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e162",
     "type": "birth",
     "date": "2021-07",
     "people": [
-      "penny-son-3"
-    ]
+      "penny-calvin"
+    ],
+    "place": {
+      "name": "Silverdale, WA",
+      "lat": 47.64,
+      "lng": -122.69
+    }
   },
   {
-    "id": "e020",
+    "id": "e163",
+    "type": "move",
+    "date": "2022-01",
+    "people": [
+      "peter"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e164",
+    "type": "move",
+    "date": "2022-08",
+    "people": [
+      "emily"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e165",
+    "type": "move",
+    "date": "2022-09",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Portland, OR",
+      "lat": 45.52,
+      "lng": -122.68
+    }
+  },
+  {
+    "id": "e166",
+    "type": "move",
+    "date": "2022-10",
+    "people": [
+      "alec"
+    ],
+    "place": {
+      "name": "Port Orchard, WA",
+      "lat": 47.54,
+      "lng": -122.64
+    }
+  },
+  {
+    "id": "e167",
+    "type": "move",
+    "date": "2022-11",
+    "people": [
+      "brinn"
+    ],
+    "place": {
+      "name": "Port Orchard, WA",
+      "lat": 47.54,
+      "lng": -122.64
+    }
+  },
+  {
+    "id": "e168",
+    "type": "birth",
+    "date": "2023-06",
+    "people": [
+      "celine-ellinor"
+    ],
+    "place": {
+      "name": "Silverdale, WA",
+      "lat": 47.64,
+      "lng": -122.69
+    }
+  },
+  {
+    "id": "e169",
+    "type": "birth",
+    "date": "2023-08",
+    "people": [
+      "rachel-kit"
+    ],
+    "place": {
+      "name": "Silverdale, WA",
+      "lat": 47.64,
+      "lng": -122.69
+    }
+  },
+  {
+    "id": "e170",
+    "type": "birth",
+    "date": "2024-04",
+    "people": [
+      "alec-livingston-wren"
+    ],
+    "place": {
+      "name": "Tacoma, WA",
+      "lat": 47.25,
+      "lng": -122.44
+    }
+  },
+  {
+    "id": "e171",
+    "type": "move",
+    "date": "2024-06",
+    "people": [
+      "freyja"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e172",
+    "type": "move",
+    "date": "2024-11",
+    "people": [
+      "rachel",
+      "tyler"
+    ],
+    "place": {
+      "name": "Yokosuka, Japan",
+      "lat": 35.28,
+      "lng": 139.67
+    }
+  },
+  {
+    "id": "e173",
+    "type": "move",
+    "date": "2025-01",
+    "people": [
+      "rachel",
+      "tyler"
+    ],
+    "place": {
+      "name": "Bremerton, WA",
+      "lat": 47.57,
+      "lng": -122.63
+    }
+  },
+  {
+    "id": "e174",
+    "type": "move",
+    "date": "2025-03",
+    "people": [
+      "tyler"
+    ],
+    "place": {
+      "name": "Tracyton, WA",
+      "lat": 47.61,
+      "lng": -122.65
+    }
+  },
+  {
+    "id": "e175",
     "type": "birth",
     "date": "2025-05",
     "people": [
-      "penny-son-4"
-    ]
+      "penny-archie"
+    ],
+    "place": {
+      "name": "Silverdale, WA",
+      "lat": 47.64,
+      "lng": -122.69
+    }
+  },
+  {
+    "id": "e176",
+    "type": "birth",
+    "date": "2025-07",
+    "people": [
+      "celine-roger"
+    ],
+    "place": {
+      "name": "Poulsbo, WA",
+      "lat": 47.74,
+      "lng": -122.65
+    }
+  },
+  {
+    "id": "e177",
+    "type": "birth",
+    "date": "2025-08",
+    "people": [
+      "rachel-blake"
+    ],
+    "place": {
+      "name": "Silverdale, WA",
+      "lat": 47.64,
+      "lng": -122.69
+    }
+  },
+  {
+    "id": "e178",
+    "type": "birth",
+    "date": "2026-05",
+    "people": [
+      "alec-livingston-hazel"
+    ],
+    "place": {
+      "name": "Tacoma, WA",
+      "lat": 47.25,
+      "lng": -122.44
+    }
   }
 ]
