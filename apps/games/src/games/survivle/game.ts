@@ -1378,6 +1378,9 @@ export class Game {
 
   private respawn() {
     const p = this.p;
+    // wake up fully: a leftover negative timer used to leave you invisible and stuck
+    this.knockedOut = 0;
+    p.hurtT = 1.5;
     p.x = this.spawn.x;
     p.y = this.spawn.y;
     p.z = this.world.heightAt(p.x, p.y);
