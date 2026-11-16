@@ -111,10 +111,7 @@ export class HostSession {
       }
       case 'rotate': {
         const e = at();
-        if (e && e.def.rotatable) {
-          e.dir = m.dir;
-          if (e.def.kind === 'belt') g.updateCurves(e.x, e.y);
-        }
+        if (e && e.def.rotatable) g.turn(e, m.dir);
         break;
       }
       case 'give': {
@@ -316,7 +313,7 @@ export class GuestSession {
     return {
       place: (type, x, y, dir, item) => {
         const g = this.game!;
-        if (g.inv.count(item) <= 0 || !g.canPlace(type, x, y)) return false;
+        if (g.inv.count(item) <= 0 || !g.canPlace(type, x, y, ENTITIES[type].rotatable ? dir : 0)) return false;
         g.place(type, x, y, dir); // show it straight away; the next snapshot confirms it
         g.inv.remove(item, 1);
         this.cmd('place', { type, x, y, dir }, (r) => {
@@ -332,7 +329,7 @@ export class GuestSession {
       },
       rotate: (e, dir) => {
         const d = (dir ?? (e.dir + 1) % 4) as Dir;
-        e.dir = d;
+        if (!this.game!.turn(e, d)) return;
         this.cmd('rotate', { x: e.x, y: e.y, dir: d });
       },
       give: (e, slot, n) => {

@@ -1,6 +1,6 @@
 // The simulation: entities, power, research, hand crafting and the player.
 import {
-  ENTITIES, INPUT_BUFFER_CRAFTS, maxHp, SCIENCE_PACKS, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
+  ENTITIES, footprint, INPUT_BUFFER_CRAFTS, maxHp, SCIENCE_PACKS, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
   RECIPE_BY_ID, SMELT_BY_INPUT, TECHS, TECH_BY_ID,
   type EntityType, type ItemId, type Recipe,
 } from './data';
@@ -86,11 +86,18 @@ export class Entity {
   get def() {
     return ENTITIES[this.type];
   }
+  /** Tiles covered across and down, for the way it faces. */
+  get w() {
+    return footprint(this.type, this.dir)[0];
+  }
+  get h() {
+    return footprint(this.type, this.dir)[1];
+  }
   get cx() {
-    return this.x + this.def.w / 2;
+    return this.x + this.w / 2;
   }
   get cy() {
-    return this.y + this.def.h / 2;
+    return this.y + this.h / 2;
   }
 }
 
@@ -225,18 +232,20 @@ export class Game {
 
   // ---------- placement ----------
 
-  canPlace(type: EntityType, x: number, y: number): boolean {
+  canPlace(type: EntityType, x: number, y: number, dir = 0, ignore = 0): boolean {
     const d = ENTITIES[type];
-    for (let j = 0; j < d.h; j++)
-      for (let i = 0; i < d.w; i++) {
+    const [w, h] = footprint(type, dir);
+    for (let j = 0; j < h; j++)
+      for (let i = 0; i < w; i++) {
         const tx = x + i, ty = y + j;
         if (!this.world.buildable(tx, ty)) return false;
-        if (this.grid[ty * WORLD + tx]) return false;
+        const at = this.grid[ty * WORLD + tx];
+        if (at && at !== ignore) return false;
         if (this.playerOverlaps(tx, ty) && solid(type)) return false;
       }
-    if (nestBlocks(this, x, y, d.w, d.h)) return false;
+    if (nestBlocks(this, x, y, w, h)) return false;
     if (d.kind === 'drill') {
-      if (!this.drillHasOre(x, y, d.w, d.area ?? d.w)) return false;
+      if (!this.drillHasOre(x, y, w, d.area ?? w)) return false;
     }
     return true;
   }
@@ -257,7 +266,7 @@ export class Game {
   }
 
   place(type: EntityType, x: number, y: number, dir: Dir): Entity | null {
-    if (!this.canPlace(type, x, y)) return null;
+    if (!this.canPlace(type, x, y, ENTITIES[type].rotatable ? dir : 0)) return null;
     const e = new Entity(this.nextId++, type, x, y, ENTITIES[type].rotatable ? dir : 0);
     if (e.def.ug) this.ugPair(e);
     this.addEntity(e);
@@ -268,7 +277,7 @@ export class Game {
     this.ents.set(e.id, e);
     this.nextId = Math.max(this.nextId, e.id + 1);
     const d = e.def;
-    for (let j = 0; j < d.h; j++) for (let i = 0; i < d.w; i++) this.grid[(e.y + j) * WORLD + e.x + i] = e.id;
+    this.mark(e, e.id);
     if (d.kind === 'pole') this.connectPole(e);
     if (d.kind === 'belt') this.updateCurves(e.x, e.y);
     this.netsDirty = true;
@@ -297,7 +306,7 @@ export class Game {
     add(e.held);
     add(e.pending);
     this.ents.delete(e.id);
-    for (let j = 0; j < d.h; j++) for (let i = 0; i < d.w; i++) this.grid[(e.y + j) * WORLD + e.x + i] = 0;
+    this.mark(e, 0);
     if (d.kind === 'pole') {
       for (const id of e.wire) {
         const o = this.ents.get(id);
@@ -316,8 +325,29 @@ export class Game {
       e.recipe = e.recipe === 'out' ? null : 'out';
       return;
     }
-    e.dir = ((e.dir + 1) % 4) as Dir;
+    this.turn(e, ((e.dir + 1) % 4) as Dir);
+  }
+
+  /**
+   * Points an entity a new way. One that isn't square (the splitter) turns about its first tile
+   * and only if the tiles it would swing onto are free; returns whether it turned.
+   */
+  turn(e: Entity, dir: Dir): boolean {
+    if (e.w !== e.h) {
+      if (!this.canPlace(e.type, e.x, e.y, dir, e.id)) return false;
+      this.mark(e, 0);
+      e.dir = dir;
+      this.mark(e, e.id);
+      return true;
+    }
+    e.dir = dir;
     if (e.def.kind === 'belt') this.updateCurves(e.x, e.y);
+    return true;
+  }
+
+  /** Writes `id` into every grid tile the entity covers. */
+  private mark(e: Entity, id: number) {
+    for (let j = 0; j < e.h; j++) for (let i = 0; i < e.w; i++) this.grid[(e.y + j) * WORLD + e.x + i] = id;
   }
 
   private connectPole(e: Entity) {
@@ -394,7 +424,7 @@ export class Game {
         const nx = e.x + DX[e.dir], ny = e.y + DY[e.dir];
         const n = this.entAt(nx, ny);
         if (n && n.def.kind === 'splitter' && n.dir === e.dir) {
-          if (n.items.length < 2) {
+          if (n.items.length < SPLITTER_HOLD) {
             items.pop();
             n.items.push({ item: b.item, pos: 0 });
           }
@@ -432,18 +462,23 @@ export class Game {
     e.recipe = null;
   }
 
-  /** Hands items out in turn to belts on the splitter's left, front and right. */
+  /**
+   * The splitter is two tiles wide. Belts run into either tile from behind, and it hands items
+   * out in turn to the belts in front of its two tiles. If one side is blocked, everything goes
+   * out the other.
+   */
   private updateSplitter(e: Entity) {
     if (!e.items.length) return;
-    for (let k = 0; k < 3; k++) {
-      const turn = [3, 0, 1][(e.cursor + k) % 3];
-      const od = ((e.dir + turn) % 4) as Dir;
-      const n = this.entAt(e.x + DX[od], e.y + DY[od]);
-      if (!n || n.def.kind !== 'belt' || n.dir === (od + 2) % 4) continue;
-      const entry = n.dir === od ? 0 : 0.5;
+    const fx = DX[e.dir], fy = DY[e.dir];
+    for (let k = 0; k < 2; k++) {
+      const side = (e.cursor + k) % 2;
+      const tx = e.x + (side ? e.w - 1 : 0) + fx, ty = e.y + (side ? e.h - 1 : 0) + fy;
+      const n = this.entAt(tx, ty);
+      if (!n || n.def.kind !== 'belt' || n.dir === (e.dir + 2) % 4) continue;
+      const entry = n.dir === e.dir ? 0 : 0.5;
       if (this.beltPut(n, e.items[0].item, entry)) {
         e.items.shift();
-        e.cursor = (e.cursor + k + 1) % 3;
+        e.cursor = (side + 1) % 2;
         e.working = true;
         return;
       }
@@ -609,7 +644,7 @@ export class Game {
       if (!d.electric && d.kind !== 'generator' && d.kind !== 'solar' && d.kind !== 'battery') continue;
       for (const p of poles) {
         const r = p.def.supply ?? POLE_SUPPLY_RADIUS;
-        if (e.x < p.cx + r && e.x + d.w > p.cx - r && e.y < p.cy + r && e.y + d.h > p.cy - r) {
+        if (e.x < p.cx + r && e.x + e.w > p.cx - r && e.y < p.cy + r && e.y + e.h > p.cy - r) {
           e.net = p.net;
           break;
         }
@@ -717,8 +752,8 @@ export class Game {
         return;
       }
     }
-    const area = d.area ?? d.w;
-    const o = (area - d.w) / 2;
+    const area = d.area ?? e.w;
+    const o = (area - e.w) / 2;
     // find a tile with ore, continuing from the last one
     let tx = -1, ty = -1;
     for (let k = 0; k < area * area; k++) {
@@ -1170,6 +1205,15 @@ export class Game {
     return TECHS.every((t) => this.researched.has(t.id));
   }
 
+  private fitsOnLoad(e: Entity) {
+    for (let j = 0; j < e.h; j++)
+      for (let i = 0; i < e.w; i++) {
+        const tx = e.x + i, ty = e.y + j;
+        if (!this.world.inside(tx, ty) || this.grid[ty * WORLD + tx]) return false;
+      }
+    return true;
+  }
+
   // ---------- save ----------
 
   serializeEnts() {
@@ -1184,7 +1228,10 @@ export class Game {
   loadEnts(list: any[]) {
     this.ents.clear();
     this.grid.fill(0);
-    for (const d of list) {
+    const lost: [ItemId, number][] = [];
+    // anything bigger than a tile goes last, so it can check the tiles beside it are free
+    const big = (d: { t: EntityType; d: number }) => (ENTITIES[d.t] ? footprint(d.t, d.d).join() !== '1,1' : false);
+    for (const d of [...list.filter((d) => !big(d)), ...list.filter(big)]) {
       if (!ENTITIES[d.t as EntityType]) continue;
       const e = new Entity(d.i, d.t, d.x, d.y, d.d);
       e.fuel = d.f ?? null;
@@ -1203,11 +1250,16 @@ export class Game {
       e.cursor = d.cu ?? 0;
       e.wire = d.w ?? [];
       if (typeof d.hp === 'number') e.hp = d.hp;
+      if (e.w * e.h > 1 && !this.fitsOnLoad(e)) {
+        // a save from before the splitter was two tiles wide, with no room beside it now
+        lost.push([e.def.item, 1]);
+        continue;
+      }
       this.ents.set(e.id, e);
       this.nextId = Math.max(this.nextId, e.id + 1);
-      const def = e.def;
-      for (let j = 0; j < def.h; j++) for (let i = 0; i < def.w; i++) this.grid[(e.y + j) * WORLD + e.x + i] = e.id;
+      this.mark(e, e.id);
     }
+    for (const [item, n] of lost) this.inv.add(item, n);
     for (const e of this.ents.values()) if (e.def.kind === 'belt') this.updateCurves(e.x, e.y);
     this.netsDirty = true;
   }
@@ -1266,6 +1318,9 @@ export class Game {
   }
 }
 
+/** Items a splitter holds at once, waiting to go out. */
+export const SPLITTER_HOLD = 4;
+
 export function solid(type: EntityType): boolean {
   const k = ENTITIES[type].kind;
   return k !== 'belt' && k !== 'floor' && k !== 'splitter' && k !== 'mine';
@@ -1274,7 +1329,7 @@ export function solid(type: EntityType): boolean {
 
 /** Tile a drill drops its ore onto. */
 export function drillOut(e: Entity): [number, number] {
-  const { w, h } = e.def;
+  const { w, h } = e;
   switch (e.dir) {
     case 0: return [e.x + Math.floor((w - 1) / 2), e.y - 1];
     case 1: return [e.x + w, e.y + Math.floor((h - 1) / 2)];
