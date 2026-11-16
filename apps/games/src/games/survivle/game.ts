@@ -269,7 +269,7 @@ export interface NetHooks {
   bonus(kind: 'mini' | 'challenge', value: string): void;
   build(x: number, y: number): void;
   /** Hit another player (multiplayer is for fighting each other). */
-  pvp(target: string): void;
+  pvp(target: string, q: number): void;
   hitWall(id: number, q: number): void;
 }
 
@@ -288,6 +288,11 @@ function angDiff(a: number, b: number) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return Math.abs(d);
+}
+
+/** A weapon's damage against a player, in quarter hearts (4 damage = 1 heart; at least a quarter). */
+export function pvpQuarters(dmg: number) {
+  return Math.max(1, Math.min(MAX_SWORD, Math.round(dmg)));
 }
 
 /** A village to carry a letter to: any one but this. */
@@ -556,9 +561,11 @@ export class Game {
       // a generous reach, since what you see of a friend is a moment behind where they really are
       if (d < 3.4 && Math.abs(o.z - p.z) < 2.5 && (d < 1 || angDiff(ang(dx, dy), p.face) < 1.7)) {
         left--;
-        this.net?.pvp(o.id);
+        // against players, weapon damage counts in quarter hearts: a 4-damage sword takes 1 heart
+        const q = pvpQuarters(dmg);
+        this.net?.pvp(o.id, q);
         sfx.hit();
-        this.float(o.x, o.y, o.z + 1.2, '-¼', '#ff8a8a');
+        this.float(o.x, o.y, o.z + 1.2, `-${q / 4}`, '#ff8a8a');
       }
     }
     const b = this.boss;
@@ -1130,7 +1137,7 @@ export class Game {
 
   hurtPlayer(q: number, fromX?: number, fromY?: number, pvp = false) {
     const p = this.p;
-    if (this.coop) q = 1; // co-op: every hit is a quarter heart
+    if (this.coop && !pvp) q = 1; // multiplayer: a hit from a Murk or boss is a quarter heart
     if (p.hurtT > 0 || this.knockedOut || this.won) return;
     p.hp = Math.max(0, p.hp - q);
     p.hurtT = pvp ? 0.35 : 0.8;
@@ -1730,8 +1737,9 @@ export class Game {
         const shooter = a.owner ?? 'me';
         for (const t of this.targets()) {
           if (t.id === shooter || Math.hypot(t.x - a.x, t.y - a.y) > 0.55 || Math.abs(t.z + 0.9 - a.z) > 1.4) continue;
-          if (t.id === 'me') this.hurtPlayer(1, a.x - a.dx, a.y - a.dy, true);
-          else this.net?.hurtRemote(t.id, 1, a.x - a.dx, a.y - a.dy, true);
+          const q = pvpQuarters(a.dmg);
+          if (t.id === 'me') this.hurtPlayer(q, a.x - a.dx, a.y - a.dy, true);
+          else this.net?.hurtRemote(t.id, q, a.x - a.dx, a.y - a.dy, true);
           dead = true;
           break;
         }

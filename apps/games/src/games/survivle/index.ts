@@ -312,7 +312,7 @@ const game: GameModule = {
         <div class="sv-panel sv-create">
           <h2>Join a friend</h2>
           <canvas class="sv-preview" width="160" height="180"></canvas>
-          <p class="sv-dim">Your friend opens their game, presses Esc, then <b>Play with friends</b> to get a code. Then fight each other! Swords and arrows hit other players, and every hit does ¼ heart.</p>
+          <p class="sv-dim">Your friend opens their game, presses Esc, then <b>Play with friends</b> to get a code. Then fight each other! Swords and arrows hit other players: every 4 damage your weapon does takes 1 heart. Murk hits only do ¼ heart.</p>
           <label>Name <input class="sv-name" maxlength="16" placeholder="Type a name" autocomplete="off" value="${esc(readSetting('survivle-coop-name', ''))}"></label>
           <label>Code <input class="sv-code" maxlength="12" placeholder="ABCDE" autocomplete="off" autocapitalize="characters"></label>
           ${msg ? `<p class="sv-msg">${esc(msg)}</p>` : ''}
@@ -357,7 +357,7 @@ const game: GameModule = {
         cam.y = g.p.y;
         cam.z = g.p.z;
         endShown = false;
-        g.toast('Fight! Swords and arrows hit other players. Every hit does ¼ heart.');
+        g.toast('Fight! Your weapon hurts players: 4 damage = 1 heart. Murks only do ¼ heart.');
         play();
       } catch (err) {
         joinMenu((err as Error).message || 'Could not join');
@@ -499,11 +499,11 @@ const game: GameModule = {
     }
 
     function coopBox() {
-      if (g.role === 'guest') return `<p class="sv-coop">Playing in a friend's world (${esc(session?.code ?? '')}). You can fight each other; every hit does ¼ heart. The game keeps going while this menu is open.</p>`;
+      if (g.role === 'guest') return `<p class="sv-coop">Playing in a friend's world (${esc(session?.code ?? '')}). You can fight each other: 4 weapon damage = 1 heart. Murk hits do ¼ heart. The game keeps going while this menu is open.</p>`;
       if (session) {
         const names = g.others.map((o) => esc(o.name)).join(', ');
         return `<div class="sv-coop"><div>Friends join with this code</div><b class="sv-bigcode">${esc(session.code)}</b>
-          <div>${names ? `Here now: ${names}` : 'Waiting for friends…'} · fight each other, every hit does ¼ heart</div>
+          <div>${names ? `Here now: ${names}` : 'Waiting for friends…'} · fight each other: 4 weapon damage = 1 heart</div>
           <button data-a="stophost" class="sv-btn ghost">Stop playing together</button></div>`;
       }
       if (hosting) return '<p class="sv-coop">Opening your game to friends…</p>';

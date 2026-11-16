@@ -1,7 +1,7 @@
 // Co-op: up to 8 heroes in one world. The host's game runs the world (enemies, bosses, chests,
 // challenges, time) and sends it out about 12 times a second. Each friend runs their own hero and
 // sends where they are; their hits and arrows go to the host, who applies them.
-import { Game, type Arrow, type Enemy, type NetHooks, type Other } from './game';
+import { Game, pvpQuarters, type Arrow, type Enemy, type NetHooks, type Other } from './game';
 import { openRoom, joinRoom, MAX_PLAYERS, type Host, type Link } from './net';
 import { sfx } from './audio';
 import { MAX_HP_CAP } from './data';
@@ -43,7 +43,7 @@ type Msg =
   | { t: 'chest'; x: number; y: number }
   | { t: 'stone'; x: number; y: number }
   | { t: 'build'; x: number; y: number }
-  | { t: 'pvp'; target: string }
+  | { t: 'pvp'; target: string; q: number }
   | { t: 'hitwall'; id: number; q: number }
   | { t: 'snap'; s: Snap }
   | { t: 'hurt'; q: number; fx?: number; fy?: number; by?: string; pvp?: boolean }
@@ -153,7 +153,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
     bonus: (kind, value) => sendAll({ t: 'bonus', kind, value }),
     build: () => {},
     hitWall: () => {},
-    pvp: (target) => to(target, { t: 'hurt', q: 1, fx: g.p.x, fy: g.p.y, by: g.p.name, pvp: true }),
+    pvp: (target, q) => to(target, { t: 'hurt', q, fx: g.p.x, fy: g.p.y, by: g.p.name, pvp: true }),
   };
   g.net = hooks;
 
@@ -178,7 +178,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
             t: 'welcome', id, seed: g.world.seed, elapsed: g.elapsed, chopped: [...g.world.chopped], x: g.p.x + 1.5, y: g.p.y + 1,
             stones: [...g.stonesDone], minis: g.minis.defeated(), won: g.won, vc: VILLAGES.length,
           } satisfies Msg);
-          g.toast(`${m.name || 'A friend'} joined! Fight them: every hit does ¼ heart${added ? `. A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!` : ''}`);
+          g.toast(`${m.name || 'A friend'} joined! Fight them: 4 weapon damage = 1 heart${added ? `. A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!` : ''}`);
           sfx.coin();
           onChange();
           return;
@@ -211,10 +211,11 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
           // a friend hit someone with their sword
           const from = g.others.find((o) => o.id === id);
           if (!from || from.ko) return;
+          const q = pvpQuarters(m.q);
           if (m.target === 'host') {
             hitBy(g, from.name);
-            g.hurtPlayer(1, from.x, from.y, true);
-          } else to(m.target, { t: 'hurt', q: 1, fx: from.x, fy: from.y, by: from.name, pvp: true });
+            g.hurtPlayer(q, from.x, from.y, true);
+          } else to(m.target, { t: 'hurt', q, fx: from.x, fy: from.y, by: from.name, pvp: true });
           return;
         }
         case 'build':
@@ -333,7 +334,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
     bonus: () => {},
     build: (x, y) => link.send({ t: 'build', x, y } satisfies Msg),
     hitWall: (id, q) => link.send({ t: 'hitwall', id, q } satisfies Msg),
-    pvp: (target) => link.send({ t: 'pvp', target } satisfies Msg),
+    pvp: (target, q) => link.send({ t: 'pvp', target, q } satisfies Msg),
   };
 
   link.onMessage((raw) => {
