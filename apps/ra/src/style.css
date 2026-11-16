@@ -1704,20 +1704,6 @@ body.sheet-open #selBar {
   opacity: 0.8;
 }
 
-#lobby .legend {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  opacity: 0.8;
-  margin-top: -6px;
-}
-
-#lobby .legend .dot {
-  width: 8px;
-  height: 8px;
-}
-
 #lobby .actions {
   display: flex;
   justify-content: space-between;

@@ -718,14 +718,56 @@ function startAttract(): void {
     built = { w: 0, h: 0 };
     const bases = g.preload();
     fit(true);
-    g.warmUp();
-    await Promise.race([Promise.all(bases), new Promise((r) => setTimeout(r, 8000))]);
+    const units = g.warmUp();
+    // Everything it will show for the first minutes is ready before it fades
+    // in, so the drift doesn't stutter: the art for the bases and the units
+    // near them (drawn by workers), then the ground along the way, painted
+    // a little each frame behind the scenes.
+    await Promise.race([Promise.all([...bases, ...units]), new Promise((r) => setTimeout(r, 12000))]);
     if (me !== attractN || game !== g) return;
-    attractT = 0;
     attractY = cen.y;
+    const x0 = Math.floor(camX()) - 64;
+    const y0 = Math.floor(camY()) - ATTRACT_SWAY - 64;
+    const x1 = x0 + view.w + ATTRACT_SPEED * 240 + 128;
+    const y1 = y0 + view.h + ATTRACT_SWAY * 2 + 128;
+    for (let x = x0; x < x1; x += 256) {
+      ctx.setTransform(dens, 0, 0, dens, 0, 0);
+      g.renderGround(x, y0, Math.min(x1, x + 256), y1, 1e5);
+      await nextFrame();
+      if (me !== attractN || game !== g) return;
+    }
+    attractT = 0;
+    drawAttract(true);
+    await nextFrame();
+    if (me !== attractN || game !== g) return;
     attractReady = true;
     document.body.classList.add('attract-on');
   }, 30);
+}
+// how fast the view drifts (map pixels a second), and how far it sways up and down
+const ATTRACT_SPEED = 7;
+const ATTRACT_SWAY = 140;
+// Just the world (none of the game's controls, the globe or the minimap), at
+// whole canvas pixels rather than whole map pixels, so the slow drift is smooth.
+function drawAttract(first: boolean): void {
+  const x0 = Math.round(camX() * dens) / dens;
+  const y0 = Math.round(camY() * dens) / dens;
+  const x1 = x0 + view.w;
+  const y1 = y0 + view.h;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.setTransform(dens, 0, 0, dens, -x0 * dens, -y0 * dens);
+  game.renderGround(Math.floor(x0) - 1, Math.floor(y0) - 1, Math.ceil(x1) + 1, Math.ceil(y1) + 1, first ? 1e5 : 4);
+  const W = built.w;
+  const H = built.h;
+  const pad = 80;
+  for (let j = Math.floor((y0 - pad) / H); j <= Math.floor((y1 + pad) / H); j++)
+    for (let k = Math.floor((x0 - pad) / W); k <= Math.floor((x1 + pad) / W); k++) {
+      ctx.setTransform(dens, 0, 0, dens, (k * W - x0) * dens, (j * H - y0) * dens);
+      game.renderObjects(x0 - k * W, y0 - j * H, x1 - k * W, y1 - j * H);
+    }
+  ctx.setTransform(dens, 0, 0, dens, -x0 * dens, -y0 * dens);
+  game.renderOver?.(x0, y0, x1, y1);
 }
 function stopAttract(): void {
   if (!attract) return;
@@ -1549,10 +1591,9 @@ function frame(now: number): void {
     if (game && built.w && attractReady) {
       // the landing page: a slow drift across the world
       attractT += dt;
-      cen.x += 26 * dt;
-      cen.y = attractY + Math.sin(attractT / 23) * 500;
-      // (the first frame paints all the ground in view)
-      draw(now, attractT === dt);
+      cen.x += ATTRACT_SPEED * dt;
+      cen.y = attractY + Math.sin(attractT / 70) * ATTRACT_SWAY;
+      drawAttract(false);
     }
   } else if (game && built.w && loading.hidden) {
     const sp = (320 * dt) / zoom;
