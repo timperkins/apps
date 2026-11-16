@@ -244,6 +244,9 @@ body {
 
 #selBar[hidden],
 #selMenu[hidden],
+#palette[hidden],
+#groups[hidden],
+#colorBtn[hidden],
 #acts[hidden],
 #noTypes[hidden],
 #confirm[hidden] {
@@ -257,30 +260,142 @@ body {
   gap: 6px;
 }
 
-/* the selection menu: a button per kind of unit on screen, then All, Clear */
+/* the selection menu, all on one row: the colour groups and a button per
+   kind of unit on screen (scrolling sideways when there are too many), then
+   Color and All or Clear, which always show */
 #selMenu {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 5px;
   background: var(--panel);
   border: 2px solid var(--edge);
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
 }
 
-#types {
-  display: contents;
+#selScroll {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* room for the count bubbles, which stick out of the buttons */
+  margin: -9px 0 -3px -3px;
+  padding: 9px 8px 3px 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 
-/* a group you have given orders to: fixed until you clear it */
+#selScroll::-webkit-scrollbar {
+  display: none;
+}
+
+#types,
+#groups {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* the colour groups in use, before the kinds of unit */
+#groups {
+  padding-right: 4px;
+  border-right: 2px solid var(--edge);
+}
+
+#selBar button.type.grp {
+  border-color: var(--grp);
+  background: color-mix(in srgb, var(--grp) 14%, transparent);
+}
+
+#selBar button.type.grp .count,
+#selBar button.type.grp[aria-pressed='true'] .count,
+#selBar button.type.whole[aria-pressed='true'] .count {
+  background: var(--grp);
+}
+
+#selBar button.type.grp[aria-pressed='true'] {
+  border-color: var(--grp);
+  background: color-mix(in srgb, var(--grp) 38%, transparent);
+  box-shadow: 0 0 0 1px var(--grp), inset 1px 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* a group you have given orders to: fixed until you clear it, shown as one
+   button with how many there are (in its colour, if it has one) */
 #types.group {
+  padding: 3px;
+  border: 1px dashed var(--grp);
+  background: color-mix(in srgb, var(--grp) 8%, transparent);
+}
+
+#selBar button.type.whole,
+#selBar button.type.whole[aria-pressed='true'] {
+  border-color: var(--grp);
+  background: color-mix(in srgb, var(--grp) 28%, transparent);
+}
+
+
+/* Color: opens the palette above the menu */
+#selBar #colorBtn {
+  flex: none;
+  width: 48px;
+  min-width: 48px;
+}
+
+#colorBtn .swatch {
+  display: block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0;
+  box-sizing: border-box;
+  border: 2px solid #10140c;
+  background: conic-gradient(#4a9dff 0 12.5%, #3fe6e6 0 25%, #b4f03c 0 37.5%, #ffd93b 0 50%, #ff9a2e 0 62.5%, #ff6fb5 0 75%, #b07cff 0 87.5%, #f4f7ea 0);
+  box-shadow: 0 0 0 2px var(--grp);
+}
+
+#selBar #colorBtn[aria-expanded='true'] {
+  border-color: #9dff9d;
+}
+
+/* the eight colours to give the selection */
+#palette {
   display: flex;
   gap: 4px;
-  padding: 3px;
-  border: 1px dashed #9dff9d;
-  background: rgba(157, 255, 157, 0.08);
+  padding: 5px;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  touch-action: pan-x;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+#selBar #palette button.swatch {
+  flex: none;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #10140c;
+  font-size: 11px;
+  background: var(--grp);
+  border: 2px solid #10140c;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.45), inset -2px -2px 0 rgba(0, 0, 0, 0.3), 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+#selBar #palette button.swatch[aria-pressed='true'] {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }
 
 #selBar button.type:disabled {
@@ -315,6 +430,7 @@ body {
 }
 
 #selBar button.type {
+  flex: none;
   position: relative;
   width: 42px;
   padding: 0;
@@ -374,6 +490,7 @@ body {
 /* All and Clear take turns in one slot: the same width, so nothing moves */
 #selBar #allBtn,
 #selBar #clearBtn {
+  flex: none;
   width: 56px;
   min-width: 56px;
 }

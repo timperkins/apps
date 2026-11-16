@@ -31,6 +31,20 @@ export interface UnitType {
   sel: number; // how many of those are selected
 }
 
+// The colours you can give a selection, to pick it again later (1-8). Red
+// is left out: it is the enemy's.
+export const GROUP_COLORS = ['#4a9dff', '#3fe6e6', '#b4f03c', '#ffd93b', '#ff9a2e', '#ff6fb5', '#b07cff', '#f4f7ea'];
+export const GROUP_NAMES = ['Blue', 'Cyan', 'Lime', 'Yellow', 'Orange', 'Pink', 'Purple', 'White'];
+
+// A colour group with units in it.
+export interface GroupInfo {
+  color: number; // index into GROUP_COLORS
+  hex: string;
+  count: number;
+  icon: string; // the picture of its most common kind
+  sel: boolean; // the selection is exactly this group
+}
+
 // One thing on the build menu.
 export interface BuildItem {
   id: string;
@@ -90,6 +104,11 @@ export interface GameLike {
   selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
   // The kinds of unit of yours that are selected, wherever they are.
   selectedTypes?(): UnitType[];
+  // Colour groups: the ones in use, putting the selection into one, and
+  // selecting one (false if it has no units left).
+  groups?(): GroupInfo[];
+  setGroup?(g: number): void;
+  selectGroup?(g: number): boolean;
   deselect(): void;
   focus(): { x: number; y: number };
   // True if the game draws at ART pixels to the map pixel (see gfx.ts).
