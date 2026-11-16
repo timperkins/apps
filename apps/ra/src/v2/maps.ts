@@ -511,12 +511,14 @@ export function landGrid(def: MapDef, seed: number, w: number, h: number, pw: nu
 
 // The colours players' start dots are drawn in on the previews (a start's
 // number is its place in startsFor).
-export const START_DOTS = ['#8fb2dc', '#eba05d', '#e8e2c8', '#e8e2c8', '#e8e2c8', '#e8e2c8', '#e8e2c8', '#e8e2c8'];
+export const START_DOTS = ['#8fb2dc', '#eba05d'];
+// every place a player can start, all alike (the multiplayer lobby)
+export const START_DOT = '#e8e2c8';
 
 // A small picture of the map the game would make from this seed: water,
 // beaches, grass and plateaus, and dots for the starts: yours and the enemy
 // base, or (given `players`) each player's.
-export function mapPreview(def: MapDef, seed: number, w: number, h: number, pw = 160, ph = 80, players = 0): HTMLCanvasElement {
+export function mapPreview(def: MapDef, seed: number, w: number, h: number, pw = 160, ph = 80, allStarts = false): HTMLCanvasElement {
   const { kind, depth } = landGrid(def, seed, w, h, pw, ph);
   const n = pw * ph;
   const cv = document.createElement('canvas');
@@ -534,12 +536,16 @@ export function mapPreview(def: MapDef, seed: number, w: number, h: number, pw =
   const dot = (f: [number, number], fill: string) => {
     const x = Math.round(f[0] * pw);
     const y = Math.round(f[1] * ph);
-    c.fillStyle = '#10170d';
-    c.fillRect(x - 3, y - 3, 7, 7);
-    c.fillStyle = fill;
-    c.fillRect(x - 2, y - 2, 5, 5);
+    // (the map wraps round: a start on an edge shows on both sides)
+    for (const ox of [-pw, 0, pw])
+      for (const oy of [-ph, 0, ph]) {
+        c.fillStyle = '#10170d';
+        c.fillRect(x + ox - 3, y + oy - 3, 7, 7);
+        c.fillStyle = fill;
+        c.fillRect(x + ox - 2, y + oy - 2, 5, 5);
+      }
   };
-  if (players > 0) startsFor(def, players).forEach((p, i) => dot(p, START_DOTS[i] ?? '#e8e2c8'));
+  if (allStarts) def.starts.forEach((p) => dot(p, START_DOT));
   else {
     dot(def.home, START_DOTS[0]);
     dot(def.enemy, START_DOTS[1]);

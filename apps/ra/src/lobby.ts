@@ -13,7 +13,7 @@
 // The host runs the game for everyone (see "Multiplayer" in src/v2/game.ts);
 // here is the lobby and the messages that carry the game once it starts.
 import { FACTIONS } from './v1/sprites';
-import { MAPS, mapPreview, mapsFor, START_DOTS } from './v2/maps';
+import { MAPS, mapPreview, mapsFor } from './v2/maps';
 import type { Command, Player, Snapshot } from './v2/game';
 import { BOT_LEVELS, type BotLevel } from './v2/bot';
 import { isValidCode, normalizeCode } from './net/codes';
@@ -712,11 +712,11 @@ export class Lobby {
     }, 250);
   }
 
-  private preview(id: string, n: number): HTMLCanvasElement {
-    const key = `${id}:${this.seed}:${n}`;
+  private preview(id: string): HTMLCanvasElement {
+    const key = `${id}:${this.seed}`;
     let c = this.previews.get(key);
     if (!c) {
-      c = mapPreview(MAPS.find((m) => m.id === id)!, this.seed, 128 * 80, 128 * 40, 120, 60, n);
+      c = mapPreview(MAPS.find((m) => m.id === id)!, this.seed, 128 * 80, 128 * 40, 120, 60, true);
       this.previews.set(key, c);
     }
     // a canvas can only be in one place: draw a copy
@@ -917,7 +917,7 @@ export class Lobby {
       const card = el('button', 'map');
       card.type = 'button';
       card.setAttribute('aria-pressed', String(m.id === this.mapId));
-      card.append(this.preview(m.id, this.players.length));
+      card.append(this.preview(m.id));
       const nm = el('span', 'name', m.name);
       nm.append(el('span', 'pcount', m.players[0] === m.players[1] ? `${m.players[0]}P` : `${m.players[0]}-${m.players[1]}P`));
       card.append(nm);
@@ -931,14 +931,6 @@ export class Lobby {
       maps.append(card);
     }
     v.append(maps);
-    const legend = el('div', 'legend');
-    this.players.forEach((p, i) => {
-      const d = el('i', 'dot');
-      d.style.setProperty('--c', START_DOTS[i] ?? '#e8e2c8');
-      legend.append(d);
-    });
-    if (this.players.length) legend.append(el('span', '', 'starts, in join order'));
-    v.append(legend);
 
     const row = el('div', 'actions');
     const leave = el('button', 'small', this.mode === 'host' ? 'Close room' : 'Leave');
