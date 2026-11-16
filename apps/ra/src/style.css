@@ -103,6 +103,7 @@ body {
 #regen,
 #voiceBtn,
 #musicBtn,
+#sfxBtn,
 #unitsLink {
   font: inherit;
   font-size: 12px;
@@ -135,7 +136,8 @@ body {
 
 #regen:active,
 #voiceBtn:active,
-#musicBtn:active {
+#musicBtn:active,
+#sfxBtn:active {
   transform: translateY(1px);
 }
 
