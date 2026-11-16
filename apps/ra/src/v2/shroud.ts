@@ -5,17 +5,15 @@
 // both ways), so a unit's sight is a 2:1 ellipse there, the shape of a circle
 // on the ground. How much of each CELL-pixel cell has been seen is kept as
 // 0..255 (255 well inside someone's sight, falling off at the edge of it).
-// The edge is drawn by interpolating that and dithering it in 2-pixel dots,
-// tile by tile: a tile all seen is skipped, one all unseen is a black
+// The edge is drawn by interpolating that into a soft fade to black (its
+// opacity eased so it blurs out smoothly), tile by tile: a tile all seen is skipped, one all unseen is a black
 // square, and only tiles on the edge get a little canvas of their own.
 import { CH } from '../tiles';
 
 const S = 8; // cell size, in map pixels
-const P = 2; // the dots of the dithered edge, in map pixels
-const N = CH / P; // dots across a tile
-const FADE = 0.2; // how much of a sight's radius the edge fades over
-// a 4 x 4 Bayer matrix: thresholds for the dithered edge
-const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((b) => ((b + 0.5) / 16) * 255);
+const P = 2; // the edge's pixels, in map pixels (smoothed when drawn)
+const N = CH / P; // pixels across a tile
+const FADE = 0.4; // how much of a sight's radius the edge fades over
 
 const BLACK = 0;
 const EDGE = 1;
@@ -107,7 +105,7 @@ export class Shroud {
     return a + (b - a) * ty;
   }
 
-  // Has screen point (x, y) been seen (past the middle of the dithered edge)?
+  // Has screen point (x, y) been seen (past the middle of the faded edge)?
   seen(x: number, y: number): boolean {
     return this.at(x, y) >= 128;
   }
@@ -135,16 +133,19 @@ export class Shroud {
     const img = (this.img ??= new ImageData(N, N));
     const d = img.data;
     let black = 0;
+    let clear = 0;
     for (let y = 0; y < N; y++)
       for (let x = 0; x < N; x++) {
-        const v = this.at(tx * CH + x * P + P / 2, ty * CH + y * P + P / 2);
+        const v = this.at(tx * CH + x * P + P / 2, ty * CH + y * P + P / 2) / 255;
+        // smoothstep, so the fade has no hard start or end
+        const a = Math.round(255 * (1 - v * v * (3 - 2 * v)));
         const o = (y * N + x) * 4;
-        const on = v < BAYER[(x & 3) + (y & 3) * 4];
         d[o] = d[o + 1] = d[o + 2] = 0;
-        d[o + 3] = on ? 255 : 0;
-        if (on) black++;
+        d[o + 3] = a;
+        if (a === 255) black++;
+        else if (a === 0) clear++;
       }
-    if (black === 0 || black === N * N) {
+    if (black === N * N || clear === N * N) {
       this.state[k] = black ? BLACK : CLEAR;
       this.canvases.delete(k);
       return;
@@ -188,6 +189,10 @@ export class Shroud {
       }
     }
     c.fill();
+    // the edge tiles smoothed as they are scaled up, for a soft blur
+    const smooth = c.imageSmoothingEnabled;
+    c.imageSmoothingEnabled = true;
     for (const [cv, x, y] of edges) c.drawImage(cv, x, y, CH, CH);
+    c.imageSmoothingEnabled = smooth;
   }
 }
