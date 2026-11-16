@@ -7,6 +7,7 @@ import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { musicMuted, setMood, setMusicMuted } from './music';
 import { setVoiceMuted, voiceMuted } from './voice';
+import { play, setSfxMuted, setWorldLevel, sfxMuted, ui } from './sfx';
 import { initBuild } from './build-ui';
 import { startArtPool } from './v2/art-pool';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
@@ -519,10 +520,15 @@ function applyScale(): void {
   canvas.style.width = `${w * scale}px`;
   canvas.style.height = `${h * scale}px`;
   mini.hidden = planet;
+  setWorldLevel(planet ? 0.15 : 1);
   if (planet !== wasPlanet) {
     lastSnap = -Infinity; // refresh the globe straight away
     showSelection(lastNames);
-    if (built.w) whoosh = { t0: performance.now(), up: planet };
+    if (built.w) {
+      whoosh = { t0: performance.now(), up: planet };
+      // out to space with a rush, and the same rush backwards coming down
+      play('whoosh_space', 1, { ui: true, reverse: !planet });
+    }
   }
   clampCen();
 }
@@ -756,6 +762,42 @@ showMusic();
 musicBtn.addEventListener('click', () => {
   setMusicMuted(!musicMuted());
   showMusic();
+});
+
+// Sounds: guns, engines, explosions and the buttons (src/sfx.ts).
+const sfxBtn = document.querySelector<HTMLButtonElement>('#sfxBtn')!;
+const showSfx = () => {
+  const on = !sfxMuted();
+  sfxBtn.textContent = `Sounds: ${on ? 'on' : 'off'}`;
+  sfxBtn.setAttribute('aria-pressed', String(on));
+};
+showSfx();
+sfxBtn.addEventListener('click', () => {
+  setSfxMuted(!sfxMuted());
+  showSfx();
+});
+
+// A panel (the menu, the build sheet, the selection menu) slides as it opens
+// or shuts, when a tap did it; every other button clicks.
+let lastTap = -1e9;
+let panelT = -1e9;
+document.addEventListener('pointerdown', () => (lastTap = performance.now()), true);
+document.addEventListener('keydown', () => (lastTap = performance.now()), true);
+const panels = new MutationObserver((ms) => {
+  if (performance.now() - lastTap > 500) return;
+  for (const m of ms) {
+    const el = m.target as HTMLElement;
+    if ((m.oldValue !== null) === el.hidden) continue;
+    ui('ui_panel', el.hidden ? 0.85 : 1);
+    panelT = performance.now();
+    return;
+  }
+});
+for (const el of [menu, selMenu, document.querySelector('#build')]) if (el) panels.observe(el, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
+document.addEventListener('click', (e) => {
+  const b = (e.target as Element | null)?.closest?.('button, select, a');
+  if (!b || performance.now() - panelT < 100) return;
+  ui('ui_click');
 });
 
 // New map: a fresh seed, and (where there is a choice) pick the map again.

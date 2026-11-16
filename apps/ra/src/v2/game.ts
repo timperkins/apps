@@ -12,6 +12,7 @@ import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
+import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
 import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
@@ -1164,6 +1165,7 @@ export class IsoGame implements GameLike {
     const y = air ? b.y : b.y + b.art.ry - 2;
     const [fx, fy] = this.fold(x, y);
     const u = this.newUnit(kind, ME, fx, fy, Math.PI / 2);
+    if (b.kind === 'factory') this.sound(b.x, b.y, 'unit_exit');
     if (kind === 'hauler') {
       u.job = { st: 'seek', t: 0 };
       u.load = 0;
@@ -1205,6 +1207,7 @@ export class IsoGame implements GameLike {
       announce('low_power');
     } else if (!low && this.lowPower) announce('power_restored');
     this.lowPower = low;
+    let paid = false;
     for (const j of this.jobs.values()) {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
@@ -1213,6 +1216,7 @@ export class IsoGame implements GameLike {
       const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
       this.credits -= pay;
       j.spent += pay;
+      if (pay > 0) paid = true;
       if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) {
         this.notice('Not enough credits');
         announce('insufficient_funds');
@@ -1229,10 +1233,17 @@ export class IsoGame implements GameLike {
           j.ready = true;
           this.notice(`${j.tech.name} ready: tap it to place`);
           announce('construction_complete');
+          ui('ui_ready');
         }
       }
     }
+    // the credits tick away while something is being made
+    if (paid && this.time - this.tickT > 0.14) {
+      this.tickT = this.time;
+      ui('credits_tick');
+    }
   }
+  private tickT = 0;
 
   // ---------- Placing a finished building ----------
 
@@ -1285,6 +1296,7 @@ export class IsoGame implements GameLike {
 
   private placeNow(): void {
     const gh = this.ghost;
+    if (gh?.why) ui('ui_error');
     if (!gh || gh.why) return;
     const t = gh.tech;
     const art = this.buildingArt(t.building!, ME);
@@ -1293,6 +1305,8 @@ export class IsoGame implements GameLike {
     this.clearSite(gh.pad, null);
     this.setPad(gh.pad, true);
     this.puff(b, 12);
+    this.sound(b.x, b.y, 'build_place');
+    this.sound(b.x, b.y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
     this.jobs.delete(t.tab);
     this.ghost = null;
     this.emit();
@@ -1517,8 +1531,13 @@ export class IsoGame implements GameLike {
           break;
         }
         const give = Math.min(ORE.unloadRate * dt, u.load, room);
+        if (u.load >= ORE.load * 0.95 && u.f === ME) this.sound(u.x, u.y, 'ore_unload');
         u.load -= give;
         this.credits += give;
+        if (u.f === ME && this.time - this.tickT > 0.12) {
+          this.tickT = this.time;
+          ui('credits_tick', 1.4);
+        }
         if (u.load <= 0.5) {
           u.load = 0;
           j.st = 'seek';
@@ -1563,17 +1582,23 @@ export class IsoGame implements GameLike {
     if (id === 'primary' && sb) for (const o of this.buildings) o.primary = o.own && o.kind === sb.kind ? o === sb : o.primary;
     if (id === 'unrally' && sb) sb.rally = undefined;
     if (id === 'place') this.placeNow();
+    else if (id === 'deploy' && !this.selected().some((u) => u.kind === 'mcv' && u.f === ME && !u.deploy && this.deployable(u))) ui('ui_error');
     else if (id === 'unplace') this.ghost = null;
     else if (id === 'deploy') {
       for (const u of this.selected()) if (!u.deploy && this.deployable(u)) this.startDeploy(u);
     } else if (id === 'pack') {
       const b = this.selB();
-      if (b && b.own && b.kind === 'yard' && b.rise >= 1) b.packing = true;
+      if (b && b.own && b.kind === 'yard' && b.rise >= 1) {
+        b.packing = true;
+        this.sound(b.x, b.y, 'build_rise', 1, { reverse: true, rate: 1.3 });
+        this.sound(b.x, b.y, 'foundry_unfold', 0.8, { delay: 1, reverse: true });
+      }
     }
   }
 
   private startDeploy(u: Unit): void {
     u.deploy = true;
+    this.sound(u.x, u.y, 'foundry_unfold');
     u.moving = false;
     u.tx = u.x;
     u.ty = u.y;
@@ -1595,6 +1620,7 @@ export class IsoGame implements GameLike {
     if (u.sel) for (const o of this.units) o.sel = false;
     this.setPad(pad, true);
     this.puff(b, 14);
+    this.sound(b.x, b.y, 'build_rise');
     this.emit();
   }
 
@@ -1633,6 +1659,73 @@ export class IsoGame implements GameLike {
   private forestF!: WorldField;
   tiles!: Tiles<Prop>;
   private view = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+  // How well you hear something at screen point (sx, sy): full in the middle
+  // of the view, a little less at its edges, dying away just past them, and
+  // quieter the further out you are zoomed.
+  private hear(sx: number, sy: number): number {
+    const v = this.view;
+    const cx = (v.x0 + v.x1) / 2;
+    const cy = (v.y0 + v.y1) / 2;
+    const hw = (v.x1 - v.x0) / 2 || 1;
+    const hh = (v.y1 - v.y0) / 2 || 1;
+    const [qx, qy] = nearestCopy(cx, cy, sx, sy, this.w, this.h);
+    const d = Math.max(Math.abs(qx - cx) / hw, Math.abs(qy - cy) / hh);
+    const near = d <= 1 ? 1 - 0.3 * d : Math.max(0, 0.7 * (1 - (d - 1) / 0.6));
+    const zoom = Math.max(0.35, Math.min(1, 600 / (hw * 2)));
+    return near * (0.4 + 0.6 * zoom);
+  }
+
+  // A one-shot from world point (x, y, z), as loud as it is near the view.
+  private sound(x: number, y: number, n: Sfx, vol = 1, o: PlayOpts = {}, z = 0): void {
+    const [sx, sy] = toScreen(x, y, z);
+    play(n, vol * this.hear(sx, sy), o);
+  }
+
+  // The loops: each as loud as how many of its makers are near the view.
+  private surfT = -1;
+  private surf = 0;
+  private loopSounds(): void {
+    const sum: Record<Loop, number> = { tracks_loop: 0, engine_loop: 0, rotor_loop: 0, boat_loop: 0, footsteps: 0, ore_dig: 0, ambient_land: 0, surf_loop: 0, fire_loop: 0 };
+    const at = (x: number, y: number, z = 0) => this.hear(...toScreen(x, y, z));
+    for (const u of this.units) {
+      if (u.dead) continue;
+      const k = u.kind;
+      if (k === 'heli') {
+        sum.rotor_loop += at(u.x, u.y, u.z + HELI_ALT) * (u.moving ? 1 : 0.6);
+        continue;
+      }
+      if (u.job?.st === 'dig') sum.ore_dig += at(u.x, u.y);
+      if (!u.moving) continue;
+      const h = at(u.x, u.y);
+      if (k === 'inf' || k === 'rocket') sum.footsteps += h * 0.5;
+      else if (k === 'boat') sum.boat_loop += h;
+      else if (k === 'buggy' || k === 'arty') sum.engine_loop += h;
+      else sum.tracks_loop += h;
+    }
+    for (const f of this.fires) if (f.t < BURN_WRECK) sum.fire_loop += at(f.x, f.y) * (1 - f.t / BURN_WRECK);
+    for (const r of this.ruins) if (r.t < BURN_RUIN) sum.fire_loop += at(r.x, r.y) * 1.5 * (1 - r.t / BURN_RUIN);
+    for (const b of this.buildings) if (!b.dead && b.hp < 0.5) sum.fire_loop += at(b.x, b.y) * (0.5 - b.hp);
+    // surf where the view has both land and water in it (looked at twice a second)
+    if (this.time - this.surfT > 0.5 || this.time < this.surfT) {
+      this.surfT = this.time;
+      const v = this.view;
+      let wet = 0;
+      let all = 0;
+      for (let i = 0; i < 6; i++)
+        for (let j = 0; j < 6; j++) {
+          const [x, y] = toWorld(v.x0 + ((i + 0.5) / 6) * (v.x1 - v.x0), v.y0 + ((j + 0.5) / 6) * (v.y1 - v.y0), 0);
+          all++;
+          if (this.terrain.k(x, y) === K.Water) wet++;
+        }
+      const f = all ? wet / all : 0;
+      this.surf = Math.min(1, 4 * f * (1 - f) + f * 0.3);
+    }
+    const zoom = Math.max(0.35, Math.min(1, 600 / Math.max(1, this.view.x1 - this.view.x0)));
+    sum.surf_loop = this.surf * (0.4 + 0.6 * zoom);
+    sum.ambient_land = (1 - this.surf * 0.5) * 0.6;
+    for (const n of Object.keys(sum) as Loop[]) level(n, n === 'surf_loop' || n === 'ambient_land' ? sum[n] : Math.min(1, sum[n] * 0.35 + (sum[n] > 0.02 ? 0.25 : 0)));
+  }
 
   // Paint one tile of ground and scatter its trees, bushes and rocks.
   private *buildTile(tx: number, ty: number): Generator<void, Tile<Prop>> {
@@ -1882,6 +1975,7 @@ export class IsoGame implements GameLike {
     const foe = shortest ? null : this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
       this.attack(sel, foe);
+      ui('order_confirm', 0.8);
       this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
       return;
     }
@@ -1901,6 +1995,7 @@ export class IsoGame implements GameLike {
       if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
         const [mx, my] = this.fold(...this.groundAt(x, y));
         if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0, ore: true });
+        ui('order_confirm', 1.3);
         this.speak(sel, 'harvest');
         return;
       }
@@ -1946,6 +2041,7 @@ export class IsoGame implements GameLike {
       u.target = undefined;
       u.forced = u.chase = false;
     }
+    ui('order_confirm');
     this.speak(sel, 'move');
   }
 
@@ -2411,6 +2507,7 @@ export class IsoGame implements GameLike {
     this.updateRuins(dt);
     this.updateFires(dt);
     this.fx.step(dt);
+    this.loopSounds();
 
     for (const p of this.particles) {
       p.life += dt;
@@ -2750,6 +2847,7 @@ export class IsoGame implements GameLike {
 
   // Rounds leave the muzzles (a flash at each) for t.
   private shoot(src: Unit | Building, w: Weapon, t: Target, from: [number, number, number][]): void {
+    this.gunSound(isB(src) ? 'tower' : src.kind, from[0], from.length);
     for (const m of from) {
       const [sx, sy] = toScreen(...m);
       this.fx.muzzle(sx, sy, w.shot !== 'bullet');
@@ -2784,7 +2882,41 @@ export class IsoGame implements GameLike {
         };
         aim = track()!;
       }
-      this.fx.fire(makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track));
+      const shot = makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track);
+      this.fx.fire(shot);
+      // a lobbed shell whistles down the last moment or so of its flight
+      if (w.shot === 'arc') this.sound(aim[0], aim[1], 'shell_whistle', 1, { delay: Math.max(0, shot.dur - 1.2), rate: 1.1 }, aim[2]);
+    }
+  }
+
+  // The sound of a gun going off: kind is who is firing, at muzzle m, with n barrels.
+  private gunSound(kind: Kind | 'tower', m: [number, number, number], n: number): void {
+    const [x, y, z] = m;
+    const twin = (s: Sfx, rate: number, vol = 1) => {
+      this.sound(x, y, s, vol, { rate }, z);
+      if (n > 1) this.sound(x, y, s, vol * 0.8, { rate: rate * 0.97, delay: 0.05 }, z);
+    };
+    switch (kind) {
+      case 'inf':
+        return twin('rifle_shot', 1);
+      case 'buggy':
+        // a machine gun: three quick rounds
+        for (let i = 0; i < 3; i++) this.sound(x, y, 'rifle_shot', 0.7, { rate: 1.35, delay: i * 0.07 }, z);
+        return;
+      case 'light':
+        return twin('cannon_shot', 1);
+      case 'heavy':
+        return twin('cannon_shot', 0.8, 1.1);
+      case 'tower':
+        return twin('cannon_shot', 0.92);
+      case 'boat':
+        return twin('cannon_shot', 1.2, 0.8);
+      case 'arty':
+        return twin('howitzer_shot', 1);
+      case 'rocket':
+        return twin('rocket_launch', 1);
+      case 'heli':
+        return twin('rocket_launch', 1.15, 0.8);
     }
   }
 
@@ -2793,6 +2925,7 @@ export class IsoGame implements GameLike {
     if (w.splash) {
       // a shell bursting: everything of the other side near it is hit, less further out
       this.fx.boom(sx, sy, 6);
+      this.sound(s.x, s.y, 'explosion_large', 0.8, {}, s.z);
       const R = w.splash;
       for (const o of [...this.units]) {
         if (o.f === src.f || o.kind === 'heli' || o.dead) continue;
@@ -2812,9 +2945,11 @@ export class IsoGame implements GameLike {
     if (w.shot === 'bullet') {
       if (soft) this.fx.dust(sx, sy);
       else this.fx.sparks(sx, sy, 4);
+      if (!soft) this.sound(s.x, s.y, 'bullet_hit', 0.8, { rate: 0.9 + Math.random() * 0.4 }, s.z);
     } else {
       this.fx.boom(sx, sy, w.shot === 'rocket' ? 3.5 : 3);
       this.fx.sparks(sx, sy, 6);
+      this.sound(s.x, s.y, 'explosion_small', 0.6, { rate: w.big ? 0.85 : 1.1 }, s.z);
     }
     if (t.dead) return;
     if (!isB(t)) this.shove(t, knockback(w, t.kind), s.x1 - s.x0, s.y1 - s.y0);
@@ -2910,6 +3045,7 @@ export class IsoGame implements GameLike {
     );
     const q = QUAKE[u.kind];
     if (q) this.quake(sx, sy, q);
+    this.deathSound(u, air);
     if (u.kind !== 'inf' && u.kind !== 'rocket') {
       const r = BOOM[u.kind] ?? 6;
       // the blast hurts whatever is close by, on either side
@@ -2920,6 +3056,19 @@ export class IsoGame implements GameLike {
       if (u.kind !== 'heli' && u.kind !== 'boat') this.survivors(u);
     }
     if (u.sel) this.emit();
+  }
+
+  private deathSound(u: Unit, air: number): void {
+    const z = u.z + air;
+    if (u.kind === 'inf' || u.kind === 'rocket') return this.sound(u.x, u.y, 'infantry_death', 1, { rate: 0.9 + Math.random() * 0.25 }, z);
+    if (u.kind === 'buggy' || u.kind === 'arty' || u.kind === 'heli') {
+      this.sound(u.x, u.y, 'explosion_small', 1, { rate: 0.85 }, z);
+    } else {
+      // tracked armour cooks off in a string of blasts
+      this.sound(u.x, u.y, 'explosion_large', 1, {}, z);
+      for (let i = 1; i < 3; i++) this.sound(u.x, u.y, 'explosion_small', 0.7, { delay: i * (0.25 + Math.random() * 0.2), rate: 0.8 + Math.random() * 0.3 }, z);
+    }
+    this.sound(u.x, u.y, 'debris', 0.8, { delay: 0.35 }, z);
   }
 
   // An explosion at world point (x, y) hurts everything on the ground within
@@ -3056,6 +3205,7 @@ export class IsoGame implements GameLike {
       }
     }
     this.quake(cx, cy, buildingQuake(rx, ry) * (power ? 1 : 0.6));
+    for (let i = 0; i < (power ? 4 : 3); i++) this.sound(b.x, b.y, i ? 'explosion_small' : 'explosion_large', 1, { delay: i * 0.12, rate: 0.75 + Math.random() * 0.3 }, 8);
     const states = this.states(b.kind, b.f);
     // fires over the ruin: on its smoking spots and scattered across it
     const ruin = states.ruin;
@@ -3082,6 +3232,8 @@ export class IsoGame implements GameLike {
         const power = r.kind === 'power';
         this.fx.collapse(r.states.damaged.spr, sx, sy, ox, oy, rx + ry, (rx + ry) * 0.5, power ? 2.2 : 1);
         this.quake(ox, oy, power ? 4 : buildingQuake(rx, ry));
+        this.sound(r.x, r.y, 'explosion_large', 1, { rate: power ? 0.7 : 0.85 }, 8);
+        this.sound(r.x, r.y, 'building_collapse', 1, { delay: 0.1, rate: power ? 0.85 : 1 });
         // the blast hurts whatever is close by, on either side
         this.blast(r.x, r.y, rx, ry, power ? 3.5 * CELL : 1.6 * CELL, power ? 90 : 35);
       }

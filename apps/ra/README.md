@@ -42,6 +42,8 @@ No collision yet, and cliffs don't block units yet. The showcase at `/units/` sh
 
 **How v2's art is drawn**: every unit, building and prop is a little model, a function from a point in space to a colour (`src/v2/sprites.ts`), which `src/v2/stack.ts` turns into a sprite by casting a ray per pixel. It lights each surface by which way it faces (so round things shade in bands), lets parts cast shadows on each other and the ground, darkens corners, and draws a lit rim and a dark line where one part stands in front of another. The art is drawn at twice the map's own grid (`ART` in `src/gfx.ts`): things are the same size on screen as before with pixels half as big, which is what leaves room for hatches, road wheels, window frames, roof clutter, courses of stone in the cliffs and blades of grass. The ground is painted to match (`paintSteps` in `src/v2/terrain.ts`), a few rows per frame so that painting a tile never holds up a frame. v1 is still drawn one for one.
 
+**Sound** (v2): guns, shells, explosions, wrecks, engines, rotors, footsteps, building, ore and the buttons, from 32 clips in `public/sfx/` made with ElevenLabs (`src/sfx.ts`). A sound is as loud as it is near the middle of the view, quieter zoomed out and nearly silent from space; one clip often stands in for several (pitched up or down, doubled for twin barrels, or played backwards). The menu's **Sounds** button mutes them, apart from the Voices and Music buttons.
+
 ```sh
 npm install
 npm run dev
