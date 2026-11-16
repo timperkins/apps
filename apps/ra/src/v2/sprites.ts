@@ -587,25 +587,38 @@ export interface V2FactionArt {
   rocket: StackSprite[][];
 }
 
+// Each set of headings is keyed fa:<faction>:<name>[:<frame>], so a worker can
+// make the same one (see art-worker.ts and factionSet below).
 export function makeFactionArt(f: Faction): V2FactionArt {
-  const haulerLoad = [0, 1, 2].map((fill) => renderDirs(hauler(f, fill), DIRS, { r: 13, zmax: 11, bakeShadow: true }));
-  const inf = (rocket: boolean) => [0, 1, 2].map((fr) => renderDirs(soldier(f, rocket, fr), 16, { r: 4, zmax: 9, step: 0.5, bakeShadow: true }));
+  const fi = FACTIONS.indexOf(f);
+  const k = (name: string) => (fi >= 0 ? `fa:${fi}:${name}` : undefined);
+  const haulerLoad = [0, 1, 2].map((fill) => renderDirs(hauler(f, fill), DIRS, { r: 13, zmax: 11, bakeShadow: true }, k(`haulerLoad:${fill}`)));
+  const inf = (rocket: boolean) =>
+    [0, 1, 2].map((fr) => renderDirs(soldier(f, rocket, fr), 16, { r: 4, zmax: 9, step: 0.5, bakeShadow: true }, k(`${rocket ? 'rocket' : 'infantry'}:${fr}`)));
   return {
-    mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }),
-    lightTank: renderDirs(tankHull(f, 16, 12, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }),
-    lightTurret: renderDirs(turretShape(f, 3.6, 5, 1, 11), DIRS, { r: 11.5, zmax: 14 }),
-    heavyTank: renderDirs(tankHull(f, 20, 15, true), DIRS, { r: 13, zmax: 8, bakeShadow: true }),
-    heavyTurret: renderDirs(turretShape(f, 4.8, 6, 2, 13), DIRS, { r: 13.5, zmax: 16 }),
-    buggy: renderDirs(buggy(f), DIRS, { r: 8, zmax: 10, bakeShadow: true }),
+    mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }, k('mcv')),
+    lightTank: renderDirs(tankHull(f, 16, 12, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lightTank')),
+    lightTurret: renderDirs(turretShape(f, 3.6, 5, 1, 11), DIRS, { r: 11.5, zmax: 14 }, k('lightTurret')),
+    heavyTank: renderDirs(tankHull(f, 20, 15, true), DIRS, { r: 13, zmax: 8, bakeShadow: true }, k('heavyTank')),
+    heavyTurret: renderDirs(turretShape(f, 4.8, 6, 2, 13), DIRS, { r: 13.5, zmax: 16 }, k('heavyTurret')),
+    buggy: renderDirs(buggy(f), DIRS, { r: 8, zmax: 10, bakeShadow: true }, k('buggy')),
     hauler: haulerLoad[0],
     haulerLoad,
-    artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }),
-    boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }),
-    heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }),
-    towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }),
+    artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }, k('artillery')),
+    boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }, k('boat')),
+    heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }, k('heli')),
+    towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }, k('towerGun')),
     infantry: inf(false),
     rocket: inf(true),
   };
+}
+
+/** The set of headings a key from makeFactionArt names, in a given set of art. */
+export function factionSet(art: V2FactionArt, key: string): StackSprite[] | null {
+  const [, , name, sub] = key.split(':');
+  const v = (art as unknown as Record<string, StackSprite[] | StackSprite[][]>)[name];
+  if (!v) return null;
+  return (sub !== undefined ? (v as StackSprite[][])[Number(sub)] : (v as StackSprite[])) ?? null;
 }
 
 // ---------- Buildings ----------
@@ -1224,6 +1237,12 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
   }
 }
 
+/** A building's footprint and effect anchors, without drawing it. */
+export function buildingFoot(kind: BuildingKind, f: Faction): Omit<V2BuildingArt, 'spr'> {
+  const b = buildingShape(kind, f);
+  return { rx: b.rx, ry: b.ry, fx: b.fx };
+}
+
 export function makeBuilding(kind: BuildingKind, f: Faction): V2BuildingArt {
   const b = buildingShape(kind, f);
   const spr = renderStack(b.shape, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 });
@@ -1255,7 +1274,7 @@ export function makeDish(): StackSprite[] {
     }
     return null;
   };
-  return renderDirs(dish, 16, { r: 6.5, zmax: 11, outline: [30, 30, 28] });
+  return renderDirs(dish, 16, { r: 6.5, zmax: 11, outline: [30, 30, 28] }, 'dish');
 }
 
 // ---------- Props ----------

@@ -266,7 +266,8 @@ export class Pix {
   }
 
   canvas(): HTMLCanvasElement {
-    const c = document.createElement('canvas');
+    // (in a worker, where there is no document, an OffscreenCanvas: see art-worker.ts)
+    const c = typeof document !== 'undefined' ? document.createElement('canvas') : (new OffscreenCanvas(this.w, this.h) as unknown as HTMLCanvasElement);
     c.width = this.w;
     c.height = this.h;
     const ctx = c.getContext('2d')!;

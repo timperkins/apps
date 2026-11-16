@@ -28,6 +28,12 @@ export interface View {
   y: number;
 }
 
+// What the globe needs of the shroud (v2/shroud.ts).
+export interface ShroudLike {
+  dark(x: number, y: number): number;
+  span(x0: number, y0: number, x1: number, y1: number): number;
+}
+
 export class Globe {
   private base: Uint32Array | null = null;
   private tex: Uint32Array | null = null;
@@ -57,19 +63,60 @@ export class Globe {
   }
 
   // The picture of the whole map (any size; it is stretched over the map).
-  setMap(mw: number, mh: number, img: HTMLCanvasElement): void {
+  // With a shroud, the picture is of the map without it, and the shroud is
+  // put over it here, so that as more is seen only that part is redone
+  // (shade) rather than the whole picture redrawn.
+  setMap(mw: number, mh: number, img: HTMLCanvasElement, shroud?: ShroudLike | null): void {
     this.mw = mw;
     this.mh = mh;
     const tw = img.width;
     const th = img.height;
     const c = img.getContext('2d', { willReadFrequently: true })!;
     this.base = new Uint32Array(c.getImageData(0, 0, tw, th).data.buffer);
-    this.tex = this.base.slice();
     this.tw = tw;
     this.th = th;
+    this.clean = shroud ? this.base.slice() : null;
+    if (shroud) this.shade(shroud, 0, 0, mw, mh);
+    this.tex = this.base.slice();
     const cw = Math.max(8, tw >> 2);
     const ch = Math.max(8, th >> 2);
     if (!this.clouds || this.cw !== cw || this.ch !== ch) this.makeClouds(cw, ch);
+  }
+
+  private clean: Uint32Array | null = null;
+
+  /** Put the shroud back over map rect (x0, y0)-(x1, y1) (unwrapped) of the picture. */
+  shade(shroud: ShroudLike, x0: number, y0: number, x1: number, y1: number): void {
+    const { clean, base, tex, tw, th, mw, mh } = this;
+    if (!clean || !base) return;
+    const kx = mw / tw;
+    const ky = mh / th;
+    const u0 = Math.floor(x0 / kx);
+    const u1 = Math.min(Math.ceil(x1 / kx), u0 + tw);
+    const v0 = Math.floor(y0 / ky);
+    const v1 = Math.min(Math.ceil(y1 / ky), v0 + th);
+    // in blocks, most of which are all seen or all unseen
+    const B = 16;
+    for (let bv = v0; bv < v1; bv += B)
+      for (let bu = u0; bu < u1; bu += B) {
+        const eu = Math.min(bu + B, u1);
+        const ev = Math.min(bv + B, v1);
+        const all = shroud.span(bu * kx, bv * ky, eu * kx, ev * ky);
+        for (let v = bv; v < ev; v++) {
+          const row = (((v % th) + th) % th) * tw;
+          for (let u = bu; u < eu; u++) {
+            const i = row + (((u % tw) + tw) % tw);
+            const p = clean[i];
+            if (all === 0) base[i] = p;
+            else if (all === 1) base[i] = 0xff000000;
+            else {
+              const k = 1 - shroud.dark((u + 0.5) * kx, (v + 0.5) * ky);
+              base[i] = 0xff000000 | (Math.round(((p >>> 16) & 255) * k) << 16) | (Math.round(((p >>> 8) & 255) * k) << 8) | Math.round((p & 255) * k);
+            }
+            if (tex) tex[i] = base[i]; // (the dots go back on at the next setDots)
+          }
+        }
+      }
   }
 
   // Units as 2 x 2 dots on top of the map picture.

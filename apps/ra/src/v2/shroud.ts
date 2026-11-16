@@ -31,6 +31,8 @@ export class Shroud {
   private img: ImageData | null = null;
   // goes up whenever more of the map is seen
   version = 0;
+  // the screen rect seen since changed() was last asked (unwrapped)
+  private box: [number, number, number, number] | null = null;
 
   constructor(
     readonly w: number,
@@ -73,6 +75,10 @@ export class Shroud {
     }
     if (!grew) return;
     this.version++;
+    const m = 2 * S;
+    const bx: [number, number, number, number] = [i0 * S - m, j0 * S - m, (i1 + 1) * S + m, (j1 + 1) * S + m];
+    const o = this.box;
+    this.box = o ? [Math.min(o[0], bx[0]), Math.min(o[1], bx[1]), Math.max(o[2], bx[2]), Math.max(o[3], bx[3])] : bx;
     // the tiles these cells reach (a cell's value blends into its neighbours)
     const t0 = Math.floor(((i0 - 1) * S) / CH);
     const t1 = Math.floor(((i1 + 2) * S) / CH);
@@ -108,6 +114,35 @@ export class Shroud {
   // Has screen point (x, y) been seen (past the middle of the faded edge)?
   seen(x: number, y: number): boolean {
     return this.at(x, y) >= 128;
+  }
+
+  /** The screen rect where more has been seen since last asked, if any. */
+  changed(): [number, number, number, number] | null {
+    const b = this.box;
+    this.box = null;
+    // (one that has gone a long way round: all of it)
+    if (b && (b[2] - b[0] > this.w || b[3] - b[1] > this.h)) return [0, 0, this.w, this.h];
+    return b;
+  }
+
+  /** How dark the shroud is drawn at screen point (x, y): 0 seen, 1 unseen. */
+  dark(x: number, y: number): number {
+    const v = this.at(x, y) / 255;
+    return 1 - v * v * (3 - 2 * v);
+  }
+
+  /** Over screen rect (x0, y0)-(x1, y1): 0 if all of it is seen, 1 if none of it, else -1. */
+  span(x0: number, y0: number, x1: number, y1: number): number {
+    let lo = 255;
+    let hi = 0;
+    for (let j = Math.floor(y0 / S) - 1; j <= Math.ceil(y1 / S); j++)
+      for (let i = Math.floor(x0 / S) - 1; i <= Math.ceil(x1 / S); i++) {
+        const v = this.cell(i, j);
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+        if (lo < 255 && hi > 0) return -1;
+      }
+    return hi === 0 ? 1 : 0;
   }
 
   // Bring a tile's picture up to date.

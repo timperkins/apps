@@ -5,7 +5,8 @@ import { STATS, UnitKind } from '../v1/game';
 import { GROUP_COLORS, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
-import { StackSprite, drawSprite, renderStack, toScreen, toWorld } from './stack';
+import { StackSprite, dirSet, drawSprite, renderStack, toScreen, toWorld } from './stack';
+import { buildingArt as workerBuilding, prefetch } from './art-pool';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
@@ -20,6 +21,7 @@ import {
   V2BuildingArt,
   V2FactionArt,
   drawBuggyLights,
+  buildingFoot,
   makeBuilding,
   makeBushes,
   makeClutter,
@@ -344,9 +346,6 @@ export class IsoGame implements GameLike {
   // where each unit of yours last lifted it, and the buildings that have
   private looked = new WeakMap<Unit, [number, number]>();
   private lookedB = new WeakSet<Building>();
-  // the shroud's version the globe's picture shows, and when it was redrawn
-  private shroudV = 0;
-  private shroudT = 0;
 
   stages(): { id: string; name: string; blurb: string }[] {
     return STAGES;
@@ -424,6 +423,112 @@ export class IsoGame implements GameLike {
       this.bArt.set(key, a);
     }
     return a;
+  }
+
+  // A building's art, drawn by a worker: its footprint is there at once, so
+  // generate() can place it, and its picture arrives later (or is drawn here
+  // if it is wanted before then).
+  private artLater(kind: BuildingKind, f: number, urgent: boolean): Promise<void> {
+    const key = `${kind}-${f}`;
+    if (this.bArt.has(key)) return Promise.resolve();
+    let spr: StackSprite | undefined;
+    const a = {
+      ...buildingFoot(kind, FACTIONS[f]),
+      get spr(): StackSprite {
+        return (spr ??= makeBuilding(kind, FACTIONS[f]).spr);
+      },
+    };
+    this.bArt.set(key, a);
+    return workerBuilding(kind, f, urgent).then((w) => {
+      if (w) spr ??= w.spr;
+      else if (urgent) void a.spr; // no workers: draw it now, while the loading screen is up
+    });
+  }
+
+  // ---------- Getting ready (the loading screen, see main.ts) ----------
+  // The art is drawn off the main thread (art-pool.ts) while the loading
+  // screen is up, so play starts without stutters: first the buildings
+  // generate() places, then each unit's heading as it starts out. The rest
+  // follow in the background.
+
+  /** Before generate(): the buildings it will place (it needn't wait for them). */
+  preload(): Promise<unknown>[] {
+    const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad'];
+    const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
+    const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
+    if (this.stage === 'combat') now.push(...[...placed, 'lab' as BuildingKind].map((k): [BuildingKind, number] => [k, ME]));
+    else now.push(['yard', ME]);
+    const get = (kind: BuildingKind, f: number, urgent: boolean) => this.artLater(kind, f, urgent);
+    const waits = now.map(([k, f]) => get(k, f, true));
+    // what you can build, for later
+    for (const k of all) void get(k, ME, false);
+    return waits;
+  }
+
+  // The heading sets a unit is drawn with, and the heading it shows now.
+  private unitSets(u: Unit): [StackSprite[], number][] {
+    const art = this.art[u.f];
+    const di = dirIndex(u.a, DIRS);
+    switch (u.kind) {
+      case 'mcv':
+        return [[art.mcv, di]];
+      case 'inf':
+      case 'rocket':
+        return (u.kind === 'inf' ? art.infantry : art.rocket).map((s): [StackSprite[], number] => [s, dirIndex(u.a, 16)]);
+      case 'light':
+        return [[art.lightTank, di], [art.lightTurret, dirIndex(u.turret, DIRS)]];
+      case 'heavy':
+        return [[art.heavyTank, di], [art.heavyTurret, dirIndex(u.turret, DIRS)]];
+      case 'heli':
+        return [[art.heli, di]];
+      case 'boat':
+        return [[art.boat, di]];
+      case 'hauler':
+        return art.haulerLoad.map((s): [StackSprite[], number] => [s, di]);
+      case 'buggy':
+        return [[art.buggy, di]];
+      default:
+        return [[art.artillery, di]];
+    }
+  }
+
+  /** After generate(): what is in play, as it is now; the rest of it after. */
+  warmUp(): Promise<unknown>[] {
+    const waits: Promise<unknown>[] = [];
+    const sets: StackSprite[][] = [];
+    // only what is near where you start is waited for
+    const f = this.focus();
+    const near = (wx: number, wy: number) => {
+      const [sx, sy] = toScreen(wx, wy);
+      const dx = Math.abs(sx - f.x) % this.w;
+      const dy = Math.abs(sy - f.y) % this.h;
+      return Math.min(dx, this.w - dx) < 1400 && Math.min(dy, this.h - dy) < 900;
+    };
+    const add = (arr: StackSprite[], d: number, now: boolean) => {
+      const s = dirSet(arr);
+      if (!s) return;
+      if (!sets.includes(arr)) sets.push(arr);
+      if (s.ready(d)) return;
+      const p = prefetch(s.key, d, now);
+      if (now) waits.push(p);
+    };
+    // yours first: they're what you see and move first
+    const us = [...this.units].sort((a, b) => (a.f === ME ? 0 : 1) - (b.f === ME ? 0 : 1));
+    for (const u of us) for (const [arr, d] of this.unitSets(u)) add(arr, d, near(u.x, u.y));
+    for (const b of this.buildings) {
+      const now = near(b.x, b.y);
+      if (b.kind === 'tower') add(this.art[b.f].towerGun, dirIndex(b.gun, DIRS), now);
+      if (b.kind === 'radar') for (let d = 0; d < 16; d++) add(this.dish, d, now);
+    }
+    // then every heading of those, and of everything you can make
+    const mine = this.art[ME];
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket])
+      if (!sets.includes(arr)) sets.push(arr);
+    for (const arr of sets) {
+      const s = dirSet(arr);
+      if (s) for (let d = 0; d < s.dirs; d++) if (!s.ready(d)) void prefetch(s.key, d);
+    }
+    return waits;
   }
 
   // The planet is big, so there are several bases round it: the two home
@@ -700,7 +805,6 @@ export class IsoGame implements GameLike {
     this.shroud = NO_SHROUD ? null : new Shroud(w, h);
     this.looked = new WeakMap();
     this.lookedB = new WeakSet();
-    this.shroudV = this.shroudT = 0;
     this.lookAround();
     this.emit();
   }
@@ -734,13 +838,7 @@ export class IsoGame implements GameLike {
       const [sx, sy] = toScreen(b.x, b.y);
       sh.reveal(sx, sy, Math.max(b.art.rx, b.art.ry) + (BSIGHT[b.kind] ?? 5) * CELL);
     }
-    // the globe's picture shows the shroud too: redraw it now and then as
-    // more is seen
-    if (sh.version !== this.shroudV && this.time - this.shroudT > 2.5) {
-      this.shroudV = sh.version;
-      this.shroudT = this.time;
-      this.mapVersion++;
-    }
+    // (the globe's picture puts the shroud on itself: see shroudMap)
   }
 
   private home = { x: 0, y: 0 };
@@ -3352,15 +3450,23 @@ export class IsoGame implements GameLike {
     return t;
   }
 
+  // The shroud, for the globe to put over the map's picture itself.
+  shroudMap(): Shroud | null {
+    return this.shroud;
+  }
+
   // The whole map for the globe, one pixel per OV screen pixels: the overview
-  // with forests darkened, and the bases on it.
+  // with forests darkened, and the bases on it (not the shroud: the globe
+  // puts that on itself).
   mapImage(): HTMLCanvasElement {
     this.mapStep(1e9);
     const src = this.ov!;
     const cv = document.createElement('canvas');
     cv.width = src.width;
     cv.height = src.height;
-    const c = cv.getContext('2d')!;
+    // the globe reads it back (planet.ts setMap), which from a GPU canvas
+    // stalls the frame, and this is redone every few seconds as the shroud lifts
+    const c = cv.getContext('2d', { willReadFrequently: true })!;
     c.drawImage(src, 0, 0);
     c.scale(1 / OV, 1 / OV);
     c.imageSmoothingEnabled = true;
@@ -3378,7 +3484,6 @@ export class IsoGame implements GameLike {
         const [fx, fy] = this.lapped(r.x, r.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
         this.blit(r.states.ruin.spr, fx, fy, 0);
       }
-      this.shroud?.draw(c, 0, 0, this.w, this.h);
     } finally {
       this.ctx = ctx;
     }

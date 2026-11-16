@@ -8,6 +8,7 @@ import { IsoGame } from './v2/game';
 import { musicMuted, setMood, setMusicMuted } from './music';
 import { setVoiceMuted, voiceMuted } from './voice';
 import { initBuild } from './build-ui';
+import { startArtPool } from './v2/art-pool';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
@@ -559,10 +560,33 @@ function fit(force = false): void {
   applyScale();
 }
 
-// Building sprites takes a moment, so show a note and yield a frame first.
+// ---------- Loading screen ----------
+// Making a world takes a few seconds, and so does drawing its art. Done
+// while you play, that is a stuttery start, so it all happens behind the
+// loading screen: the art is drawn off the main thread (src/v2/art-pool.ts)
+// and the screen comes down once the bases, the map of the planet and the
+// units as they start out are ready.
+
+const ldBar = loading.querySelector<HTMLElement>('.ld')!;
+const ldText = loading.querySelector<HTMLElement>('.ld-text')!;
+const SEGS = 24;
+function showLoading(p: number, text: string): void {
+  loading.hidden = false;
+  ldBar.style.setProperty('--p', String(Math.round(Math.min(1, p) * SEGS) / SEGS));
+  ldText.textContent = text;
+}
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+// Wait for a batch of work, moving the bar from p0 to p1 as it finishes.
+async function track(work: Promise<unknown>[], p0: number, p1: number, text: string): Promise<void> {
+  let done = 0;
+  showLoading(p0, text);
+  await Promise.all(work.map((w) => w.then(() => showLoading(p0 + ((p1 - p0) * ++done) / work.length, text))));
+}
+
 // Versions with a choice of maps ask which one first.
 function start(v: string): void {
-  loading.hidden = false;
+  showLoading(0.05, 'Loading');
+  if (v === '2') startArtPool();
   requestAnimationFrame(() =>
     setTimeout(() => {
       game = VERSIONS[v](seed);
@@ -576,25 +600,52 @@ function start(v: string): void {
   );
 }
 
-// Generate the world (a fresh one each time) and paint the first view while
-// the note is up.
-function makeWorld(): void {
+// Generate the world (a fresh one each time) and get it ready to play while
+// the loading screen is up.
+let making = 0;
+async function makeWorld(): Promise<void> {
+  const me = ++making;
   build.reset();
   game.seed = seed;
-  loading.hidden = false;
-  requestAnimationFrame(() =>
-    setTimeout(() => {
-      fit(true);
-      draw(performance.now(), true);
-      loading.hidden = true;
-    }, 0),
-  );
+  const g = game;
+  showLoading(0.02, 'Shaping the land');
+  await nextFrame();
+  if (me !== making || g !== game) return;
+  // the art for the bases is drawn by workers while the land is made here
+  const bases = g.preload?.() ?? [];
+  fit(true);
+  const units = g.warmUp?.() ?? [];
+  // the globe's picture of the whole map, a little each frame
+  let p = 0.2;
+  showLoading(p, 'Mapping the planet');
+  await nextFrame();
+  while (!g.mapStep(30)) {
+    p += (0.5 - p) * 0.15;
+    showLoading(p, 'Mapping the planet');
+    await nextFrame();
+  }
+  await track(bases, 0.5, 0.75, 'Raising the bases');
+  if (me !== making || g !== game) return;
+  globe.setMap(built.w, built.h, g.mapImage(), g.shroudMap?.());
+  g.shroudMap?.()?.changed();
+  mapVersion = g.mapVersion ?? 0;
+  await track(units, 0.75, 0.98, 'Rolling out');
+  if (me !== making || g !== game) return;
+  // one step and a frame drawn behind the screen, so the first one you see
+  // isn't the one that looks up the ground under everyone and sends every
+  // picture to the screen for the first time
+  g.update(1 / 60);
+  draw(performance.now(), true);
+  ctx.getImageData(0, 0, 1, 1); // (makes the canvas really draw it now)
+  showLoading(1, 'Ready');
+  await nextFrame();
+  if (me === making) loading.hidden = true;
 }
 
 // ---------- Map picker ----------
 
 function showPicker(): void {
-  if (!game.maps) return makeWorld();
+  if (!game.maps) return void makeWorld();
   setMenu(false);
   pickClose.hidden = !built.w;
   picker.hidden = false;
@@ -1240,10 +1291,12 @@ const hashf = (i: number, k: number) => {
 let last = performance.now();
 let mapVersion = 0;
 let lastMap = -Infinity;
+let lastShade = -Infinity;
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (game && built.w) {
+  // (not while the loading screen is up: nothing moves until you can see it)
+  if (game && built.w && loading.hidden) {
     const sp = (320 * dt) / zoom;
     if (keys.has('arrowleft') || keys.has('a')) cen.x -= sp;
     if (keys.has('arrowright') || keys.has('d')) cen.x += sp;
@@ -1264,15 +1317,26 @@ function draw(now: number, first: boolean): void {
   // the globe's picture of the map is built in the background, or at once if
   // it is needed now
   if (!globe.ready && game.mapStep(planet ? 1e9 : first ? 0 : 12)) {
-    globe.setMap(built.w, built.h, game.mapImage());
+    globe.setMap(built.w, built.h, game.mapImage(), game.shroudMap?.());
+    game.shroudMap?.()?.changed();
     mapVersion = game.mapVersion ?? 0;
   }
   // a base changed: redraw the globe's picture of the map
   if (globe.ready && (game.mapVersion ?? 0) !== mapVersion && now - lastMap > 500) {
     lastMap = now;
     mapVersion = game.mapVersion ?? 0;
-    globe.setMap(built.w, built.h, game.mapImage());
+    globe.setMap(built.w, built.h, game.mapImage(), game.shroudMap?.());
+    game.shroudMap?.()?.changed();
     lastSnap = -Infinity;
+  }
+  // more of the map seen: darken just that part of the globe's picture again
+  if (globe.ready && now - lastShade > 250) {
+    const sh = game.shroudMap?.();
+    const box = sh?.changed();
+    if (sh && box) {
+      lastShade = now;
+      globe.shade(sh, ...box);
+    }
   }
   refreshActions();
   syncGhost();
