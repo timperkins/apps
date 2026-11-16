@@ -244,6 +244,8 @@ export interface Other {
   maxHp: number;
   ko: boolean;
   swordD: number;
+  /** Flashes after they get hit. */
+  hurtT: number;
 }
 
 export interface Target {
@@ -255,7 +257,7 @@ export interface Target {
 
 /** What the co-op link does for the game. */
 export interface NetHooks {
-  hurtRemote(id: string, q: number, fx?: number, fy?: number): void;
+  hurtRemote(id: string, q: number, fx?: number, fy?: number, pvp?: boolean): void;
   hitEnemy(id: number, dmg: number, nx: number, ny: number): void;
   hitBoss(dmg: number): void;
   hitMini(kind: number, dmg: number): void;
@@ -307,6 +309,8 @@ export class Game {
   iceArrows = 0;
   /** Shoot ice arrows instead of normal ones (Q switches). */
   useIce = false;
+  /** Touch screens turn you toward the nearest target when you swing. */
+  autoAim = false;
   wood = 0;
   coins = 0;
   apples = 0;
@@ -513,6 +517,13 @@ export class Game {
   swing() {
     const p = this.p;
     if (p.swingCd > 0 || p.climbing || this.knockedOut) return;
+    if (this.autoAim) {
+      // touch screens: turn to the closest Murk or player in reach
+      let best = 3.4, a: number | null = null;
+      for (const e of this.enemies) { const d = Math.hypot(e.x - p.x, e.y - p.y); if (d < best) { best = d; a = ang(e.x - p.x, e.y - p.y); } }
+      for (const o of this.others) { if (o.ko) continue; const d = Math.hypot(o.x - p.x, o.y - p.y); if (d < best) { best = d; a = ang(o.x - p.x, o.y - p.y); } }
+      if (a !== null) p.face = a;
+    }
     p.swingT = 0.28;
     p.swingCd = 0.4;
     sfx.swing();
@@ -542,7 +553,8 @@ export class Game {
       if (left <= 0) break;
       if (o.ko) continue;
       const dx = o.x - p.x, dy = o.y - p.y, d = Math.hypot(dx, dy);
-      if (d < 2.6 && Math.abs(o.z - p.z) < 2 && (d < 0.6 || angDiff(ang(dx, dy), p.face) < 1.4)) {
+      // a generous reach, since what you see of a friend is a moment behind where they really are
+      if (d < 3.4 && Math.abs(o.z - p.z) < 2.5 && (d < 1 || angDiff(ang(dx, dy), p.face) < 1.7)) {
         left--;
         this.net?.pvp(o.id);
         sfx.hit();
@@ -1116,18 +1128,19 @@ export class Game {
 
   // ---------- damage ----------
 
-  hurtPlayer(q: number, fromX?: number, fromY?: number) {
+  hurtPlayer(q: number, fromX?: number, fromY?: number, pvp = false) {
     const p = this.p;
     if (this.coop) q = 1; // co-op: every hit is a quarter heart
     if (p.hurtT > 0 || this.knockedOut || this.won) return;
     p.hp = Math.max(0, p.hp - q);
-    p.hurtT = 0.8;
+    p.hurtT = pvp ? 0.35 : 0.8;
     this.shake = Math.max(this.shake, 6 + q * 2);
     sfx.hurt();
     this.float(p.x, p.y, p.z, `-${q / 4}`, '#ff5a5a');
     if (fromX !== undefined && fromY !== undefined && !p.climbing) {
       const dx = p.x - fromX, dy = p.y - fromY, d = Math.hypot(dx, dy) || 1;
-      this.tryMove(p, (dx / d) * 0.6, (dy / d) * 0.6, false);
+      const push = pvp ? 0.2 : 0.6; // a small shove from players so fights stay in reach
+      this.tryMove(p, (dx / d) * push, (dy / d) * push, false);
     }
     if (p.hp > 0 && p.hp <= 4) this.say('lowhp', "You're hurt! Eat something with H, or rest by a fire.", 45);
     if (p.hp <= 0) {
@@ -1250,6 +1263,7 @@ export class Game {
       o.z += (o.tz - o.z) * k;
       o.walkT += o.moving ? dt : 0;
       o.swingT = Math.max(0, o.swingT - dt);
+      o.hurtT = Math.max(0, (o.hurtT ?? 0) - dt);
     }
     this.updateNarrator();
     this.updateParticles(dt);
@@ -1716,7 +1730,8 @@ export class Game {
         const shooter = a.owner ?? 'me';
         for (const t of this.targets()) {
           if (t.id === shooter || Math.hypot(t.x - a.x, t.y - a.y) > 0.55 || Math.abs(t.z + 0.9 - a.z) > 1.4) continue;
-          this.hurtTarget(t.id, 1, a.x - a.dx, a.y - a.dy);
+          if (t.id === 'me') this.hurtPlayer(1, a.x - a.dx, a.y - a.dy, true);
+          else this.net?.hurtRemote(t.id, 1, a.x - a.dx, a.y - a.dy, true);
           dead = true;
           break;
         }

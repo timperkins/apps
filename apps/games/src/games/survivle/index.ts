@@ -832,6 +832,7 @@ const game: GameModule = {
         touchEl.hidden = !showTouch;
         if (!showTouch) releaseStick();
       }
+      g.autoAim = touchMode;
       if (mode === 'play' && (overlay === 'none' || session)) {
         if (overlay !== 'none') g.input.up = g.input.down = g.input.left = g.input.right = false;
         if (touchMode) {

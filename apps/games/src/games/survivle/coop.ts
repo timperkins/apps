@@ -25,6 +25,8 @@ interface HeroMsg {
   hp: number;
   maxHp: number;
   ko: boolean;
+  /** Just got hit (flashes for everyone). */
+  hurt?: boolean;
   swordD: number;
 }
 
@@ -44,7 +46,7 @@ type Msg =
   | { t: 'pvp'; target: string }
   | { t: 'hitwall'; id: number; q: number }
   | { t: 'snap'; s: Snap }
-  | { t: 'hurt'; q: number; fx?: number; fy?: number; by?: string }
+  | { t: 'hurt'; q: number; fx?: number; fy?: number; by?: string; pvp?: boolean }
   | { t: 'reward'; coins: number; arrows: number }
   | { t: 'bonus'; kind: 'mini' | 'challenge'; value: string };
 
@@ -75,7 +77,7 @@ function heroOf(g: Game, id: string): HeroMsg {
   const p = g.p;
   return {
     id, name: p.name, outfit: p.outfit, x: r2(p.x), y: r2(p.y), z: r2(p.z), face: r2(p.face), moving: p.moving,
-    swingT: r2(p.swingT), climbing: p.climbing, hp: p.hp, maxHp: g.maxHp, ko: g.knockedOut > 0, swordD: g.swordDmg,
+    swingT: r2(p.swingT), climbing: p.climbing, hp: p.hp, maxHp: g.maxHp, ko: g.knockedOut > 0, swordD: g.swordDmg, hurt: p.hurtT > 0,
   };
 }
 
@@ -83,7 +85,7 @@ function heroOf(g: Game, id: string): HeroMsg {
 function setOther(g: Game, h: HeroMsg) {
   let o = g.others.find((q) => q.id === h.id);
   if (!o) {
-    o = { ...h, tx: h.x, ty: h.y, tz: h.z, walkT: 0 } as Other;
+    o = { ...h, tx: h.x, ty: h.y, tz: h.z, walkT: 0, hurtT: 0 } as Other;
     g.others.push(o);
   }
   // a big jump (a warp pad or a wake-up) snaps instead of sliding
@@ -104,6 +106,7 @@ function setOther(g: Game, h: HeroMsg) {
   o.hp = h.hp;
   o.maxHp = h.maxHp;
   o.ko = h.ko;
+  if (h.hurt && o.hurtT <= 0) o.hurtT = 0.6;
   o.swordD = h.swordD;
 }
 
@@ -138,7 +141,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
   const to = (id: string, m: Msg) => links.get(id)?.send(m);
 
   const hooks: NetHooks = {
-    hurtRemote: (id, q, fx, fy) => to(id, { t: 'hurt', q, fx, fy }),
+    hurtRemote: (id, q, fx, fy, pvp) => to(id, { t: 'hurt', q, fx, fy, pvp }),
     hitEnemy: () => {},
     hitBoss: () => {},
     hitMini: () => {},
@@ -150,7 +153,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
     bonus: (kind, value) => sendAll({ t: 'bonus', kind, value }),
     build: () => {},
     hitWall: () => {},
-    pvp: (target) => to(target, { t: 'hurt', q: 1, fx: g.p.x, fy: g.p.y, by: g.p.name }),
+    pvp: (target) => to(target, { t: 'hurt', q: 1, fx: g.p.x, fy: g.p.y, by: g.p.name, pvp: true }),
   };
   g.net = hooks;
 
@@ -210,8 +213,8 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
           if (!from || from.ko) return;
           if (m.target === 'host') {
             hitBy(g, from.name);
-            g.hurtPlayer(1, from.x, from.y);
-          } else to(m.target, { t: 'hurt', q: 1, fx: from.x, fy: from.y, by: from.name });
+            g.hurtPlayer(1, from.x, from.y, true);
+          } else to(m.target, { t: 'hurt', q: 1, fx: from.x, fy: from.y, by: from.name, pvp: true });
           return;
         }
         case 'build':
@@ -250,7 +253,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
         el: g.elapsed,
         pl: [heroOf(g, 'host'), ...g.others.map((o) => ({
           id: o.id, name: o.name, outfit: o.outfit, x: o.tx, y: o.ty, z: o.tz, face: o.face, moving: o.moving, swingT: o.swingT,
-          climbing: o.climbing, hp: o.hp, maxHp: o.maxHp, ko: o.ko, swordD: o.swordD,
+          climbing: o.climbing, hp: o.hp, maxHp: o.maxHp, ko: o.ko, swordD: o.swordD, hurt: o.hurtT > 0,
         }))],
         en: g.enemies.map((e) => [e.id, e.kind, r2(e.x), r2(e.y), r2(e.z), e.aggro ? 1 : 0, r2(e.hurtT), e.ch ? 1 : 0, e.minion ? 1 : 0, r2(e.frozen ?? 0), e.hp]),
         ar: g.arrowsFlying.map((a) => [r2(a.x), r2(a.y), r2(a.z), r2(a.dx), r2(a.dy), r2(a.life), a.ice ? 1 : 0]),
@@ -341,7 +344,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
         return;
       case 'hurt':
         if (m.by) hitBy(g, m.by);
-        g.hurtPlayer(m.q, m.fx, m.fy);
+        g.hurtPlayer(m.q, m.fx, m.fy, m.pvp);
         return;
       case 'reward':
         g.coins += m.coins;

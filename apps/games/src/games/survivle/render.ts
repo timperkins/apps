@@ -1160,7 +1160,9 @@ export class Renderer {
         ctx.fill();
         ctx.save();
         ctx.translate(X, Y);
-        drawHero(ctx, outfitById(o.outfit), o.face, o.moving || o.climbing ? o.walkT : 0, { swing: o.swingT, swordD: o.swordD, climbing: o.climbing });
+        drawHero(ctx, outfitById(o.outfit), o.face, o.moving || o.climbing ? o.walkT : 0, {
+          swing: o.swingT, swordD: o.swordD, climbing: o.climbing, hurt: o.hurtT > 0 && Math.floor(o.hurtT * 12) % 2 === 0,
+        });
         ctx.font = 'bold 11px ui-rounded, system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = 'rgba(0,0,0,.5)';
