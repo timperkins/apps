@@ -1,4 +1,5 @@
 import type { RGB } from './gfx';
+import type { ShroudLike } from './planet';
 
 // What main.ts needs from each game version. All coordinates are map pixels
 // (the flat, top-down or isometric screen-space map); main.ts owns the camera
@@ -74,7 +75,11 @@ export interface GameLike {
   onSelect: (names: string[]) => void;
   readonly w: number;
   readonly h: number;
+  // Getting ready behind the loading screen (main.ts makeWorld): work to wait
+  // for before generate() (preload) and after it (warmUp), each a promise.
+  preload?(): Promise<unknown>[];
   generate(w: number, h: number): void;
+  warmUp?(): Promise<unknown>[];
   update(dt: number): void;
   // What is going on, for the background music (src/music.ts): a fight
   // involving your side, your troops out away from the base, or neither.
@@ -93,6 +98,9 @@ export interface GameLike {
   // for up to ms milliseconds and says whether it is ready.
   mapStep(ms: number): boolean;
   mapImage(): HTMLCanvasElement;
+  // The shroud, if there is one: the globe darkens its picture of the map
+  // with it, redoing just the part where more has been seen.
+  shroudMap?(): (ShroudLike & { changed(): [number, number, number, number] | null }) | null;
   mapDots(): [number, number, RGB][];
   click(x: number, y: number, add: boolean): void;
   // shortest: from the globe view, go the shortest way instead of the way the

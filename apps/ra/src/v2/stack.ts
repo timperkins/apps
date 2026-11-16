@@ -195,24 +195,71 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
 }
 
 // Headings are rendered lazily, the first time each one is drawn, so the game
-// starts quickly; a unit turning to a new heading costs a few milliseconds once.
-export function renderDirs(shape: Shape, dirs: number, o: StackOpts): StackSprite[] {
+// starts quickly. Rendering one takes a few milliseconds, which in a frame is
+// a stutter, so where it can the game has them rendered off the main thread
+// instead (src/v2/art-pool.ts sets `remote`): a heading that isn't ready yet
+// is asked for there and the nearest one that is ready stands in for it for
+// the frame or two that takes. Only when none is ready is it drawn here.
+export interface Remote {
+  want(key: string, d: number, urgent: boolean): void;
+}
+let remote: Remote | null = null;
+export function setRemote(r: Remote | null): void {
+  remote = r;
+}
+
+interface DirSet {
+  key: string;
+  dirs: number;
+  cache: (StackSprite | undefined)[];
+}
+const sets = new Map<string, DirSet>();
+const setOf = new WeakMap<object, DirSet>();
+
+/** A heading rendered elsewhere has arrived. */
+export function deliver(key: string, d: number, spr: StackSprite): void {
+  const s = sets.get(key);
+  if (s && !s.cache[d]) s.cache[d] = spr;
+}
+
+/** The key and size of a set of headings made by renderDirs (if it has a key). */
+export function dirSet(arr: StackSprite[]): { key: string; dirs: number; ready: (d: number) => boolean } | null {
+  const s = setOf.get(arr);
+  return s ? { key: s.key, dirs: s.dirs, ready: (d) => !!s.cache[d] } : null;
+}
+
+// `key` names the set so a worker can make the same one (see art-worker.ts).
+export function renderDirs(shape: Shape, dirs: number, o: StackOpts, key?: string): StackSprite[] {
   let hmap: ColumnMap | undefined;
   const cache: (StackSprite | undefined)[] = new Array(dirs);
-  return new Proxy(cache as StackSprite[], {
+  const now = (d: number): StackSprite => {
+    hmap ??= columnMap(shape, o);
+    return (cache[d] = renderStack(shape, { ...o, hmap, angle: (d / dirs) * Math.PI * 2 }));
+  };
+  const proxy = new Proxy(cache as StackSprite[], {
     get(target, prop, recv) {
       if (typeof prop === 'string' && /^\d+$/.test(prop)) {
         const d = Number(prop);
-        let spr = target[d];
-        if (!spr) {
-          hmap ??= columnMap(shape, o);
-          spr = target[d] = renderStack(shape, { ...o, hmap, angle: (d / dirs) * Math.PI * 2 });
+        const spr = target[d];
+        if (spr) return spr;
+        if (remote && key) {
+          remote.want(key, d, true);
+          for (let k = 1; k <= dirs >> 1; k++) {
+            const n = target[(d + k) % dirs] ?? target[(d - k + dirs) % dirs];
+            if (n) return n;
+          }
         }
-        return spr;
+        return now(d);
       }
       return Reflect.get(target, prop, recv);
     },
   });
+  if (key) {
+    const s = { key, dirs, cache };
+    sets.set(key, s);
+    setOf.set(proxy, s);
+  }
+  return proxy;
 }
 
 export interface ColumnMap {
