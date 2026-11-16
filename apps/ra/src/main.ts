@@ -1273,6 +1273,8 @@ function draw(now: number, first: boolean): void {
         ctx.setTransform(dens, 0, 0, dens, (k * W - x0) * dens, (j * H - y0) * dens);
         game.renderObjects(x0 - k * W, y0 - j * H, x1 - k * W, y1 - j * H);
       }
+    ctx.setTransform(dens, 0, 0, dens, -x0 * dens, -y0 * dens);
+    game.renderOver?.(x0, y0, x1, y1);
     ctx.setTransform(dens, 0, 0, dens, 0, 0);
     drawBox();
     if (globe.ready) drawMini();
