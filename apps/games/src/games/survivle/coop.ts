@@ -41,9 +41,10 @@ type Msg =
   | { t: 'chest'; x: number; y: number }
   | { t: 'stone'; x: number; y: number }
   | { t: 'build'; x: number; y: number }
+  | { t: 'pvp'; target: string }
   | { t: 'hitwall'; id: number; q: number }
   | { t: 'snap'; s: Snap }
-  | { t: 'hurt'; q: number; fx?: number; fy?: number }
+  | { t: 'hurt'; q: number; fx?: number; fy?: number; by?: string }
   | { t: 'reward'; coins: number; arrows: number }
   | { t: 'bonus'; kind: 'mini' | 'challenge'; value: string };
 
@@ -106,6 +107,15 @@ function setOther(g: Game, h: HeroMsg) {
   o.swordD = h.swordD;
 }
 
+let lastHitToast = 0;
+/** Tell you who is hitting you (not on every single hit). */
+function hitBy(g: Game, name: string) {
+  const now = performance.now();
+  if (now - lastHitToast < 3000) return;
+  lastHitToast = now;
+  g.toast(`${name} hit you!`);
+}
+
 export interface Session {
   role: 'host' | 'guest';
   code: string;
@@ -140,6 +150,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
     bonus: (kind, value) => sendAll({ t: 'bonus', kind, value }),
     build: () => {},
     hitWall: () => {},
+    pvp: (target) => to(target, { t: 'hurt', q: 1, fx: g.p.x, fy: g.p.y, by: g.p.name }),
   };
   g.net = hooks;
 
@@ -164,7 +175,7 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
             t: 'welcome', id, seed: g.world.seed, elapsed: g.elapsed, chopped: [...g.world.chopped], x: g.p.x + 1.5, y: g.p.y + 1,
             stones: [...g.stonesDone], minis: g.minis.defeated(), won: g.won, vc: VILLAGES.length,
           } satisfies Msg);
-          g.toast(`${m.name || 'A friend'} joined! Co-op: every hit does ¼ heart${added ? `. A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!` : ''}`);
+          g.toast(`${m.name || 'A friend'} joined! Fight them: every hit does ¼ heart${added ? `. A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!` : ''}`);
           sfx.coin();
           onChange();
           return;
@@ -193,6 +204,16 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
         case 'chest':
           g.chests = g.chests.filter((c) => c.x !== m.x || c.y !== m.y);
           return;
+        case 'pvp': {
+          // a friend hit someone with their sword
+          const from = g.others.find((o) => o.id === id);
+          if (!from || from.ko) return;
+          if (m.target === 'host') {
+            hitBy(g, from.name);
+            g.hurtPlayer(1, from.x, from.y);
+          } else to(m.target, { t: 'hurt', q: 1, fx: from.x, fy: from.y, by: from.name });
+          return;
+        }
         case 'build':
           if (g.canWall(m.x, m.y, null)) g.addWall(m.x, m.y, id);
           return;
@@ -309,6 +330,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
     bonus: () => {},
     build: (x, y) => link.send({ t: 'build', x, y } satisfies Msg),
     hitWall: (id, q) => link.send({ t: 'hitwall', id, q } satisfies Msg),
+    pvp: (target) => link.send({ t: 'pvp', target } satisfies Msg),
   };
 
   link.onMessage((raw) => {
@@ -318,6 +340,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
         applySnap(g, m.s, myId);
         return;
       case 'hurt':
+        if (m.by) hitBy(g, m.by);
         g.hurtPlayer(m.q, m.fx, m.fy);
         return;
       case 'reward':

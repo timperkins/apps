@@ -266,6 +266,8 @@ export interface NetHooks {
   reward(owner: string, coins: number, arrows: number): void;
   bonus(kind: 'mini' | 'challenge', value: string): void;
   build(x: number, y: number): void;
+  /** Hit another player (multiplayer is for fighting each other). */
+  pvp(target: string): void;
   hitWall(id: number, q: number): void;
 }
 
@@ -534,6 +536,18 @@ export class Game {
         sfx.hit();
         this.float(e.x, e.y, e.z, `${dmg}`, '#fff');
       } else this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
+    }
+    // other players in the arc: in multiplayer you fight each other
+    for (const o of this.others) {
+      if (left <= 0) break;
+      if (o.ko) continue;
+      const dx = o.x - p.x, dy = o.y - p.y, d = Math.hypot(dx, dy);
+      if (d < 2.6 && Math.abs(o.z - p.z) < 2 && (d < 0.6 || angDiff(ang(dx, dy), p.face) < 1.4)) {
+        left--;
+        this.net?.pvp(o.id);
+        sfx.hit();
+        this.float(o.x, o.y, o.z + 1.2, '-¼', '#ff8a8a');
+      }
     }
     const b = this.boss;
     const body = this.beastBodies().find((q) => {
@@ -1692,6 +1706,16 @@ export class Game {
             dead = true;
             break;
           }
+        }
+      }
+      if (!dead && this.coop) {
+        // arrows hit other players too (not the one who shot it)
+        const shooter = a.owner ?? 'me';
+        for (const t of this.targets()) {
+          if (t.id === shooter || Math.hypot(t.x - a.x, t.y - a.y) > 0.55 || Math.abs(t.z + 0.9 - a.z) > 1.4) continue;
+          this.hurtTarget(t.id, 1, a.x - a.dx, a.y - a.dy);
+          dead = true;
+          break;
         }
       }
       const b = this.boss;

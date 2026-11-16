@@ -1621,7 +1621,7 @@ export class Renderer {
     if (game.coopLabel || game.others.length) {
       ctx.font = 'bold 12px ui-rounded, system-ui, sans-serif';
       const names = game.others.map((o) => o.name).join(', ');
-      this.shadowText(`${game.coopLabel || 'Co-op'}${names ? ` · with ${names}` : ''} · hits do ¼ heart`, 14, rowsY + 54, '#9fe8ff');
+      this.shadowText(`${game.coopLabel || 'Co-op'}${names ? ` · with ${names}` : ''} · fight! hits do ¼ heart`, 14, rowsY + 54, '#9fe8ff');
     }
     if (game.challenge) {
       ctx.textAlign = 'center';
