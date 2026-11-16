@@ -352,8 +352,8 @@ export class IsoGame implements GameLike {
     return STAGES;
   }
 
-  maps(): { id: string; name: string; blurb: string }[] {
-    return MAPS.map(({ id, name, blurb }) => ({ id, name, blurb }));
+  maps(): { id: string; name: string; blurb: string; players?: [number, number] }[] {
+    return MAPS.map(({ id, name, blurb, players }) => ({ id, name, blurb, players }));
   }
   preview(id: string, w: number, h: number): HTMLCanvasElement {
     const def = mapDef(id);

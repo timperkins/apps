@@ -115,7 +115,7 @@ export class Game {
     public ctx: CanvasRenderingContext2D,
     public seed: number,
   ) {
-    this.art = FACTIONS.map(makeFactionArt);
+    this.art = FACTIONS.slice(0, 2).map(makeFactionArt);
   }
 
   get w(): number {

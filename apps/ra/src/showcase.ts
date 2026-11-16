@@ -1216,7 +1216,7 @@ const later = () => new Promise<void>((r) => setTimeout(r, 0));
 async function main(): Promise<void> {
   await later(); // let "Drawing…" show first
   grass = makeGrass();
-  const arts = FACTIONS.map(makeFactionArt);
+  const arts = FACTIONS.slice(0, 2).map(makeFactionArt);
   const dish = makeDish();
   const yard = makeBuilding('yard', FACTIONS[0]);
   buildUnits(document.querySelector('#unitRows')!, arts[0], arts[1], yard);
