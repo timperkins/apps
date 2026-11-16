@@ -154,6 +154,11 @@ const isB = (t: Target): t is Building => 'pad' in t;
 const LEASH = 10 * CELL;
 // How close a friend has to be to come and help when one of its side is hit.
 const HELP = 7 * CELL;
+// Music moods (see mood()): how long each holds after it ends, in seconds,
+// and how far from your nearest building counts as out away from the base.
+const BATTLE_HOLD = 12;
+const SHROUD_HOLD = 8;
+const AWAY = 24 * CELL;
 
 // A destroyed building: rubble, for good (t < 0 while it is still blowing up).
 interface Ruin {
@@ -1957,6 +1962,34 @@ export class IsoGame implements GameLike {
 
   // ---------- Simulation ----------
 
+  // ---------- Music ----------
+
+  // When your side last hit or got hit, and when troops were last out moving
+  // away from the base: the music holds each mood a while after it ends, so
+  // it doesn't flick back and forth.
+  private fightT = -1e9;
+  private awayT = -1e9;
+
+  mood(): 'battle' | 'shroud' | 'base' {
+    if (this.time - this.fightT < BATTLE_HOLD) return 'battle';
+    // home is your buildings, or the foundry vehicle before it has set up
+    let mine: { x: number; y: number }[] = this.buildings.filter((b) => b.f === ME && !b.dead);
+    if (!mine.length) mine = this.units.filter((u) => u.f === ME && !u.dead && u.kind === 'mcv');
+    const away = (x: number, y: number) =>
+      mine.every((b) => {
+        const [bx, by] = nearestCopy(x, y, b.x, b.y, this.w, this.h);
+        return Math.hypot(bx - x, by - y) > AWAY;
+      });
+    for (const u of this.units) {
+      if (u.f !== ME || u.dead || !u.moving || u.kind === 'hauler' || u.kind === 'mcv') continue;
+      if (away(u.x, u.y)) {
+        this.awayT = this.time;
+        break;
+      }
+    }
+    return this.time - this.awayT < SHROUD_HOLD ? 'shroud' : 'base';
+  }
+
   update(dt: number): void {
     this.time += dt;
     this.updateBuild(dt);
@@ -2666,6 +2699,7 @@ export class IsoGame implements GameLike {
 
   private damage(t: Target, amt: number, src?: Unit | Building): void {
     if (t.dead) return;
+    if (t.f === ME || src?.f === ME) this.fightT = this.time;
     const max = isB(t) ? BUILDING_DEF[t.kind].strength : UNIT_DEF[t.kind].strength;
     t.hp = Math.max(0, t.hp - amt / max);
     t.hitT = this.time;
