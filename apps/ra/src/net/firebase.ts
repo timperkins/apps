@@ -16,9 +16,9 @@ const app = initializeApp({
 
 export const auth = getAuth(app);
 // The game lives in its own named database, not the project's (default) one. CI sets
-// VITE_FIRESTORE_DATABASE_ID to `ra` for prod and `ra-preview` for previews; local builds
+// VITE_FIRESTORE_DATABASE_ID to `ra-rooms` for prod and `ra-rooms-preview` for previews; local builds
 // default to the preview database so they never touch prod data.
-export const db = getFirestore(app, env.VITE_FIRESTORE_DATABASE_ID || 'ra-preview');
+export const db = getFirestore(app, env.VITE_FIRESTORE_DATABASE_ID || 'ra-rooms-preview');
 
 if (useEmulators) {
   const host = location.hostname;

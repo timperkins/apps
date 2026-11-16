@@ -6,8 +6,8 @@
   "previewSite": "trom-ra-preview",
   "previewDomain": "ra-preview.trom.dev",
   "firestore": {
-    "prod": "ra",
-    "preview": "ra-preview"
+    "prod": "ra-rooms",
+    "preview": "ra-rooms-preview"
   },
   "ttlCollections": [
     "rooms",

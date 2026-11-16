@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Rules for the "ra" database: rooms for multiplayer games on the same
+// Rules for the "ra-rooms" database: rooms for multiplayer games on the same
 // network. Firestore only carries the WebRTC handshake; the game itself goes
 // peer to peer. Every device signs in anonymously.
 service cloud.firestore {

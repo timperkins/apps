@@ -10,12 +10,12 @@
   },
   "firestore": [
     {
-      "database": "ra",
+      "database": "ra-rooms",
       "rules": "firestore.rules",
       "indexes": "firestore.indexes.json"
     },
     {
-      "database": "ra-preview",
+      "database": "ra-rooms-preview",
       "rules": "firestore.rules",
       "indexes": "firestore.indexes.json"
     }
