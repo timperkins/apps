@@ -19,7 +19,9 @@ export type Announce =
   | 'base_under_attack'
   | 'harvester_under_attack'
   | 'unit_lost'
-  | 'building_lost';
+  | 'building_lost'
+  | 'new_options'
+  | 'rally_point';
 
 const UNIT_CLIPS: Record<UnitVoice, Partial<Record<UnitLine, number>>> = {
   soldier: { select: 5, move: 5, attack: 5 },
@@ -41,6 +43,8 @@ const ANNOUNCE: Announce[] = [
   'harvester_under_attack',
   'unit_lost',
   'building_lost',
+  'new_options',
+  'rally_point',
 ];
 
 // The least time between two of the same announcement, in seconds: alerts
@@ -52,6 +56,8 @@ const ANNOUNCE_GAP: Partial<Record<Announce, number>> = {
   unit_lost: 8,
   building_lost: 4,
   low_power: 10,
+  new_options: 6,
+  rally_point: 3,
 };
 
 const base = import.meta.env.BASE_URL;

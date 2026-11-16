@@ -65,7 +65,7 @@ export interface BuildMenu {
   credits: number;
   store?: number; // most credits you can hold
   power?: { made: number; used: number };
-  tabs: { id: string; label: string; icon?: string }[]; // icon: image URL
+  tabs: { id: string; label: string; icon?: string; disabled?: boolean }[]; // icon: image URL; disabled: nothing on it yet
   items: BuildItem[];
 }
 
@@ -130,6 +130,8 @@ export interface GameLike {
   // Commands for the selection (deploy, pack up and so on), if the version has any.
   actions?(): Action[];
   act?(id: string): void;
+  /** A lone selected MCU of yours: where to show its Deploy button over it. */
+  deployAt?(): { x: number; y: number; ok: boolean } | null;
   // Goes up whenever the bases change, so the globe's picture is redrawn.
   mapVersion?: number;
   // Building: the build menu (null until there is anything to build), tapping

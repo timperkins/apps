@@ -41,7 +41,7 @@ import {
 type Kind = UnitKind | 'mcv';
 const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number; hp: number }> = {
   ...STATS,
-  mcv: { name: 'Mobile Foundry', speed: 10, turn: 1.3, r: 15, hp: 1 },
+  mcv: { name: 'MCU', speed: 10, turn: 1.3, r: 15, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
   yard: 'Foundry',
@@ -145,6 +145,10 @@ interface Unit {
   // where you last sent it (its own coordinates): while it is still on its
   // way there, a faint line shows the way
   dest?: [number, number];
+  // the spot you clicked when you sent it there (with dest, its own slot near
+  // it): the faint line points here, so a group's lines all meet where you
+  // clicked. Only on your own screen.
+  aim?: [number, number, number, number];
   // being knocked back by a hit: how far it still has to slide (world units)
   knock?: [number, number];
   // the enemy's guards (Combat stage): which post it holds, and its spot there
@@ -270,7 +274,7 @@ const NO_SHROUD = typeof location !== 'undefined' && new URLSearchParams(locatio
 // fight with a full base each, close together.
 export type Stage = 'initial' | 'combat';
 const STAGES: { id: Stage; name: string; blurb: string }[] = [
-  { id: 'initial', name: 'Initial', blurb: 'A Foundry vehicle and a few units. The enemy is far away.' },
+  { id: 'initial', name: 'Initial', blurb: 'An MCU and a few units. The enemy is far away.' },
   { id: 'combat', name: 'Combat', blurb: 'Two full bases close together, an army each and $50000. The enemy rebuilds its losses.' },
 ];
 // The enemy's army in the Combat stage: it keeps this many of each, making
@@ -1209,7 +1213,8 @@ export class IsoGame implements GameLike {
         blocked,
       });
     }
-    const tabs = TABS.filter((tb) => items.some((i) => i.tab === tb.id)).map((tb) => ({ ...tb, icon: this.tabIcon(tb.id) }));
+    // every tab shows from the start; one with nothing on it yet is greyed out
+    const tabs = TABS.map((tb) => ({ ...tb, icon: this.tabIcon(tb.id), disabled: !items.some((i) => i.tab === tb.id) }));
     return { credits: Math.floor(this.credits), store: this.store(), power: this.power(), tabs, items };
   }
 
@@ -1351,7 +1356,10 @@ export class IsoGame implements GameLike {
         this.fresh.add(t.id);
         opened = true;
       }
-    if (opened) this.notice('New construction options');
+    if (opened) {
+      this.notice('New construction options');
+      announce('new_options');
+    }
     const pw = this.power();
     const low = pw.used > pw.made;
     if (low && !this.lowWarned) {
@@ -1394,7 +1402,7 @@ export class IsoGame implements GameLike {
           }
         } else {
           j.ready = true;
-          this.tell(f, `${j.tech.name} ready: tap it to place`, 'construction_complete');
+          this.tell(f, `${j.tech.name} is complete`, 'construction_complete');
           if (f === this.me) ui('ui_ready');
         }
       }
@@ -1746,9 +1754,20 @@ export class IsoGame implements GameLike {
       return [];
     }
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === this.me);
-    if (!mcvs.length) return [];
+    // a lone MCU has its Deploy button floating over it instead (deployAt)
+    if (!mcvs.length || this.deployAt()) return [];
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
     return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' }];
+  }
+
+  deployAt(): { x: number; y: number; ok: boolean } | null {
+    if (this.ghost || this.selB()) return null;
+    const sel = this.selected();
+    if (sel.length !== 1) return null;
+    const u = sel[0];
+    if (u.kind !== 'mcv' || u.f !== this.me || u.deploy) return null;
+    const [x, y] = this.screenOf(u);
+    return { x, y, ok: this.deployable(u) };
   }
 
   act(id: string): void {
@@ -2094,6 +2113,7 @@ export class IsoGame implements GameLike {
       if (sb.f === this.me && MAKERS.includes(sb.kind) && sb.rise >= 1) {
         const [wx, wy] = this.fold(...this.groundAt(x, y));
         this.command({ c: 'rally', b: sb.id, x: wx, y: wy });
+        announce('rally_point');
         this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
         return;
       }
@@ -2207,7 +2227,9 @@ export class IsoGame implements GameLike {
       });
       const u = left.splice(bi, 1)[0];
       // the same move, in the unit's own (folded) coordinates
-      moves.push([u.id, ...this.lapped(sx, sy, -u.lap, -u.lapY)]);
+      const [tx, ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
+      moves.push([u.id, tx, ty]);
+      u.aim = [tx, ty, tx + (wx - sx), ty + (wy - sy)];
     }
     this.command({ c: 'move', m: moves, dig, n: node });
     ui('order_confirm');
@@ -3929,12 +3951,11 @@ export class IsoGame implements GameLike {
       if (n.amt >= 10) this.blit(this.oreArt.stain[n.v][n.amt > ORE.node * 0.6 ? 2 : n.amt > ORE.node * 0.25 ? 1 : 0], n.x, n.y, 0);
     c.globalAlpha = 1;
 
-    const feet: [Rect, string][] = [];
+    // where a selected MCU would deploy: a plain tinted box, no outline
     for (const u of this.units) {
       if (!u.sel || u.kind !== 'mcv' || u.f !== this.me || u.deploy || !seen(u.x, u.y)) continue;
       const r = this.siteOf(u.x, u.y);
-      feet.push([r, this.siteOk(r) ? '#9dff9d' : '#ff6a5a']);
-      this.drawFoot(r, feet[feet.length - 1][1], 1, true, false);
+      this.drawFoot(r, this.siteOk(r) ? '#9dff9d' : '#ff6a5a', 1.5, true, false);
     }
 
     // aircraft shadows on the ground
@@ -3987,10 +4008,6 @@ export class IsoGame implements GameLike {
       c.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
     }
 
-    // where a selected Foundry vehicle would deploy: its outline over the
-    // trees (they get cleared)
-    for (const [r, col] of feet) this.drawFoot(r, col, 0.75 + 0.25 * Math.sin(this.time * 6), false, true);
-
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
     // anything hit lately shows its health for a moment
@@ -4006,11 +4023,10 @@ export class IsoGame implements GameLike {
     const gh = this.ghost;
     if (gh && seen(gh.x, gh.y, 10)) {
       const col = gh.why ? '#ff6a5a' : '#9dff9d';
-      this.drawFoot(gh.pad, col, 1, true, false);
+      this.drawFoot(gh.pad, col, 1.5, true, false);
       c.globalAlpha = 0.65;
       this.blit(this.buildingArt(gh.tech.building!, this.me).spr, gh.x, gh.y, 0);
       c.globalAlpha = 1;
-      this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
     }
   }
 
@@ -4045,7 +4061,9 @@ export class IsoGame implements GameLike {
     for (const u of this.units) {
       if (u.f !== this.me || !u.moving || !u.dest || u.dest[0] !== u.tx || u.dest[1] !== u.ty || u.deploy) continue;
       const [ax, ay] = this.screenOf(u);
-      const [bx, by] = toScreen(u.tx, u.ty, this.terrain.elev(u.tx, u.ty));
+      const a = u.aim && Math.abs(u.aim[0] - u.tx) < 1 && Math.abs(u.aim[1] - u.ty) < 1 ? u.aim : null;
+      const [ex, ey] = a ? [a[2], a[3]] : [u.tx, u.ty];
+      const [bx, by] = toScreen(ex, ey, this.terrain.elev(ex, ey));
       if (Math.max(ax, bx) < x0 - pad || Math.min(ax, bx) > x1 + pad || Math.max(ay, by) < y0 - pad || Math.min(ay, by) > y1 + pad) continue;
       c.moveTo(ax, ay);
       c.lineTo(bx, by);
