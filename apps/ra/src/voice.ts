@@ -63,6 +63,7 @@ const buffers = new Map<string, AudioBuffer>();
 const loading = new Map<string, Promise<AudioBuffer | null>>();
 const lastPick = new Map<string, number>();
 const lastSaid = new Map<Announce, number>();
+const unlockFns: ((c: AudioContext) => void)[] = [];
 let unitSrc: AudioBufferSourceNode | null = null;
 let annSrc: AudioBufferSourceNode | null = null;
 let annQueue: string[] = [];
@@ -114,6 +115,7 @@ function unlock(): void {
       if (u) void load(u).then(next);
     };
     for (let i = 0; i < 4; i++) next();
+    for (const f of unlockFns) f(ctx);
   }
   if (ctx.state === 'suspended') void ctx.resume();
 }
@@ -121,6 +123,12 @@ function unlock(): void {
 if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', unlock, { capture: true });
   window.addEventListener('keydown', unlock, { capture: true });
+}
+
+/** Runs once audio is allowed (the first tap), with the shared context. Used by src/music.ts. */
+export function onAudioUnlock(f: (c: AudioContext) => void): void {
+  if (ctx) f(ctx);
+  else unlockFns.push(f);
 }
 
 function start(buf: AudioBuffer, gain = 1): AudioBufferSourceNode | null {

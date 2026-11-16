@@ -5,6 +5,7 @@ import { CH } from './tiles';
 import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
+import { musicMuted, setMood, setMusicMuted } from './music';
 import { setVoiceMuted, voiceMuted } from './voice';
 import { initBuild } from './build-ui';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
@@ -693,6 +694,19 @@ voiceBtn.addEventListener('click', () => {
   showVoice();
 });
 
+// Music: a loop for fighting, one for troops out in the field, one for the base (src/music.ts).
+const musicBtn = document.querySelector<HTMLButtonElement>('#musicBtn')!;
+const showMusic = () => {
+  const on = !musicMuted();
+  musicBtn.textContent = `Music: ${on ? 'on' : 'off'}`;
+  musicBtn.setAttribute('aria-pressed', String(on));
+};
+showMusic();
+musicBtn.addEventListener('click', () => {
+  setMusicMuted(!musicMuted());
+  showMusic();
+});
+
 // New map: a fresh seed, and (where there is a choice) pick the map again.
 regen.addEventListener('click', () => {
   setMenu(false);
@@ -1237,6 +1251,7 @@ function frame(now: number): void {
     if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
+    setMood(game.mood?.() ?? 'base');
     hoverNow(now);
     draw(now, false);
   }

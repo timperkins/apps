@@ -76,6 +76,9 @@ export interface GameLike {
   readonly h: number;
   generate(w: number, h: number): void;
   update(dt: number): void;
+  // What is going on, for the background music (src/music.ts): a fight
+  // involving your side, your troops out away from the base, or neither.
+  mood?(): 'battle' | 'shroud' | 'base';
   // Ground for a map rect in unwrapped map pixels; tiles not yet painted are
   // painted for up to `budget` milliseconds.
   renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void;
