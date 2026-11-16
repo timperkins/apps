@@ -7,5 +7,17 @@
       "**/.*",
       "**/node_modules/**"
     ]
-  }
+  },
+  "firestore": [
+    {
+      "database": "ra",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "ra-preview",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
 }

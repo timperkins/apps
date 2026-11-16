@@ -9,7 +9,7 @@ import { StackSprite, dirSet, drawSprite, renderStack, toScreen, toWorld } from 
 import { buildingArt as workerBuilding, prefetch } from './art-pool';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
-import { MAPS, combatHome, mapDef, mapPreview } from './maps';
+import { MAPS, combatHome, mapDef, mapPreview, startsFor } from './maps';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
@@ -55,8 +55,6 @@ const BNAME: Record<BuildingKind, string> = {
   helipad: 'Helipad',
   lab: 'Tech lab',
 };
-// The faction you play.
-const ME = 0;
 // Deploying: the Foundry vehicle turns to line up, then the yard rises.
 const RISE_S = 1.8;
 // Where a hauler unloads at a refinery (its striped pad), from its centre.
@@ -84,6 +82,7 @@ const PACE_SPEED = 3.5; // a soldier pacing about, in map pixels a second
 const PACE_R = 6; // and how far from where it was left
 
 interface Unit {
+  id: number; // the same on every player's screen in a multiplayer game
   kind: Kind;
   f: number;
   x: number;
@@ -196,6 +195,7 @@ interface OreNode {
 }
 
 interface Building {
+  id: number;
   kind: BuildingKind;
   f: number;
   x: number;
@@ -205,7 +205,6 @@ interface Building {
   gun: number;
   gunGoal: number;
   pad: Rect;
-  own: boolean; // built (or deployed) by the player
   sel: boolean;
   rise: number; // 0..1, how far it has gone up (1 when standing)
   hp: number; // 0..1
@@ -291,6 +290,70 @@ const POSTS = 6;
 const ENEMY = 1;
 
 
+// ---------- Multiplayer: what goes over the wire ----------
+
+interface Job {
+  tech: Tech;
+  spent: number;
+  paused: boolean;
+  ready: boolean;
+}
+// A side's purse and what it is making.
+interface Eco {
+  credits: number;
+  jobs: Map<Tab, Job>;
+  queue: Map<Tab, Tech[]>;
+  lowPower: boolean;
+}
+const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new Map(), lowPower: false });
+
+/** A player in a multiplayer game: the side (colour) they play and their name. */
+export interface Player {
+  f: number;
+  name: string;
+}
+
+/** Something a player told their side to do. Every order goes through one of
+ * these, so the host can carry out a player's orders as if they were its own. */
+export type Command =
+  | { c: 'move'; m: [number, number, number][]; dig?: number[]; n?: number } // [unit id, tx, ty]; haulers in dig go for ore n
+  | { c: 'attack'; u: number[]; t: number }
+  | { c: 'deploy'; u: number[] }
+  | { c: 'pack'; b: number }
+  | { c: 'primary'; b: number }
+  | { c: 'rally'; b: number; x?: number; y?: number }
+  | { c: 'build'; t: string }
+  | { c: 'cancel'; t: string }
+  | { c: 'place'; t: string; x: number; y: number };
+
+// How a unit or building left the game, for the players' screens: destroyed
+// (blows up), quietly (a Foundry vehicle unfolding into its yard), razed, or
+// a Foundry packing up into its vehicle.
+const GONE_KILL = 0;
+const GONE_QUIET = 1;
+const GONE_RAZE = 2;
+const GONE_PACK = 3;
+const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait'] as const;
+
+/** What the host sends everyone, several times a second: every unit and
+ * building as it is, what has gone since last time, each player's purse,
+ * the ore now and then, messages for players and who is out of the game. */
+export interface Snapshot {
+  t: number;
+  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state]
+  u: (number | string)[][];
+  // [id, kind, side, x, y, hp, rise, flags, pad x, y, w, h, rally x, rally y, target id]
+  b: (number | string)[][];
+  gone: [number, number][];
+  // [side, credits, low power, jobs [tab, tech, spent, paused, ready][], queue [tab, techs][]]
+  eco: [number, number, number, [string, string, number, number, number][], [string, string[]][]][];
+  ore?: number[]; // x, y, amount, variant, ...
+  told: [number, string, string][];
+  out: number[];
+}
+const r1 = (v: number) => Math.round(v * 10) / 10;
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
 // A sprite as a flat white silhouette (made once per sprite image).
 const whites = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
 function whiteOf(img: HTMLCanvasElement): HTMLCanvasElement {
@@ -311,6 +374,22 @@ function whiteOf(img: HTMLCanvasElement): HTMLCanvasElement {
 
 export class IsoGame implements GameLike {
   readonly fine = true;
+  // The side you play: 0 (Cobalt) in single player; your colour in a
+  // multiplayer game, where players lists everyone and net says whether this
+  // screen is the host (which runs the game) or a player's (which shows it).
+  me = 0;
+  players: Player[] | null = null;
+  net: 'solo' | 'host' | 'client' = 'solo';
+  // Orders from a player's screen go to the host this way (net: 'client').
+  onCommand: (cmd: Command) => void = () => {};
+  // Sides that have lost everything, and a message when that changes (you
+  // are out, or the last one standing).
+  out = new Set<number>();
+  onOutcome: (won: boolean) => void = () => {};
+  private nextId = 1;
+  // what has left the game, and messages for other players, since the last snapshot
+  private gone: [number, number][] = [];
+  private told: [number, string, string][] = [];
   terrain!: IsoTerrain;
   units: Unit[] = [];
   buildings: Building[] = [];
@@ -390,7 +469,7 @@ export class IsoGame implements GameLike {
   private emit(): void {
     const b = this.selB();
     // units of yours newly picked answer (the most common kind among them)
-    const now = new Set(this.units.filter((u) => u.sel && u.f === ME && !u.dead));
+    const now = new Set(this.units.filter((u) => u.sel && u.f === this.me && !u.dead));
     const fresh = [...now].filter((u) => !this.heard.has(u));
     this.heard = now;
     if (fresh.length) this.speak(fresh, 'select');
@@ -457,12 +536,12 @@ export class IsoGame implements GameLike {
     const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
-    if (this.stage === 'combat') now.push(...[...placed, 'lab' as BuildingKind].map((k): [BuildingKind, number] => [k, ME]));
-    else now.push(['yard', ME]);
+    if (this.stage === 'combat') now.push(...[...placed, 'lab' as BuildingKind].map((k): [BuildingKind, number] => [k, this.me]));
+    else now.push(['yard', this.me]);
     const get = (kind: BuildingKind, f: number, urgent: boolean) => this.artLater(kind, f, urgent);
     const waits = now.map(([k, f]) => get(k, f, true));
     // what you can build, for later
-    for (const k of all) void get(k, ME, false);
+    for (const k of all) void get(k, this.me, false);
     return waits;
   }
 
@@ -514,7 +593,7 @@ export class IsoGame implements GameLike {
       if (now) waits.push(p);
     };
     // yours first: they're what you see and move first
-    const us = [...this.units].sort((a, b) => (a.f === ME ? 0 : 1) - (b.f === ME ? 0 : 1));
+    const us = [...this.units].sort((a, b) => (a.f === this.me ? 0 : 1) - (b.f === this.me ? 0 : 1));
     for (const u of us) for (const [arr, d] of this.unitSets(u)) add(arr, d, near(u.x, u.y));
     for (const b of this.buildings) {
       const now = near(b.x, b.y);
@@ -522,7 +601,7 @@ export class IsoGame implements GameLike {
       if (b.kind === 'radar') for (let d = 0; d < 16; d++) add(this.dish, d, now);
     }
     // then every heading of those, and of everything you can make
-    const mine = this.art[ME];
+    const mine = this.art[this.me];
     for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
@@ -532,9 +611,12 @@ export class IsoGame implements GameLike {
     return waits;
   }
 
-  // The planet is big, so there are several bases round it: the two home
-  // bases near each other where the camera starts, and outposts further out.
-  // Sites are chosen on the screen-space map and placed on the ground below.
+  // Single player: two sides, you starting with a Foundry vehicle and a
+  // small escort, and the enemy dug in with a full base and an army on the
+  // far side of the planet. Multiplayer (players set): every player starts
+  // like you, at the map's starts furthest apart. Sites are chosen on the
+  // screen-space map and placed on the ground below. Every player's screen
+  // makes the same world from the same seed.
   generate(w: number, h: number): void {
     const rand = rng(this.seed * 7919 + 29);
     const def = mapDef(this.mapId);
@@ -551,16 +633,20 @@ export class IsoGame implements GameLike {
     this.fires = [];
     this.lastTap = null;
     this.mapVersion++;
+    this.nextId = 1;
+    this.gone = [];
+    this.told = [];
+    this.out = new Set();
+    const mp = !!this.players;
+    if (mp) this.stage = 'initial';
     const combat = this.stage === 'combat';
-    this.credits = combat ? COMBAT_CREDITS : START_CREDITS;
+    this.eco = FACTIONS.map(() => newEco(combat ? COMBAT_CREDITS : START_CREDITS));
     this.posts = [];
     this.aiJobs = new Map();
     this.aiT = 0;
-    this.jobs = new Map();
-    this.queue = new Map();
     this.ore = [];
     this.oreGrid = new Map();
-    this.lowPower = false;
+    this.lowWarned = false;
     this.known = new Set();
     this.fresh = new Set();
     this.ghost = null;
@@ -583,40 +669,44 @@ export class IsoGame implements GameLike {
         }
       return null;
     };
-    // Two sides: you, starting with a Foundry vehicle and a small escort,
-    // and the enemy, dug in with a full base and an army on the far side of
-    // the planet.
     type Site = { sx: number; sy: number; f: number };
     const at = (p: [number, number], f: number): Site => {
       const [sx, sy] = findLand(p[0] * w, p[1] * h) ?? [p[0] * w, p[1] * h];
       return { sx, sy, f };
     };
-    const homeSite = at(combat ? combatHome(def) : def.home, ME);
-    const foe = at(def.enemy, 1);
+    // where each side starts: in single player you, then the enemy base
+    const sites: Site[] = mp
+      ? startsFor(def, this.players!.length).map((p, i) => at(p, this.players![i].f))
+      : [at(combat ? combatHome(def) : def.home, this.me), at(def.enemy, ENEMY)];
+    const homeSite = sites.find((st) => st.f === this.me) ?? sites[0];
+    const foe = sites[1] ?? sites[0];
 
-    // a road from your start to the enemy base, kept to dry land: it winds
-    // between waypoints found on the way
-    const pts: [number, number][] = [[homeSite.sx, homeSite.sy]];
-    const steps = 8;
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const p = findLand(homeSite.sx + (foe.sx - homeSite.sx) * t, homeSite.sy + (foe.sy - homeSite.sy) * t, 900);
-      if (p) {
-        // keep it on the same lap as the line it follows
-        const [lx, ly] = pts[pts.length - 1];
-        pts.push(nearestCopy(lx, ly, p[0], p[1], w, h));
-      }
-    }
-    {
-      const [lx, ly] = pts[pts.length - 1];
-      pts.push(nearestCopy(lx, ly, foe.sx, foe.sy, w, h));
-    }
+    // roads from each start to the next (in single player, from yours to the
+    // enemy base), kept to dry land: each winds between waypoints found on the way
     const lines: [number, number][][] = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const [ax, ay] = T.at(...pts[i]);
-      const [bx, by] = T.at(...pts[i + 1]);
-      lines.push(windingRoad(ax, ay, bx, by, rand));
-    }
+    const road = (a: Site, b: Site) => {
+      const pts: [number, number][] = [[a.sx, a.sy]];
+      const steps = 8;
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps;
+        const p = findLand(a.sx + (b.sx - a.sx) * t, a.sy + (b.sy - a.sy) * t, 900);
+        if (p) {
+          // keep it on the same lap as the line it follows
+          const [lx, ly] = pts[pts.length - 1];
+          pts.push(nearestCopy(lx, ly, p[0], p[1], w, h));
+        }
+      }
+      {
+        const [lx, ly] = pts[pts.length - 1];
+        pts.push(nearestCopy(lx, ly, b.sx, b.sy, w, h));
+      }
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, ay] = T.at(...pts[i]);
+        const [bx, by] = T.at(...pts[i + 1]);
+        lines.push(windingRoad(ax, ay, bx, by, rand));
+      }
+    };
+    if (sites.length > 1) for (let i = 0; i < (sites.length > 2 ? sites.length : 1); i++) road(sites[i], sites[(i + 1) % sites.length]);
     T.setRoads(lines);
 
     const pads: Rect[] = [];
@@ -636,17 +726,16 @@ export class IsoGame implements GameLike {
             if (pads.some((p) => overlap(p, pad, 4))) continue;
             pads.push(pad);
             T.markPad(pad);
-            this.buildings.push({ kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2, pad, own: false, sel: false, rise: 1, hp: 1 });
+            this.addBuilding({ id: 0, kind, f, x, y, art, phase: rand() * 10, gun: rand() * Math.PI * 2, gunGoal: rand() * Math.PI * 2, pad, sel: false, rise: 1, hp: 1 });
             ok = true;
           }
         }
       }
     };
-    place(['yard', ...BASE_B], foe.f, foe.sx, foe.sy);
+    if (!mp) place(['yard', ...BASE_B], foe.f, foe.sx, foe.sy);
     // in the Combat stage you have a full base too, already built
     if (combat) {
-      place(['yard', ...BASE_B, 'lab', 'power'], ME, homeSite.sx, homeSite.sy);
-      for (const b of this.buildings) if (b.f === ME) b.own = true;
+      place(['yard', ...BASE_B, 'lab', 'power'], this.me, homeSite.sx, homeSite.sy);
       // what it opens up is already known, not news
       for (const t of this.available()) this.known.add(t.id);
     }
@@ -703,22 +792,22 @@ export class IsoGame implements GameLike {
           ['buggy', 1],
           ['inf', 3],
         ];
-    // the Foundry vehicle starts on the nearest open ground to your home site
-    let ms: [number, number] = [homeSite.sx, homeSite.sy];
-    found: for (let r = 0; r < (combat ? 0 : 1200); r += 12)
-      for (let t = 0; t < Math.max(1, r / 6); t++) {
-        const a = rand() * Math.PI * 2;
-        const sx = homeSite.sx + Math.cos(a) * r;
-        const sy = homeSite.sy + Math.sin(a) * r * 0.5;
-        const [x, y] = toWorld(sx, sy, 0);
-        if (this.siteOk(this.siteOf(x, y))) {
-          ms = [sx, sy];
-          break found;
+    // each player's Foundry vehicle starts on the nearest open ground to its site
+    const starters = mp ? sites : [homeSite];
+    const spots = starters.map((st): [number, number] => {
+      for (let r = 0; r < (combat ? 0 : 1200); r += 12)
+        for (let t = 0; t < Math.max(1, r / 6); t++) {
+          const a = rand() * Math.PI * 2;
+          const sx = st.sx + Math.cos(a) * r;
+          const sy = st.sy + Math.sin(a) * r * 0.5;
+          const [x, y] = toWorld(sx, sy, 0);
+          if (this.siteOk(this.siteOf(x, y))) return [sx, sy];
         }
-      }
-    // ore fields: two near where you start, one by the enemy base, one
-    // half way, and more scattered round the land
-    const startSite = this.siteOf(...toWorld(ms[0], ms[1], 0));
+      return [st.sx, st.sy];
+    });
+    // ore fields: two near each start, one by the enemy base, one half way
+    // between neighbours, and more scattered round the land
+    const startSites = spots.map((ms) => this.siteOf(...toWorld(ms[0], ms[1], 0)));
     const field = (sx: number, sy: number, n: number) => {
       const reach = 6 + Math.sqrt(n) * 5.5;
       for (let i = 0, t = 0; i < n && t < n * 30; t++) {
@@ -726,7 +815,7 @@ export class IsoGame implements GameLike {
         const d = Math.sqrt(rand()) * reach;
         const [x, y] = toWorld(sx + Math.cos(a) * d * 1.6, sy + Math.sin(a) * d * 0.8, 0);
         if (T.k(x, y) !== K.Grass || T.k(x + 5, y + 5) !== K.Grass || T.k(x - 5, y - 5) !== K.Grass) continue;
-        if (inside(x, y, startSite, 10)) continue;
+        if (startSites.some((ss) => inside(x, y, ss, 10))) continue;
         if (this.oreNear(x, y, 5).length) continue;
         const [fx, fy] = T.fold(x, y);
         this.addOre({ x: fx, y: fy, amt: ORE.node * (0.6 + rand() * 0.4), v: Math.floor(rand() * 4) });
@@ -740,18 +829,22 @@ export class IsoGame implements GameLike {
         const sx = cx + Math.cos(a) * r;
         const sy = cy + Math.sin(a) * r * 0.5;
         const [x, y] = toWorld(sx, sy, 0);
-        if (T.k(x, y) === K.Grass && !inside(x, y, startSite, 40)) {
+        if (T.k(x, y) === K.Grass && !startSites.some((ss) => inside(x, y, ss, 40))) {
           field(sx, sy, n);
           return;
         }
       }
     };
-    nearField(ms[0], ms[1], 170, 30);
-    nearField(ms[0], ms[1], 420, 34);
-    nearField(foe.sx, foe.sy, 220, 28);
-    {
-      const [mx, my] = nearestCopy(homeSite.sx, homeSite.sy, foe.sx, foe.sy, w, h);
-      const mid = findLand((homeSite.sx + mx) / 2, (homeSite.sy + my) / 2, 900);
+    for (const ms of spots) {
+      nearField(ms[0], ms[1], 170, 30);
+      nearField(ms[0], ms[1], 420, 34);
+    }
+    if (!mp) nearField(foe.sx, foe.sy, 220, 28);
+    for (let i = 0; i < (sites.length > 2 ? sites.length : 1) && sites.length > 1; i++) {
+      const a = sites[i];
+      const b = sites[(i + 1) % sites.length];
+      const [mx, my] = nearestCopy(a.sx, a.sy, b.sx, b.sy, w, h);
+      const mid = findLand((a.sx + mx) / 2, (a.sy + my) / 2, 900);
       if (mid) nearField(mid[0], mid[1], 0, 40);
     }
     const extra = Math.max(1, Math.round((w * h * (1 - def.water)) / 1.2e7));
@@ -765,42 +858,47 @@ export class IsoGame implements GameLike {
       }
 
     const mine: [number, number][] = [];
-    for (const [kind, c] of start)
-      for (let i = 0; i < c; i++) {
-        const u =
-          kind === 'mcv'
-            ? spawn(kind, ME, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', ME, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0)
-            : combat
-              ? spawn(kind, ME, ms[0] - 60, ms[1] + 140, 220)
-              : spawn(kind, ME, ms[0], ms[1] + 45, 70);
-        if (u) mine.push(toScreen(u.x, u.y));
-      }
+    starters.forEach((st, si) => {
+      const ms = spots[si];
+      for (const [kind, c] of start)
+        for (let i = 0; i < c; i++) {
+          const u =
+            kind === 'mcv'
+              ? spawn(kind, st.f, ms[0], ms[1], 0.5) ?? this.newUnit('mcv', st.f, ...T.fold(...toWorld(ms[0], ms[1], 0)), 0)
+              : combat
+                ? spawn(kind, st.f, ms[0] - 60, ms[1] + 140, 220)
+                : spawn(kind, st.f, ms[0], ms[1] + 45, 70);
+          if (u && st.f === this.me) mine.push(toScreen(u.x, u.y));
+        }
+    });
     if (combat) {
       // your refinery's hauler is already at work
       for (const b of this.buildings)
-        if (b.own && b.kind === 'refinery') {
+        if (b.f === this.me && b.kind === 'refinery') {
           b.gift = true;
-          const u = this.newUnit('hauler', ME, ...this.fold(b.x + DOCK[0], b.y + DOCK[1] + 6), Math.PI / 2);
+          const u = this.newUnit('hauler', this.me, ...this.fold(b.x + DOCK[0], b.y + DOCK[1] + 6), Math.PI / 2);
           u.job = { st: 'seek', t: 0 };
           u.load = 0;
         }
       this.makePosts(foe.sx, foe.sy, homeSite.sx, homeSite.sy, rand);
     }
-    for (const [kind, c] of army) for (let i = 0; i < c; i++) spawn(kind, foe.f, foe.sx + 60, foe.sy + 140, 220);
-    // enemy patrol boats on the nearest water to their base
-    let lake: [number, number] | null = null;
-    for (let r = 100; r < 2000 && !lake; r += 100)
-      for (let t = 0; t < 40 && !lake; t++) {
-        const a = rand() * Math.PI * 2;
-        const sx = foe.sx + Math.cos(a) * r;
-        const sy = foe.sy + Math.sin(a) * r * 0.5;
-        const [x, y] = toWorld(sx, sy, 0);
-        if (T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water && T.k(x, y + 30) === K.Water && T.k(x, y - 30) === K.Water) lake = [sx, sy];
-      }
-    if (lake) for (let i = 0; i < 3; i++) spawn('boat', foe.f, lake[0], lake[1], 40);
+    if (!mp) {
+      for (const [kind, c] of army) for (let i = 0; i < c; i++) spawn(kind, foe.f, foe.sx + 60, foe.sy + 140, 220);
+      // enemy patrol boats on the nearest water to their base
+      let lake: [number, number] | null = null;
+      for (let r = 100; r < 2000 && !lake; r += 100)
+        for (let t = 0; t < 40 && !lake; t++) {
+          const a = rand() * Math.PI * 2;
+          const sx = foe.sx + Math.cos(a) * r;
+          const sy = foe.sy + Math.sin(a) * r * 0.5;
+          const [x, y] = toWorld(sx, sy, 0);
+          if (T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water && T.k(x, y + 30) === K.Water && T.k(x, y - 30) === K.Water) lake = [sx, sy];
+        }
+      if (lake) for (let i = 0; i < 3; i++) spawn('boat', foe.f, lake[0], lake[1], 40);
+    }
     for (const u of this.units) u.z = this.groundZ(u);
 
-    const yard = combat && this.buildings.find((b) => b.own && b.kind === 'yard');
+    const yard = combat && this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
     this.home = yard ? { x: toScreen(yard.x, yard.y)[0], y: toScreen(yard.x, yard.y)[1] } : mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
     this.shroud = NO_SHROUD ? null : new Shroud(w, h);
@@ -819,7 +917,7 @@ export class IsoGame implements GameLike {
 
   // Can you see this enemy unit (it isn't under the shroud)? Yours always.
   private shown(u: Unit): boolean {
-    return u.f === ME || !this.shroud || this.shroud.seen(...this.spot(u));
+    return u.f === this.me || !this.shroud || this.shroud.seen(...this.spot(u));
   }
 
   // Your units and buildings lift the shroud round themselves.
@@ -827,14 +925,14 @@ export class IsoGame implements GameLike {
     const sh = this.shroud;
     if (!sh) return;
     for (const u of this.units) {
-      if (u.f !== ME || u.dead) continue;
+      if (u.f !== this.me || u.dead) continue;
       const last = this.looked.get(u);
       if (last && Math.abs(last[0] - u.x) + Math.abs(last[1] - u.y) < 6) continue;
       this.looked.set(u, [u.x, u.y]);
       sh.reveal(...this.spot(u), SIGHT[u.kind] * CELL);
     }
     for (const b of this.buildings) {
-      if (b.f !== ME || this.lookedB.has(b)) continue;
+      if (b.f !== this.me || this.lookedB.has(b)) continue;
       this.lookedB.add(b);
       const [sx, sy] = toScreen(b.x, b.y);
       sh.reveal(sx, sy, Math.max(b.art.rx, b.art.ry) + (BSIGHT[b.kind] ?? 5) * CELL);
@@ -846,18 +944,34 @@ export class IsoGame implements GameLike {
   private lastTap: { u: Unit; t: number } | null = null;
 
   private newUnit(kind: Kind, f: number, x: number, y: number, a: number): Unit {
-    const u: Unit = { kind, f, x, y, z: this.terrain.elev(x, y), a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: 0, hp: 1, idle: 2, trackAcc: 0, lap: 0, lapY: 0 };
+    const u: Unit = { id: this.nextId++, kind, f, x, y, z: this.terrain.elev(x, y), a, turret: a, turretGoal: a, tx: x, ty: y, moving: false, sel: false, anim: 0, hp: 1, idle: 2, trackAcc: 0, lap: 0, lapY: 0 };
     this.units.push(u);
     return u;
   }
 
+  private addBuilding(b: Building): Building {
+    b.id = this.nextId++;
+    this.buildings.push(b);
+    return b;
+  }
+
   // ---------- Building: credits, the build menu and placing ----------
 
-  credits = START_CREDITS;
-  // what each tab of the menu is working on (one thing at a time)
-  private jobs = new Map<Tab, { tech: Tech; spent: number; paused: boolean; ready: boolean }>();
-  // units waiting behind the one being made, per tab
-  private queue = new Map<Tab, Tech[]>();
+  // Each side's purse and what it is making. In a multiplayer game every
+  // player has one, kept by the host (see "Multiplayer" below); yours is
+  // eco[me], which is what the build menu shows.
+  eco: Eco[] = FACTIONS.map(() => newEco(START_CREDITS));
+  get credits(): number {
+    return this.eco[this.me].credits;
+  }
+  // what each tab of your menu is working on (one thing at a time), and the
+  // units waiting behind the one being made
+  private get jobs(): Map<Tab, Job> {
+    return this.eco[this.me].jobs;
+  }
+  private get queue(): Map<Tab, Tech[]> {
+    return this.eco[this.me].queue;
+  }
   private known = new Set<string>(); // items that have been on the menu
   private fresh = new Set<string>(); // ...and those not looked at yet
   private ghost: { tech: Tech; x: number; y: number; pad: Rect; why: string } | null = null;
@@ -873,10 +987,19 @@ export class IsoGame implements GameLike {
     this.onNotice(msg);
   }
 
-  // Kinds of building you have standing.
-  private have(): Set<BuildingKind> {
+  // A message (and an announcement) for side f's player: yours straight
+  // away, another player's sent with the host's next update.
+  private tell(f: number, msg?: string, line?: Parameters<typeof announce>[0]): void {
+    if (f === this.me) {
+      if (msg) this.notice(msg);
+      if (line) announce(line);
+    } else if (this.net === 'host' && this.players?.some((p) => p.f === f)) this.told.push([f, msg ?? '', line ?? '']);
+  }
+
+  // Kinds of building side f (you, unless said) has standing.
+  private have(f = this.me): Set<BuildingKind> {
     const s = new Set<BuildingKind>();
-    for (const b of this.buildings) if (b.own && b.rise >= 1 && !b.packing) s.add(b.kind);
+    for (const b of this.buildings) if (b.f === f && b.rise >= 1 && !b.packing) s.add(b.kind);
     return s;
   }
 
@@ -919,7 +1042,7 @@ export class IsoGame implements GameLike {
 
   // The model of a building or unit drawn at `scale` times its size on the map.
   private subjectSprite(id: string, scale: number): StackSprite | null {
-    const m = subjectModel(id, FACTIONS[ME]);
+    const m = subjectModel(id, FACTIONS[this.me]);
     if (!m) return null;
     const unit = !TECH.some((x) => x.building === id) && id !== 'inf' && id !== 'rocket';
     const angle = unit ? (dirIndex(Math.PI * 0.62, DIRS) / DIRS) * Math.PI * 2 : 0;
@@ -966,7 +1089,7 @@ export class IsoGame implements GameLike {
     let url = this.icons.get(key);
     if (url) return url;
     const layers: { img: HTMLCanvasElement; x: number; y: number }[] = [];
-    if (t.building) layers.push({ img: this.buildingArt(t.building, ME).spr.img, x: 0, y: 0 });
+    if (t.building) layers.push({ img: this.buildingArt(t.building, this.me).spr.img, x: 0, y: 0 });
     else for (const s of this.unitLayers(t.unit as Kind)) layers.push({ img: s.img, x: -s.cx * ART, y: -s.cy * ART });
     // put the layers together at the art's own size
     const x0 = Math.min(...layers.map((l) => l.x));
@@ -1013,7 +1136,7 @@ export class IsoGame implements GameLike {
   // The sprites a unit is drawn from, facing down and to the left.
   private unitLayers(kind: Kind): StackSprite[] {
     const a = Math.PI * 0.62;
-    const art = this.art[ME];
+    const art = this.art[this.me];
     const di = dirIndex(a, DIRS);
     return kind === 'inf' || kind === 'rocket'
       ? [(kind === 'inf' ? art.infantry : art.rocket)[0][dirIndex(a, 16)]]
@@ -1095,67 +1218,89 @@ export class IsoGame implements GameLike {
     if (!t) return;
     this.fresh.delete(id);
     const j = this.jobs.get(t.tab);
+    // a finished building: put it down (that's yours alone, until it's placed)
+    if (t.building && j && j.tech === t && j.ready) {
+      this.startPlace(t);
+      return;
+    }
+    this.command({ c: 'build', t: id });
+  }
+
+  buildCancel(id: string): void {
+    if (this.ghost?.tech.id === id) this.ghost = null;
+    this.command({ c: 'cancel', t: id });
+  }
+
+  // Side f starts making something, or puts it on hold or starts it again.
+  private startJob(f: number, id: string): void {
+    const t = TECH.find((x) => x.id === id);
+    if (!t) return;
+    const e = this.eco[f];
+    const j = e.jobs.get(t.tab);
+    const have = this.have(f);
+    const open = t.needs.every((k) => have.has(k));
     if (t.unit) {
       // units queue up: tap again for another (a held one starts again)
       if (j && j.tech === t && j.paused) {
         j.paused = false;
         return;
       }
-      if (!this.available().includes(t)) return;
-      if ((j?.tech === t ? 1 : 0) + this.queued(t) >= QUEUE_MAX) return;
-      if (!j) this.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+      if (!open) return;
+      const queued = (e.queue.get(t.tab) ?? []).filter((q) => q === t).length;
+      if ((j?.tech === t ? 1 : 0) + queued >= QUEUE_MAX) return;
+      if (!j) e.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
       else {
-        const q = this.queue.get(t.tab) ?? [];
+        const q = e.queue.get(t.tab) ?? [];
         q.push(t);
-        this.queue.set(t.tab, q);
+        e.queue.set(t.tab, q);
       }
-      announce('training');
+      this.tell(f, undefined, 'training');
       return;
     }
     if (j && j.tech === t) {
-      if (j.ready) this.startPlace(t);
-      else j.paused = !j.paused;
+      if (!j.ready) j.paused = !j.paused;
       return;
     }
     if (j) {
-      this.notice(`Busy building ${j.tech.name}`);
+      this.tell(f, `Busy building ${j.tech.name}`);
       return;
     }
-    if (!this.available().includes(t)) return;
-    if (t.building && !this.have().has('yard')) return;
-    this.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
-    announce('building');
+    if (!open || !have.has('yard')) return;
+    e.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+    this.tell(f, undefined, 'building');
   }
 
-  buildCancel(id: string): void {
+  // Side f calls off one of something: a queued unit goes first (one at a
+  // time), then the one being made, and its credits come back.
+  private cancelJob(f: number, id: string): void {
     const t = TECH.find((x) => x.id === id);
     if (!t) return;
-    // a queued unit goes first (one at a time), then the one being made
-    const q = this.queue.get(t.tab) ?? [];
+    const e = this.eco[f];
+    const q = e.queue.get(t.tab) ?? [];
     const qi = q.lastIndexOf(t);
     if (qi >= 0) {
       q.splice(qi, 1);
       return;
     }
-    const j = this.jobs.get(t.tab);
+    const j = e.jobs.get(t.tab);
     if (!j || j.tech !== t) return;
-    this.credits += j.spent;
-    this.nextJob(t.tab);
-    if (this.ghost?.tech === t) this.ghost = null;
+    e.credits += j.spent;
+    this.nextJob(e, t.tab);
+    if (f === this.me && this.ghost?.tech === t) this.ghost = null;
   }
 
   // The tab's job is done with: start the next one in its queue.
-  private nextJob(tab: Tab): void {
-    this.jobs.delete(tab);
-    const q = this.queue.get(tab);
+  private nextJob(e: Eco, tab: Tab): void {
+    e.jobs.delete(tab);
+    const q = e.queue.get(tab);
     const n = q?.shift();
-    if (n) this.jobs.set(tab, { tech: n, spent: 0, paused: false, ready: false });
+    if (n) e.jobs.set(tab, { tech: n, spent: 0, paused: false, ready: false });
   }
 
-  // A finished unit comes out of the building that makes it (the one picked
-  // as primary, or the newest) and heads for its rally point.
-  private deliver(t: Tech): boolean {
-    const makers = this.buildings.filter((b) => b.own && b.kind === t.from && b.rise >= 1 && !b.packing);
+  // A finished unit comes out of the building of side f that makes it (the
+  // one picked as primary, or the newest) and heads for its rally point.
+  private deliver(t: Tech, f: number): boolean {
+    const makers = this.buildings.filter((b) => b.f === f && b.kind === t.from && b.rise >= 1 && !b.packing);
     if (!makers.length) return false;
     const b = makers.find((m) => m.primary) ?? makers[makers.length - 1];
     const kind = t.unit as Kind;
@@ -1164,7 +1309,7 @@ export class IsoGame implements GameLike {
     const x = air ? b.x : b.x + (Math.random() - 0.5) * 6;
     const y = air ? b.y : b.y + b.art.ry - 2;
     const [fx, fy] = this.fold(x, y);
-    const u = this.newUnit(kind, ME, fx, fy, Math.PI / 2);
+    const u = this.newUnit(kind, f, fx, fy, Math.PI / 2);
     if (b.kind === 'factory') this.sound(b.x, b.y, 'unit_exit');
     if (kind === 'hauler') {
       u.job = { st: 'seek', t: 0 };
@@ -1189,6 +1334,9 @@ export class IsoGame implements GameLike {
     return toWorld(nx, ny, 0);
   }
 
+  // Making things: what is newly on your menu and your power, then every
+  // side's credits paying for what it is making (the host's job in a
+  // multiplayer game: a player's screen just shows what it is told).
   private updateBuild(dt: number): void {
     const have = this.have();
     // newly opened options
@@ -1202,43 +1350,53 @@ export class IsoGame implements GameLike {
     if (opened) this.notice('New construction options');
     const pw = this.power();
     const low = pw.used > pw.made;
-    if (low && !this.lowPower) {
+    if (low && !this.lowWarned) {
       this.notice('Low power: build a power plant');
       announce('low_power');
-    } else if (!low && this.lowPower) announce('power_restored');
-    this.lowPower = low;
+    } else if (!low && this.lowWarned) announce('power_restored');
+    this.lowWarned = low;
+    if (this.net === 'client') return;
+    for (const f of this.sides()) this.payJobs(f, dt);
+  }
+  private lowWarned = false;
+
+  // The sides with a purse: you (and in a multiplayer game everyone).
+  private sides(): number[] {
+    return this.players ? this.players.map((p) => p.f) : [this.me];
+  }
+
+  private payJobs(f: number, dt: number): void {
+    const e = this.eco[f];
+    const have = this.have(f);
+    const pw = this.power(f);
+    e.lowPower = pw.used > pw.made;
     let paid = false;
-    for (const j of this.jobs.values()) {
+    for (const j of [...e.jobs.values()]) {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
       if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
-      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt * (this.lowPower ? 0.5 : 1);
-      const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
-      this.credits -= pay;
+      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt * (e.lowPower ? 0.5 : 1);
+      const pay = Math.min(want, e.credits, j.tech.cost - j.spent);
+      e.credits -= pay;
       j.spent += pay;
       if (pay > 0) paid = true;
-      if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) {
-        this.notice('Not enough credits');
-        announce('insufficient_funds');
-      }
+      if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) this.tell(f, 'Not enough credits', 'insufficient_funds');
       if (j.spent >= j.tech.cost - 1e-6) {
         j.spent = j.tech.cost;
         if (j.tech.unit) {
-          if (this.deliver(j.tech)) {
-            this.notice(`${j.tech.name} ready`);
-            announce('unit_ready');
-            this.nextJob(j.tech.tab);
+          if (this.deliver(j.tech, f)) {
+            this.tell(f, `${j.tech.name} ready`, 'unit_ready');
+            this.nextJob(e, j.tech.tab);
           }
         } else {
           j.ready = true;
-          this.notice(`${j.tech.name} ready: tap it to place`);
-          announce('construction_complete');
-          ui('ui_ready');
+          this.tell(f, `${j.tech.name} ready: tap it to place`, 'construction_complete');
+          if (f === this.me) ui('ui_ready');
         }
       }
     }
     // the credits tick away while something is being made
-    if (paid && this.time - this.tickT > 0.14) {
+    if (paid && f === this.me && this.time - this.tickT > 0.14) {
       this.tickT = this.time;
       ui('credits_tick');
     }
@@ -1254,7 +1412,7 @@ export class IsoGame implements GameLike {
   private startPlace(t: Tech): void {
     this.ghost = { tech: t, x: 0, y: 0, pad: { x: 0, y: 0, w: 0, h: 0 }, why: '' };
     // until main.ts moves it: next to your Foundry
-    const yard = this.buildings.find((b) => b.own && b.kind === 'yard');
+    const yard = this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
     if (yard) {
       const [sx, sy] = toScreen(yard.x, yard.y + yard.art.ry + 40);
       this.placeAt(sx, sy);
@@ -1267,23 +1425,23 @@ export class IsoGame implements GameLike {
   placeAt(x: number, y: number): void {
     const gh = this.ghost;
     if (!gh) return;
-    const art = this.buildingArt(gh.tech.building!, ME);
+    const art = this.buildingArt(gh.tech.building!, this.me);
     let [wx, wy] = this.fold(...toWorld(x, y, 0));
     wx = Math.round(wx / 4) * 4;
     wy = Math.round(wy / 4) * 4;
     gh.x = wx;
     gh.y = wy;
     gh.pad = { x: wx - art.rx - 3, y: wy - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-    gh.why = this.placeWhy(gh.pad);
+    gh.why = this.placeWhy(gh.pad, this.me);
   }
 
   // Why a building can't go on pad r ('' if it can): it needs clear, level
   // ground next to the rest of your base.
-  private placeWhy(r: Rect): string {
+  private placeWhy(r: Rect, f: number): string {
     if (!this.siteOk(r)) return 'Blocked: needs open, level ground';
     const [gsx, gsy] = toScreen(r.x + r.w / 2, r.y + r.h / 2);
     for (const b of this.buildings) {
-      if (!b.own) continue;
+      if (b.f !== f) continue;
       const [bsx, bsy] = toScreen(b.x, b.y);
       const [nx, ny] = nearestCopy(gsx, gsy, bsx, bsy, this.w, this.h);
       const [bx, by] = toWorld(nx, ny, 0);
@@ -1298,18 +1456,30 @@ export class IsoGame implements GameLike {
     const gh = this.ghost;
     if (gh?.why) ui('ui_error');
     if (!gh || gh.why) return;
-    const t = gh.tech;
-    const art = this.buildingArt(t.building!, ME);
-    const b: Building = { kind: t.building!, f: ME, x: gh.x, y: gh.y, art, phase: 0, gun: 0, gunGoal: 0, pad: gh.pad, own: true, sel: false, rise: 0, hp: 1 };
-    this.buildings.push(b);
-    this.clearSite(gh.pad, null);
-    this.setPad(gh.pad, true);
+    this.command({ c: 'place', t: gh.tech.id, x: gh.x, y: gh.y });
+    this.ghost = null;
+    this.emit();
+  }
+
+  // Side f puts its finished building down at world point (x, y), if it can go there.
+  private placeBuilding(f: number, id: string, x: number, y: number): void {
+    const t = TECH.find((q) => q.id === id);
+    const j = t && this.eco[f].jobs.get(t.tab);
+    if (!t?.building || !j || j.tech !== t || !j.ready) return;
+    const art = this.buildingArt(t.building, f);
+    const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+    const why = this.placeWhy(pad, f);
+    if (why) {
+      this.tell(f, why);
+      return;
+    }
+    const b = this.addBuilding({ id: 0, kind: t.building, f, x, y, art, phase: 0, gun: 0, gunGoal: 0, pad, sel: false, rise: 0, hp: 1 });
+    this.clearSite(pad, null);
+    this.setPad(pad, true);
     this.puff(b, 12);
     this.sound(b.x, b.y, 'build_place');
     this.sound(b.x, b.y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
-    this.jobs.delete(t.tab);
-    this.ghost = null;
-    this.emit();
+    this.eco[f].jobs.delete(t.tab);
   }
 
   // Everyone standing on rect r (but `keep`) drives off it.
@@ -1333,7 +1503,7 @@ export class IsoGame implements GameLike {
 
   // The pad a Foundry standing at (x, y) would deploy onto.
   private siteOf(x: number, y: number): Rect {
-    const a = this.buildingArt('yard', ME);
+    const a = this.buildingArt('yard', this.me);
     const cx = Math.round(x);
     const cy = Math.round(y);
     return { x: cx - a.rx - 3, y: cy - a.ry - 3, w: a.rx * 2 + 6, h: a.ry * 2 + 6 };
@@ -1401,33 +1571,32 @@ export class IsoGame implements GameLike {
     return out;
   }
 
-  // Power made and used by your buildings.
-  private power(): { made: number; used: number } {
+  // Power made and used by side f's buildings (yours unless said).
+  private power(f = this.me): { made: number; used: number } {
     let made = 0;
     let used = 0;
     for (const b of this.buildings) {
-      if (!b.own || b.rise < 1) continue;
+      if (b.f !== f || b.rise < 1) continue;
       const p = POWER[b.kind] ?? 0;
       if (p > 0) made += p;
       else used -= p;
     }
     return { made, used };
   }
-  private lowPower = false;
-
-  private store(): number {
+  // The most credits side f can hold.
+  private store(f = this.me): number {
     if (this.stage === 'combat') return COMBAT_STORE;
     let s = STORE.base;
-    for (const b of this.buildings) if (b.own && b.rise >= 1) s += b.kind === 'refinery' ? STORE.refinery : b.kind === 'silo' ? STORE.silo : 0;
+    for (const b of this.buildings) if (b.f === f && b.rise >= 1) s += b.kind === 'refinery' ? STORE.refinery : b.kind === 'silo' ? STORE.silo : 0;
     return s;
   }
 
-  // The nearest refinery of yours to (x, y).
-  private refineryNear(x: number, y: number): Building | null {
+  // The nearest refinery of side f to (x, y).
+  private refineryNear(x: number, y: number, f: number): Building | null {
     let best: Building | null = null;
     let bd = 1e9;
     for (const b of this.buildings) {
-      if (!b.own || b.kind !== 'refinery' || b.rise < 1 || b.packing) continue;
+      if (b.f !== f || b.kind !== 'refinery' || b.rise < 1 || b.packing) continue;
       const [bx, by] = this.nearPoint(x, y, b.x, b.y);
       const d = Math.hypot(bx - x, by - y);
       if (d < bd) {
@@ -1469,7 +1638,7 @@ export class IsoGame implements GameLike {
         if (!node) {
           if (u.load > 0) j.st = 'home';
           else {
-            this.notice('No ore in reach of your hauler');
+            this.tell(u.f, 'No ore in reach of your hauler');
             j.st = 'wait';
             j.t = 5;
           }
@@ -1503,14 +1672,14 @@ export class IsoGame implements GameLike {
         if (u.load >= ORE.load - 0.5) {
           j.st = 'home';
           // a hauler you are looking after says it is heading home
-          if (u.sel && u.f === ME) sayUnit('harvester', 'full');
+          if (u.sel && u.f === this.me) sayUnit('harvester', 'full');
         }
         break;
       }
       case 'home': {
-        const ref = this.refineryNear(u.x, u.y);
+        const ref = this.refineryNear(u.x, u.y, u.f);
         if (!ref) {
-          this.notice('Your hauler needs a refinery');
+          this.tell(u.f, 'Your hauler needs a refinery');
           j.st = 'wait';
           j.t = 5;
           break;
@@ -1525,16 +1694,17 @@ export class IsoGame implements GameLike {
         else if (!u.moving) j.st = 'unload';
         break;
       case 'unload': {
-        const room = this.store() - this.credits;
+        const e = this.eco[u.f];
+        const room = this.store(u.f) - e.credits;
         if (room <= 0) {
-          this.notice('Credits full: build an ore silo');
+          this.tell(u.f, 'Credits full: build an ore silo');
           break;
         }
         const give = Math.min(ORE.unloadRate * dt, u.load, room);
-        if (u.load >= ORE.load * 0.95 && u.f === ME) this.sound(u.x, u.y, 'ore_unload');
+        if (u.load >= ORE.load * 0.95) this.sound(u.x, u.y, 'ore_unload');
         u.load -= give;
-        this.credits += give;
-        if (u.f === ME && this.time - this.tickT > 0.12) {
+        e.credits += give;
+        if (u.f === this.me && this.time - this.tickT > 0.12) {
           this.tickT = this.time;
           ui('credits_tick', 1.4);
         }
@@ -1548,7 +1718,7 @@ export class IsoGame implements GameLike {
   }
 
   private deployable(u: Unit): boolean {
-    return u.kind === 'mcv' && u.f === ME && this.siteOk(this.siteOf(u.x, u.y));
+    return u.kind === 'mcv' && this.siteOk(this.siteOf(u.x, u.y));
   }
 
   actions(): Action[] {
@@ -1561,17 +1731,17 @@ export class IsoGame implements GameLike {
     }
     const b = this.selB();
     if (b) {
-      if (b.own && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
-      if (b.own && MAKERS.includes(b.kind)) {
+      if (b.f === this.me && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
+      if (b.f === this.me && MAKERS.includes(b.kind)) {
         const acts: Action[] = [];
-        if (this.buildings.filter((o) => o.own && o.kind === b.kind).length > 1)
+        if (this.buildings.filter((o) => o.f === this.me && o.kind === b.kind).length > 1)
           acts.push({ id: 'primary', label: b.primary ? 'Primary' : 'Make primary', icon: 'star', disabled: !!b.primary, title: 'New units come out of this one' });
         if (b.rally) acts.push({ id: 'unrally', label: 'Clear rally', icon: 'x', title: 'New units wait by the door' });
         return acts;
       }
       return [];
     }
-    const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === ME);
+    const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === this.me);
     if (!mcvs.length) return [];
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
     return [{ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' }];
@@ -1579,21 +1749,15 @@ export class IsoGame implements GameLike {
 
   act(id: string): void {
     const sb = this.selB();
-    if (id === 'primary' && sb) for (const o of this.buildings) o.primary = o.own && o.kind === sb.kind ? o === sb : o.primary;
-    if (id === 'unrally' && sb) sb.rally = undefined;
+    if (id === 'primary' && sb) this.command({ c: 'primary', b: sb.id });
+    if (id === 'unrally' && sb) this.command({ c: 'rally', b: sb.id });
     if (id === 'place') this.placeNow();
-    else if (id === 'deploy' && !this.selected().some((u) => u.kind === 'mcv' && u.f === ME && !u.deploy && this.deployable(u))) ui('ui_error');
     else if (id === 'unplace') this.ghost = null;
     else if (id === 'deploy') {
-      for (const u of this.selected()) if (!u.deploy && this.deployable(u)) this.startDeploy(u);
-    } else if (id === 'pack') {
-      const b = this.selB();
-      if (b && b.own && b.kind === 'yard' && b.rise >= 1) {
-        b.packing = true;
-        this.sound(b.x, b.y, 'build_rise', 1, { reverse: true, rate: 1.3 });
-        this.sound(b.x, b.y, 'foundry_unfold', 0.8, { delay: 1, reverse: true });
-      }
-    }
+      const go = this.selected().filter((u) => u.kind === 'mcv' && u.f === this.me && !u.deploy && this.deployable(u));
+      if (!go.length) ui('ui_error');
+      else this.command({ c: 'deploy', u: go.map((u) => u.id) });
+    } else if (id === 'pack' && sb && sb.f === this.me && sb.kind === 'yard' && sb.rise >= 1) this.command({ c: 'pack', b: sb.id });
   }
 
   private startDeploy(u: Unit): void {
@@ -1614,9 +1778,9 @@ export class IsoGame implements GameLike {
       return;
     }
     this.units.splice(this.units.indexOf(u), 1);
+    this.gone.push([u.id, GONE_QUIET]);
     const art = this.buildingArt('yard', u.f);
-    const b: Building = { kind: 'yard', f: u.f, x: pad.x + pad.w / 2, y: pad.y + pad.h / 2, art, phase: 0, gun: 0, gunGoal: 0, pad, own: true, sel: u.sel, rise: 0, hp: 1 };
-    this.buildings.push(b);
+    const b = this.addBuilding({ id: 0, kind: 'yard', f: u.f, x: pad.x + pad.w / 2, y: pad.y + pad.h / 2, art, phase: 0, gun: 0, gunGoal: 0, pad, sel: u.sel, rise: 0, hp: 1 });
     if (u.sel) for (const o of this.units) o.sel = false;
     this.setPad(pad, true);
     this.puff(b, 14);
@@ -1626,6 +1790,7 @@ export class IsoGame implements GameLike {
 
   private packNow(b: Building): void {
     this.buildings.splice(this.buildings.indexOf(b), 1);
+    this.gone.push([b.id, GONE_PACK]);
     this.setPad(b.pad, false);
     const u = this.newUnit('mcv', b.f, b.x, b.y, 0);
     u.sel = b.sel;
@@ -1866,11 +2031,11 @@ export class IsoGame implements GameLike {
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
     const hit = this.unitAt(x, y);
-    if (hit && (hit.u.f === ME || !mine.length)) return 'pick';
+    if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
       const sb = this.selB();
-      return sb && sb.own && MAKERS.includes(sb.kind) && sb.rise >= 1 ? 'rally' : null;
+      return sb && sb.f === this.me && MAKERS.includes(sb.kind) && sb.rise >= 1 ? 'rally' : null;
     }
     const sel = mine.filter((u) => !u.deploy);
     if (!sel.length) return null;
@@ -1885,7 +2050,7 @@ export class IsoGame implements GameLike {
   }
 
   private mine(): Unit[] {
-    return this.units.filter((u) => u.sel && u.f === ME);
+    return this.units.filter((u) => u.sel && u.f === this.me);
   }
 
   // You command your own side. Enemy units and buildings can be tapped to
@@ -1893,19 +2058,19 @@ export class IsoGame implements GameLike {
   click(x: number, y: number, add: boolean): void {
     const hitU = this.unitAt(x, y);
     const mine = this.mine();
-    if (hitU && (hitU.u.f === ME || !mine.length)) {
+    if (hitU && (hitU.u.f === this.me || !mine.length)) {
       const best = hitU.u;
       // a second tap on a lone Foundry vehicle deploys it
       const now = performance.now();
       const again = this.lastTap && this.lastTap.u === best && now - this.lastTap.t < 400 && best.sel && !add;
       this.lastTap = { u: best, t: now };
       for (const b of this.buildings) b.sel = false;
-      const enemy = best.f !== ME;
+      const enemy = best.f !== this.me;
       // enemies are looked at one at a time, never mixed into your selection
-      if (!add || enemy || this.units.some((o) => o.sel && o.f !== ME)) for (const o of this.units) if (o !== best) o.sel = false;
+      if (!add || enemy || this.units.some((o) => o.sel && o.f !== this.me)) for (const o of this.units) if (o !== best) o.sel = false;
       best.sel = add && !enemy ? !best.sel : true;
       [best.lap, best.lapY] = hitU.lap;
-      if (again && this.deployable(best) && !best.deploy) this.startDeploy(best);
+      if (again && best.f === this.me && this.deployable(best) && !best.deploy) this.command({ c: 'deploy', u: [best.id] });
       this.emit();
       return;
     }
@@ -1922,9 +2087,9 @@ export class IsoGame implements GameLike {
     if (sb) {
       // with a barracks, works or helipad selected, a tap on the ground sets
       // where its new units go
-      if (sb.own && MAKERS.includes(sb.kind) && sb.rise >= 1) {
+      if (sb.f === this.me && MAKERS.includes(sb.kind) && sb.rise >= 1) {
         const [wx, wy] = this.fold(...this.groundAt(x, y));
-        sb.rally = [wx, wy];
+        this.command({ c: 'rally', b: sb.id, x: wx, y: wy });
         this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
         return;
       }
@@ -1943,7 +2108,7 @@ export class IsoGame implements GameLike {
     // enemy buildings under the shroud can't be picked out
     const hidden = this.shroud && !this.shroud.seen(x, y);
     for (const b of this.buildings) {
-      if (hidden && b.f !== ME) continue;
+      if (hidden && b.f !== this.me) continue;
       const [bsx, bsy] = toScreen(b.x, b.y);
       const lx = Math.round((x - bsx) / this.w) * this.w;
       const ly = Math.round((y - bsy) / this.h) * this.h;
@@ -1969,30 +2134,33 @@ export class IsoGame implements GameLike {
   }
 
   order(x: number, y: number, shortest = false): void {
-    const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === ME);
+    const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === this.me);
     if (!sel.length) return;
     // onto an enemy: everyone who can, attacks it
     const foe = shortest ? null : this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
-      this.attack(sel, foe);
+      this.command({ c: 'attack', u: sel.map((u) => u.id), t: foe.id });
+      foe.aimT = this.time;
+      if (this.moveMarks) {
+        const [mx, my] = this.fold(foe.x, foe.y);
+        this.markers.push({ x: mx, y: my, z: isB(foe) ? 0 : foe.z, t: 0, foe: true });
+      }
       ui('order_confirm', 0.8);
       this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
       return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
-    let dig = false;
+    let dig: number[] | undefined;
+    let node = -1;
     {
       const [gx, gy] = this.fold(...this.groundAt(x, y));
       const near = this.oreNear(gx, gy, 16).filter((n) => n.amt > 20);
-      for (const u of sel)
-        if (u.kind === 'hauler' && u.f === ME) {
-          if (near.length) {
-            dig = true;
-            u.job = { st: 'seek', node: near[0], t: 0 };
-            u.load ??= 0;
-          } else u.job = undefined;
-        }
-      if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
+      if (near.length) {
+        node = this.ore.indexOf(near[0]);
+        dig = sel.filter((u) => u.kind === 'hauler').map((u) => u.id);
+      }
+      if (near.length && sel.every((u) => u.kind === 'hauler')) {
+        this.command({ c: 'move', m: [], dig, n: node });
         const [mx, my] = this.fold(...this.groundAt(x, y));
         if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0, ore: true });
         ui('order_confirm', 1.3);
@@ -2009,7 +2177,7 @@ export class IsoGame implements GameLike {
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
     const [mx, my] = this.fold(wx, wy);
-    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0, ore: dig });
+    if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0, ore: !!dig?.length });
     const cols = Math.ceil(Math.sqrt(sel.length));
     const rows = Math.ceil(sel.length / cols);
     const gap = 14;
@@ -2020,6 +2188,7 @@ export class IsoGame implements GameLike {
       slots.push([wx + (c - (cols - 1) / 2) * gap, wy + (r - (rows - 1) / 2) * gap]);
     }
     const left = [...sel];
+    const moves: [number, number, number][] = [];
     slots.sort((a, b) => Math.hypot(a[0] - wx, a[1] - wy) - Math.hypot(b[0] - wx, b[1] - wy));
     for (const [sx, sy] of slots) {
       let bi = 0;
@@ -2034,20 +2203,16 @@ export class IsoGame implements GameLike {
       });
       const u = left.splice(bi, 1)[0];
       // the same move, in the unit's own (folded) coordinates
-      [u.tx, u.ty] = this.lapped(sx, sy, -u.lap, -u.lapY);
-      u.dest = [u.tx, u.ty];
-      u.moving = true;
-      // a move order calls off any fight
-      u.target = undefined;
-      u.forced = u.chase = false;
+      moves.push([u.id, ...this.lapped(sx, sy, -u.lap, -u.lapY)]);
     }
+    this.command({ c: 'move', m: moves, dig, n: node });
     ui('order_confirm');
     this.speak(sel, 'move');
   }
 
   // If your unit u is inside a screen rect, the copy of it there (as laps).
   private inRect(u: Unit, x0: number, y0: number, x1: number, y1: number): [number, number] | null {
-    if (u.f !== ME || u.dead) return null;
+    if (u.f !== this.me || u.dead) return null;
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
@@ -2080,7 +2245,7 @@ export class IsoGame implements GameLike {
   selectedTypes(): UnitType[] {
     const by = new Map<Kind, UnitType>();
     for (const u of this.units) {
-      if (!u.sel || u.f !== ME || u.dead) continue;
+      if (!u.sel || u.f !== this.me || u.dead) continue;
       let t = by.get(u.kind);
       if (!t) by.set(u.kind, (t = { kind: u.kind, name: UNIT[u.kind].name, icon: this.unitIcon(u.kind), count: 0, sel: 0 }));
       t.count++;
@@ -2096,7 +2261,7 @@ export class IsoGame implements GameLike {
   selectKind(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void {
     for (const b of this.buildings) b.sel = false;
     for (const u of this.units) {
-      if (u.f !== ME) {
+      if (u.f !== this.me) {
         u.sel = false;
         continue;
       }
@@ -2122,7 +2287,7 @@ export class IsoGame implements GameLike {
       if (lap) {
         u.sel = true;
         [u.lap, u.lapY] = lap;
-      } else if (!add || u.f !== ME) u.sel = false;
+      } else if (!add || u.f !== this.me) u.sel = false;
     }
     if (this.units.some((u) => u.sel)) for (const b of this.buildings) b.sel = false;
     this.emit();
@@ -2134,7 +2299,7 @@ export class IsoGame implements GameLike {
       if (lap) {
         u.sel = true;
         [u.lap, u.lapY] = lap;
-      } else if (!add || u.f !== ME) u.sel = false;
+      } else if (!add || u.f !== this.me) u.sel = false;
     }
     if (this.units.some((u) => u.sel)) for (const b of this.buildings) b.sel = false;
     this.emit();
@@ -2147,9 +2312,9 @@ export class IsoGame implements GameLike {
   // Your home base: the Foundry if it stands, or else the Foundry vehicle, or
   // else where you started (screen position, on the first copy of the map).
   homeBase(): { x: number; y: number } {
-    const yard = this.buildings.find((b) => b.own && b.kind === 'yard');
-    const mcv = this.units.find((u) => u.f === ME && u.kind === 'mcv');
-    const b = yard ?? this.buildings.find((o) => o.own);
+    const yard = this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
+    const mcv = this.units.find((u) => u.f === this.me && u.kind === 'mcv');
+    const b = yard ?? this.buildings.find((o) => o.f === this.me);
     if (b) {
       const [sx, sy] = toScreen(b.x, b.y);
       return { x: sx, y: sy };
@@ -2171,7 +2336,7 @@ export class IsoGame implements GameLike {
   groups(): GroupInfo[] {
     const out: GroupInfo[] = [];
     for (let g = 0; g < GROUP_COLORS.length; g++) {
-      const us = this.units.filter((u) => u.grp === g && u.f === ME && !u.dead);
+      const us = this.units.filter((u) => u.grp === g && u.f === this.me && !u.dead);
       if (!us.length) continue;
       const kinds = new Map<Kind, number>();
       for (const u of us) kinds.set(u.kind, (kinds.get(u.kind) ?? 0) + 1);
@@ -2194,7 +2359,7 @@ export class IsoGame implements GameLike {
   // Select group g, wherever its units are (each stays on the copy of the
   // world it was last picked on, so orders go the way they went before).
   selectGroup(g: number): boolean {
-    const us = this.units.filter((u) => u.grp === g && u.f === ME && !u.dead);
+    const us = this.units.filter((u) => u.grp === g && u.f === this.me && !u.dead);
     if (!us.length) return false;
     for (const b of this.buildings) b.sel = false;
     for (const u of this.units) u.sel = us.includes(u);
@@ -2230,15 +2395,15 @@ export class IsoGame implements GameLike {
   mood(): 'battle' | 'shroud' | 'base' {
     if (this.time - this.fightT < BATTLE_HOLD) return 'battle';
     // home is your buildings, or the foundry vehicle before it has set up
-    let mine: { x: number; y: number }[] = this.buildings.filter((b) => b.f === ME && !b.dead);
-    if (!mine.length) mine = this.units.filter((u) => u.f === ME && !u.dead && u.kind === 'mcv');
+    let mine: { x: number; y: number }[] = this.buildings.filter((b) => b.f === this.me && !b.dead);
+    if (!mine.length) mine = this.units.filter((u) => u.f === this.me && !u.dead && u.kind === 'mcv');
     const away = (x: number, y: number) =>
       mine.every((b) => {
         const [bx, by] = nearestCopy(x, y, b.x, b.y, this.w, this.h);
         return Math.hypot(bx - x, by - y) > AWAY;
       });
     for (const u of this.units) {
-      if (u.f !== ME || u.dead || !u.moving || u.kind === 'hauler' || u.kind === 'mcv') continue;
+      if (u.f !== this.me || u.dead || !u.moving || u.kind === 'hauler' || u.kind === 'mcv') continue;
       if (away(u.x, u.y)) {
         this.awayT = this.time;
         break;
@@ -2251,7 +2416,7 @@ export class IsoGame implements GameLike {
     this.time += dt;
     this.updateBuild(dt);
     this.enemyAI(dt);
-    for (const u of this.units) if (u.job) this.haul(u, dt);
+    if (this.net !== 'client') for (const u of this.units) if (u.job) this.haul(u, dt);
     for (const u of [...this.units]) if (!u.dead) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
     for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
@@ -2263,7 +2428,8 @@ export class IsoGame implements GameLike {
         const diff = angDiff(0, u.a);
         const stepA = st.turn * 2.5 * dt;
         u.a = Math.abs(diff) <= stepA ? 0 : u.a + Math.sign(diff) * stepA;
-        if (u.a === 0) {
+        // (on a player's screen the host says when it has unfolded)
+        if (u.a === 0 && this.net !== 'client') {
           this.deployNow(u);
           continue;
         }
@@ -2448,7 +2614,7 @@ export class IsoGame implements GameLike {
       if (b.packing) {
         b.rise = Math.max(0, b.rise - dt / PACK_S);
         if (Math.random() < dt * 12) this.puff(b, 1);
-        if (b.rise === 0) this.packNow(b);
+        if (b.rise === 0 && this.net !== 'client') this.packNow(b);
         continue;
       }
       if (b.rise < 1) {
@@ -2456,11 +2622,11 @@ export class IsoGame implements GameLike {
         if (Math.random() < dt * 14) this.puff(b, 1);
         if (b.rise === 1) {
           this.mapVersion++;
-          if (b.own && b.kind === 'refinery' && !b.gift) {
+          if (b.kind === 'refinery' && !b.gift && this.net !== 'client') {
             // a refinery comes with a hauler, which gets straight to work
             b.gift = true;
             const [fx, fy] = this.fold(b.x + DOCK[0], b.y + DOCK[1] + 6);
-            const u = this.newUnit('hauler', ME, fx, fy, Math.PI / 2);
+            const u = this.newUnit('hauler', b.f, fx, fy, Math.PI / 2);
             u.job = { st: 'seek', t: 0 };
             u.load = 0;
           }
@@ -2540,6 +2706,338 @@ export class IsoGame implements GameLike {
     for (const s of this.sparkles) s.life += dt;
     this.sparkles = this.sparkles.filter((s) => s.life < 1.2);
     this.lookAround();
+    if (this.net === 'host') this.checkOut();
+  }
+
+  // ---------- Multiplayer ----------
+  // The host's screen runs the game for everyone: it carries out every
+  // player's orders (exec) and sends everyone how things stand several times
+  // a second (snapshot). A player's screen runs the same game too, so that
+  // units move smoothly and guns fire between updates, but only the host
+  // decides what is built, who is hit and what is destroyed: each update
+  // puts the player's world right (applySnapshot). Orders a player gives
+  // their units take effect on their own screen straight away as well.
+
+  // An order of yours: carried out here, and on a player's screen sent to the host too.
+  private command(cmd: Command): void {
+    if (this.net !== 'client') return this.exec(this.me, cmd);
+    this.onCommand(cmd);
+    // moving and attacking show at once; the rest waits for the host
+    if (cmd.c === 'move' || cmd.c === 'attack') {
+      this.exec(this.me, cmd);
+      const ids = new Set(cmd.c === 'move' ? [...cmd.m.map((m) => m[0]), ...(cmd.dig ?? [])] : cmd.u);
+      for (const u of this.units) if (ids.has(u.id)) this.predicted.set(u.id, this.time);
+    }
+  }
+  // Units of yours you just gave an order on a player's screen: the host's
+  // word on where they are going waits until it has had the order.
+  private predicted = new Map<number, number>();
+
+  /** Carry out an order from side f's player (ignoring what isn't theirs). */
+  exec(f: number, cmd: Command): void {
+    const unit = (id: number) => this.units.find((u) => u.id === id && u.f === f && !u.dead);
+    const bldg = (id: number) => this.buildings.find((b) => b.id === id && b.f === f && !b.dead);
+    switch (cmd.c) {
+      case 'move': {
+        const dig = new Set(cmd.dig ?? []);
+        const node = cmd.n !== undefined && cmd.n >= 0 ? this.ore[cmd.n] : undefined;
+        for (const id of dig) {
+          const u = unit(id);
+          if (!u || u.kind !== 'hauler' || !node) continue;
+          u.job = { st: 'seek', node, t: 0 };
+          u.load ??= 0;
+        }
+        for (const [id, tx, ty] of cmd.m) {
+          const u = unit(id);
+          if (!u || u.deploy) continue;
+          if (u.kind === 'hauler' && !dig.has(id)) u.job = undefined;
+          u.tx = tx;
+          u.ty = ty;
+          u.dest = [tx, ty];
+          u.moving = true;
+          // a move order calls off any fight
+          u.target = undefined;
+          u.forced = u.chase = false;
+        }
+        break;
+      }
+      case 'attack': {
+        const t: Target | undefined = this.units.find((o) => o.id === cmd.t) ?? this.buildings.find((o) => o.id === cmd.t);
+        if (!t || t.f === f || t.dead) break;
+        this.attack(cmd.u.map(unit).filter((u): u is Unit => !!u && !u.deploy), t);
+        break;
+      }
+      case 'deploy':
+        for (const id of cmd.u) {
+          const u = unit(id);
+          if (u && u.kind === 'mcv' && !u.deploy && this.deployable(u)) this.startDeploy(u);
+        }
+        break;
+      case 'pack': {
+        const b = bldg(cmd.b);
+        if (b && b.kind === 'yard' && b.rise >= 1 && !b.packing) {
+          b.packing = true;
+          this.sound(b.x, b.y, 'build_rise', 1, { reverse: true, rate: 1.3 });
+          this.sound(b.x, b.y, 'foundry_unfold', 0.8, { delay: 1, reverse: true });
+        }
+        break;
+      }
+      case 'primary': {
+        const b = bldg(cmd.b);
+        if (b) for (const o of this.buildings) if (o.f === f && o.kind === b.kind) o.primary = o === b;
+        break;
+      }
+      case 'rally': {
+        const b = bldg(cmd.b);
+        if (b) b.rally = cmd.x === undefined || cmd.y === undefined ? undefined : [cmd.x, cmd.y];
+        if (b && b.rally && f === this.me) this.markers.push({ x: b.rally[0], y: b.rally[1], z: this.terrain.elev(...b.rally), t: 0 });
+        break;
+      }
+      case 'build':
+        this.startJob(f, cmd.t);
+        break;
+      case 'cancel':
+        this.cancelJob(f, cmd.t);
+        break;
+      case 'place':
+        this.placeBuilding(f, cmd.t, cmd.x, cmd.y);
+        break;
+    }
+  }
+
+  // Sides out of the game: every player that has nothing left. You are told
+  // if it is you, or if you are the last one standing.
+  private outT = 0;
+  private checkOut(): void {
+    if (!this.players || this.time - this.outT < 1) return;
+    this.outT = this.time;
+    const alive = new Set<number>();
+    for (const u of this.units) if (!u.dead) alive.add(u.f);
+    for (const b of this.buildings) if (!b.dead) alive.add(b.f);
+    for (const p of this.players) if (!alive.has(p.f) && !this.out.has(p.f)) this.setOut([...this.out, p.f]);
+  }
+  private setOut(out: number[]): void {
+    const was = this.out.size;
+    this.out = new Set(out);
+    if (this.out.size === was || !this.players) return;
+    const left = this.players.filter((p) => !this.out.has(p.f));
+    for (const p of this.players) if (this.out.has(p.f) && p.f !== this.me) this.notice(`${p.name} is out`);
+    if (this.out.has(this.me)) this.onOutcome(false);
+    else if (left.length === 1 && this.players.length > 1) this.onOutcome(true);
+  }
+
+  /** The host's word on how things stand, for everyone else's screens. */
+  snapshot(): Snapshot {
+    const tid = (t?: Target) => (t && !t.dead ? t.id : 0);
+    const u = this.units.map((o) => [
+      o.id,
+      o.kind,
+      o.f,
+      r1(o.x),
+      r1(o.y),
+      r2(o.a),
+      r2(o.turret),
+      Math.round(o.hp * 1000) / 1000,
+      (o.moving ? 1 : 0) | (o.deploy ? 2 : 0) | (o.forced ? 4 : 0) | (o.chase ? 8 : 0),
+      r1(o.tx),
+      r1(o.ty),
+      tid(o.target),
+      Math.round(o.load ?? 0),
+      o.job ? JOB_STATES.indexOf(o.job.st) : -1,
+    ]);
+    const b = this.buildings.map((o) => [
+      o.id,
+      o.kind,
+      o.f,
+      o.x,
+      o.y,
+      Math.round(o.hp * 1000) / 1000,
+      r2(o.rise),
+      (o.packing ? 1 : 0) | (o.primary ? 2 : 0) | (o.gift ? 4 : 0),
+      o.pad.x,
+      o.pad.y,
+      o.pad.w,
+      o.pad.h,
+      o.rally ? r1(o.rally[0]) : 0,
+      o.rally ? r1(o.rally[1]) : 0,
+      tid(o.target),
+    ]);
+    const eco: Snapshot['eco'] = this.sides().map((f) => {
+      const e = this.eco[f];
+      return [
+        f,
+        Math.round(e.credits),
+        e.lowPower ? 1 : 0,
+        [...e.jobs].map(([tab, j]): [string, string, number, number, number] => [tab, j.tech.id, Math.round(j.spent), j.paused ? 1 : 0, j.ready ? 1 : 0]),
+        [...e.queue].map(([tab, q]): [string, string[]] => [tab, q.map((t) => t.id)]),
+      ];
+    });
+    const snap: Snapshot = { t: r2(this.time), u, b, gone: this.gone, eco, told: this.told, out: [...this.out] };
+    // the ore, about once a second (it changes slowly)
+    if (this.time - this.oreSentT > 1 || !this.oreSentT) {
+      this.oreSentT = this.time || 1e-6;
+      snap.ore = this.ore.flatMap((n) => [r1(n.x), r1(n.y), Math.round(n.amt), n.v]);
+    }
+    this.gone = [];
+    this.told = [];
+    return snap;
+  }
+  private oreSentT = 0;
+
+  /** A player's screen: put the world right by the host's latest word. */
+  applySnapshot(s: Snapshot): void {
+    const units = new Map(this.units.map((u) => [u.id, u]));
+    const bldgs = new Map(this.buildings.map((b) => [b.id, b]));
+    // what has gone: blown up, razed, or quietly
+    for (const [id, how] of s.gone) {
+      const u = units.get(id);
+      if (u) {
+        units.delete(id);
+        if (how === GONE_KILL) this.kill(u);
+        else {
+          this.units.splice(this.units.indexOf(u), 1);
+          u.dead = true;
+        }
+        continue;
+      }
+      const b = bldgs.get(id);
+      if (!b) continue;
+      bldgs.delete(id);
+      if (how === GONE_RAZE) this.raze(b);
+      else {
+        b.dead = true;
+        this.buildings.splice(this.buildings.indexOf(b), 1);
+        this.setPad(b.pad, false);
+        if (how === GONE_PACK) this.puff(b, 8);
+      }
+    }
+    this.gone = [];
+    const target = (id: number): Target | undefined => (id ? units.get(id) ?? bldgs.get(id) : undefined);
+    // buildings first (units can be aiming at them)
+    const seenB = new Set<number>();
+    for (const e of s.b) {
+      const [id, kind, f, x, y, hp, rise, flags, px, py, pw, ph, rx, ry] = e as [number, BuildingKind, number, number, number, number, number, number, number, number, number, number, number, number, number];
+      seenB.add(id);
+      let b = bldgs.get(id);
+      if (!b) {
+        const pad = { x: px, y: py, w: pw, h: ph };
+        b = { id, kind, f, x, y, art: this.buildingArt(kind, f), phase: 0, gun: 0, gunGoal: 0, pad, sel: false, rise, hp };
+        this.buildings.push(b);
+        bldgs.set(id, b);
+        this.setPad(pad, true);
+        if (rise < 1) {
+          this.clearSite(pad, null);
+          this.puff(b, 12);
+          this.sound(b.x, b.y, 'build_rise', 1, { rate: 1.1 });
+        }
+        if (f === this.me) this.emit();
+      }
+      b.hp = hp;
+      // (rising and packing go on here between updates)
+      if (Math.abs(b.rise - rise) > 0.15 || rise >= 1 || rise <= 0) b.rise = rise;
+      b.packing = !!(flags & 1);
+      b.primary = !!(flags & 2);
+      b.gift = !!(flags & 4);
+      b.rally = rx || ry ? [rx, ry] : undefined;
+    }
+    for (const b of [...this.buildings])
+      if (!seenB.has(b.id)) {
+        this.buildings.splice(this.buildings.indexOf(b), 1);
+        this.setPad(b.pad, false);
+        bldgs.delete(b.id);
+      }
+    const seenU = new Set<number>();
+    for (const e of s.u) {
+      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number];
+      seenU.add(id);
+      let u = units.get(id);
+      if (!u) {
+        u = this.newUnit(kind, f, x, y, a);
+        u.id = id;
+        u.turret = turret;
+        units.set(id, u);
+        if (f === this.me) this.mapVersion++;
+      }
+      // the host's copy may be a lap round the world from ours: follow it round
+      const [lsx, lsy] = toScreen(u.x, u.y);
+      const [hsx, hsy] = toScreen(x, y);
+      const kx = Math.round((lsx - hsx) / this.w);
+      const ky = Math.round((lsy - hsy) / this.h);
+      if (kx || ky) {
+        [u.x, u.y] = this.lapped(u.x, u.y, -kx, -ky);
+        [u.tx, u.ty] = this.lapped(u.tx, u.ty, -kx, -ky);
+        u.lap += kx;
+        u.lapY += ky;
+      }
+      // close enough: ease towards where the host has it; far off: jump
+      const d = Math.hypot(x - u.x, y - u.y);
+      if (d > 24) {
+        u.x = x;
+        u.y = y;
+      } else {
+        u.x += (x - u.x) * 0.35;
+        u.y += (y - u.y) * 0.35;
+      }
+      u.hp = hp;
+      u.load = load;
+      const fresh = this.time - (this.predicted.get(id) ?? -1e9) < 0.5;
+      if (!fresh) {
+        if (Math.abs(angDiff(a, u.a)) > 0.4) u.a = a;
+        u.moving = !!(flags & 1);
+        u.tx = tx;
+        u.ty = ty;
+        u.forced = !!(flags & 4);
+        u.chase = !!(flags & 8);
+        u.target = target(tgt);
+      }
+      u.deploy = !!(flags & 2);
+      if (job >= 0) {
+        const st = JOB_STATES[job];
+        if (u.job) u.job.st = st;
+        else u.job = { st, t: 0 };
+      } else u.job = undefined;
+    }
+    for (const u of [...this.units])
+      if (!seenU.has(u.id)) {
+        this.units.splice(this.units.indexOf(u), 1);
+        u.dead = true;
+      }
+    for (const [id, t] of this.predicted) if (this.time - t > 1) this.predicted.delete(id);
+    // gun towers aim where the host's do
+    for (const e of s.b) {
+      const b = bldgs.get(e[0] as number);
+      if (b && b.kind === 'tower') b.target = target(e[14] as number);
+    }
+    // your purse
+    const mine = s.eco.find((e) => e[0] === this.me);
+    if (mine) {
+      const [, credits, low, jobs, queue] = mine;
+      const e = this.eco[this.me];
+      e.credits = credits;
+      e.lowPower = !!low;
+      const tech = (id: string) => TECH.find((t) => t.id === id);
+      const nj = new Map<Tab, Job>();
+      for (const [tab, id, spent, paused, ready] of jobs) {
+        const t = tech(id);
+        if (t) nj.set(tab as Tab, { tech: t, spent, paused: !!paused, ready: !!ready });
+      }
+      e.jobs = nj;
+      e.queue = new Map(queue.map(([tab, ids]) => [tab as Tab, ids.map(tech).filter((t): t is Tech => !!t)]));
+      if (this.ghost && !nj.get(this.ghost.tech.tab)?.ready) this.ghost = null;
+    }
+    // the ore, as the host has it
+    if (s.ore) {
+      const o = s.ore;
+      const n = o.length / 4;
+      if (n === this.ore.length) for (let i = 0; i < n; i++) this.ore[i].amt = o[i * 4 + 2];
+      else {
+        this.ore = [];
+        this.oreGrid = new Map();
+        for (let i = 0; i < n; i++) this.addOre({ x: o[i * 4], y: o[i * 4 + 1], amt: o[i * 4 + 2], v: o[i * 4 + 3] });
+      }
+    }
+    for (const [f, msg, line] of s.told) if (f === this.me) this.tell(f, msg || undefined, (line || undefined) as Parameters<typeof announce>[0] | undefined);
+    this.setOut(s.out);
   }
 
   // ---------- The enemy (Combat stage) ----------
@@ -2681,9 +3179,9 @@ export class IsoGame implements GameLike {
   // The enemy unit or building under screen point (x, y), if any.
   private enemyAt(x: number, y: number): Target | null {
     const h = this.unitAt(x, y);
-    if (h && h.u.f !== ME) return h.u;
+    if (h && h.u.f !== this.me) return h.u;
     const b = this.buildingAt(x, y);
-    return b && b.f !== ME ? b : null;
+    return b && b.f !== this.me ? b : null;
   }
 
   private canHit(w: Weapon | undefined, t: Target): boolean {
@@ -2744,11 +3242,6 @@ export class IsoGame implements GameLike {
       u.anchor = undefined;
       u.repath = 0;
       u.pace = undefined;
-    }
-    t.aimT = this.time;
-    if (this.moveMarks) {
-      const [mx, my] = this.fold(t.x, t.y);
-      this.markers.push({ x: mx, y: my, z: isB(t) ? 0 : t.z, t: 0, foe: true });
     }
   }
 
@@ -2996,19 +3489,25 @@ export class IsoGame implements GameLike {
 
   private damage(t: Target, amt: number, src?: Unit | Building): void {
     if (t.dead) return;
-    if (t.f === ME || src?.f === ME) this.fightT = this.time;
+    if (t.f === this.me || src?.f === this.me) this.fightT = this.time;
+    // on a player's screen a hit only shows: the host keeps the score
+    if (this.net === 'client') {
+      t.hitT = this.time;
+      if (!isB(t) || amt >= 12) t.flashT = this.time;
+      if (t.f === this.me && src && isB(t)) announce('base_under_attack');
+      return;
+    }
     const max = isB(t) ? BUILDING_DEF[t.kind].strength : UNIT_DEF[t.kind].strength;
     t.hp = Math.max(0, t.hp - amt / max);
     t.hitT = this.time;
     // a flash of light where a big round lands (buildings shrug off bullets)
     if (!isB(t) || amt >= 12) t.flashT = this.time;
     if (t.hp <= 0) {
-      if (t.f === ME) announce(isB(t) ? 'building_lost' : 'unit_lost');
       if (isB(t)) this.raze(t);
       else this.kill(t);
       return;
     }
-    if (t.f === ME && src) {
+    if (t.f === this.me && src) {
       if (isB(t)) announce('base_under_attack');
       else if (t.kind === 'hauler') announce('harvester_under_attack');
     }
@@ -3032,6 +3531,8 @@ export class IsoGame implements GameLike {
   private kill(u: Unit): void {
     u.dead = true;
     this.units.splice(this.units.indexOf(u), 1);
+    this.gone.push([u.id, GONE_KILL]);
+    if (u.f === this.me) announce('unit_lost');
     if (this.lastTap?.u === u) this.lastTap = null;
     const air = u.kind === 'heli' ? HELI_ALT : 0;
     const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
@@ -3053,7 +3554,7 @@ export class IsoGame implements GameLike {
       // the wreck burns where it stood (a copter falls and burns too; a boat sinks)
       if (u.kind !== 'boat' && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
       // and a few of the crew crawl out, hurt
-      if (u.kind !== 'heli' && u.kind !== 'boat') this.survivors(u);
+      if (u.kind !== 'heli' && u.kind !== 'boat' && this.net !== 'client') this.survivors(u);
     }
     if (u.sel) this.emit();
   }
@@ -3215,7 +3716,11 @@ export class IsoGame implements GameLike {
     const flames: Ruin['flames'] = spots.map(([x, y, z], i) => [x, y, z, (i < ruin.fx.length ? 7 : 4 + Math.random() * 3) * (power ? 1.3 : 1), BURN_RUIN * (0.55 + Math.random() * 0.45)]);
     flames.sort((p, q) => p[0] + p[1] - q[0] - q[1]);
     this.ruins.push({ kind: b.kind, f: b.f, x: b.x, y: b.y, states, t: -0.45, flames });
-    if (b.own) this.notice(`${BNAME[b.kind]} destroyed`);
+    if (b.f === this.me) {
+      this.notice(`${BNAME[b.kind]} destroyed`);
+      announce('building_lost');
+    }
+    this.gone.push([b.id, GONE_RAZE]);
     this.mapVersion++;
     if (b.sel) this.emit();
   }
@@ -3365,7 +3870,7 @@ export class IsoGame implements GameLike {
 
     const feet: [Rect, string][] = [];
     for (const u of this.units) {
-      if (!u.sel || u.kind !== 'mcv' || u.f !== ME || u.deploy || !seen(u.x, u.y)) continue;
+      if (!u.sel || u.kind !== 'mcv' || u.f !== this.me || u.deploy || !seen(u.x, u.y)) continue;
       const r = this.siteOf(u.x, u.y);
       feet.push([r, this.siteOk(r) ? '#9dff9d' : '#ff6a5a']);
       this.drawFoot(r, feet[feet.length - 1][1], 1, true, false);
@@ -3442,7 +3947,7 @@ export class IsoGame implements GameLike {
       const col = gh.why ? '#ff6a5a' : '#9dff9d';
       this.drawFoot(gh.pad, col, 1, true, false);
       c.globalAlpha = 0.65;
-      this.blit(this.buildingArt(gh.tech.building!, ME).spr, gh.x, gh.y, 0);
+      this.blit(this.buildingArt(gh.tech.building!, this.me).spr, gh.x, gh.y, 0);
       c.globalAlpha = 1;
       this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
     }
@@ -3477,7 +3982,7 @@ export class IsoGame implements GameLike {
     c.beginPath();
     const ends: [number, number][] = [];
     for (const u of this.units) {
-      if (u.f !== ME || !u.moving || !u.dest || u.dest[0] !== u.tx || u.dest[1] !== u.ty || u.deploy) continue;
+      if (u.f !== this.me || !u.moving || !u.dest || u.dest[0] !== u.tx || u.dest[1] !== u.ty || u.deploy) continue;
       const [ax, ay] = this.screenOf(u);
       const [bx, by] = toScreen(u.tx, u.ty, this.terrain.elev(u.tx, u.ty));
       if (Math.max(ax, bx) < x0 - pad || Math.min(ax, bx) > x1 + pad || Math.max(ay, by) < y0 - pad || Math.min(ay, by) > y1 + pad) continue;
@@ -3554,7 +4059,7 @@ export class IsoGame implements GameLike {
       c.fillRect(X + 1, Y - 7, 4, 1);
     }
     const { rx, ry } = b.art;
-    c.fillStyle = b.own ? '#ffffff' : '#ff6a5a';
+    c.fillStyle = b.f === this.me ? '#ffffff' : '#ff6a5a';
     const L = 7;
     for (const [cx, cy, dx, dy] of [
       [-rx, -ry, 1, 1],
@@ -3736,9 +4241,9 @@ export class IsoGame implements GameLike {
   private drawSelection(u: Unit): void {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
-    const grp = u.f === ME && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
+    const grp = u.f === this.me && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
     // in a colour group: its corners are in the group's colour
-    c.fillStyle = grp ?? (u.f === ME ? '#ffffff' : '#ff6a5a');
+    c.fillStyle = grp ?? (u.f === this.me ? '#ffffff' : '#ff6a5a');
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
     healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);

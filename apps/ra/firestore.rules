@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Rules for the "ra" database: rooms for multiplayer games on the same
+// network. Firestore only carries the WebRTC handshake; the game itself goes
+// peer to peer. Every device signs in anonymously.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isHost(code) {
+      return signedIn() && get(/databases/$(database)/documents/rooms/$(code)).data.hostUid == request.auth.uid;
+    }
+
+    match /rooms/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && code.matches('^[BCDFGHJKLMNPQRSTVWXZ]{4}$')
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.phase == 'lobby';
+      allow update: if isHost(code)
+        && request.resource.data.hostUid == resource.data.hostUid
+        && request.resource.data.phase in ['lobby', 'playing'];
+      allow delete: if isHost(code);
+
+      // WebRTC offer from a joining player, answer from the host.
+      match /rtc/{uid} {
+        allow read: if signedIn() && (request.auth.uid == uid || isHost(code));
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && exists(/databases/$(database)/documents/rooms/$(code))
+          && !('answer' in request.resource.data);
+        allow update: if signedIn() && (
+          (request.auth.uid == uid && !('answer' in request.resource.data))
+          || (isHost(code) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer']))
+        );
+        allow delete: if signedIn() && (request.auth.uid == uid || isHost(code));
+      }
+    }
+  }
+}

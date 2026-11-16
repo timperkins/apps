@@ -4,5 +4,13 @@
   "domain": "ra.trom.dev",
   "hostingSite": "trom-ra",
   "previewSite": "trom-ra-preview",
-  "previewDomain": "ra-preview.trom.dev"
+  "previewDomain": "ra-preview.trom.dev",
+  "firestore": {
+    "prod": "ra",
+    "preview": "ra-preview"
+  },
+  "ttlCollections": [
+    "rooms",
+    "rtc"
+  ]
 }

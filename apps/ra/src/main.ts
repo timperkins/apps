@@ -9,6 +9,7 @@ import { musicMuted, setMood, setMusicMuted } from './music';
 import { setVoiceMuted, voiceMuted } from './voice';
 import { play, setSfxMuted, setWorldLevel, sfxMuted, ui } from './sfx';
 import { initBuild } from './build-ui';
+import { Lobby, type Match } from './lobby';
 import { startArtPool } from './v2/art-pool';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
@@ -645,7 +646,115 @@ async function makeWorld(): Promise<void> {
   ctx.getImageData(0, 0, 1, 1); // (makes the canvas really draw it now)
   showLoading(1, 'Ready');
   await nextFrame();
-  if (me === making) loading.hidden = true;
+  if (me !== making) return;
+  // a multiplayer game waits until everyone's world is ready
+  if (match) {
+    showLoading(1, 'Waiting for the others');
+    match.ready();
+    return;
+  }
+  loading.hidden = true;
+}
+
+// ---------- Multiplayer ----------
+// The landing page is the multiplayer lobby (src/lobby.ts). When a game
+// starts every screen makes the same world; the host's runs the game and
+// sends the others how it stands, and their orders go to the host.
+
+let match: Match | null = null;
+const lobby = new Lobby({
+  solo: () => {
+    match = null;
+    showMpMenu();
+    start(version);
+  },
+  start: (m) => startMatch(m),
+});
+const leaveBtn = document.querySelector<HTMLButtonElement>('#leaveBtn')!;
+const lobbyBtn = document.querySelector<HTMLButtonElement>('#lobbyBtn')!;
+const banner = document.querySelector<HTMLDivElement>('#banner')!;
+// the menu has New map and the versions in single player, Leave game in multiplayer
+function showMpMenu(): void {
+  const mp = !!match;
+  regen.hidden = mp;
+  versionEl.closest('label')!.hidden = mp;
+  leaveBtn.hidden = !mp;
+  lobbyBtn.hidden = mp;
+}
+function showBanner(text: string, sub: string): void {
+  banner.replaceChildren();
+  const b = document.createElement('div');
+  b.className = 'card';
+  const t = document.createElement('div');
+  t.className = 't';
+  t.textContent = text;
+  const p = document.createElement('div');
+  p.className = 's';
+  p.textContent = sub;
+  const keep = document.createElement('button');
+  keep.type = 'button';
+  keep.textContent = 'Keep watching';
+  keep.addEventListener('click', () => (banner.hidden = true));
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.textContent = 'Back to the lobby';
+  back.addEventListener('click', () => leaveGame());
+  b.append(t, p, keep, back);
+  banner.append(b);
+  banner.hidden = false;
+}
+function leaveGame(): void {
+  banner.hidden = true;
+  setMenu(false);
+  const m = match;
+  match = null;
+  built = { w: 0, h: 0 };
+  loading.hidden = true;
+  picker.hidden = true;
+  setSelOpen(false);
+  showMpMenu();
+  if (m) m.leave();
+  else lobby.show();
+}
+leaveBtn.addEventListener('click', () => leaveGame());
+lobbyBtn.addEventListener('click', () => leaveGame());
+
+function startMatch(m: Match): void {
+  match = m;
+  showMpMenu();
+  banner.hidden = true;
+  showLoading(0.05, 'Loading');
+  startArtPool();
+  seed = m.seed;
+  const g = new IsoGame(ctx, m.seed);
+  g.players = m.players;
+  g.me = m.me;
+  g.net = m.host ? 'host' : 'client';
+  g.mapId = m.mapId;
+  g.onSelect = showSelection;
+  g.onCommand = (cmd) => m.sendCommand(cmd);
+  g.onOutcome = (won) => (won ? showBanner('Victory', 'Everyone else is out.') : showBanner('Defeated', 'You have nothing left.'));
+  m.onCommand = (f, cmd) => g.exec(f, cmd);
+  m.onSnapshot = (snap) => {
+    if (game === g && built.w) g.applySnapshot(snap);
+  };
+  m.onGo = () => {
+    if (game === g) loading.hidden = true;
+  };
+  m.onLeft = (name) => g.onNotice?.(`${name} left the game`);
+  m.onHostLost = () => showBanner('The host has gone', 'The game stopped when the host left.');
+  game = g;
+  build.reset();
+  built = { w: 0, h: 0 };
+  void makeWorld();
+}
+
+// The host sends everyone how things stand ten times a second.
+let lastNet = 0;
+function sendNet(now: number): void {
+  if (!match?.host || !(game instanceof IsoGame) || now - lastNet < 100) return;
+  lastNet = now;
+  match.sendSnapshot(game.snapshot());
 }
 
 // ---------- Map picker ----------
@@ -726,7 +835,16 @@ rerollBtn.addEventListener('click', () => {
 pickClose.addEventListener('click', () => {
   picker.hidden = true;
 });
-start(version);
+// straight into single player with ?solo (or a version in the URL); the
+// multiplayer lobby otherwise
+if (params.has('solo') || params.has('v')) {
+  lobby.hide();
+  showMpMenu();
+  start(version);
+} else {
+  showMpMenu();
+  lobby.show();
+}
 
 versionEl.addEventListener('change', () => {
   version = versionEl.value;
@@ -1353,6 +1471,7 @@ function frame(now: number): void {
     if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
     clampCen();
     game.update(dt);
+    sendNet(now);
     setMood(game.mood?.() ?? 'base');
     hoverNow(now);
     draw(now, false);

@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
     <title>RA</title>
-    <meta name="description" content="A pixel-art real-time strategy graphics test." />
+    <meta name="description" content="A pixel-art real-time strategy game for up to eight players on the same network." />
     <meta name="theme-color" content="#1b2a16" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -32,6 +32,8 @@
         </select>
       </label>
       <button id="regen" type="button">New map</button>
+      <button id="leaveBtn" type="button" hidden>Leave game</button>
+      <button id="lobbyBtn" type="button" title="Back to the multiplayer lobby">Multiplayer</button>
       <button id="voiceBtn" type="button" aria-pressed="true">Voices: on</button>
       <button id="musicBtn" type="button" aria-pressed="true">Music: on</button>
       <button id="sfxBtn" type="button" aria-pressed="true">Sounds: on</button>
@@ -87,6 +89,7 @@
     </div>
     <div id="build-no" aria-hidden="true" hidden></div>
     <div id="toast" hidden></div>
+    <div id="banner" hidden role="status" aria-live="polite"></div>
     <div id="loading" hidden role="status" aria-live="polite">
       <div class="ld">
         <div class="ld-title">RA</div>
