@@ -7,5 +7,17 @@
       "**/.*",
       "**/node_modules/**"
     ]
-  }
+  },
+  "firestore": [
+    {
+      "database": "ra-rooms",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "ra-rooms-preview",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
 }
