@@ -15,6 +15,7 @@
 import { FACTIONS } from './v1/sprites';
 import { MAPS, mapPreview, mapsFor, START_DOTS } from './v2/maps';
 import type { Command, Player, Snapshot } from './v2/game';
+import { BOT_LEVELS, type BotLevel } from './v2/bot';
 import { isValidCode, normalizeCode } from './net/codes';
 import type { Signaling } from './net/signal';
 import type { Hub, Link } from './net/link';
@@ -35,6 +36,7 @@ interface LobbyPlayer {
   name: string;
   color: number; // a side in FACTIONS
   host?: boolean;
+  bot?: BotLevel; // a computer player the host added
   away?: boolean; // in a game: lost touch, may be back
 }
 
@@ -276,7 +278,7 @@ export class Lobby {
     this.seed = saved.seed;
     const me = saved.players.find((p) => p.host);
     // everyone else comes back by joining again
-    this.players = saved.started ? saved.players.map((p) => ({ ...p, away: !p.host })) : me ? [me] : [];
+    this.players = saved.started ? saved.players.map((p) => ({ ...p, away: !p.host && !p.bot })) : saved.players.filter((p) => p.host || p.bot);
     if (me) {
       me.name = this.name || me.name;
       this.color = me.color;
@@ -372,7 +374,7 @@ export class Lobby {
   private sendLobby(): void {
     if (this.mode !== 'host') return;
     for (const p of this.players)
-      if (!p.host) this.hub?.send(p.id, { t: 'lobby', players: this.players, mapId: this.mapId, seed: this.seed, you: p.id } satisfies ToPlayer);
+      if (!p.host && !p.bot) this.hub?.send(p.id, { t: 'lobby', players: this.players, mapId: this.mapId, seed: this.seed, you: p.id } satisfies ToPlayer);
     this.saveNow();
     this.render();
   }
@@ -390,12 +392,12 @@ export class Lobby {
 
   private startGame(): void {
     if (this.mode !== 'host' || this.match) return;
-    const players = this.players.map((p) => ({ id: p.id, f: p.color, name: p.name }));
+    const players = this.players.map((p) => ({ id: p.id, f: p.color, name: p.name, ...(p.bot ? { bot: p.bot } : {}) }));
     const start: StartMsg = { t: 'start', seed: this.seed, mapId: this.mapId, players };
     this.started = start;
     this.hub?.broadcast(start);
     void this.sig?.setPhase(this.code, 'playing').catch(() => {});
-    this.waiting = new Set(this.players.filter((p) => !p.host).map((p) => p.id));
+    this.waiting = new Set(this.players.filter((p) => !p.host && !p.bot).map((p) => p.id));
     this.hostReady = false;
     this.saveNow();
     this.begin(start, true);
@@ -426,6 +428,30 @@ export class Lobby {
     this.waiting.clear();
     this.hub?.broadcast({ t: 'go' } satisfies ToPlayer);
     this.goLive();
+  }
+
+  // ---------- Bots (the host) ----------
+
+  private botN = 0;
+  private addBot(): void {
+    if (this.mode !== 'host' || this.started || this.players.length >= MAX_PLAYERS) return;
+    const used = new Set(this.players.map((p) => p.name));
+    let n = 1;
+    while (used.has(`Bot ${n}`)) n++;
+    this.players.push({ id: `bot-${Date.now().toString(36)}-${this.botN++}`, name: `Bot ${n}`, color: this.freeColor(-1, ''), bot: 'normal' });
+    this.fitMap();
+    this.sendLobby();
+  }
+  private setBot(id: string, change: { bot?: BotLevel; color?: number } | null): void {
+    const p = this.players.find((q) => q.id === id && q.bot);
+    if (!p || this.started) return;
+    if (!change) this.players = this.players.filter((q) => q !== p);
+    else {
+      if (change.bot) p.bot = change.bot;
+      if (change.color !== undefined) p.color = this.freeColor(change.color, p.id);
+    }
+    this.fitMap();
+    this.sendLobby();
   }
 
   // ---------- Saving (the host) ----------
@@ -572,7 +598,7 @@ export class Lobby {
     const match: Match = {
       seed: m.seed,
       mapId: m.mapId,
-      players: m.players.map(({ f, name }) => ({ f, name })),
+      players: m.players.map(({ f, name, bot }) => (bot ? { f, name, bot } : { f, name })),
       me,
       host,
       resume,
@@ -748,6 +774,38 @@ export class Lobby {
     return nameLab;
   }
 
+  // A bot's difficulty and color, and taking it out (the host).
+  private botControls(p: LobbyPlayer): HTMLElement {
+    const box = el('span', 'botCtl');
+    const level = el('select');
+    level.setAttribute('aria-label', `${p.name} difficulty`);
+    for (const l of BOT_LEVELS) {
+      const o = el('option', '', l.name);
+      o.value = l.id;
+      o.selected = l.id === p.bot;
+      level.append(o);
+    }
+    level.addEventListener('change', () => this.setBot(p.id, { bot: level.value as BotLevel }));
+    const color = el('select');
+    color.setAttribute('aria-label', `${p.name} color`);
+    const taken = new Set(this.players.filter((q) => q !== p).map((q) => q.color));
+    FACTIONS.forEach((f, i) => {
+      if (taken.has(i)) return;
+      const o = el('option', '', f.name);
+      o.value = String(i);
+      o.selected = i === p.color;
+      color.append(o);
+    });
+    color.addEventListener('change', () => this.setBot(p.id, { color: Number(color.value) }));
+    const rm = el('button', 'rm', '×');
+    rm.type = 'button';
+    rm.title = `Remove ${p.name}`;
+    rm.setAttribute('aria-label', `Remove ${p.name}`);
+    rm.addEventListener('click', () => this.setBot(p.id, null));
+    box.append(level, color, rm);
+    return box;
+  }
+
   private homeView(): HTMLElement {
     const v = el('div', 'home');
     v.append(this.nameInput());
@@ -815,6 +873,13 @@ export class Lobby {
       const dot = el('i', 'dot');
       dot.style.setProperty('--c', p.color >= 0 ? hexOf(p.color) : 'transparent');
       li.append(dot, el('span', 'pname', p.name || 'Player'));
+      if (p.bot && this.mode === 'host') {
+        li.classList.add('bot');
+        li.append(this.botControls(p));
+        list.append(li);
+        continue;
+      }
+      if (p.bot) li.append(el('span', 'tag', BOT_LEVELS.find((l) => l.id === p.bot)?.name ?? 'bot'));
       if (p.host) li.append(el('span', 'tag', 'host'));
       if (p.id === this.you) li.append(el('span', 'tag', 'you'));
       list.append(li);
@@ -825,6 +890,12 @@ export class Lobby {
       list.append(li);
     }
     v.append(list);
+    if (this.mode === 'host' && this.players.length < MAX_PLAYERS) {
+      const add = el('button', 'small addBot', '+ Add bot');
+      add.type = 'button';
+      add.addEventListener('click', () => this.addBot());
+      v.append(add);
+    }
 
     const n = Math.max(2, this.players.length);
     const mapHead = el('div', 'mapHead');

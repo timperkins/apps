@@ -1,4 +1,5 @@
 // v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
+import type { BotLevel } from './bot';
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
@@ -311,6 +312,7 @@ const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new
 export interface Player {
   f: number;
   name: string;
+  bot?: BotLevel; // a computer player, run on the host's screen
 }
 
 /** Something a player told their side to do. Every order goes through one of
@@ -1574,7 +1576,7 @@ export class IsoGame implements GameLike {
   }
 
   // Power made and used by side f's buildings (yours unless said).
-  private power(f = this.me): { made: number; used: number } {
+  power(f = this.me): { made: number; used: number } {
     let made = 0;
     let used = 0;
     for (const b of this.buildings) {
@@ -3040,6 +3042,38 @@ export class IsoGame implements GameLike {
     }
     for (const [f, msg, line] of s.told) if (f === this.me) this.tell(f, msg || undefined, (line || undefined) as Parameters<typeof announce>[0] | undefined);
     this.setOut(s.out);
+  }
+
+  // ---------- For bots (src/v2/bot.ts) ----------
+  // What a computer player sees and can ask; it acts only through exec(), like a player.
+
+  /** Kinds of building side f has standing. */
+  standing(f: number): Set<BuildingKind> {
+    return this.have(f);
+  }
+  /** Can this Foundry vehicle deploy where it is? */
+  canDeploy(id: number): boolean {
+    const u = this.units.find((o) => o.id === id);
+    return !!u && !u.deploy && this.deployable(u);
+  }
+  /** The copy of world point (x, y) nearest (ax, ay) (the world wraps round). */
+  nearest(ax: number, ay: number, x: number, y: number): [number, number] {
+    return this.nearPoint(ax, ay, x, y);
+  }
+  /** Somewhere side f's finished building `techId` can go, near (cx, cy) and its base, or null. */
+  findSite(f: number, techId: string, cx: number, cy: number, rand: () => number = Math.random): [number, number] | null {
+    const t = TECH.find((q) => q.id === techId);
+    if (!t?.building) return null;
+    const art = this.buildingArt(t.building, f);
+    const a0 = rand() * Math.PI * 2;
+    for (let r = 50; r <= 260; r += 14)
+      for (let i = 0; i < 14; i++) {
+        const a = a0 + (i / 14) * Math.PI * 2;
+        const [x, y] = this.fold(Math.round((cx + Math.cos(a) * r) / 4) * 4, Math.round((cy + Math.sin(a) * r) / 4) * 4);
+        const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+        if (!this.placeWhy(pad, f)) return [x, y];
+      }
+    return null;
   }
 
   /** The host back after a reload: the game as it last saved it, in a world just made. */
