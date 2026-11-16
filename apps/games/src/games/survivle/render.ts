@@ -1,7 +1,7 @@
 // Isometric drawing for Survivle: terrain with cliffs, trees, the hero, Murks, chests, traders,
 // campfires, the castle, the Dark Beast, the spreading darkness and the HUD.
 import { CROP_TIME, GOODS, ENEMY_KINDS, jobById, outfitById, swordColor, swordName, bowName, type Outfit } from './data';
-import type { Game, Particle } from './game';
+import { WALL_HP, type Game, type Particle, type Wall } from './game';
 import { MINI_KINDS, type Mini } from './minis';
 import { BOARD, STORE, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, WARPS, gen, hash, lairPad, tG, tH, tT } from './world';
 
@@ -409,6 +409,7 @@ export class Renderer {
   private mini: HTMLCanvasElement;
   private mctx: CanvasRenderingContext2D;
   private miniCenter = { x: -1e9, y: -1e9 };
+  private miniVersion = 0;
   private miniBuild: { x: number; y: number; row: number; img: ImageData } | null = null;
 
   constructor(cv: HTMLCanvasElement) {
@@ -423,7 +424,7 @@ export class Renderer {
     const w = this.cv.clientWidth, h = this.cv.clientHeight;
     this.cv.width = Math.round(w * this.dpr);
     this.cv.height = Math.round(h * this.dpr);
-    this.zoom = Math.max(0.7, Math.min(1.3, Math.min(w / 1150, h / 720)));
+    this.zoom = Math.max(0.45, Math.min(1.3, Math.min(w / 1150, h / 720)));
     this.W = w / this.zoom;
     this.H = h / this.zoom;
     this.dark.width = Math.ceil(w / 2);
@@ -676,6 +677,11 @@ export class Renderer {
         ctx.fillText(pd.label, X, Y - 34);
         ctx.restore();
       });
+    }
+    // walls people built
+    for (const w of game.walls) {
+      if (Math.abs(w.x - cam.x) > 50 || Math.abs(w.y - cam.y) > 50) continue;
+      add(w.x + 0.5, w.y + 0.5, () => this.wall(game, w, cam));
     }
     // glowing challenge rocks
     for (const st of game.stones()) {
@@ -1195,6 +1201,62 @@ export class Renderer {
     }
   }
 
+  private wall(game: Game, w: Wall, cam: Cam) {
+    const ctx = this.ctx;
+    const h = game.world.heightAt(w.x, w.y), H = h + 1.4;
+    const P = (x: number, y: number, z: number) => [this.sx(cam, x, y), this.sy(cam, x, y, z)] as const;
+    const mine = w.owner === game.myId;
+    const poly = (pts: (readonly [number, number])[], fill: string) => {
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (const q of pts.slice(1)) ctx.lineTo(q[0], q[1]);
+      ctx.closePath();
+      ctx.fill();
+    };
+    const x = w.x, y = w.y;
+    ctx.save();
+    if (mine) ctx.globalAlpha = 0.78;
+    const flash = w.hurtT > 0;
+    // east and south faces, then the top
+    poly([P(x + 1, y, h), P(x + 1, y + 1, h), P(x + 1, y + 1, H), P(x + 1, y, H)], flash ? '#e8b080' : '#7a5230');
+    poly([P(x, y + 1, h), P(x + 1, y + 1, h), P(x + 1, y + 1, H), P(x, y + 1, H)], flash ? '#f0c090' : '#9b6b3c');
+    poly([P(x, y, H), P(x + 1, y, H), P(x + 1, y + 1, H), P(x, y + 1, H)], flash ? '#ffd8a8' : '#b98b52');
+    // plank lines
+    ctx.strokeStyle = 'rgba(60,35,15,.6)';
+    ctx.lineWidth = 1.2;
+    for (let i = 1; i < 4; i++) {
+      const a = P(x + i / 4, y + 1, h), b = P(x + i / 4, y + 1, H);
+      const c = P(x + 1, y + i / 4, h), d = P(x + 1, y + i / 4, H);
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]);
+      ctx.lineTo(b[0], b[1]);
+      ctx.moveTo(c[0], c[1]);
+      ctx.lineTo(d[0], d[1]);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const top = P(x + 0.5, y + 0.5, H);
+    if (mine) {
+      // a little flag so you know it is yours (and that you can walk through it)
+      ctx.fillStyle = '#5a3a1e';
+      ctx.fillRect(top[0] - 1, top[1] - 16, 2, 16);
+      ctx.fillStyle = '#7fe07a';
+      ctx.beginPath();
+      ctx.moveTo(top[0] + 1, top[1] - 16);
+      ctx.lineTo(top[0] + 10, top[1] - 12);
+      ctx.lineTo(top[0] + 1, top[1] - 8);
+      ctx.fill();
+    }
+    if (w.hp < WALL_HP) {
+      ctx.fillStyle = 'rgba(0,0,0,.55)';
+      ctx.fillRect(top[0] - 15, top[1] - 24, 30, 5);
+      ctx.fillStyle = '#ffb04a';
+      ctx.fillRect(top[0] - 14, top[1] - 23, (28 * Math.max(0, w.hp)) / WALL_HP, 3);
+    }
+    ctx.restore();
+  }
+
   private miniBoss(game: Game, m: Mini, cam: Cam) {
     const ctx = this.ctx;
     const t = game.time;
@@ -1573,7 +1635,7 @@ export class Renderer {
         this.shadowText(`Castle ${Math.round(dist).toLocaleString()} tiles`, W / 2, 76, '#d9c6ff');
       }
     }
-    if (game.job === 'courier' && game.letterTo !== null) {
+    if (game.job === 'courier' && game.letterTo !== null && VILLAGES[game.letterTo]) {
       const v = VILLAGES[game.letterTo];
       const dx = v.x + 0.5 - p.x, dy = v.y + 0.5 - p.y;
       const a = Math.atan2((dx + dy) / 2, dx - dy);
@@ -1752,6 +1814,11 @@ export class Renderer {
     const ctx = this.ctx;
     const p = game.p;
     const N = 128, SCALE = 2;
+    if (this.miniVersion !== game.world.version) {
+      this.miniVersion = game.world.version;
+      this.miniCenter = { x: -1e9, y: -1e9 };
+      this.miniBuild = null;
+    }
     if (!this.miniBuild && (Math.abs(p.x - this.miniCenter.x) > 40 || Math.abs(p.y - this.miniCenter.y) > 40)) {
       this.miniBuild = { x: Math.floor(p.x), y: Math.floor(p.y), row: 0, img: this.mctx.createImageData(N, N) };
     }

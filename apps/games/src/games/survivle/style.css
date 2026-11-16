@@ -77,3 +77,17 @@
 .sv-bigcode { display: block; font-size: 34px; letter-spacing: 6px; color: #fff; margin: 4px 0; }
 .sv-coop-btn { width: 100%; margin-bottom: 10px; }
 .sv-create input.sv-code { text-transform: uppercase; letter-spacing: 3px; }
+.sv-touch { position: absolute; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+.sv-touch[hidden] { display: none; }
+.sv-touch button, .sv-stick { pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.sv-stick { position: absolute; left: 18px; bottom: 74px; width: 128px; height: 128px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.3); }
+.sv-knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: rgba(255,255,255,.45); border: 2px solid rgba(255,255,255,.7); }
+.sv-tbtns { position: absolute; right: 14px; bottom: 74px; display: grid; grid-template-columns: repeat(3, 52px); gap: 8px; direction: rtl; }
+.sv-touch button { width: 52px; height: 52px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,12,34,.55); color: #fff; font: 900 20px ui-rounded, system-ui, sans-serif; padding: 0; }
+.sv-touch button:active { background: rgba(198,155,255,.6); }
+.sv-tbtns .big { width: 64px; height: 64px; font-size: 26px; grid-row: span 2; align-self: center; }
+.sv-ttop { position: absolute; right: 12px; top: 200px; display: flex; flex-direction: column; gap: 8px; }
+.sv-ttop button { width: 44px; height: 44px; font-size: 18px; }
+@media (max-width: 600px) {
+  .sv-panel { max-height: calc(100% - 24px); overflow-y: auto; }
+}

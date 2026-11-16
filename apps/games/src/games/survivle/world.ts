@@ -73,11 +73,33 @@ export function isDoor(x: number, y: number) {
 const onPath = (dx: number, dy: number) => Math.abs(dx) <= 1 && dy > CASTLE_R && dy < ROAD_END;
 const inCamp = (x: number, y: number) => Math.abs(x - 5000) <= 8 && Math.abs(y - 5600) <= 8;
 
-/** Two villages where you can get a job. */
-export const VILLAGES = [
+/** Every village there can be: two to start, and one more for each friend in a co-op game. */
+const ALL_VILLAGES = [
   { name: 'Willowby', x: 5060, y: 5640 },
   { name: 'Stonebrook', x: 4936, y: 5652 },
+  { name: 'Fernhollow', x: 5130, y: 5560 },
+  { name: 'Ashford', x: 4870, y: 5560 },
+  { name: 'Mossgate', x: 5070, y: 5740 },
+  { name: 'Pebbleton', x: 4935, y: 5745 },
+  { name: 'Brightwater', x: 5160, y: 5670 },
+  { name: 'Oakridge', x: 4840, y: 5680 },
 ];
+/** The villages in this game right now. */
+export const VILLAGES = ALL_VILLAGES.slice(0, 2);
+export const MAX_VILLAGES = ALL_VILLAGES.length;
+
+/** Change how many villages there are (co-op adds one per friend) and rebuild the land around them. */
+export function setVillageCount(n: number, world?: World) {
+  n = Math.max(2, Math.min(ALL_VILLAGES.length, n));
+  if (n === VILLAGES.length) return false;
+  VILLAGES.length = 0;
+  VILLAGES.push(...ALL_VILLAGES.slice(0, n));
+  if (world) {
+    world.chunks.clear();
+    world.version++;
+  }
+  return true;
+}
 export const VILLAGE_R = 20;
 /** Houses: top-left corner offsets from the village centre, each 4 × 4 tiles. */
 const HOUSES = [[-15, -15], [-7, -16], [5, -15], [12, -12], [-16, -5], [-16, 6], [-12, 13], [7, 13], [14, 4]];
@@ -224,6 +246,8 @@ export class World {
   chunks = new Map<number, Uint32Array>();
   chopped = new Set<number>();
   sealed = false;
+  /** Goes up when the land changes (a new village), so maps get redrawn. */
+  version = 0;
 
   constructor(seed: number) {
     this.seed = seed;

@@ -6,7 +6,7 @@ import { Game, type SaveData } from './game';
 import { Renderer, drawHero, drawBeast, type Cam } from './render';
 import { JOBS, OUTFITS, PRICES, bowName, outfitById, swordName, TIME_LIMIT } from './data';
 import { isMuted, setMuted, sfx } from './audio';
-import { CX, CY, FLOOR_H, VILLAGES } from './world';
+import { CX, CY, FLOOR_H, VILLAGES, setVillageCount } from './world';
 import { hostGame, joinGame, type Session } from './coop';
 import { cleanCode } from './net';
 
@@ -52,6 +52,7 @@ const CONTROLS = `
     <div><b>Shift</b> shoot bow · aim with the mouse</div>
     <div><b>Z</b> jump · walk into a cliff to climb</div>
     <div><b>E</b> chests · trader · jobs · glowing rocks</div>
+    <div><b>B</b> build a wall (5 wood, 12 hearts; only you can walk through it)</div>
     <div><b>C</b> campfire (3 wood) · <b>H</b> eat (acorn ¼ heart, apple 1)</div>
     <div><b>I</b> gear &amp; clothes · <b>Esc</b> pause</div>
   </div>`;
@@ -108,7 +109,21 @@ const game: GameModule = {
     const el = document.createElement('div');
     el.className = 'sv';
     el.tabIndex = 0;
-    el.innerHTML = `<canvas class="sv-canvas"></canvas><div class="sv-say" hidden></div><div class="sv-ui"></div>`;
+    el.innerHTML = `<canvas class="sv-canvas"></canvas><div class="sv-say" hidden></div>
+      <div class="sv-touch" hidden>
+        <div class="sv-stick"><div class="sv-knob"></div></div>
+        <div class="sv-tbtns">
+          <button data-t="swing" class="big">⚔️</button>
+          <button data-t="shoot">🏹</button>
+          <button data-t="jump">⤒</button>
+          <button data-t="act">E</button>
+          <button data-t="build">🧱</button>
+          <button data-t="fire">🔥</button>
+          <button data-t="eat">🍎</button>
+        </div>
+        <div class="sv-ttop"><button data-t="gear">🎒</button><button data-t="pause">⏸</button></div>
+      </div>
+      <div class="sv-ui"></div>`;
     root.appendChild(el);
     const cv = el.querySelector('canvas')!;
     const sayEl = el.querySelector<HTMLDivElement>('.sv-say')!;
@@ -166,6 +181,63 @@ const game: GameModule = {
       }
     });
     const ui = el.querySelector<HTMLDivElement>('.sv-ui')!;
+    // ---------- touch controls (phones and tablets) ----------
+    const touchEl = el.querySelector<HTMLDivElement>('.sv-touch')!;
+    let touchMode = window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+    const stick = touchEl.querySelector<HTMLDivElement>('.sv-stick')!;
+    const knob = touchEl.querySelector<HTMLDivElement>('.sv-knob')!;
+    let stickId: number | null = null;
+    const setStick = (cx: number, cy: number) => {
+      const r = stick.getBoundingClientRect();
+      const mx = r.left + r.width / 2, my = r.top + r.height / 2, rad = r.width / 2;
+      let dx = (cx - mx) / rad, dy = (cy - my) / rad;
+      const len = Math.hypot(dx, dy);
+      if (len > 1) {
+        dx /= len;
+        dy /= len;
+      }
+      knob.style.transform = `translate(${dx * rad * 0.6}px, ${dy * rad * 0.6}px)`;
+      const dead = 0.32;
+      g.input.left = dx < -dead;
+      g.input.right = dx > dead;
+      g.input.up = dy < -dead;
+      g.input.down = dy > dead;
+    };
+    const releaseStick = () => {
+      stickId = null;
+      knob.style.transform = '';
+      g.input.up = g.input.down = g.input.left = g.input.right = false;
+    };
+    stick.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      stickId = e.pointerId;
+      stick.setPointerCapture(e.pointerId);
+      setStick(e.clientX, e.clientY);
+    });
+    stick.addEventListener('pointermove', (e) => {
+      if (e.pointerId === stickId) setStick(e.clientX, e.clientY);
+    });
+    stick.addEventListener('pointerup', releaseStick);
+    stick.addEventListener('pointercancel', releaseStick);
+    touchEl.addEventListener('pointerdown', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-t]');
+      if (!b) return;
+      e.preventDefault();
+      if (mode !== 'play') return;
+      const a = b.dataset.t;
+      if (a === 'pause') return overlay === 'none' ? pause() : play();
+      if (a === 'gear') return overlay === 'gear' ? play() : overlay === 'none' ? gear() : undefined;
+      if (overlay !== 'none') return;
+      if (a === 'swing') g.swing();
+      else if (a === 'shoot') g.shoot();
+      else if (a === 'jump') g.jump();
+      else if (a === 'act') g.interact();
+      else if (a === 'build') g.build();
+      else if (a === 'fire') g.campfire();
+      else if (a === 'eat') g.eat();
+    });
+    touchEl.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('touchstart', () => (touchMode = true), { once: true, passive: true });
     const R = new Renderer(cv);
     R.resize();
 
@@ -197,6 +269,7 @@ const game: GameModule = {
       mode = 'title';
       overlay = 'none';
       endSession();
+      setVillageCount(2);
       g = new Game('', 777);
       cam.x = CX + 0.5;
       cam.y = CY + 60;
@@ -214,7 +287,7 @@ const game: GameModule = {
           </div>
           ${CONTROLS}
           ${narratorOptions(voiceName, pitch)}
-          <p class="sv-note">Best on a computer with a keyboard and mouse.</p>
+          <p class="sv-note">Plays with a keyboard and mouse, or with the touch buttons on a phone.</p>
         </div>`);
       drawOrb();
     }
@@ -341,6 +414,7 @@ const game: GameModule = {
 
     function begin() {
       endSession();
+      setVillageCount(2);
       const input = ui.querySelector<HTMLInputElement>('.sv-name');
       const name = (input?.value.trim() || 'Hero').slice(0, 16);
       g = new Game(name, Math.floor(Math.random() * 1e9));
@@ -466,6 +540,7 @@ const game: GameModule = {
       const data = readJSON<SaveData | null>(slotKey(id), null);
       if (!data) return;
       endSession();
+      setVillageCount(2);
       g = Game.fromSave(data);
       hookGame();
       cam.x = g.p.x;
@@ -684,6 +759,7 @@ const game: GameModule = {
         case 'KeyZ': g.jump(); break;
         case 'KeyE': g.interact(); break;
         case 'KeyC': g.campfire(); break;
+        case 'KeyB': g.build(); break;
         case 'KeyH': g.eat(); break;
       }
     };
@@ -701,8 +777,12 @@ const game: GameModule = {
       mouse = { x: (e.clientX - r.left) / R.zoom, y: (e.clientY - r.top) / R.zoom };
     };
     cv.addEventListener('mousemove', onMove);
-    cv.addEventListener('mousedown', (e) => {
+    cv.addEventListener('pointerdown', (e) => {
       el.focus();
+      if (e.pointerType !== 'mouse') {
+        touchMode = true;
+        return;
+      }
       if (mode === 'play' && overlay === 'none') {
         onMove(e);
         if (e.button === 0) g.shoot();
@@ -737,12 +817,23 @@ const game: GameModule = {
       }
 
       session?.tick(dt);
+      const showTouch = touchMode && mode === 'play' && overlay === 'none';
+      if (touchEl.hidden === showTouch) {
+        touchEl.hidden = !showTouch;
+        if (!showTouch) releaseStick();
+      }
       if (mode === 'play' && (overlay === 'none' || session)) {
         if (overlay !== 'none') g.input.up = g.input.down = g.input.left = g.input.right = false;
-        // aim from mouse
-        const w = R.toWorld(cam, mouse.x, mouse.y, g.p.z + 1);
-        g.input.aimX = w.x - g.p.x;
-        g.input.aimY = w.y - g.p.y;
+        if (touchMode) {
+          // on a phone the bow shoots the way you are facing
+          g.input.aimX = 0;
+          g.input.aimY = 0;
+        } else {
+          // aim from mouse
+          const w = R.toWorld(cam, mouse.x, mouse.y, g.p.z + 1);
+          g.input.aimX = w.x - g.p.x;
+          g.input.aimY = w.y - g.p.y;
+        }
         let left = dt;
         while (left > 0) {
           const step = Math.min(left, 1 / 60);

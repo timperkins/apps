@@ -1,7 +1,7 @@
 import { Peer, type DataConnection } from 'peerjs';
 
 /**
- * Co-op: up to 4 heroes in one world. The host's game runs the world; friends join with
+ * Co-op: up to 8 heroes in one world. The host's game runs the world; friends join with
  * the host's code. PeerJS's free public server only brokers the WebRTC handshake, then game traffic
  * goes straight between the devices.
  */
@@ -11,7 +11,7 @@ const PREFIX = 'trom-survivle-';
 const OPEN_TIMEOUT = 12000;
 /** Letters and numbers that are hard to mix up (no 0/O, 1/I/L). */
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 /** For testing on a computer with its own PeerJS server: ?peer=localhost:9000/myapp. Otherwise the free public one. */
 const local = new URLSearchParams(location.search).get('peer');
 const OPTS = local ? (() => { const [hp, ...path] = local.split('/'), [host, port] = hp.split(':'); return { host, port: Number(port) || 9000, path: '/' + path.join('/'), secure: false }; })() : {};

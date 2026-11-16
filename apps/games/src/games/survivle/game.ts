@@ -10,7 +10,7 @@ import { MINI_KINDS, Minis } from './minis';
 const MINI_NAMES = MINI_KINDS.map((k) => k.name);
 import {
   BOARD, STORE, CX, CY, FLOOR_H, WARPS, lairPad, G, OVEN, ROOM_R, SIZE, START_X, START_Y, T, VILLAGES, World,
-  CASTLE_R, blocksMove, castleR, hash, inRoom, stoneIn, tG, tH, tT, villageAt,
+  CASTLE_R, isDoor as isDoorTile, blocksMove, castleR, hash, inRoom, tG, tH, tT, villageAt,
 } from './world';
 
 export const GRAVITY = 32;
@@ -23,6 +23,10 @@ const AGGRO = 30; // tiles
 const MAX_CHESTS = 25;
 /** Most things one sword swing can hit. */
 const SWING_MAX = 10;
+const ROCKS = 10;
+export const WALL_WOOD = 5;
+/** 12 hearts, in quarters. */
+export const WALL_HP = 48;
 
 export interface Input {
   up: boolean;
@@ -188,6 +192,19 @@ export interface SaveData {
   minis?: number[];
   goods?: Record<string, number>;
   shelves?: Record<string, number>;
+  rocks?: { x: number; y: number }[];
+  rockLevel?: number;
+  walls?: Wall[];
+}
+
+/** A wooden wall someone built. Its builder can walk through it; nobody else can. */
+export interface Wall {
+  id: number;
+  x: number;
+  y: number;
+  owner: string;
+  hp: number;
+  hurtT: number;
 }
 
 /** A villager shopping at your grocery store. */
@@ -243,6 +260,8 @@ export interface NetHooks {
   stone(x: number, y: number): void;
   reward(owner: string, coins: number, arrows: number): void;
   bonus(kind: 'mini' | 'challenge', value: string): void;
+  build(x: number, y: number): void;
+  hitWall(id: number, q: number): void;
 }
 
 export interface Work {
@@ -260,6 +279,12 @@ function angDiff(a: number, b: number) {
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
   return Math.abs(d);
+}
+
+/** A village to carry a letter to: any one but this. */
+function otherVillage(vi: number) {
+  const n = VILLAGES.length;
+  return (vi + 1 + Math.floor(Math.random() * (n - 1))) % n;
 }
 
 export class Game {
@@ -297,8 +322,14 @@ export class Game {
   /** Narrator: say a line (key keeps it from repeating too often). */
   onSay: ((key: string, text: string, cooldown?: number) => void) | null = null;
   private seen = new Set<string>();
-  private stoneCache: { x: number; y: number }[] = [];
-  private stoneAt = { x: -1e9, y: -1e9 };
+  /** The glowing rocks out in the world right now (one starts right by the camp). */
+  rocks: { x: number; y: number }[] = [{ x: 4993, y: 5594 }];
+  /** How many challenges have been won: each new one is a little harder. */
+  rockLevel = 0;
+  private rockCd = 0;
+  walls: Wall[] = [];
+  /** Who walls count as "mine" for: 'me' here, or a friend's id when you joined their game. */
+  myId = 'me';
   private lastLand = { x: START_X, y: START_Y };
   private lastHour = -1;
   private wasVillage = -1;
@@ -325,7 +356,7 @@ export class Game {
   shake = 0;
   knockedOut = 0;
   onShop: (() => void) | null = null;
-  private nextId = 1;
+  nextId = 1;
   private spawnCd = 4;
   private chestCd = 0;
   private fireTick = 0;
@@ -426,25 +457,32 @@ export class Game {
     return [{ x: this.trader.x - 0.5, y: this.trader.y - 0.5 }];
   }
 
-  /** Glowing challenge rocks near the hero. */
+  /** Glowing challenge rocks: 10 at a time somewhere around the heroes. */
   stones(): { x: number; y: number }[] {
-    const p = this.p;
-    if (Math.abs(p.x - this.stoneAt.x) > 60 || Math.abs(p.y - this.stoneAt.y) > 60) {
-      this.stoneAt = { x: p.x, y: p.y };
-      const list: { x: number; y: number }[] = [];
-      const rx = Math.floor(p.x / 250), ry = Math.floor(p.y / 250);
-      for (let j = -1; j <= 1; j++)
-        for (let i = -1; i <= 1; i++) {
-          const t = stoneIn(rx + i, ry + j, this.world);
-          if (t) list.push(t);
-        }
-      this.stoneCache = list;
-    }
-    return this.stoneCache;
+    return this.rocks;
   }
 
   stoneDone(st: { x: number; y: number }) {
-    return this.stonesDone.has(`${st.x},${st.y}`);
+    return this.stonesDone.has(`${st.x},${st.y}`) && !this.rocks.some((r) => r.x === st.x && r.y === st.y);
+  }
+
+  /** Keep 10 glowing rocks around: a beaten one goes away and a new one shows up somewhere else. */
+  private updateRocks(dt: number) {
+    this.rockCd -= dt;
+    if (this.rockCd > 0) return;
+    this.rockCd = 0.7;
+    const all = this.targets();
+    const heroes = all.length ? all : [this.p];
+    this.rocks = this.rocks.filter((r) => (this.challenge && this.challenge.key === `${r.x},${r.y}`) || heroes.some((t) => Math.hypot(r.x - t.x, r.y - t.y) < 420));
+    if (this.rocks.length >= ROCKS) return;
+    const c = heroes[Math.floor(Math.random() * heroes.length)];
+    const a = Math.random() * Math.PI * 2, d = 35 + Math.random() * 190;
+    const x = Math.floor(c.x + Math.cos(a) * d), y = Math.floor(c.y + Math.sin(a) * d);
+    if (castleR(x, y) < 150 || villageAt(x, y) >= 0 || x < 60 || y < 60 || x > SIZE - 60 || y > SIZE - 60) return;
+    const v = this.world.tile(x, y);
+    if (tG(v) === G.Water || blocksMove(v) || tT(v) !== T.None) return;
+    if (this.rocks.some((r) => Math.hypot(r.x - x, r.y - y) < 40)) return;
+    this.rocks.push({ x, y });
   }
 
   private nearTile(x: number, y: number, r: number) {
@@ -503,6 +541,17 @@ export class Game {
       } else this.hurtBoss(dmg);
     }
     if (left > 0 && this.minis.swordHit(this, dmg, (dx, dy) => angDiff(ang(dx, dy), p.face) < 1.3)) left--;
+    // your own walls, if you want to take one down
+    for (const w of [...this.walls]) {
+      if (left <= 0) break;
+      if (w.owner !== this.myId) continue;
+      const dx = w.x + 0.5 - p.x, dy = w.y + 0.5 - p.y, d = Math.hypot(dx, dy);
+      if (d < 2 && (d < 0.8 || angDiff(ang(dx, dy), p.face) < 1.2)) {
+        left--;
+        this.hurtWall(w, dmg * 2);
+        sfx.chop();
+      }
+    }
     // trees and bushes in the arc, nearest first
     if (left <= 0) return;
     const trees: { tx: number; ty: number; t: number; h: number; d: number }[] = [];
@@ -709,16 +758,79 @@ export class Game {
   takeJob(id: string, village: number) {
     this.job = id;
     this.jobVillage = village;
-    this.letterTo = id === 'courier' ? 1 - village : null;
+    this.letterTo = id === 'courier' ? otherVillage(village) : null;
     const j = jobById(id);
     this.toast(`You're a ${j?.name} now!`);
-    if (id === 'courier') this.say('courier', `Take this letter to ${VILLAGES[1 - village].name}. Follow the yellow arrow!`, 5);
+    if (id === 'courier') this.say('courier', `Take this letter to ${VILLAGES[this.letterTo ?? 0].name}. Follow the yellow arrow!`, 5);
     else this.say('job', `Good luck with your new job!`, 5);
   }
 
   addMeat(x: number, y: number, z: number) {
     this.goods.meat++;
     this.float(x, y, z + 1, '+1 meat', '#ff9a8a');
+  }
+
+  wallAt(tx: number, ty: number): Wall | undefined {
+    for (const w of this.walls) if (w.x === tx && w.y === ty) return w;
+    return undefined;
+  }
+
+  /** The tile in front of you where a wall would go. */
+  wallSpot() {
+    const p = this.p;
+    return { x: Math.floor(p.x + Math.cos(p.face) * 1.1), y: Math.floor(p.y + Math.sin(p.face) * 1.1) };
+  }
+
+  /** Build a wall in front of you: 5 wood, 12 hearts. You can walk through your own walls. */
+  build() {
+    const p = this.p;
+    if (p.climbing || this.knockedOut) return;
+    if (this.wood < WALL_WOOD) {
+      this.toast(`A wall takes ${WALL_WOOD} wood. Chop some trees!`);
+      return;
+    }
+    const { x, y } = this.wallSpot();
+    if (!this.canWall(x, y)) {
+      this.toast("You can't build a wall there");
+      return;
+    }
+    this.wood -= WALL_WOOD;
+    sfx.chop();
+    this.puff(x + 0.5, y + 0.5, this.world.heightAt(x, y) + 0.5, '#9b6b3c', 10, 2);
+    if (this.role === 'guest') {
+      this.net?.build(x, y);
+      this.walls.push({ id: -1, x, y, owner: this.myId, hp: WALL_HP, hurtT: 0 });
+    } else this.addWall(x, y, 'me');
+    this.say('wall', 'A wall! You can walk through your own walls, but Murks and other people cannot.', 600);
+  }
+
+  canWall(x: number, y: number, z: number | null = this.p.z) {
+    const v = this.world.tile(x, y);
+    if (tG(v) === G.Water || tT(v) !== T.None || this.wallAt(x, y)) return false;
+    if ((z !== null && Math.abs(tH(v) - z) > 1.5) || (this.world.sealed && isDoorTile(x, y))) return false;
+    if (villageAt(x, y) >= 0 && tG(v) === G.Roof) return false;
+    return !this.enemies.some((e) => Math.floor(e.x) === x && Math.floor(e.y) === y);
+  }
+
+  addWall(x: number, y: number, owner: string) {
+    if (this.wallAt(x, y)) return;
+    this.walls.push({ id: this.nextId++, x, y, owner, hp: WALL_HP, hurtT: 0 });
+  }
+
+  /** Something hit a wall. Returns true if it broke. */
+  hurtWall(w: Wall, q: number) {
+    if (this.role === 'guest') {
+      this.net?.hitWall(w.id, q);
+      w.hurtT = 0.2;
+      return false;
+    }
+    w.hp -= q;
+    w.hurtT = 0.2;
+    if (w.hp > 0) return false;
+    this.walls = this.walls.filter((o) => o !== w);
+    this.puff(w.x + 0.5, w.y + 0.5, this.world.heightAt(w.x, w.y) + 0.6, '#9b6b3c', 16, 2.5);
+    sfx.treeFall();
+    return true;
   }
 
   /** Put everything you are carrying on the store shelves (wood too). */
@@ -746,7 +858,7 @@ export class Game {
       this.shoppers = [];
       return;
     }
-    const v = VILLAGES[this.jobVillage];
+    const v = VILLAGES[this.jobVillage] ?? VILLAGES[0];
     const sx = v.x + STORE.x + 0.5, sy = v.y + STORE.y + 1.8;
     const stocked = GOODS.filter((g) => this.shelves[g.id] > 0);
     this.shopperCd -= dt;
@@ -810,10 +922,16 @@ export class Game {
 
   startChallenge(st: { x: number; y: number }) {
     const c = CHALLENGES[Math.floor(hash(st.x, st.y, this.world.seed + 77) * CHALLENGES.length)];
-    this.challenge = { key: `${st.x},${st.y}`, x: st.x + 0.5, y: st.y + 0.5, name: c.name };
+    const lv = this.rockLevel;
+    const name = lv ? `${c.name} (level ${lv + 1})` : c.name;
+    this.challenge = { key: `${st.x},${st.y}`, x: st.x + 0.5, y: st.y + 0.5, name };
     this.enemies = this.enemies.filter((e) => e.aggro);
-    c.kinds.forEach((kind, i) => {
-      const a = (i / c.kinds.length) * Math.PI * 2;
+    // each win makes the next rock a little harder: an extra Murk, and every Murk a bit tougher
+    const kinds = [...c.kinds];
+    for (let i = 0; i < Math.min(lv, 12); i++) kinds.push(i % 3 === 2 ? 1 : 0);
+    const tough = 1 + Math.min(lv, 20) * 0.12;
+    kinds.forEach((kind, i) => {
+      const a = (i / kinds.length) * Math.PI * 2;
       let ex = st.x + 0.5 + Math.cos(a) * 6, ey = st.y + 0.5 + Math.sin(a) * 6;
       const v = this.world.tile(Math.floor(ex), Math.floor(ey));
       if (tG(v) === G.Water || blocksMove(v)) {
@@ -821,14 +939,14 @@ export class Game {
         ey = st.y + 0.5 + Math.sin(a) * 2;
       }
       this.enemies.push({
-        id: this.nextId++, kind, x: ex, y: ey, z: this.world.heightAt(ex, ey), hp: ENEMY_KINDS[kind].hp, aggro: true, atkCd: 1.5,
+        id: this.nextId++, kind, x: ex, y: ey, z: this.world.heightAt(ex, ey), hp: Math.round(ENEMY_KINDS[kind].hp * tough), aggro: true, atkCd: 1.5,
         hurtT: 0, kx: 0, ky: 0, wanderA: 0, wanderT: 0, hop: Math.random() * 6, ch: true,
       });
       this.puff(ex, ey, this.world.heightAt(ex, ey), '#5ad0ff', 12, 2);
     });
     this.shake = 8;
     sfx.door();
-    this.toast(`Challenge: ${c.name}! Win for a permanent quarter heart.`);
+    this.toast(`Challenge: ${name}! Win for a permanent quarter heart.`);
     this.say('challenge', 'Here they come! Beat them all!', 10);
   }
 
@@ -845,6 +963,8 @@ export class Game {
     }
     if (left === 0) {
       this.stonesDone.add(c.key);
+      this.rocks = this.rocks.filter((r) => `${r.x},${r.y}` !== c.key);
+      this.rockLevel++;
       this.challenge = null;
       this.net?.bonus('challenge', c.key);
       if (this.maxHp < MAX_HP_CAP) {
@@ -854,7 +974,7 @@ export class Game {
       this.p.hp = this.maxHp;
       sfx.chest();
       this.puff(c.x, c.y, this.world.heightAt(c.x, c.y) + 1, '#5ad0ff', 30, 3);
-      this.say('chwin', 'You won! You got stronger!', 20);
+      this.say('chwin', 'You won! You got stronger! The rock is gone, and the next one will be a little harder.', 20);
     }
   }
 
@@ -1034,7 +1154,8 @@ export class Game {
       this.won = true;
       this.world.sealed = false;
       sfx.win();
-      this.toast('The Dark Beast is defeated!');
+      this.coins += 50;
+      this.toast('The Dark Beast is defeated! +50 coins');
       this.say('won', 'You did it! The Dark Beast is gone and the land is saved!', 999);
     }
   }
@@ -1069,12 +1190,14 @@ export class Game {
     }
     this.updateWork(dt);
     this.updateStore(dt);
+    for (const w of this.walls) w.hurtT = Math.max(0, w.hurtT - dt);
     this.updateTrader(dt);
     if (this.role === 'guest') {
       this.guestTick(dt);
     } else {
       this.updateEnemies(dt);
       this.updateChallenge();
+      this.updateRocks(dt);
       this.minis.update(this, dt);
       this.updateArrows(dt);
       this.updateBoss(dt);
@@ -1198,8 +1321,8 @@ export class Game {
         if (this.job === 'courier' && this.letterTo === vi) {
           this.coins += 15;
           sfx.coin();
-          this.toast('Letter delivered! +15 coins. Here is one for the other village.');
-          this.letterTo = 1 - vi;
+          this.letterTo = otherVillage(vi);
+          this.toast(`Letter delivered! +15 coins. Next one goes to ${VILLAGES[this.letterTo].name}.`);
         }
       }
     }
@@ -1241,6 +1364,8 @@ export class Game {
       if (nx < 1 || ny < 1 || nx > SIZE - 1 || ny > SIZE - 1) return false;
       const v = this.world.tile(Math.floor(nx), Math.floor(ny));
       if (blocksMove(v)) return false;
+      const w = this.walls.length ? this.wallAt(Math.floor(nx), Math.floor(ny)) : undefined;
+      if (w && w.owner !== this.myId) return false;
       const th = tH(v);
       if (th > p.z + stepUp) return false;
       if (th > p.z) p.z = th; // stepping up one level
@@ -1477,7 +1602,16 @@ export class Game {
       my += e.ky * dt;
       e.kx *= Math.pow(0.002, dt);
       e.ky *= Math.pow(0.002, dt);
+      const ox = e.x, oy = e.y;
       this.moveEnemy(e, mx, my);
+      if (e.aggro && this.walls.length && Math.hypot(e.x - ox, e.y - oy) < Math.hypot(mx, my) * 0.3 && e.atkCd <= 0) {
+        // a wall is in the way: chew on it
+        const w = this.wallAt(Math.floor(e.x + Math.sign(mx) * 0.7), Math.floor(e.y)) ?? this.wallAt(Math.floor(e.x), Math.floor(e.y + Math.sign(my) * 0.7));
+        if (w) {
+          e.atkCd = 1.3;
+          this.hurtWall(w, k.dmg);
+        }
+      }
       const gh = this.world.heightAt(e.x, e.y);
       e.z += (gh - e.z) * Math.min(1, dt * 12);
       if (tg && e.aggro && d < 0.95 && Math.abs(e.z - tg.z) < 1.3 && e.atkCd <= 0) {
@@ -1491,6 +1625,7 @@ export class Game {
     const ok = (nx: number, ny: number) => {
       const v = this.world.tile(Math.floor(nx), Math.floor(ny));
       if (blocksMove(v) || tG(v) === G.Water || castleR(nx, ny) <= CASTLE_R - 1 || villageAt(nx, ny) >= 0) return false;
+      if (this.walls.length && this.wallAt(Math.floor(nx), Math.floor(ny))) return false;
       const th = tH(v);
       return th - e.z <= 1.05 && e.z - th <= 3;
     };
@@ -1661,6 +1796,7 @@ export class Game {
       this.shake = 18;
       b.rings.push({ x: b.x, y: b.y, r: 5, t: 0, max: 0.5, heavy: false });
       hitAll(5, 6);
+      for (const w of [...this.walls]) if (Math.hypot(w.x + 0.5 - b.x, w.y + 0.5 - b.y) < 5) this.hurtWall(w, 6);
       b.state = 'recover';
       b.t = 1;
     } else if (b.state === 'recover' && b.t <= 0) {
@@ -1677,6 +1813,11 @@ export class Game {
           this.hurtTarget(t.id, 4, o.x, o.y);
           o.life = 0;
         }
+      }
+      const ow = this.walls.length ? this.wallAt(Math.floor(o.x), Math.floor(o.y)) : undefined;
+      if (ow && o.life > 0) {
+        this.hurtWall(ow, 4);
+        o.life = 0;
       }
       // barricades stop orbs
       if (tH(this.world.tile(Math.floor(o.x), Math.floor(o.y))) > FLOOR_H + 0.5) {
@@ -1807,6 +1948,7 @@ export class Game {
       won: this.won, savedAt: Date.now(), acorns: this.acorns, maxHp: this.maxHp, stones: [...this.stonesDone], job: this.job,
       jobVillage: this.jobVillage, farm: [...this.farm], letterTo: this.letterTo,
       minis: this.minis.defeated(), goods: this.goods, shelves: this.shelves,
+      rocks: this.rocks, rockLevel: this.rockLevel, walls: this.walls,
     };
   }
 
@@ -1836,8 +1978,13 @@ export class Game {
     g.jobVillage = s.jobVillage ?? 0;
     g.farm = new Map(s.farm ?? []);
     g.letterTo = s.letterTo ?? null;
+    if (g.jobVillage >= VILLAGES.length) g.jobVillage = 0;
+    if (g.letterTo !== null && g.letterTo >= VILLAGES.length) g.letterTo = otherVillage(g.jobVillage);
     g.minis = new Minis(s.minis ?? []);
     if (s.goods) Object.assign(g.goods, s.goods);
+    if (s.rocks) g.rocks = s.rocks;
+    g.rockLevel = s.rockLevel ?? 0;
+    g.walls = (s.walls ?? []).map((w) => ({ ...w, id: g.nextId++, hurtT: 0 }));
     if (s.shelves) Object.assign(g.shelves, s.shelves);
     // If saved inside the locked room, start just outside its door so the fight starts fresh.
     if (inRoom(s.x, s.y) && !s.won) {

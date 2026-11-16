@@ -1,10 +1,11 @@
-// Co-op: up to 4 heroes in one world. The host's game runs the world (enemies, bosses, chests,
+// Co-op: up to 8 heroes in one world. The host's game runs the world (enemies, bosses, chests,
 // challenges, time) and sends it out about 12 times a second. Each friend runs their own hero and
 // sends where they are; their hits and arrows go to the host, who applies them.
 import { Game, type Arrow, type Enemy, type NetHooks, type Other } from './game';
 import { openRoom, joinRoom, MAX_PLAYERS, type Host, type Link } from './net';
 import { sfx } from './audio';
 import { MAX_HP_CAP } from './data';
+import { VILLAGES, setVillageCount } from './world';
 
 const SNAP_HZ = 12;
 const ME_HZ = 15;
@@ -29,7 +30,7 @@ interface HeroMsg {
 
 type Msg =
   | { t: 'hello'; name: string; outfit: string }
-  | { t: 'welcome'; id: string; seed: number; elapsed: number; chopped: number[]; x: number; y: number; stones: string[]; minis: number[]; won: boolean }
+  | { t: 'welcome'; id: string; seed: number; elapsed: number; chopped: number[]; x: number; y: number; stones: string[]; minis: number[]; won: boolean; vc: number }
   | { t: 'full' }
   | { t: 'me'; h: HeroMsg }
   | { t: 'hit'; id: number; dmg: number; nx: number; ny: number }
@@ -39,6 +40,8 @@ type Msg =
   | { t: 'chop'; key: number }
   | { t: 'chest'; x: number; y: number }
   | { t: 'stone'; x: number; y: number }
+  | { t: 'build'; x: number; y: number }
+  | { t: 'hitwall'; id: number; q: number }
   | { t: 'snap'; s: Snap }
   | { t: 'hurt'; q: number; fx?: number; fy?: number }
   | { t: 'reward'; coins: number; arrows: number }
@@ -56,6 +59,11 @@ interface Snap {
   shots: Game['minis']['shots'];
   hazards: Game['minis']['hazards'];
   ch: Game['challenge'];
+  rocks: Game['rocks'];
+  rl: number;
+  vc: number;
+  /** id, x, y, owner, hp */
+  walls: [number, number, number, string, number][];
   sealed: boolean;
   won: boolean;
 }
@@ -130,6 +138,8 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
     stone: () => {},
     reward: (owner, coins, arrows) => to(owner, { t: 'reward', coins, arrows }),
     bonus: (kind, value) => sendAll({ t: 'bonus', kind, value }),
+    build: () => {},
+    hitWall: () => {},
   };
   g.net = hooks;
 
@@ -148,11 +158,13 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
           if (named) return;
           named = true;
           links.set(id, link);
+          // one more village for every friend who joins
+          const added = setVillageCount(Math.max(VILLAGES.length, 2 + links.size), g.world);
           link.send({
             t: 'welcome', id, seed: g.world.seed, elapsed: g.elapsed, chopped: [...g.world.chopped], x: g.p.x + 1.5, y: g.p.y + 1,
-            stones: [...g.stonesDone], minis: g.minis.defeated(), won: g.won,
+            stones: [...g.stonesDone], minis: g.minis.defeated(), won: g.won, vc: VILLAGES.length,
           } satisfies Msg);
-          g.toast(`${m.name || 'A friend'} joined! Co-op: every hit does ¼ heart`);
+          g.toast(`${m.name || 'A friend'} joined! Co-op: every hit does ¼ heart${added ? `. A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!` : ''}`);
           sfx.coin();
           onChange();
           return;
@@ -181,8 +193,17 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
         case 'chest':
           g.chests = g.chests.filter((c) => c.x !== m.x || c.y !== m.y);
           return;
+        case 'build':
+          if (g.canWall(m.x, m.y, null)) g.addWall(m.x, m.y, id);
+          return;
+        case 'hitwall': {
+          const w = g.walls.find((q) => q.id === m.id);
+          // friends can only take down their own walls; Murks and the Dark Beast hit walls on the host
+          if (w && w.owner === id) g.hurtWall(w, m.q);
+          return;
+        }
         case 'stone':
-          if (!g.challenge && !g.stonesDone.has(`${m.x},${m.y}`)) g.startChallenge({ x: m.x, y: m.y });
+          if (!g.challenge && g.rocks.some((r) => r.x === m.x && r.y === m.y)) g.startChallenge({ x: m.x, y: m.y });
           return;
       }
     });
@@ -218,6 +239,10 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
         shots: g.minis.shots,
         hazards: g.minis.hazards,
         ch: g.challenge,
+        rocks: g.rocks,
+        rl: g.rockLevel,
+        vc: VILLAGES.length,
+        walls: g.walls.map((w) => [w.id, w.x, w.y, w.owner === 'me' ? 'host' : w.owner, w.hp]),
         sealed: g.world.sealed,
         won: g.won,
       };
@@ -247,12 +272,13 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
         resolve(m);
       } else if (m.t === 'full') {
         clearTimeout(timer);
-        reject(new Error('That game is full (4 heroes)'));
+        reject(new Error('That game is full (8 heroes)'));
       }
     });
     link.onClose(() => reject(new Error('The link closed')));
   });
 
+  setVillageCount(welcome.vc || 2);
   const g = new Game(name, welcome.seed, `guest-${Date.now().toString(36)}`);
   g.p.outfit = outfit;
   g.role = 'guest';
@@ -266,6 +292,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
   g.p.z = g.world.heightAt(g.p.x, g.p.y);
   g.coopLabel = `Co-op · code ${code}`;
   const myId = welcome.id;
+  g.myId = myId;
   let left = false;
   const gotMini = new Set<number>(welcome.minis);
 
@@ -280,6 +307,8 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
     stone: (x, y) => link.send({ t: 'stone', x, y } satisfies Msg),
     reward: () => {},
     bonus: () => {},
+    build: (x, y) => link.send({ t: 'build', x, y } satisfies Msg),
+    hitWall: (id, q) => link.send({ t: 'hitwall', id, q } satisfies Msg),
   };
 
   link.onMessage((raw) => {
@@ -407,11 +436,20 @@ function applySnap(g: Game, s: Snap, myId: string) {
   g.minis.shots = s.shots;
   g.minis.hazards = s.hazards;
   g.challenge = s.ch;
+  g.rocks = s.rocks;
+  g.rockLevel = s.rl;
+  const oldWalls = new Map(g.walls.map((w) => [w.id, w]));
+  g.walls = s.walls.map(([id, x, y, owner, hp]) => {
+    const o = oldWalls.get(id);
+    return { id, x, y, owner, hp, hurtT: o && o.hp > hp ? 0.2 : o?.hurtT ?? 0 };
+  });
+  if (s.vc && setVillageCount(s.vc, g.world)) g.toast(`A new village appeared: ${VILLAGES[VILLAGES.length - 1].name}!`);
   g.world.sealed = s.sealed;
   if (s.won && !g.won) {
     g.won = true;
     sfx.win();
-    g.toast('The Dark Beast is defeated!');
+    g.coins += 50;
+    g.toast('The Dark Beast is defeated! +50 coins');
     g.say('won', 'You did it! The Dark Beast is gone and the land is saved!', 999);
   }
 }
