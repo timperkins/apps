@@ -8,7 +8,7 @@
 // into the rectangle 0 <= sx < w, 0 <= sy < h. The land is the same all over.
 // The map is planet-sized, so nothing is stored per pixel: the ground is
 // classified and painted a tile at a time, on demand.
-import { ART, RGB, WorldField, WrapNoise, fbm, hash2, hex, mix, rng, shade, wrapNoise } from '../gfx';
+import { ART, RGB, WorldField, WrapNoise, fbm, hash2, hex, mix, rng, shade, vnoise, wrapNoise } from '../gfx';
 import { CH, Roads, canvasOf } from '../tiles';
 import { toScreen, toWorld } from './stack';
 
@@ -22,6 +22,8 @@ export const enum K {
 }
 
 export const HP = 11; // plateau height in world units (= screen pixels)
+// The furthest a cliff's slope reaches out past the rim at its foot.
+const SLOPE_OUT = Math.ceil(HP * 0.7 + 1.2);
 // Map pixels per pixel of the overview used for the globe and unpainted tiles.
 export const OV = 4;
 // Margin of ground classified round a tile's footprint, for the painter's
@@ -287,6 +289,21 @@ export class IsoTerrain {
     return this.k(wx, wy) === K.High;
   }
 
+  // Is (wx, wy) up on a plateau or on the broken rock below its rim? Nothing
+  // on the ground can go there. (The rock slopes out from the rim towards +x
+  // and +y, the sides you see: see rockOut in paintSteps.)
+  cliff(wx: number, wy: number): boolean {
+    return (
+      this.isHigh(wx, wy) ||
+      this.isHigh(wx - 3, wy - 3) ||
+      this.isHigh(wx - 6, wy - 6) ||
+      this.isHigh(wx - 2, wy) ||
+      this.isHigh(wx, wy - 2) ||
+      this.isHigh(wx + 2, wy) ||
+      this.isHigh(wx, wy + 2)
+    );
+  }
+
   elev(wx: number, wy: number): number {
     return this.isHigh(wx, wy) ? HP : 0;
   }
@@ -373,7 +390,7 @@ export class IsoTerrain {
       for (let i = 0; i < rw; i++)
         if (R.hi[j * rw + i] > 0) {
           anyHigh = true;
-          for (let b = Math.max(0, j - 1); b <= Math.min(rh - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(rw - 1, i + 1); a++) hiNear[b * rw + a] = 1;
+          for (let b = Math.max(0, j - 2); b <= Math.min(rh - 1, j + 2); b++) for (let a = Math.max(0, i - 2); a <= Math.min(rw - 1, i + 2); a++) hiNear[b * rw + a] = 1;
         }
     // cells with high ground within reach of its shadow (towards the light)
     const hiClose = new Uint8Array(rw * rh);
@@ -381,13 +398,56 @@ export class IsoTerrain {
       for (let j = 0; j < rh; j++)
         for (let i = 0; i < rw; i++) {
           if (!hiNear[j * rw + i]) continue;
-          for (let b = Math.max(0, j - 4); b <= Math.min(rh - 1, j + 2); b++) for (let a = i; a <= Math.min(rw - 1, i + 11); a++) hiClose[b * rw + a] = 1;
+          for (let b = Math.max(0, j - 4); b <= Math.min(rh - 1, j + 15); b++) for (let a = i; a <= Math.min(rw - 1, i + 16); a++) hiClose[b * rw + a] = 1;
         }
+    // (the rim is pushed in and out a little by noise, so the edge of the
+    // rock breaks up raggedly instead of running smooth)
     const hiAt = (wx: number, wy: number): boolean => {
       const i = Math.floor(wx) - R.x0;
       const j = Math.floor(wy) - R.y0;
       if (i < 0 || j < 0 || i >= rw || j >= rh) return this.isHigh(wx, wy);
-      return hiNear[j * rw + i] === 1 && bl(R.hi, wx, wy) > 0;
+      if (hiNear[j * rw + i] !== 1) return false;
+      const jx = (vnoise(wx * 0.3, wy * 0.3, seed + 41) - 0.5) * 2.2 + (vnoise(wx * 0.9, wy * 0.9, seed + 43) - 0.5) * 0.9;
+      const jy = (vnoise(wx * 0.3, wy * 0.3, seed + 42) - 0.5) * 2.2 + (vnoise(wx * 0.9, wy * 0.9, seed + 44) - 0.5) * 0.9;
+      return bl(R.hi, wx + jx, wy + jy) > 0;
+    };
+    // Broken rock: a jumble of stones, each a cell of a jittered grid in
+    // (u, v). Gives the stone's id, how far the point is from the crack
+    // round it, and where it is in the stone (for lighting it as a facet).
+    const stone = (u: number, v: number, s: number): [number, number, number, number] => {
+      const ci = Math.floor(u);
+      const cj = Math.floor(v);
+      let d1 = 9;
+      let d2 = 9;
+      let id = 0;
+      let ox = 0;
+      let oy = 0;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          const gi = ci + di;
+          const gj = cj + dj;
+          const cx = gi + 0.1 + hash2(gi, gj, s) * 0.8;
+          const cy = gj + 0.1 + hash2(gi, gj, s + 1) * 0.8;
+          const dd = Math.hypot(u - cx, v - cy);
+          if (dd < d1) {
+            d2 = d1;
+            d1 = dd;
+            id = hash2(gi, gj, s + 2);
+            ox = u - cx;
+            oy = v - cy;
+          } else if (dd < d2) d2 = dd;
+        }
+      return [id, d2 - d1, ox, oy];
+    };
+
+    // How far out the rock reaches at height z below the rim (world units,
+    // towards +x and +y, the sides you see): a rough slope down to the foot.
+    const rockOut = (ax: number, ay: number, z: number): number => {
+      const down = HP - z;
+      // (steeper where a road runs under it, so the rock doesn't spill over the road)
+      const sl = (0.25 + 0.45 * vnoise(ax * 0.15, ay * 0.15, seed + 46)) * Math.max(0.2, Math.min(1, (bl(R.road, ax, ay) - 1.2) / 1.5));
+      const ledge = (vnoise((ax - ay) * 0.4, z * 0.45, seed + 47) - 0.5) * 2.4 * Math.min(1, down / 3);
+      return Math.max(0, down * sl + ledge);
     };
 
     // Slow-changing noise, worked out on a coarse lattice over the tile (the
@@ -453,15 +513,16 @@ export class IsoTerrain {
         let hitZ = -1;
         let wx = 0;
         let wy = 0;
+        let lean = 0; // how far the rock face leans back where the ray hit it
         if (anyHigh) {
           // a quick pass along the ray over the coarse cells first: most rays
           // pass nowhere near high ground
           const bx = px / 2 + py - R.x0;
           const by = py - px / 2 - R.y0;
           let may = false;
-          for (let z = HP + 1; z >= 0; z--) {
-            const i = (bx + z) | 0;
-            const j = (by + z) | 0;
+          for (let t = HP + 1; t >= -SLOPE_OUT; t--) {
+            const i = (bx + t) | 0;
+            const j = (by + t) | 0;
             if (i >= 0 && j >= 0 && i < rw && j < rh && hiNear[j * rw + i]) {
               may = true;
               break;
@@ -469,12 +530,16 @@ export class IsoTerrain {
           }
           if (may)
             for (let z = HP; z >= 0; z -= 0.5) {
+              // the cliff isn't sheer: it slopes out towards its foot, more
+              // in some places than others, with ledges and bulges
               const ax = px / 2 + py + z;
               const ay = py + z - px / 2;
-              if (hiAt(ax, ay)) {
+              const o = z >= HP ? 0 : rockOut(ax, ay, z);
+              if (hiAt(ax - o, ay - o)) {
+                if (z < HP) lean = (rockOut(ax, ay, z - 0.5) - o) * 2;
                 hitZ = z;
-                wx = ax;
-                wy = ay;
+                wx = ax - o;
+                wy = ay - o;
                 break;
               }
             }
@@ -492,31 +557,51 @@ export class IsoTerrain {
           const lip = !hiAt(wx + 0.8, wy) || !hiAt(wx, wy + 0.8);
           const rim = lip || !hiAt(wx + 2.2, wy) || !hiAt(wx, wy + 2.2);
           const back = !hiAt(wx - 1.2, wy) || !hiAt(wx, wy - 1.2);
-          if (lip) c = shade(ROCK_L, 0.1 + (r2 - 0.5) * 0.14);
-          else if (rim && r2 > 0.35) c = shade(mix(ROCK, ROCK_L, r2), rnd > 0.8 ? -0.2 : 0);
+          // bare rock breaks through along the edge in patches, not as a kerb
+          const bare = vnoise(wx * 0.45, wy * 0.45, seed + 45);
+          if (lip && bare > 0.35) c = shade(mix(ROCK, ROCK_L, r2), rnd > 0.85 ? -0.18 : 0.06);
+          else if (lip) c = shade(c, -0.1);
+          else if (rim && bare > 0.55 && r2 > 0.4) c = shade(mix(ROCK, ROCK_L, r2), rnd > 0.8 ? -0.2 : 0);
           else if (back) c = shade(c, -0.22);
         } else if (hitZ >= 0) {
-          // rock face in courses of blocks: +x faces are in shade, +y faces catch the light
+          // a face of broken rock: +x faces are in shade, +y faces catch the
+          // light. Rough layers, each a jumble of stones with dark cracks
+          // between, lit on their upper sides, with the odd deep fissure,
+          // lichen and moss, and grass hanging over the top.
           const rightFace = !hiAt(wx + 0.7, wy);
           const along = rightFace ? wy : wx;
-          const zz = hitZ + fbm(along / 9, 0, seed + 3, 2) * 3;
-          const course = Math.floor(zz / 2.4);
-          const inC = zz - course * 2.4;
-          const bw = 3 + hash2(course, 1, seed + 4) * 3;
-          const bpos = (along + hash2(course, 2, seed + 4) * 9) / bw;
-          const block = Math.floor(bpos);
-          const inB = (bpos - block) * bw;
-          const bh = hash2(block, course, seed + 5);
-          c = mix(ROCK, ROCK_L, 0.15 + bh * 0.55);
-          if (bh > 0.86) c = mix(c, hex('#8d7a5c'), 0.5); // a browner stone now and then
-          if (inC < 0.5) c = shade(ROCK_D, -0.1); // the ledge under each course
-          else if (inB < 0.5) c = ROCK_D; // joints
-          else if (inC > 1.9) c = shade(c, 0.14); // lit top of the block
-          else if (hash2(Math.floor(along * 2), Math.floor(zz * 2), seed + 6) > 0.9) c = shade(c, -0.18); // pitting
+          const zz = hitZ + (fbm(along / 7, 0, seed + 3, 2) - 0.5) * 5;
+          const [id, crack, ox, oy] = stone(along / 5, zz / 4.2, seed + 4);
+          // big slabs and smaller stones side by side
+          const [id2, crack2, ox2, oy2] = stone(along / 2.4, zz / 1.9, seed + 14);
+          const fine = vnoise(along / 9, 0.5, seed + 15) > 0.55;
+          const sid = fine ? id2 : id;
+          const scr = fine ? crack2 * 1.8 : crack;
+          const sox = fine ? ox2 : ox;
+          const soy = fine ? oy2 : oy;
+          c = mix(ROCK_D, ROCK_L, 0.2 + sid * 0.65);
+          // sloping rock catches the sky, sheer rock is darker
+          c = shade(c, Math.max(-0.22, Math.min(0.16, (lean - 0.55) * 0.25)));
+          c = shade(c, (vnoise(along / 14, zz / 20, seed + 16) - 0.5) * 0.3); // broad weathering
+          if (sid > 0.84) c = mix(c, hex('#8d7a5c'), 0.55); // a browner stone now and then
+          else if (sid < 0.14) c = mix(c, hex('#6e6f68'), 0.5); // or a greyer one
+          // facets lit from up and to the left: each stone bulges, so its
+          // upper side is bright and its foot falls into shadow
+          const lit = soy * 0.9 + sox * (rightFace ? -0.3 : 0.4);
+          c = shade(c, Math.max(-0.38, Math.min(0.26, lit * 0.7 + (soy > 0.2 ? 0.08 : 0))));
+          const fis = Math.abs(fbm(along / 2.2, hitZ / 9, seed + 7, 2) - 0.5);
+          const seam = vnoise(along / 3, zz / 3, seed + 17) > 0.3; // some joints are healed over
+          if (scr < 0.06 && seam) c = shade(ROCK_D, -0.32 - (0.06 - scr) * 3); // cracks
+          else if (scr < 0.12 && soy < -0.1 && seam) c = shade(c, -0.2); // shadow under a ledge
+          else if (fis < 0.016 && hash2(Math.floor(along / 5), 0, seed + 9) > 0.55) c = shade(ROCK_D, -0.45); // a deep fissure
+          else if (hash2(Math.floor(along * 2), Math.floor(zz * 2), seed + 6) > 0.92) c = shade(c, -0.14); // pitting
+          const crack3 = scr;
+          const moss = vnoise(along / 4, hitZ / 3, seed + 10);
+          if (crack3 >= 0.06 && moss > 0.68 && rnd < (moss - 0.68) * 4) c = mix(c, HIGH[1], 0.6);
+          else if (crack3 >= 0.06 && rnd > 0.985) c = mix(c, hex('#a9a36c'), 0.5); // lichen
           c = shade(c, rightFace ? -0.34 : 0);
           if (hitZ <= 1.5) c = shade(c, -0.22);
-          if (hitZ >= HP - 0.5) c = shade(rightFace ? c : ROCK_L, 0.14);
-          else if (hitZ > HP - 3.5 && hash2(Math.floor(along * 1.5), Math.floor(hitZ * 2), seed + 8) > 0.74 - (hitZ - HP + 3.5) * 0.12) c = mix(c, rightFace ? HIGH[0] : HIGH[2], 0.75); // grass hanging over the edge
+          if (hitZ > HP - 3.5 && hash2(Math.floor(along * 1.5), Math.floor(hitZ * 2), seed + 8) > 0.74 - (hitZ - HP + 3.5) * 0.12) c = mix(c, rightFace ? HIGH[0] : HIGH[2], 0.75); // grass hanging over the edge
           c = shade(c, (rnd - 0.5) * 0.1);
         } else {
           wx = px / 2 + py;
@@ -637,6 +722,27 @@ export class IsoTerrain {
               else if (r2 > 0.9853) c = shade(ROCK, -0.05);
               else if (r2 < 0.0358) c = FLOWER[Math.floor(rnd * FLOWER.length)];
               if (anyHigh && rnd < 0.4 && hiClose[cj * rw + ci] && (hiAt(wx + 2, wy) || hiAt(wx - 2, wy) || hiAt(wx, wy + 2) || hiAt(wx, wy - 2))) c = shade(mix(c, ROCK_D, 0.55), (r2 - 0.5) * 0.3); // scree
+            }
+          }
+          // rocks fallen from the cliff, piled along its foot
+          if (anyHigh && k !== K.Water && hiClose[cj * rw + ci]) {
+            let foot = 0;
+            const out = rockOut(wx, wy, 0);
+            for (const dd of [1, 2.2, 3.5, 5, 6.5])
+              if (hiAt(wx - dd - out, wy) || hiAt(wx, wy - dd - out)) {
+                foot = dd;
+                break;
+              }
+            if (foot) {
+              const [bid, bcr, box, boy] = stone(wx / 3, wy / 3, seed + 50);
+              const big = bid > 0.25 + foot * 0.1 && Math.hypot(box, boy) < 0.55 - foot * 0.05;
+              if (big && bcr > 0.05) {
+                // a boulder: lit on its upper left, dark underneath
+                c = mix(ROCK_D, ROCK_L, 0.3 + hash2(Math.floor(bid * 1e4), 0, seed + 51) * 0.45);
+                c = shade(c, Math.max(-0.35, Math.min(0.22, -(box + boy) * 0.5)));
+                if (bcr < 0.12) c = shade(c, -0.25);
+                c = shade(c, (rnd - 0.5) * 0.1);
+              } else if (big || (foot < 2.5 && rnd < 0.45)) c = shade(mix(c, ROCK_D, 0.6), -0.25); // crevices and grit
             }
           }
           // shadows cast by plateaus
