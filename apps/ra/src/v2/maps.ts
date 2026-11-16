@@ -129,7 +129,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'ring',
     name: 'Equator',
-    blurb: 'A belt of land round the middle of the planet, oceans to north and south. Two ways round to the enemy.',
+    blurb: 'A belt of land around the middle of the planet, oceans to north and south. Two ways around to the enemy.',
     water: 0.5,
     high: 0.12,
     mask: (sx, sy, w, h, N, s) => {
@@ -148,7 +148,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'lakes',
     name: 'Lakelands',
-    blurb: 'Rolling grassland all the way round, with lakes and ridges. Open in every direction.',
+    blurb: 'Rolling grassland all the way around, with lakes and ridges. Open in every direction.',
     water: 0.15,
     high: 0.14,
     players: [2, 8],
@@ -205,7 +205,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'cross',
     name: 'Crossroads',
-    blurb: 'Two belts of land cross in the middle of the ocean and run on round the planet.',
+    blurb: 'Two belts of land cross in the middle of the ocean and run on around the planet.',
     water: 0.6,
     high: 0.12,
     mask: (sx, sy, w, h, N, s) => {
@@ -225,7 +225,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'serpent',
     name: 'Serpent',
-    blurb: 'A winding band of land coiled round the planet, sea on either side.',
+    blurb: 'A winding band of land coiled around the planet, sea on either side.',
     water: 0.62,
     high: 0.12,
     mask: (sx, sy, w, h, N, s) => {
@@ -302,7 +302,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'inland',
     name: 'Inland Sea',
-    blurb: 'Land all the way round a great sea in the middle of the map.',
+    blurb: 'Land all the way around a great sea in the middle of the map.',
     water: 0.3,
     high: 0.14,
     mask: (sx, sy, w, h, N, s) => coast(-blob(sx, sy, w, h, N, s, 0.5, 0.5, 0.24, 0.25), w, 0.06),
@@ -312,7 +312,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'atoll',
     name: 'Atoll',
-    blurb: 'A ring of land round a lagoon, open ocean outside. Bases round the ring.',
+    blurb: 'A ring of land around a lagoon, open ocean outside. Bases around the ring.',
     water: 0.6,
     high: 0.1,
     mask: (sx, sy, w, h, N, s) => {
@@ -325,7 +325,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'wetlands',
     name: 'Wetlands',
-    blurb: 'Low, soggy country full of lakes and meres. Lots of ways round, few straight lines.',
+    blurb: 'Low, soggy country full of lakes and ponds. Lots of ways around, few straight lines.',
     water: 0.3,
     high: 0.06,
     players: [2, 6],
@@ -357,7 +357,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'crater',
     name: 'Crater Lake',
-    blurb: 'A ring of water round an island in the middle, crossed by three causeways. Bases all round it.',
+    blurb: 'A ring of water around an island in the middle, crossed by three causeways. Bases all around it.',
     water: 0.16,
     high: 0.14,
     mask: (sx, sy, w, h, N, s) => {
@@ -425,7 +425,7 @@ const RECIPES: Recipe[] = [
   {
     id: 'meridian',
     name: 'Meridian',
-    blurb: 'A broad belt of land from pole to pole, ocean round the back of the planet.',
+    blurb: 'A broad belt of land from pole to pole, ocean around the back of the planet.',
     water: 0.46,
     high: 0.14,
     mask: (sx, sy, w, h, N, s) => {

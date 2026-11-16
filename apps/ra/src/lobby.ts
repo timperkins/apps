@@ -1,8 +1,14 @@
-// The landing page: multiplayer first. You pick a name and a colour, then
-// host a game (and get a four-letter room code to share) or join one with
-// its code. Everyone in the room sees who else is there; the host picks one
-// of the maps made for that many players and starts the game. One button
-// goes to the single-player game and its test stages instead.
+// The landing page: multiplayer first. You enter a name, then host a game
+// (and get a four-letter room code) or join one with its code. Everyone in
+// the room sees who else is there and gets a color of their own, which they
+// can change; the host picks one of the maps made for that many players and
+// starts the game. "Test mode" (top right) goes to the single-player game
+// and its test stages at /test instead.
+//
+// A room has its own address (/CODE), so reloading the page brings you
+// back into it: a player joins again, and the host takes the room back up
+// with the game as it last saved it. While the host is away everyone else's
+// game is paused.
 //
 // The host runs the game for everyone (see "Multiplayer" in src/v2/game.ts);
 // here is the lobby and the messages that carry the game once it starts.
@@ -16,22 +22,43 @@ import type { Hub, Link } from './net/link';
 const MAX_PLAYERS = 8;
 // how long the host waits for everyone's world to be ready before starting anyway
 const READY_WAIT_MS = 45000;
+// how long a player keeps trying to get back to a host that has gone
+const REJOIN_MS = 3 * 60 * 1000;
+const REJOIN_GAP_MS = 2000;
+// how often the host saves the game, so a reload can carry on from there
+const SAVE_MS = 2000;
+// saved rooms older than this are forgotten
+const SAVE_LIFE_MS = 6 * 60 * 60 * 1000;
 
 interface LobbyPlayer {
   id: string;
   name: string;
   color: number; // a side in FACTIONS
   host?: boolean;
+  away?: boolean; // in a game: lost touch, may be back
 }
 
+type StartMsg = { t: 'start'; seed: number; mapId: string; players: (Player & { id: string })[] };
 type ToHost = { t: 'hello'; name: string; color: number } | { t: 'ready' } | { t: 'cmd'; cmd: Command };
 type ToPlayer =
   | { t: 'lobby'; players: LobbyPlayer[]; mapId: string; seed: number; you: string }
-  | { t: 'start'; seed: number; mapId: string; players: (Player & { id: string })[] }
+  | StartMsg
   | { t: 'go' }
   | { t: 'snap'; s: Snapshot }
   | { t: 'left'; name: string }
+  | { t: 'back'; name: string }
   | { t: 'no'; why: string };
+
+/** What the host keeps in local storage so a reload can pick the room up again. */
+interface HostSave {
+  uid: string;
+  at: number;
+  players: LobbyPlayer[];
+  mapId: string;
+  seed: number;
+  started?: StartMsg;
+  snap?: Snapshot;
+}
 
 /** A game that is starting: what main.ts needs to make the world and run it. */
 export interface Match {
@@ -40,9 +67,11 @@ export interface Match {
   players: Player[];
   me: number; // your side
   host: boolean;
+  /** The host back after a reload: the game as it was. */
+  resume?: Snapshot;
   /** Your world is made: tell the host. */
   ready(): void;
-  /** Everyone is ready: play. */
+  /** Everyone is ready (or the host is back): play. */
   onGo: () => void;
   // the host: a player's order, and sending everyone the latest
   onCommand: (f: number, cmd: Command) => void;
@@ -50,18 +79,21 @@ export interface Match {
   // a player: an order for the host, and its updates
   sendCommand(cmd: Command): void;
   onSnapshot: (s: Snapshot) => void;
-  // someone left, or (a player) the host has gone
+  // someone left or came back
   onLeft: (name: string) => void;
+  onBack: (name: string) => void;
+  // a player: the host has gone (the game waits), or isn't coming back
   onHostLost: () => void;
+  onHostGone: () => void;
   leave(): void;
 }
 
 export interface LobbyHooks {
   solo(): void;
   start(m: Match): void;
+  /** The landing page shows (true) or goes (false): main.ts shows a world behind it. */
+  showing(on: boolean): void;
 }
-
-const NAMES = ['Ace', 'Badger', 'Comet', 'Dingo', 'Falcon', 'Gecko', 'Hawk', 'Ibex', 'Jackal', 'Kestrel', 'Lynx', 'Marten', 'Otter', 'Puma', 'Raven', 'Viper'];
 
 function load(key: string): string | null {
   try {
@@ -70,12 +102,47 @@ function load(key: string): string | null {
     return null;
   }
 }
-function save(key: string, v: string): void {
+function save(key: string, v: string | null): void {
   try {
-    localStorage.setItem(key, v);
+    if (v === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, v);
   } catch {
-    /* private mode */
+    /* private mode, or full */
   }
+}
+function loadJson<T>(key: string): T | null {
+  try {
+    return JSON.parse(load(key) ?? 'null') as T | null;
+  } catch {
+    return null;
+  }
+}
+const hostKey = (code: string) => `ra-host-${code}`;
+// the room you were last in, as a player
+const ROOM_KEY = 'ra-room';
+
+// Forget saved rooms from long ago.
+function tidySaves(): void {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith('ra-host-')) continue;
+      const s = loadJson<HostSave>(k);
+      if (!s || Date.now() - s.at > SAVE_LIFE_MS) localStorage.removeItem(k);
+    }
+  } catch {
+    /* no storage */
+  }
+}
+
+// The page's address: /CODE in a room, / otherwise (keeping ?localnet and the like).
+function setPath(path: string): void {
+  const q = new URLSearchParams(location.search);
+  q.delete('join');
+  // (?localnet, not ?localnet=)
+  const s = q.toString().replace(/=(?=&|$)/g, '');
+  const url = path + (s ? `?${s}` : '') + location.hash;
+  if (url !== location.pathname + location.search + location.hash) history.replaceState(null, '', url);
 }
 
 const hexOf = (f: number) => {
@@ -92,8 +159,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 export class Lobby {
   private root = el('div');
-  private name = load('ra-name') || NAMES[Math.floor(Math.random() * NAMES.length)];
-  private color = Math.min(FACTIONS.length - 1, Math.max(0, Number(load('ra-color') ?? 0) || 0));
+  private name = load('ra-name') ?? '';
+  private color = -1; // given by the host when you join
   private sig: Signaling | null = null;
   // in a room
   private mode: 'home' | 'host' | 'player' = 'home';
@@ -105,26 +172,40 @@ export class Lobby {
   private hub: Hub | null = null;
   private link: Link | null = null;
   private match: Match | null = null;
+  private started: StartMsg | null = null; // the host: the game being played
   private busy = '';
   private error = '';
+  private joinCode = '';
+  // a player who has lost the host: trying to get back until then
+  private rejoinUntil = 0;
   private previews = new Map<string, HTMLCanvasElement>();
 
   constructor(private hooks: LobbyHooks) {
     this.root.id = 'lobby';
+    this.root.hidden = true;
     document.body.append(this.root);
+    tidySaves();
     // a link with ?join=CODE fills in the code
-    const j = normalizeCode(new URLSearchParams(location.search).get('join') ?? '');
-    this.joinCode = j;
-    this.render();
+    this.joinCode = normalizeCode(new URLSearchParams(location.search).get('join') ?? '');
+    window.addEventListener('pagehide', () => this.saveNow());
   }
-  private joinCode = '';
+
+  /** The room code in the page's address, if there is one. */
+  static pathCode(): string {
+    const c = normalizeCode(location.pathname.replace(/\//g, ''));
+    return location.pathname.replace(/\//g, '').length === 4 && isValidCode(c) ? c : '';
+  }
 
   show(): void {
+    if (!this.root.hidden) return this.render();
     this.root.hidden = false;
+    this.hooks.showing(true);
     this.render();
   }
   hide(): void {
+    if (this.root.hidden) return;
     this.root.hidden = true;
+    this.hooks.showing(false);
   }
   get open(): boolean {
     return !this.root.hidden;
@@ -138,46 +219,92 @@ export class Lobby {
     return this.sig;
   }
 
+  /** Back into the room in the page's address: as its host if it was yours, otherwise as a player. */
+  async enter(code: string): Promise<void> {
+    this.show();
+    this.setBusy(`Joining ${code}`);
+    try {
+      const sig = await this.signaling();
+      const uid = await sig.me();
+      const saved = loadJson<HostSave>(hostKey(code));
+      if (saved && saved.uid === uid && (await sig.reopenRoom(code, saved.started ? 'playing' : 'lobby'))) return void (await this.rehost(code, saved));
+    } catch (err) {
+      return this.fail(err);
+    }
+    // a player: keep trying for a while if this is the room you were in
+    const was = loadJson<{ code: string; at: number }>(ROOM_KEY);
+    this.joinCode = code;
+    void this.join(was?.code === code && Date.now() - was.at < SAVE_LIFE_MS);
+  }
+
   // ---------- The host ----------
 
   private async host(): Promise<void> {
     this.setBusy('Making a room');
     try {
       const sig = await this.signaling();
-      const { Hub } = await import('./net/link');
       this.code = await sig.createRoom();
       this.you = await sig.me();
       this.mode = 'host';
-      this.players = [{ id: this.you, name: this.name, color: this.color, host: true }];
+      this.players = [{ id: this.you, name: this.name || 'Host', color: 0, host: true }];
+      this.color = 0;
       this.fitMap();
-      this.hub = new Hub(sig, this.code, {
-        onOpen: () => {},
-        onClose: (uid) => this.playerGone(uid),
-        onMessage: (uid, m) => this.fromPlayer(uid, m as ToHost),
-      });
+      await this.openHub();
+      setPath(`/${this.code}`);
+      this.saveNow();
       this.setBusy('');
     } catch (err) {
       this.fail(err);
     }
   }
 
+  private async openHub(): Promise<void> {
+    const { Hub } = await import('./net/link');
+    this.hub = new Hub(this.sig!, this.code, {
+      onOpen: () => {},
+      onClose: (uid) => this.playerGone(uid),
+      onMessage: (uid, m) => this.fromPlayer(uid, m as ToHost),
+    });
+  }
+
+  // The host reloaded the page: the room again, and the game if one was on.
+  private async rehost(code: string, saved: HostSave): Promise<void> {
+    this.code = code;
+    this.you = saved.uid;
+    this.mode = 'host';
+    this.mapId = saved.mapId;
+    this.seed = saved.seed;
+    const me = saved.players.find((p) => p.host);
+    // everyone else comes back by joining again
+    this.players = saved.started ? saved.players.map((p) => ({ ...p, away: !p.host })) : me ? [me] : [];
+    if (me) {
+      me.name = this.name || me.name;
+      this.color = me.color;
+    }
+    await this.openHub();
+    setPath(`/${code}`);
+    this.setBusy('');
+    if (saved.started) {
+      this.started = saved.started;
+      this.waiting.clear();
+      this.begin(saved.started, true, saved.snap);
+    } else this.sendLobby();
+  }
+
   private fromPlayer(uid: string, m: ToHost): void {
     if (m.t === 'hello') {
-      if (this.match) {
-        this.hub?.send(uid, { t: 'no', why: 'That game has already started.' } satisfies ToPlayer);
-        return;
-      }
+      if (this.started) return this.helloInGame(uid, m);
       let p = this.players.find((q) => q.id === uid);
       if (!p) {
         if (this.players.length >= MAX_PLAYERS) {
-          this.hub?.send(uid, { t: 'no', why: 'That room is full (8 players).' } satisfies ToPlayer);
+          this.hub?.send(uid, { t: 'no', why: `That room is full (${MAX_PLAYERS} players).` } satisfies ToPlayer);
           return;
         }
-        p = { id: uid, name: '', color: 0 };
+        p = { id: uid, name: '', color: -1 };
         this.players.push(p);
       }
-      p.name = String(m.name).slice(0, 16) || 'Player';
-      p.color = this.freeColor(m.color, uid);
+      p.name = String(m.name).slice(0, 16) || `Player ${this.players.indexOf(p) + 1}`;
+      p.color = this.freeColor(Number(m.color), uid);
       this.fitMap();
       this.sendLobby();
       return;
@@ -186,11 +313,37 @@ export class Lobby {
     if (m.t === 'ready') this.readyFrom(uid);
     else if (m.t === 'cmd') {
       const p = this.players.find((q) => q.id === uid);
-      if (p) this.match.onCommand(p.color, m.cmd);
+      if (p && !p.away) this.match.onCommand(p.color, m.cmd);
     }
   }
 
-  // The colour a player asked for, or the first one nobody else has.
+  // Someone in the game coming back (they reloaded, or the host did): the game
+  // to make their world from, then they play on once it is made.
+  // the host's game is going (not still being made)
+  private live = false;
+  private goLive(): void {
+    this.live = true;
+    this.match?.onGo();
+    for (const uid of [...this.readied]) this.readyFrom(uid);
+    this.readied.clear();
+  }
+  // players back and ready while the host's game was still being made
+  private readied = new Set<string>();
+
+  private helloInGame(uid: string, m: Extract<ToHost, { t: 'hello' }>): void {
+    const p = this.players.find((q) => q.id === uid);
+    if (!p || !this.started) {
+      this.hub?.send(uid, { t: 'no', why: 'That game has already started.' } satisfies ToPlayer);
+      return;
+    }
+    if (m.name) p.name = String(m.name).slice(0, 16);
+    this.hub?.send(uid, this.started);
+    this.rejoining.add(uid);
+  }
+  // players back in a game, making their world again
+  private rejoining = new Set<string>();
+
+  // The color a player asked for, or the first one nobody else has.
   private freeColor(want: number, uid: string): number {
     const taken = new Set(this.players.filter((p) => p.id !== uid).map((p) => p.color));
     if (want >= 0 && want < FACTIONS.length && !taken.has(want)) return want;
@@ -201,13 +354,16 @@ export class Lobby {
   private playerGone(uid: string): void {
     const p = this.players.find((q) => q.id === uid);
     if (!p) return;
-    this.players = this.players.filter((q) => q !== p);
     if (this.match) {
+      // (they may be back)
+      p.away = true;
+      this.rejoining.delete(uid);
       this.hub?.broadcast({ t: 'left', name: p.name } satisfies ToPlayer);
       this.match.onLeft(p.name);
       this.waiting.delete(uid);
       this.maybeGo();
     } else {
+      this.players = this.players.filter((q) => q !== p);
       this.fitMap();
       this.sendLobby();
     }
@@ -217,6 +373,7 @@ export class Lobby {
     if (this.mode !== 'host') return;
     for (const p of this.players)
       if (!p.host) this.hub?.send(p.id, { t: 'lobby', players: this.players, mapId: this.mapId, seed: this.seed, you: p.id } satisfies ToPlayer);
+    this.saveNow();
     this.render();
   }
 
@@ -234,15 +391,31 @@ export class Lobby {
   private startGame(): void {
     if (this.mode !== 'host' || this.match) return;
     const players = this.players.map((p) => ({ id: p.id, f: p.color, name: p.name }));
-    const start: ToPlayer = { t: 'start', seed: this.seed, mapId: this.mapId, players };
+    const start: StartMsg = { t: 'start', seed: this.seed, mapId: this.mapId, players };
+    this.started = start;
     this.hub?.broadcast(start);
     void this.sig?.setPhase(this.code, 'playing').catch(() => {});
     this.waiting = new Set(this.players.filter((p) => !p.host).map((p) => p.id));
     this.hostReady = false;
+    this.saveNow();
     this.begin(start, true);
   }
 
   private readyFrom(uid: string): void {
+    const p = this.players.find((q) => q.id === uid);
+    if (this.rejoining.has(uid)) {
+      // back in: play on (once the host's own game is going again)
+      if (!this.live) return void this.readied.add(uid);
+      this.rejoining.delete(uid);
+      this.hub?.send(uid, { t: 'go' } satisfies ToPlayer);
+      if (p) {
+        p.away = false;
+        this.hub?.broadcast({ t: 'back', name: p.name } satisfies ToPlayer);
+        this.match?.onBack(p.name);
+      }
+      return;
+    }
+    if (p) p.away = false;
     this.waiting.delete(uid);
     this.maybeGo();
   }
@@ -252,33 +425,96 @@ export class Lobby {
     clearTimeout(this.readyWait);
     this.waiting.clear();
     this.hub?.broadcast({ t: 'go' } satisfies ToPlayer);
-    this.match.onGo();
+    this.goLive();
+  }
+
+  // ---------- Saving (the host) ----------
+
+  private lastSnap: Snapshot | null = null;
+  private lastOre: number[] | undefined;
+  private savedAt = 0;
+
+  private keepSnapshot(s: Snapshot): void {
+    if (s.ore) this.lastOre = s.ore;
+    this.lastSnap = s;
+    if (performance.now() - this.savedAt > SAVE_MS) this.saveNow();
+  }
+
+  private saveNow(): void {
+    if (this.mode !== 'host' || !this.code) return;
+    this.savedAt = performance.now();
+    const snap = this.lastSnap && this.started ? { ...this.lastSnap, gone: [], told: [], ore: this.lastOre } : undefined;
+    const s: HostSave = { uid: this.you, at: Date.now(), players: this.players, mapId: this.mapId, seed: this.seed, started: this.started ?? undefined, snap };
+    save(hostKey(this.code), JSON.stringify(s));
   }
 
   // ---------- A player ----------
 
-  private async join(): Promise<void> {
+  // Join the room in the code box. Again and again for a while if `keepTrying`
+  // (you were in it, and the host may be away for a moment).
+  private async join(keepTrying = false): Promise<void> {
     const code = normalizeCode(this.joinCode);
     if (!isValidCode(code)) {
       this.error = 'Room codes are four letters.';
       this.render();
       return;
     }
-    this.setBusy(`Joining ${code}`);
+    this.setBusy(keepTrying ? `Waiting for the host of ${code}` : `Joining ${code}`);
+    if (keepTrying) {
+      this.code = code;
+      this.rejoinUntil = Date.now() + REJOIN_MS;
+      return this.rejoin();
+    }
     try {
       const sig = await this.signaling();
       const phase = await sig.roomPhase(code);
       if (!phase) throw new Error(`There is no room ${code}.`);
-      if (phase === 'playing') throw new Error(`The game in ${code} has already started.`);
-      const { join } = await import('./net/link');
-      this.link = await join(sig, code, (m) => this.fromHost(m as ToPlayer), () => this.hostGone());
-      this.code = code;
-      this.mode = 'player';
-      this.you = this.link.uid;
-      this.link.send({ t: 'hello', name: this.name, color: this.color } satisfies ToHost);
+      await this.connect(code);
       this.setBusy('');
     } catch (err) {
       this.fail(err);
+    }
+  }
+
+  private async connect(code: string): Promise<void> {
+    const sig = await this.signaling();
+    const { join } = await import('./net/link');
+    this.link = await join(sig, code, (m) => this.fromHost(m as ToPlayer), () => this.hostGone());
+    this.code = code;
+    this.mode = 'player';
+    this.you = this.link.uid;
+    save(ROOM_KEY, JSON.stringify({ code, at: Date.now() }));
+    setPath(`/${code}`);
+    this.link.send({ t: 'hello', name: this.name, color: this.color } satisfies ToHost);
+  }
+
+  // Back to the host after losing it: try until it answers, or until it's clear it won't.
+  private rejoining_ = false;
+  private async rejoin(): Promise<void> {
+    if (this.rejoining_) return;
+    this.rejoining_ = true;
+    const code = this.code;
+    try {
+      while (this.code === code && Date.now() < this.rejoinUntil) {
+        try {
+          await this.connect(code);
+          this.setBusy('');
+          return;
+        } catch (err) {
+          console.info('host not back yet', err);
+          await new Promise((r) => setTimeout(r, REJOIN_GAP_MS));
+        }
+      }
+      if (this.code !== code) return;
+      // the host isn't coming back
+      if (this.match) this.match.onHostGone();
+      else {
+        this.toHome();
+        this.error = `Lost touch with the host of ${code}.`;
+        this.render();
+      }
+    } finally {
+      this.rejoining_ = false;
     }
   }
 
@@ -289,12 +525,14 @@ export class Lobby {
         this.mapId = m.mapId;
         this.seed = m.seed;
         this.you = m.you;
-        // the host may have given you another colour (yours was taken)
+        // the host gives you a color nobody else has
         this.color = m.players.find((p) => p.id === m.you)?.color ?? this.color;
         this.render();
         break;
       case 'start':
-        this.begin(m, false);
+        // back with the host in a game you are already playing: say you're ready
+        if (this.match && this.match.seed === m.seed && this.match.mapId === m.mapId) this.link?.send({ t: 'ready' } satisfies ToHost);
+        else this.begin(m, false);
         break;
       case 'go':
         this.match?.onGo();
@@ -305,10 +543,14 @@ export class Lobby {
       case 'left':
         this.match?.onLeft(m.name);
         break;
+      case 'back':
+        this.match?.onBack(m.name);
+        break;
       case 'no':
         this.link?.close();
         this.link = null;
-        this.mode = 'home';
+        this.toHome();
+        save(ROOM_KEY, null);
         this.fail(new Error(m.why));
         break;
     }
@@ -316,17 +558,16 @@ export class Lobby {
 
   private hostGone(): void {
     this.link = null;
+    if (this.mode !== 'player') return;
+    this.rejoinUntil = Date.now() + REJOIN_MS;
     if (this.match) this.match.onHostLost();
-    else {
-      this.mode = 'home';
-      this.error = 'Lost touch with the host.';
-      this.render();
-    }
+    else this.setBusy('Waiting for the host');
+    void this.rejoin();
   }
 
   // ---------- Starting ----------
 
-  private begin(m: Extract<ToPlayer, { t: 'start' }>, host: boolean): void {
+  private begin(m: StartMsg, host: boolean, resume?: Snapshot): void {
     const me = m.players.find((p) => p.id === this.you)?.f ?? 0;
     const match: Match = {
       seed: m.seed,
@@ -334,24 +575,31 @@ export class Lobby {
       players: m.players.map(({ f, name }) => ({ f, name })),
       me,
       host,
+      resume,
       ready: () => {
-        if (host) {
-          this.hostReady = true;
-          // nobody holds the game up for long
-          this.readyWait = window.setTimeout(() => {
-            this.waiting.clear();
-            this.maybeGo();
-          }, READY_WAIT_MS);
+        if (!host) return this.link?.send({ t: 'ready' } satisfies ToHost);
+        // the host back after a reload: carry on (the others are let in as they come back)
+        if (resume) return this.goLive();
+        this.hostReady = true;
+        // nobody holds the game up for long
+        this.readyWait = window.setTimeout(() => {
+          this.waiting.clear();
           this.maybeGo();
-        } else this.link?.send({ t: 'ready' } satisfies ToHost);
+        }, READY_WAIT_MS);
+        this.maybeGo();
       },
       onGo: () => {},
       onCommand: () => {},
-      sendSnapshot: (s) => this.hub?.broadcast({ t: 'snap', s } satisfies ToPlayer, true),
+      sendSnapshot: (s) => {
+        this.hub?.broadcast({ t: 'snap', s } satisfies ToPlayer, true);
+        this.keepSnapshot(s);
+      },
       sendCommand: (cmd) => this.link?.send({ t: 'cmd', cmd } satisfies ToHost),
       onSnapshot: () => {},
       onLeft: () => {},
+      onBack: () => {},
       onHostLost: () => {},
+      onHostGone: () => {},
       leave: () => this.leave(),
     };
     this.match = match;
@@ -364,16 +612,32 @@ export class Lobby {
     if (this.mode === 'host') {
       this.hub?.close();
       void this.sig?.closeRoom(this.code);
+      save(hostKey(this.code), null);
     }
     this.link?.close();
+    save(ROOM_KEY, null);
+    this.toHome();
+    this.error = '';
+    this.show();
+  }
+
+  private toHome(): void {
+    clearTimeout(this.readyWait);
     this.hub = null;
     this.link = null;
     this.match = null;
+    this.started = null;
+    this.lastSnap = null;
+    this.lastOre = undefined;
+    this.rejoining.clear();
+    this.readied.clear();
+    this.live = false;
     this.mode = 'home';
     this.players = [];
     this.code = '';
-    this.error = '';
-    this.show();
+    this.color = -1;
+    this.busy = '';
+    setPath('/');
   }
 
   // ---------- Drawing it ----------
@@ -388,6 +652,7 @@ export class Lobby {
     this.busy = '';
     this.error = err instanceof Error ? err.message : String(err);
     if (/permission|unavailable|network|offline/i.test(this.error)) this.error = `Couldn't reach the room server (${this.error}).`;
+    if (this.mode === 'home') setPath('/');
     this.render();
   }
 
@@ -397,19 +662,19 @@ export class Lobby {
     this.sendMe();
   }
   private setColor(c: number): void {
-    if (this.mode !== 'home' && this.players.some((p) => p.color === c && p.id !== this.you)) return;
+    if (this.players.some((p) => p.color === c && p.id !== this.you)) return;
     this.color = c;
-    save('ra-color', String(c));
     this.sendMe();
     this.render();
   }
-  // tell the room your name and colour
+  // tell the room your name and color
   private sendTimer = 0;
   private sendMe(): void {
+    if (this.mode === 'home') return;
     clearTimeout(this.sendTimer);
     this.sendTimer = window.setTimeout(() => {
-      if (this.mode === 'player') this.link?.send({ t: 'hello', name: this.name || 'Player', color: this.color } satisfies ToHost);
-      if (this.mode === 'host') {
+      if (this.mode === 'player') this.link?.send({ t: 'hello', name: this.name, color: this.color } satisfies ToHost);
+      if (this.mode === 'host' && !this.started) {
         const me = this.players.find((p) => p.host);
         if (me) {
           me.name = this.name || 'Host';
@@ -444,62 +709,21 @@ export class Lobby {
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-label', 'Multiplayer lobby');
 
-    const head = el('div', 'head');
-    head.append(el('span', 'title', 'RA'), el('span', 'sub', 'Multiplayer · same network'));
-    box.append(head);
-
-    // you: name and colour
-    const you = el('div', 'you');
-    const nameLab = el('label', 'field');
-    nameLab.append(el('span', 'lab', 'Name'));
-    const input = el('input');
-    input.id = 'lobbyName';
-    input.maxLength = 16;
-    input.value = this.name;
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.addEventListener('input', () => this.setName(input.value));
-    nameLab.append(input);
-    you.append(nameLab);
-    const colors = el('div', 'field');
-    colors.append(el('span', 'lab', 'Colour'));
-    const sw = el('div', 'swatches');
-    sw.setAttribute('role', 'radiogroup');
-    const taken = new Set(this.mode === 'home' ? [] : this.players.filter((p) => p.id !== this.you).map((p) => p.color));
-    FACTIONS.forEach((f, i) => {
-      const b = el('button', 'swatch');
-      b.type = 'button';
-      b.style.setProperty('--c', hexOf(i));
-      b.title = taken.has(i) ? `${f.name} (taken)` : f.name;
-      b.setAttribute('role', 'radio');
-      b.setAttribute('aria-label', f.name);
-      b.setAttribute('aria-checked', String(i === this.color));
-      b.disabled = taken.has(i);
-      b.addEventListener('click', () => this.setColor(i));
-      sw.append(b);
-    });
-    colors.append(sw);
-    you.append(colors);
-    box.append(you);
-
     if (this.mode === 'home') box.append(this.homeView());
     else box.append(this.roomView());
 
     if (this.busy) box.append(el('div', 'busy', `${this.busy}…`));
     if (this.error) box.append(el('div', 'err', this.error));
 
-    const foot = el('div', 'foot');
-    const solo = el('button', 'solo', 'Single player / test mode');
-    solo.type = 'button';
-    solo.title = 'Play against the computer, with the test stages';
-    solo.addEventListener('click', () => {
-      if (this.mode !== 'home') this.leave();
-      this.hide();
-      this.hooks.solo();
-    });
-    foot.append(solo);
-    box.append(foot);
-    this.root.replaceChildren(box);
+    const kids: HTMLElement[] = [box];
+    if (this.mode === 'home') {
+      const test = el('button', 'testMode', 'Test mode');
+      test.type = 'button';
+      test.title = 'Play alone against the computer, with the test stages';
+      test.addEventListener('click', () => this.hooks.solo());
+      kids.push(test);
+    }
+    this.root.replaceChildren(...kids);
     if (focused) {
       const f = document.getElementById(focused) as HTMLInputElement | null;
       if (f) {
@@ -509,8 +733,24 @@ export class Lobby {
     }
   }
 
+  private nameInput(): HTMLElement {
+    const nameLab = el('label', 'field');
+    nameLab.append(el('span', 'lab', 'Name'));
+    const input = el('input');
+    input.id = 'lobbyName';
+    input.maxLength = 16;
+    input.value = this.name;
+    input.placeholder = 'Your name';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.addEventListener('input', () => this.setName(input.value));
+    nameLab.append(input);
+    return nameLab;
+  }
+
   private homeView(): HTMLElement {
     const v = el('div', 'home');
+    v.append(this.nameInput());
     const hostBtn = el('button', 'big', 'Host a game');
     hostBtn.type = 'button';
     hostBtn.disabled = !!this.busy;
@@ -535,22 +775,45 @@ export class Lobby {
     joinBtn.addEventListener('click', () => void this.join());
     joinRow.append(code, joinBtn);
     v.append(hostBtn, el('div', 'or', 'or join with a room code'), joinRow);
-    v.append(el('p', 'note', 'Everyone needs to be on the same Wi-Fi. Up to 8 players.'));
     return v;
   }
 
   private roomView(): HTMLElement {
     const v = el('div', 'room');
-    const codeRow = el('div', 'codeRow');
-    codeRow.append(el('span', 'lab', 'Room'), el('span', 'code', this.code));
-    codeRow.append(el('span', 'hint', this.mode === 'host' ? 'Tell the others this code' : 'Waiting for the host to start'));
-    v.append(codeRow);
+    const code = el('div', 'code', this.code);
+    code.setAttribute('aria-label', `Room code ${this.code.split('').join(' ')}`);
+    v.append(code);
+
+    // you: name and color
+    const you = el('div', 'you');
+    you.append(this.nameInput());
+    const colors = el('div', 'field');
+    colors.append(el('span', 'lab', 'Color'));
+    const sw = el('div', 'swatches');
+    sw.setAttribute('role', 'radiogroup');
+    sw.setAttribute('aria-label', 'Your color');
+    const taken = new Set(this.players.filter((p) => p.id !== this.you).map((p) => p.color));
+    FACTIONS.forEach((f, i) => {
+      const b = el('button', 'swatch');
+      b.type = 'button';
+      b.style.setProperty('--c', hexOf(i));
+      b.title = taken.has(i) ? `${f.name} (taken)` : f.name;
+      b.setAttribute('role', 'radio');
+      b.setAttribute('aria-label', f.name);
+      b.setAttribute('aria-checked', String(i === this.color));
+      b.disabled = taken.has(i);
+      b.addEventListener('click', () => this.setColor(i));
+      sw.append(b);
+    });
+    colors.append(sw);
+    you.append(colors);
+    v.append(you);
 
     const list = el('ul', 'players');
     for (const p of this.players) {
       const li = el('li');
       const dot = el('i', 'dot');
-      dot.style.setProperty('--c', hexOf(p.color));
+      dot.style.setProperty('--c', p.color >= 0 ? hexOf(p.color) : 'transparent');
       li.append(dot, el('span', 'pname', p.name || 'Player'));
       if (p.host) li.append(el('span', 'tag', 'host'));
       if (p.id === this.you) li.append(el('span', 'tag', 'you'));
@@ -612,11 +875,11 @@ export class Lobby {
     leave.addEventListener('click', () => this.leave());
     row.append(leave);
     if (this.mode === 'host') {
-      const go = el('button', 'big', this.players.length < 2 ? 'Start alone (test)' : `Start · ${this.players.length} players`);
+      const go = el('button', 'big', this.players.length < 2 ? 'Start alone' : `Start · ${this.players.length} players`);
       go.type = 'button';
       go.addEventListener('click', () => this.startGame());
       row.append(go);
-    }
+    } else row.append(el('span', 'hint', 'Waiting for the host to start'));
     v.append(row);
     return v;
   }
