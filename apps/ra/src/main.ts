@@ -47,6 +47,7 @@ const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
 const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
 const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
 const okRing = document.querySelector<HTMLDivElement>('#okRing')!;
+const deployBtn = document.querySelector<HTMLButtonElement>('#deployBtn')!;
 const homeBtn = document.querySelector<HTMLButtonElement>('#homeBtn')!;
 const picker = document.querySelector<HTMLDivElement>('#picker')!;
 const pickMaps = picker.querySelector<HTMLDivElement>('.maps')!;
@@ -430,6 +431,27 @@ function placeConfirm(): void {
     okRing.style.backgroundImage = `url(${frames[i]})`;
   }
   confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
+}
+// A lone selected MCU gets a Deploy button floating just above it.
+deployBtn.innerHTML = `<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">${ICONS.deploy ?? ''}</svg>Deploy`;
+deployBtn.addEventListener('click', () => game?.act?.('deploy'));
+let deployKey = '';
+function placeDeploy(): void {
+  const d = (!planet && game?.deployAt?.()) || null;
+  deployBtn.hidden = !d;
+  if (!d) {
+    deployKey = '';
+    return;
+  }
+  const key = String(d.ok);
+  if (key !== deployKey) {
+    deployKey = key;
+    deployBtn.disabled = !d.ok;
+    deployBtn.title = d.ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear';
+  }
+  const r = canvas.getBoundingClientRect();
+  const lift = 22 * scale;
+  deployBtn.style.transform = `translate(${Math.round(r.left + (d.x - camX()) * scale)}px, ${Math.round(r.top + (d.y - camY()) * scale - lift)}px) translate(-50%, -100%)`;
 }
 okBtn.addEventListener('click', () => {
   if (!pending || !game) return;
@@ -1177,7 +1199,39 @@ function syncGhost(): void {
     ghostP = null;
     return;
   }
-  if (!ghostP) moveGhost(cen.x, cen.y + 20);
+  if (!ghostP) {
+    const p = ghostStart();
+    moveGhost(p.x, p.y);
+  }
+}
+// Where a new ghost first shows: by the pointer (on the map side of the build
+// menu and toolbar if the pointer is over them), or mid-screen if no pointer
+// has been seen yet.
+let lastPtr: { x: number; y: number } | null = null;
+window.addEventListener('pointermove', (e) => (lastPtr = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
+window.addEventListener('pointerdown', (e) => (lastPtr = { x: e.clientX, y: e.clientY }), { capture: true, passive: true });
+function ghostStart(): { x: number; y: number } {
+  if (!lastPtr) return { x: cen.x, y: cen.y + 20 };
+  const r = canvas.getBoundingClientRect();
+  const m = 48;
+  let x0 = r.left + m;
+  let x1 = r.right - m;
+  let y0 = r.top + m;
+  let y1 = r.bottom - m;
+  for (const sel of ['#build', '#toolbar']) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (!el || el.hidden || !el.offsetParent) continue;
+    const b = el.getBoundingClientRect();
+    if (!b.width || !b.height) continue;
+    // a panel down one side: keep to the map side of it
+    if (b.height > r.height * 0.6 && b.left > r.left + r.width / 2) x1 = Math.min(x1, b.left - m);
+    else if (b.height > r.height * 0.6 && b.right < r.left + r.width / 2) x0 = Math.max(x0, b.right + m);
+    else if (b.top > r.top + r.height / 2) y1 = Math.min(y1, b.top - m);
+    else if (b.bottom < r.top + r.height / 2) y0 = Math.max(y0, b.bottom + m);
+  }
+  const cx = x1 > x0 ? Math.min(x1, Math.max(x0, lastPtr.x)) : (r.left + r.right) / 2;
+  const cy = y1 > y0 ? Math.min(y1, Math.max(y0, lastPtr.y)) : (r.top + r.bottom) / 2;
+  return toMap(cx, cy);
 }
 let ghostDrag: { dx: number; dy: number } | null = null;
 
@@ -1599,8 +1653,9 @@ function frame(now: number): void {
     const sp = (320 * dt) / zoom;
     if (keys.has('arrowleft') || keys.has('a')) cen.x -= sp;
     if (keys.has('arrowright') || keys.has('d')) cen.x += sp;
-    if (keys.has('arrowup') || keys.has('w')) cen.y -= sp / 2;
-    if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
+    // up and down go as fast across the screen as left and right
+    if (keys.has('arrowup') || keys.has('w')) cen.y -= sp;
+    if (keys.has('arrowdown') || keys.has('s')) cen.y += sp;
     clampCen();
     if (!netPaused) {
       game.update(dt);
@@ -1646,6 +1701,7 @@ function draw(now: number, first: boolean): void {
   lockOnPan();
   refreshTypes();
   placeConfirm();
+  placeDeploy();
   build.update(now);
   if (first) lastSnap = -Infinity;
   snapshot(now);

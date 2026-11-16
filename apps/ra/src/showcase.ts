@@ -834,7 +834,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       } else s.blit(yard.spr, 0, 0, 0);
     },
   };
-  plain('Mobile Foundry', 'mcv', (a) => a.mcv, 22, 10, () => [deploy]);
+  plain('MCU', 'mcv', (a) => a.mcv, 22, 10, () => [deploy]);
 
   // the copter flies at height, with a shadow below and its rotors spinning
   const heliDraw =
@@ -938,7 +938,7 @@ function puffSite(s: Scene, b: V2BuildingArt): void {
 }
 
 const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
-  { kind: 'yard', name: 'Foundry', blurb: 'Where your base starts: builds everything else. Packs up into a Mobile Foundry.' },
+  { kind: 'yard', name: 'Foundry', blurb: 'Where your base starts: builds everything else. Packs up into an MCU (mobile construction unit).' },
   { kind: 'power', name: 'Power plant' },
   { kind: 'barracks', name: 'Barracks' },
   { kind: 'refinery', name: 'Ore refinery' },

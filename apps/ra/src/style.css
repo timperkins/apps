@@ -585,6 +585,45 @@ body {
   pointer-events: none;
 }
 
+#deployBtn {
+  position: fixed;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: 11px;
+  color: #10170d;
+  background: #e0b83c;
+  border: 2px solid;
+  border-color: #f7e2a0 #8a6a16 #8a6a16 #f7e2a0;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+
+#deployBtn svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+#deployBtn:disabled {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--edge);
+  opacity: 0.75;
+  cursor: var(--cur-arrow);
+}
+
+#deployBtn[hidden] {
+  display: none;
+}
+
 #okRing {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -822,6 +861,19 @@ body.sheet-open #selBar {
 }
 
 #build .close:active,
+#build .tabs button:disabled {
+  cursor: var(--cur-arrow);
+  opacity: 0.45;
+}
+
+#build .tabs button:disabled img {
+  filter: grayscale(1) brightness(0.8);
+}
+
+#build .tabs button:disabled:active {
+  border-color: var(--wood-hi) var(--wood-lo) var(--wood-lo) var(--wood-hi);
+}
+
 #build .tabs button:active {
   border-color: var(--wood-lo) var(--wood-hi) var(--wood-hi) var(--wood-lo);
 }
@@ -1802,6 +1854,7 @@ body.attract #hud,
 body.attract #mini,
 body.attract #selBar,
 body.attract #confirm,
+body.attract #deployBtn,
 body.attract #toolbar,
 body.attract #build,
 body.attract #toast,

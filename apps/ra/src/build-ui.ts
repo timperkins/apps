@@ -14,6 +14,20 @@ export interface BuildUI {
   reset(): void;
 }
 
+// prog/at/rate: the last progress the game reported, when, and how fast it
+// was going, so the clock wipe can sweep smoothly between reports
+interface Card {
+  el: HTMLButtonElement;
+  key: string;
+  icon: string;
+  wipe: HTMLElement;
+  building: boolean;
+  prog: number;
+  at: number;
+  rate: number;
+  shown: number;
+}
+
 export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   const btn = document.querySelector<HTMLButtonElement>('#buildBtn')!;
   const sep = document.querySelector<HTMLElement>('#buildSep')!;
@@ -37,7 +51,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   let last = 0;
   let wasPlacing = false;
   let reopen = false;
-  const cards = new Map<string, { el: HTMLButtonElement; key: string; icon: string }>();
+  const cards = new Map<string, Card>();
   let tabsKey = '';
   const seenSoon = new Set<string>();
 
@@ -137,8 +151,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     panelCredits.classList.toggle('full', !!menu.store && menu.credits >= menu.store);
     renderPower(menu.power);
 
-    if (!menu.tabs.some((t) => t.id === tab)) tab = menu.tabs[0]?.id ?? '';
-    const tk = menu.tabs.map((t) => t.id + (t.icon ? '*' : '')).join(',') + '|' + tab + '|' + menu.tabs.map((t) => (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready')) ? 1 : 0)).join('');
+    if (!menu.tabs.some((t) => t.id === tab && !t.disabled)) tab = (menu.tabs.find((t) => !t.disabled) ?? menu.tabs[0])?.id ?? '';
+    const tk = menu.tabs.map((t) => t.id + (t.icon ? '*' : '') + (t.disabled ? '-' : '')).join(',') + '|' + tab + '|' + menu.tabs.map((t) => (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready')) ? 1 : 0)).join('');
     if (tk !== tabsKey) {
       tabsKey = tk;
       tabsEl.replaceChildren(
@@ -155,6 +169,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
           b.title = t.label;
           b.setAttribute('aria-label', t.label);
           b.setAttribute('aria-selected', String(t.id === tab));
+          b.disabled = !!t.disabled;
+          if (t.disabled) b.title = `${t.label}: nothing to build here yet`;
           if (menu.items.some((i) => i.tab === t.id && (i.isNew || i.state === 'ready'))) b.classList.add('alert');
           b.addEventListener('click', () => {
             tab = t.id;
@@ -184,7 +200,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     shown.forEach((it, n) => {
       let c = cards.get(it.id);
       if (!c) {
-        c = { el: card(it), key: '', icon: it.icon };
+        const el = card(it);
+        c = { el, key: '', icon: it.icon, wipe: el.querySelector<HTMLElement>('.wipe')!, building: false, prog: 0, at: 0, rate: 0, shown: -1 };
         cards.set(it.id, c);
       }
       if (grid.children[n] !== c.el) grid.insertBefore(c.el, grid.children[n] ?? null);
@@ -193,8 +210,19 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
         c.icon = it.icon;
         c.el.querySelector('img')!.src = it.icon;
       }
-      const p = Math.round(it.progress * 100);
-      const key = `${it.state}|${p}|${it.isNew}|${it.blocked ?? ''}|${it.count}`;
+      const now = performance.now();
+      const building = it.state === 'building' || it.state === 'paused';
+      if (it.state === 'building' && c.building && it.progress > c.prog && now > c.at) {
+        const r = (it.progress - c.prog) / (now - c.at);
+        c.rate = c.rate ? c.rate * 0.6 + r * 0.4 : r;
+      } else if (it.state !== 'building' || it.progress < c.prog) c.rate = 0;
+      if (it.progress !== c.prog || !building) {
+        c.prog = it.progress;
+        c.at = now;
+      }
+      c.building = building;
+      if (it.state === 'paused') c.rate = 0;
+      const key = `${it.state}|${it.isNew}|${it.blocked ?? ''}|${it.count}`;
       if (key === c.key) return;
       c.key = key;
       const el = c.el;
@@ -202,13 +230,28 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
       el.classList.toggle('blocked', !!it.blocked && it.state === 'idle');
       el.classList.toggle('fresh', it.isNew);
       el.title = it.blocked ?? `${it.name}: ${it.blurb}`;
-      const wipe = el.querySelector<HTMLElement>('.wipe')!;
-      // the part still to build is shaded, sweeping round like a clock
-      wipe.style.background = it.state === 'idle' || it.state === 'ready' ? 'none' : `conic-gradient(transparent 0 ${p}%, rgba(0,0,0,0.62) ${p}% 100%)`;
       el.querySelector('.state')!.textContent =
-        it.state === 'ready' ? 'Ready' : it.state === 'paused' ? 'On hold' : it.state === 'building' ? `${p}%` : it.blocked && !it.blocked.startsWith('Busy') ? it.blocked : '';
+        it.state === 'ready' ? 'Ready' : it.state === 'paused' ? 'On hold' : it.state === 'building' ? '' : it.blocked && !it.blocked.startsWith('Busy') ? it.blocked : '';
       el.querySelector('.count')!.textContent = it.count > 1 ? `×${it.count}` : '';
     });
+  }
+
+  // Every frame: the part still to build is shaded, sweeping round like a
+  // clock, carried on between the game's reports at the pace it was going.
+  function sweep(now: number): void {
+    if (panel.hidden) return;
+    for (const c of cards.values()) {
+      let p = -1;
+      if (c.building) {
+        const ahead = Math.min(c.rate * (now - c.at), 0.05);
+        p = Math.max(c.shown, Math.min(1, c.prog + ahead));
+        if (c.prog < c.shown - 0.05) p = c.prog;
+      }
+      if (Math.abs(p - c.shown) < 0.0005 && (p < 0) === (c.shown < 0)) continue;
+      c.shown = p;
+      const pc = (p * 100).toFixed(2);
+      c.wipe.style.background = p < 0 ? 'none' : `conic-gradient(transparent 0 ${pc}%, rgba(0,0,0,0.62) ${pc}% 100%)`;
+    }
   }
 
   // The power bar: how much the plants make, filling up from the bottom in
@@ -238,9 +281,11 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
       }
       wasPlacing = placing;
       if (g && g.onNotice !== notice && 'onNotice' in g) g.onNotice = notice;
-      if (now - last < 120) return;
-      last = now;
-      render();
+      if (now - last >= 120) {
+        last = now;
+        render();
+      }
+      sweep(performance.now());
     },
     reset() {
       hasMenu = false;
