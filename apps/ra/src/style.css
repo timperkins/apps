@@ -102,6 +102,7 @@ body {
 
 #version,
 #regen,
+#voiceBtn,
 #unitsLink {
   font: inherit;
   font-size: 12px;
@@ -132,7 +133,8 @@ body {
   text-decoration: none;
 }
 
-#regen:active {
+#regen:active,
+#voiceBtn:active {
   transform: translateY(1px);
 }
 

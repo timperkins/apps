@@ -5,6 +5,7 @@ import { CH } from './tiles';
 import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
+import { setVoiceMuted, voiceMuted } from './voice';
 import { initBuild } from './build-ui';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
@@ -677,6 +678,19 @@ let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => game && built.w && fit(), 150);
+});
+
+// Voices: units answer and the base announcer speaks (src/voice.ts).
+const voiceBtn = document.querySelector<HTMLButtonElement>('#voiceBtn')!;
+const showVoice = () => {
+  const on = !voiceMuted();
+  voiceBtn.textContent = `Voices: ${on ? 'on' : 'off'}`;
+  voiceBtn.setAttribute('aria-pressed', String(on));
+};
+showVoice();
+voiceBtn.addEventListener('click', () => {
+  setVoiceMuted(!voiceMuted());
+  showVoice();
 });
 
 // New map: a fresh seed, and (where there is a choice) pick the map again.
