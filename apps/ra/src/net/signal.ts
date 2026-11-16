@@ -25,6 +25,8 @@ export interface Signaling {
   // the host
   createRoom(): Promise<string>;
   setPhase(code: string, phase: 'lobby' | 'playing'): Promise<void>;
+  /** The host is back (after a reload): the room is theirs again. False if it isn't theirs. */
+  reopenRoom(code: string, phase: 'lobby' | 'playing'): Promise<boolean>;
   closeRoom(code: string): Promise<void>;
   watchOffers(code: string, onOffer: (uid: string, signal: RtcSignal) => void): () => void;
   publishAnswer(code: string, uid: string, answer: SessionDescription): Promise<void>;
@@ -65,6 +67,19 @@ export async function firestoreSignaling(): Promise<Signaling> {
     async setPhase(code, phase) {
       await updateDoc(roomRef(code), { phase, expiresAt: expiresAt() });
     },
+    async reopenRoom(code, phase) {
+      const uid = (await ensureUser()).uid;
+      const snap = await getDoc(roomRef(code));
+      if (snap.exists()) {
+        if (snap.data().hostUid !== uid) return false;
+        await updateDoc(roomRef(code), { phase, expiresAt: expiresAt() });
+        return true;
+      }
+      // gone (cleared out while you were away): make it again
+      await setDoc(roomRef(code), { hostUid: uid, phase: 'lobby', createdAt: serverTimestamp(), expiresAt: expiresAt() });
+      if (phase !== 'lobby') await updateDoc(roomRef(code), { phase });
+      return true;
+    },
     async closeRoom(code) {
       await deleteDoc(roomRef(code)).catch(() => {});
     },
@@ -104,7 +119,14 @@ type LocalMsg =
 
 export function localSignaling(): Signaling {
   const bc = new BroadcastChannel('ra-localnet');
-  const uid = crypto.randomUUID();
+  // one id per tab, kept when the tab reloads
+  let uid = '';
+  try {
+    uid = sessionStorage.getItem('ra-localnet-uid') ?? '';
+    if (!uid) sessionStorage.setItem('ra-localnet-uid', (uid = crypto.randomUUID()));
+  } catch {
+    uid ||= crypto.randomUUID();
+  }
   const listeners = new Set<(m: LocalMsg) => void>();
   bc.onmessage = (e) => listeners.forEach((l) => l(e.data as LocalMsg));
   const on = (l: (m: LocalMsg) => void) => {
@@ -127,6 +149,10 @@ export function localSignaling(): Signaling {
     },
     async setPhase(code, phase) {
       rooms.set(code, phase);
+    },
+    async reopenRoom(code, phase) {
+      rooms.set(code, phase);
+      return true;
     },
     async closeRoom(code) {
       rooms.delete(code);

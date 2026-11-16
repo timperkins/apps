@@ -592,6 +592,7 @@ async function track(work: Promise<unknown>[], p0: number, p1: number, text: str
 
 // Versions with a choice of maps ask which one first.
 function start(v: string): void {
+  stopAttract();
   showLoading(0.05, 'Loading');
   if (v === '2') startArtPool();
   requestAnimationFrame(() =>
@@ -621,6 +622,13 @@ async function makeWorld(): Promise<void> {
   // the art for the bases is drawn by workers while the land is made here
   const bases = g.preload?.() ?? [];
   fit(true);
+  // the host back after a reload: the game as it was
+  if (match?.resume && g instanceof IsoGame) {
+    g.restore(match.resume);
+    const f = g.focus();
+    cen.x = f.x;
+    cen.y = f.y;
+  }
   const units = g.warmUp?.() ?? [];
   // the globe's picture of the whole map, a little each frame
   let p = 0.2;
@@ -662,14 +670,67 @@ async function makeWorld(): Promise<void> {
 // sends the others how it stands, and their orders go to the host.
 
 let match: Match | null = null;
+// a player's game waits while the host is away
+let netPaused = false;
 const lobby = new Lobby({
-  solo: () => {
-    match = null;
-    showMpMenu();
-    start(version);
-  },
+  solo: () => goTo('/test'),
   start: (m) => startMatch(m),
+  showing: (on) => (on ? startAttract() : stopAttract()),
 });
+// Another page of the game (test mode at /test, the lobby at /), keeping ?localnet and the like.
+function goTo(path: string): void {
+  location.assign(path + location.search);
+}
+
+// ---------- Behind the lobby ----------
+// The landing page shows a world drifting by: a single-player world (both
+// bases built, no shroud) that is drawn but never run, so it stays quiet.
+let attract = false;
+let attractReady = false;
+let attractN = 0;
+let attractT = 0;
+let attractY = 0;
+const ATTRACT_MAPS = ['pangaea', 'continents', 'lakes', 'high', 'atoll', 'crater', 'badlands', 'inland', 'rivers', 'wetlands'];
+function startAttract(): void {
+  if (attract) return;
+  attract = true;
+  document.body.classList.add('attract');
+  // still the one from before: carry on
+  if (game instanceof IsoGame && game.noShroud && built.w) {
+    attractReady = true;
+    document.body.classList.add('attract-on');
+    return;
+  }
+  attractReady = false;
+  const me = ++attractN;
+  startArtPool();
+  setTimeout(async () => {
+    if (me !== attractN) return;
+    const g = new IsoGame(ctx, Math.floor(Math.random() * 100000));
+    g.stage = 'combat';
+    g.mapId = ATTRACT_MAPS[Math.floor(Math.random() * ATTRACT_MAPS.length)];
+    g.noShroud = true;
+    game = g;
+    build.reset();
+    built = { w: 0, h: 0 };
+    const bases = g.preload();
+    fit(true);
+    g.warmUp();
+    await Promise.race([Promise.all(bases), new Promise((r) => setTimeout(r, 8000))]);
+    if (me !== attractN || game !== g) return;
+    attractT = 0;
+    attractY = cen.y;
+    attractReady = true;
+    document.body.classList.add('attract-on');
+  }, 30);
+}
+function stopAttract(): void {
+  if (!attract) return;
+  attract = false;
+  attractReady = false;
+  attractN++;
+  document.body.classList.remove('attract', 'attract-on');
+}
 const leaveBtn = document.querySelector<HTMLButtonElement>('#leaveBtn')!;
 const lobbyBtn = document.querySelector<HTMLButtonElement>('#lobbyBtn')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
@@ -681,7 +742,7 @@ function showMpMenu(): void {
   leaveBtn.hidden = !mp;
   lobbyBtn.hidden = mp;
 }
-function showBanner(text: string, sub: string): void {
+function showBanner(text: string, sub: string, watch = true): void {
   banner.replaceChildren();
   const b = document.createElement('div');
   b.className = 'card';
@@ -697,14 +758,19 @@ function showBanner(text: string, sub: string): void {
   keep.addEventListener('click', () => (banner.hidden = true));
   const back = document.createElement('button');
   back.type = 'button';
-  back.textContent = 'Back to the lobby';
+  back.textContent = watch ? 'Back to the lobby' : 'Leave game';
   back.addEventListener('click', () => leaveGame());
-  b.append(t, p, keep, back);
+  b.append(t, p);
+  if (watch) b.append(keep);
+  b.append(back);
   banner.append(b);
   banner.hidden = false;
 }
 function leaveGame(): void {
+  // (single player is its own page, /test)
+  if (!match) return goTo('/');
   banner.hidden = true;
+  netPaused = false;
   setMenu(false);
   const m = match;
   match = null;
@@ -717,10 +783,12 @@ function leaveGame(): void {
   else lobby.show();
 }
 leaveBtn.addEventListener('click', () => leaveGame());
-lobbyBtn.addEventListener('click', () => leaveGame());
+lobbyBtn.addEventListener('click', () => goTo('/'));
 
 function startMatch(m: Match): void {
+  stopAttract();
   match = m;
+  netPaused = false;
   showMpMenu();
   banner.hidden = true;
   showLoading(0.05, 'Loading');
@@ -739,10 +807,22 @@ function startMatch(m: Match): void {
     if (game === g && built.w) g.applySnapshot(snap);
   };
   m.onGo = () => {
-    if (game === g) loading.hidden = true;
+    if (game !== g) return;
+    loading.hidden = true;
+    if (netPaused) banner.hidden = true;
+    netPaused = false;
   };
   m.onLeft = (name) => g.onNotice?.(`${name} left the game`);
-  m.onHostLost = () => showBanner('The host has gone', 'The game stopped when the host left.');
+  m.onBack = (name) => g.onNotice?.(`${name} is back`);
+  // the host reloaded, or lost touch: the game waits for it
+  m.onHostLost = () => {
+    netPaused = true;
+    showBanner('Paused', 'Waiting for the host to come back.', false);
+  };
+  m.onHostGone = () => {
+    netPaused = true;
+    showBanner('The host has gone', 'The game stopped when the host left.', false);
+  };
   game = g;
   build.reset();
   built = { w: 0, h: 0 };
@@ -835,16 +915,13 @@ rerollBtn.addEventListener('click', () => {
 pickClose.addEventListener('click', () => {
   picker.hidden = true;
 });
-// straight into single player with ?solo (or a version in the URL); the
-// multiplayer lobby otherwise
-if (params.has('solo') || params.has('v')) {
-  lobby.hide();
-  showMpMenu();
-  start(version);
-} else {
-  showMpMenu();
-  lobby.show();
-}
+// Test mode (single player) at /test, or with ?solo or a version in the
+// URL; a room at /CODE (back into it after a reload); the lobby otherwise.
+const atPath = location.pathname.replace(/\/+$/, '');
+showMpMenu();
+if (atPath === '/test' || params.has('solo') || params.has('v')) start(version);
+else if (Lobby.pathCode()) void lobby.enter(Lobby.pathCode());
+else lobby.show();
 
 versionEl.addEventListener('change', () => {
   version = versionEl.value;
@@ -1463,15 +1540,26 @@ function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   // (not while the loading screen is up: nothing moves until you can see it)
-  if (game && built.w && loading.hidden) {
+  if (attract) {
+    if (game && built.w && attractReady) {
+      // the landing page: a slow drift across the world
+      attractT += dt;
+      cen.x += 26 * dt;
+      cen.y = attractY + Math.sin(attractT / 23) * 500;
+      // (the first frame paints all the ground in view)
+      draw(now, attractT === dt);
+    }
+  } else if (game && built.w && loading.hidden) {
     const sp = (320 * dt) / zoom;
     if (keys.has('arrowleft') || keys.has('a')) cen.x -= sp;
     if (keys.has('arrowright') || keys.has('d')) cen.x += sp;
     if (keys.has('arrowup') || keys.has('w')) cen.y -= sp / 2;
     if (keys.has('arrowdown') || keys.has('s')) cen.y += sp / 2;
     clampCen();
-    game.update(dt);
-    sendNet(now);
+    if (!netPaused) {
+      game.update(dt);
+      sendNet(now);
+    }
     setMood(game.mood?.() ?? 'base');
     hoverNow(now);
     draw(now, false);

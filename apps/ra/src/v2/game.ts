@@ -387,6 +387,8 @@ export class IsoGame implements GameLike {
   out = new Set<number>();
   onOutcome: (won: boolean) => void = () => {};
   private nextId = 1;
+  /** No shroud (the landing page's view of a world). */
+  noShroud = false;
   // what has left the game, and messages for other players, since the last snapshot
   private gone: [number, number][] = [];
   private told: [number, string, string][] = [];
@@ -901,7 +903,7 @@ export class IsoGame implements GameLike {
     const yard = combat && this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
     this.home = yard ? { x: toScreen(yard.x, yard.y)[0], y: toScreen(yard.x, yard.y)[1] } : mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
-    this.shroud = NO_SHROUD ? null : new Shroud(w, h);
+    this.shroud = NO_SHROUD || this.noShroud ? null : new Shroud(w, h);
     this.looked = new WeakMap();
     this.lookedB = new WeakSet();
     this.lookAround();
@@ -3038,6 +3040,31 @@ export class IsoGame implements GameLike {
     }
     for (const [f, msg, line] of s.told) if (f === this.me) this.tell(f, msg || undefined, (line || undefined) as Parameters<typeof announce>[0] | undefined);
     this.setOut(s.out);
+  }
+
+  /** The host back after a reload: the game as it last saved it, in a world just made. */
+  restore(s: Snapshot): void {
+    const me = this.me;
+    this.applySnapshot({ ...s, gone: [], told: [] });
+    // every side's purse, not just yours
+    for (const row of s.eco) {
+      this.me = row[0];
+      this.applySnapshot({ t: s.t, u: s.u, b: s.b, gone: [], eco: [row], told: [], out: s.out });
+    }
+    this.me = me;
+    this.gone = [];
+    let top = 0;
+    for (const o of [...this.units, ...this.buildings]) top = Math.max(top, o.id);
+    this.nextId = top + 1;
+    // haulers start their round again (where they were going isn't saved)
+    for (const u of this.units)
+      if (u.job) {
+        u.job = { st: u.job.st === 'ret' || u.job.st === 'unload' || u.job.st === 'home' ? 'home' : 'seek', t: 0 };
+        u.moving = false;
+      }
+    for (const u of this.units) u.z = this.groundZ(u);
+    this.mapVersion++;
+    this.emit();
   }
 
   // ---------- The enemy (Combat stage) ----------
