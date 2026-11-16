@@ -90,6 +90,7 @@ export const PRICES = {
   woodSell: 2,
   arrows10: 6,
   apple: 5,
+  ice10: 20,
 };
 
 export const CAMPFIRE_WOOD = 3;

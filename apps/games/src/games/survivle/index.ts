@@ -49,7 +49,7 @@ const CONTROLS = `
   <div class="sv-keys">
     <div><b>Arrows / WASD</b> walk</div>
     <div><b>Space</b> swing sword (chops trees too)</div>
-    <div><b>Shift</b> shoot bow · aim with the mouse</div>
+    <div><b>Shift</b> shoot bow · aim with the mouse · <b>Q</b> switch to ice arrows</div>
     <div><b>Z</b> jump · walk into a cliff to climb</div>
     <div><b>E</b> chests · trader · jobs · glowing rocks</div>
     <div><b>B</b> build a wall (5 wood, 12 hearts; only you can walk through it)</div>
@@ -120,6 +120,7 @@ const game: GameModule = {
           <button data-t="build">🧱</button>
           <button data-t="fire">🔥</button>
           <button data-t="eat">🍎</button>
+          <button data-t="ice">❄</button>
         </div>
         <div class="sv-ttop"><button data-t="gear">🎒</button><button data-t="pause">⏸</button></div>
       </div>
@@ -235,6 +236,7 @@ const game: GameModule = {
       else if (a === 'build') g.build();
       else if (a === 'fire') g.campfire();
       else if (a === 'eat') g.eat();
+      else if (a === 'ice') g.toggleIce();
     });
     touchEl.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('touchstart', () => (touchMode = true), { once: true, passive: true });
@@ -582,6 +584,7 @@ const game: GameModule = {
           <div class="sv-shop">
             <button class="sv-item" data-a="sellwood" ${g.wood ? '' : 'disabled'}>🪵 Sell all wood <em>+${g.wood * PRICES.woodSell} coins</em></button>
             <button class="sv-item" data-a="buyarrows">🏹 10 arrows <em>${PRICES.arrows10} coins</em></button>
+            <button class="sv-item" data-a="buyice">❄ 10 ice arrows (freeze a Murk for 10 s, ⅒ damage) <em>${PRICES.ice10} coins</em></button>
             <button class="sv-item" data-a="buyapple">🍎 Apple (heals 1 heart) <em>${PRICES.apple} coins</em></button>
           </div>
           <h3>Clothes</h3>
@@ -673,6 +676,12 @@ const game: GameModule = {
           g.arrows += 10;
           sfx.coin();
           return shopHtml('10 arrows added.');
+        case 'buyice':
+          if (g.coins < PRICES.ice10) return shopHtml('Not enough coins.');
+          g.coins -= PRICES.ice10;
+          g.iceArrows += 10;
+          sfx.coin();
+          return shopHtml('10 ice arrows! Press Q (or ❄) to switch to them.');
         case 'buyapple':
           if (g.coins < PRICES.apple) return shopHtml('Not enough coins.');
           g.coins -= PRICES.apple;
@@ -760,6 +769,7 @@ const game: GameModule = {
         case 'KeyE': g.interact(); break;
         case 'KeyC': g.campfire(); break;
         case 'KeyB': g.build(); break;
+        case 'KeyQ': g.toggleIce(); break;
         case 'KeyH': g.eat(); break;
       }
     };

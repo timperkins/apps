@@ -1033,16 +1033,22 @@ export class Renderer {
         const X = this.sx(cam, a.x, a.y), Y = this.sy(cam, a.x, a.y, a.z);
         const ddx = (a.dx - a.dy) * HW, ddy = (a.dx + a.dy) * HH;
         const l = Math.hypot(ddx, ddy) || 1;
-        ctx.strokeStyle = '#6b4424';
+        ctx.strokeStyle = a.ice ? '#7fd8ff' : '#6b4424';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(X - (ddx / l) * 14, Y - (ddy / l) * 14);
         ctx.lineTo(X, Y);
         ctx.stroke();
-        ctx.fillStyle = '#ddd';
+        ctx.fillStyle = a.ice ? '#e8fbff' : '#ddd';
         ctx.beginPath();
-        ctx.arc(X, Y, 2, 0, 7);
+        ctx.arc(X, Y, a.ice ? 3.2 : 2, 0, 7);
         ctx.fill();
+        if (a.ice) {
+          ctx.fillStyle = 'rgba(160,230,255,.35)';
+          ctx.beginPath();
+          ctx.arc(X, Y, 7, 0, 7);
+          ctx.fill();
+        }
       });
     }
     // the Dark Beast
@@ -1453,7 +1459,8 @@ export class Renderer {
     ctx.lineTo(4, -25);
     ctx.fill();
     // body
-    ctx.fillStyle = e.hurtT > 0 ? '#fff' : k.body;
+    const frozen = (e.frozen ?? 0) > 0;
+    ctx.fillStyle = e.hurtT > 0 ? '#fff' : frozen ? '#9fdcf5' : k.body;
     ctx.beginPath();
     ctx.ellipse(0, -12, 14 / squash, 13 * squash, 0, 0, 7);
     ctx.fill();
@@ -1486,7 +1493,35 @@ export class Renderer {
       ctx.lineTo(2, -18);
       ctx.stroke();
     }
+    if (frozen) {
+      // a block of ice around it
+      ctx.fillStyle = 'rgba(190,240,255,.45)';
+      ctx.strokeStyle = 'rgba(235,252,255,.9)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-17, 2);
+      ctx.lineTo(-19, -24);
+      ctx.lineTo(-8, -33);
+      ctx.lineTo(10, -32);
+      ctx.lineTo(19, -22);
+      ctx.lineTo(17, 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-10, -26);
+      ctx.lineTo(-4, -16);
+      ctx.moveTo(8, -27);
+      ctx.lineTo(12, -20);
+      ctx.stroke();
+    }
     ctx.restore();
+    if (frozen) {
+      ctx.font = 'bold 10px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#dff7ff';
+      ctx.fillText(`❄ ${Math.ceil(e.frozen ?? 0)}`, X, Y - 48 * s);
+    }
     if (e.hp < k.hp) {
       ctx.fillStyle = 'rgba(0,0,0,.6)';
       ctx.fillRect(X - 15, Y - 42 * s - hop, 30, 4);
@@ -1700,7 +1735,8 @@ export class Renderer {
     // gear bar
     const items: [string, string][] = [
       ['⚔', `${swordName(game.swordDmg)} · ${game.swordDmg}`],
-      ['🏹', `${bowName(game.bowDmg)} · ${game.bowDmg}  (${game.arrows} arrows)`],
+      ['🏹', `${bowName(game.bowDmg)} · ${game.bowDmg}  (${game.useIce ? `❄ ${game.iceArrows} ice` : `${game.arrows} arrows`})`],
+      ...(game.iceArrows || game.useIce ? [['❄', game.useIce ? `${game.arrows} normal · Q` : `${game.iceArrows} ice · Q`] as [string, string]] : []),
       ['🪵', `${game.wood}`],
       ['🪙', `${game.coins}`],
       ['🍎', `${game.apples}`],

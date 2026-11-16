@@ -83,6 +83,8 @@ export interface Enemy {
   ch?: boolean;
   /** Called in by a mini boss. */
   minion?: boolean;
+  /** Seconds left frozen by an ice arrow. */
+  frozen?: number;
   /** Where a friend's game last saw it (co-op guests smooth toward this). */
   tx?: number;
   ty?: number;
@@ -98,6 +100,8 @@ export interface Arrow {
   dmg: number;
   fromBoss?: boolean;
   owner?: string;
+  /** An ice arrow: freezes a Murk for 10 seconds but does a tenth of the damage. */
+  ice?: boolean;
 }
 
 export interface Chest {
@@ -195,6 +199,7 @@ export interface SaveData {
   rocks?: { x: number; y: number }[];
   rockLevel?: number;
   walls?: Wall[];
+  iceArrows?: number;
 }
 
 /** A wooden wall someone built. Its builder can walk through it; nobody else can. */
@@ -297,6 +302,9 @@ export class Game {
   sword = 0;
   bow = 0;
   arrows = 20;
+  iceArrows = 0;
+  /** Shoot ice arrows instead of normal ones (Q switches). */
+  useIce = false;
   wood = 0;
   coins = 0;
   apples = 0;
@@ -607,7 +615,12 @@ export class Game {
   shoot() {
     const p = this.p;
     if (p.bowCd > 0 || p.climbing || this.knockedOut) return;
-    if (this.arrows <= 0) {
+    if (this.useIce && this.iceArrows <= 0) {
+      this.useIce = false;
+      this.toast('Out of ice arrows! Back to normal arrows. The trader sells 10 for 20 coins.');
+    }
+    const ice = this.useIce;
+    if (!ice && this.arrows <= 0) {
       this.toast('Out of arrows! Buy more from a trader.');
       p.bowCd = 0.6;
       return;
@@ -615,11 +628,24 @@ export class Game {
     const a = this.input.aimX || this.input.aimY ? ang(this.input.aimX, this.input.aimY) : p.face;
     p.face = a;
     p.bowCd = 0.5;
-    this.arrows--;
-    const arrow: Arrow = { x: p.x, y: p.y, z: p.z + 0.9, dx: Math.cos(a), dy: Math.sin(a), life: 1.8, dmg: this.bowDmg };
+    if (ice) this.iceArrows--;
+    else this.arrows--;
+    const dmg = ice ? Math.max(0.1, Math.round(this.bowDmg) / 10) : this.bowDmg;
+    const arrow: Arrow = { x: p.x, y: p.y, z: p.z + 0.9, dx: Math.cos(a), dy: Math.sin(a), life: 1.8, dmg, ice: ice || undefined };
     if (this.role === 'guest') this.net?.shoot(arrow);
     else this.arrowsFlying.push(arrow);
     sfx.bow();
+  }
+
+  /** Switch between normal and ice arrows. */
+  toggleIce() {
+    if (!this.useIce && this.iceArrows <= 0) {
+      this.toast('No ice arrows. The trader sells 10 for 20 coins.');
+      return;
+    }
+    this.useIce = !this.useIce;
+    sfx.click();
+    this.toast(this.useIce ? `Ice arrows ready (${this.iceArrows})` : `Normal arrows (${this.arrows})`);
   }
 
   /** Open a chest or talk to a trader if one is close. */
@@ -1097,7 +1123,7 @@ export class Game {
   }
 
   hurtEnemy(e: Enemy, dmg: number, nx: number, ny: number, owner = 'me') {
-    e.hp -= dmg;
+    e.hp = Math.round((e.hp - dmg) * 100) / 100;
     e.hurtT = 0.25;
     e.aggro = true;
     e.kx = nx * 6;
@@ -1225,7 +1251,7 @@ export class Game {
         e.y += (e.ty - e.y) * k;
       }
       e.hurtT = Math.max(0, e.hurtT - dt);
-      e.hop += dt * (e.aggro ? 9 : 5);
+      if (!e.frozen) e.hop += dt * (e.aggro ? 9 : 5);
     }
     const b = this.boss;
     b.hurtT = Math.max(0, b.hurtT - dt);
@@ -1575,6 +1601,13 @@ export class Game {
         continue;
       }
       e.hurtT = Math.max(0, e.hurtT - dt);
+      if (e.frozen) {
+        // frozen solid by an ice arrow: no moving, no biting
+        e.frozen = Math.max(0, e.frozen - dt);
+        e.aggro = true;
+        e.kx = e.ky = 0;
+        continue;
+      }
       e.atkCd -= dt;
       e.hop += dt * (e.aggro ? 9 : 5);
       if (d <= AGGRO && tg && !e.aggro) {
@@ -1650,7 +1683,12 @@ export class Game {
       if (!dead) {
         for (const e of this.enemies) {
           if (Math.hypot(e.x - a.x, e.y - a.y) < 0.6 && Math.abs(e.z + 0.5 - a.z) < 1.4) {
-            this.hurtEnemy(e, a.dmg, a.dx, a.dy, a.owner);
+            if (a.ice) {
+              e.frozen = 10;
+              e.kx = e.ky = 0;
+              this.puff(e.x, e.y, e.z + 0.6, '#bff1ff', 14, 2);
+            }
+            this.hurtEnemy(e, a.dmg, a.ice ? 0 : a.dx, a.ice ? 0 : a.dy, a.owner);
             dead = true;
             break;
           }
@@ -1948,7 +1986,7 @@ export class Game {
       won: this.won, savedAt: Date.now(), acorns: this.acorns, maxHp: this.maxHp, stones: [...this.stonesDone], job: this.job,
       jobVillage: this.jobVillage, farm: [...this.farm], letterTo: this.letterTo,
       minis: this.minis.defeated(), goods: this.goods, shelves: this.shelves,
-      rocks: this.rocks, rockLevel: this.rockLevel, walls: this.walls,
+      rocks: this.rocks, rockLevel: this.rockLevel, walls: this.walls, iceArrows: this.iceArrows,
     };
   }
 
@@ -1962,6 +2000,7 @@ export class Game {
     g.sword = Math.min(s.sword, s.swords.length - 1);
     g.bow = Math.min(s.bow, s.bows.length - 1);
     g.arrows = s.arrows;
+    g.iceArrows = s.iceArrows ?? 0;
     g.wood = s.wood;
     g.coins = s.coins;
     g.apples = s.apples;

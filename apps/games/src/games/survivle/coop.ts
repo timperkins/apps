@@ -50,9 +50,9 @@ type Msg =
 interface Snap {
   el: number;
   pl: HeroMsg[];
-  /** id, kind, x, y, z, aggro, hurt, ch, minion */
-  en: [number, number, number, number, number, number, number, number, number][];
-  ar: [number, number, number, number, number, number][];
+  /** id, kind, x, y, z, aggro, hurt, ch, minion, frozen, hp */
+  en: [number, number, number, number, number, number, number, number, number, number, number][];
+  ar: [number, number, number, number, number, number, number][];
   chests: [number, number][];
   boss: { x: number; y: number; hp: number; active: boolean; state: string; dead: boolean; deadT: number; hurtT: number; rings: Game['boss']['rings']; orbs: Game['boss']['orbs']; clones: Game['boss']['clones']; split: number; dash: Game['boss']['dash'] };
   minis: { x: number; y: number; lift: number; hp: number; active: boolean; dead: boolean; hurtT: number; flash: number }[];
@@ -231,8 +231,8 @@ export async function hostGame(g: Game, onChange: () => void): Promise<Session> 
           id: o.id, name: o.name, outfit: o.outfit, x: o.tx, y: o.ty, z: o.tz, face: o.face, moving: o.moving, swingT: o.swingT,
           climbing: o.climbing, hp: o.hp, maxHp: o.maxHp, ko: o.ko, swordD: o.swordD,
         }))],
-        en: g.enemies.map((e) => [e.id, e.kind, r2(e.x), r2(e.y), r2(e.z), e.aggro ? 1 : 0, r2(e.hurtT), e.ch ? 1 : 0, e.minion ? 1 : 0]),
-        ar: g.arrowsFlying.map((a) => [r2(a.x), r2(a.y), r2(a.z), r2(a.dx), r2(a.dy), r2(a.life)]),
+        en: g.enemies.map((e) => [e.id, e.kind, r2(e.x), r2(e.y), r2(e.z), e.aggro ? 1 : 0, r2(e.hurtT), e.ch ? 1 : 0, e.minion ? 1 : 0, r2(e.frozen ?? 0), e.hp]),
+        ar: g.arrowsFlying.map((a) => [r2(a.x), r2(a.y), r2(a.z), r2(a.dx), r2(a.dy), r2(a.life), a.ice ? 1 : 0]),
         chests: g.chests.map((c) => [c.x, c.y]),
         boss: { x: r2(b.x), y: r2(b.y), hp: b.hp, active: b.active, state: b.state, dead: b.dead, deadT: b.deadT, hurtT: b.hurtT, rings: b.rings, orbs: b.orbs, clones: b.clones, split: b.split, dash: b.dash },
         minis: g.minis.list.map((q) => ({ x: r2(q.x), y: r2(q.y), lift: r2(q.lift), hp: q.hp, active: q.active, dead: q.dead, hurtT: q.hurtT, flash: q.flash })),
@@ -388,7 +388,7 @@ function applySnap(g: Game, s: Snap, myId: string) {
   g.others = g.others.filter((o) => seen.has(o.id));
   // enemies: keep where we drew them, and slide toward where the host has them
   const old = new Map(g.enemies.map((e) => [e.id, e]));
-  g.enemies = s.en.map(([id, kind, x, y, z, aggro, hurt, ch, minion]) => {
+  g.enemies = s.en.map(([id, kind, x, y, z, aggro, hurt, ch, minion, frozen, hp]) => {
     const e: Enemy = old.get(id) ?? { id, kind, x, y, z, hp: 1, aggro: false, atkCd: 0, hurtT: 0, kx: 0, ky: 0, wanderA: 0, wanderT: 0, hop: Math.random() * 6 };
     if (Math.hypot(e.x - x, e.y - y) > 6) {
       e.x = x;
@@ -401,9 +401,11 @@ function applySnap(g: Game, s: Snap, myId: string) {
     if (hurt > e.hurtT) e.hurtT = hurt;
     e.ch = !!ch;
     e.minion = !!minion;
+    e.frozen = frozen;
+    e.hp = hp;
     return e;
   });
-  g.arrowsFlying = s.ar.map(([x, y, z, dx, dy, life]) => ({ x, y, z, dx, dy, life, dmg: 0 }));
+  g.arrowsFlying = s.ar.map(([x, y, z, dx, dy, life, ice]) => ({ x, y, z, dx, dy, life, dmg: 0, ice: !!ice }));
   g.chests = s.chests.map(([x, y]) => ({ x, y }));
   // the Dark Beast
   const b = g.boss;
