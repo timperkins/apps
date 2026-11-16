@@ -697,6 +697,13 @@ function showPicker(): void {
       tag.textContent = 'Test';
       name.append(tag);
     }
+    if (m.players) {
+      const pl = document.createElement('span');
+      pl.className = 'players';
+      pl.textContent = m.players[0] === m.players[1] ? `${m.players[0]}P` : `${m.players[0]}-${m.players[1]}P`;
+      pl.title = `Made for ${m.players[0] === m.players[1] ? m.players[0] : `${m.players[0]} to ${m.players[1]}`} players`;
+      name.append(pl);
+    }
     const blurb = document.createElement('span');
     blurb.className = 'blurb';
     blurb.textContent = m.blurb;

@@ -146,7 +146,7 @@ export interface GameLike {
   placeAt?(x: number, y: number): void;
   // Maps to pick from before generate(), with a small picture of each for
   // the current seed; mapId is the one generate() makes.
-  maps?(): { id: string; name: string; blurb: string }[];
+  maps?(): { id: string; name: string; blurb: string; players?: [number, number] }[];
   preview?(id: string, w: number, h: number): HTMLCanvasElement;
   mapId?: string;
   // Stages to start in, for testing (the normal start, a ready-made fight...);
