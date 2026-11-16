@@ -1830,3 +1830,50 @@ body.attract #menu {
 #lobby .box:has(.home) {
   width: min(380px, 100%);
 }
+
+/* A bot in the host's list: its difficulty and color, and taking it out. */
+#lobby .players li.bot {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+}
+#lobby .botCtl {
+  display: flex;
+  flex: 1 1 240px;
+  gap: 4px;
+  align-items: center;
+}
+#lobby .botCtl select {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 90px;
+  padding: 2px 3px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 0;
+}
+#lobby .botCtl .rm {
+  padding: 0 6px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: var(--cur-hand);
+}
+#lobby .addBot {
+  align-self: flex-start;
+}
+
+#lobby .room {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#lobby .players li.bot .pname {
+  flex: 0 0 auto;
+  margin-right: 6px;
+}

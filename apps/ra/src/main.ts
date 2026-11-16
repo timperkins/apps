@@ -10,6 +10,7 @@ import { setVoiceMuted, voiceMuted } from './voice';
 import { play, setSfxMuted, setWorldLevel, sfxMuted, ui } from './sfx';
 import { initBuild } from './build-ui';
 import { Lobby, type Match } from './lobby';
+import { Bot } from './v2/bot';
 import { startArtPool } from './v2/art-pool';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
@@ -672,6 +673,8 @@ async function makeWorld(): Promise<void> {
 let match: Match | null = null;
 // a player's game waits while the host is away
 let netPaused = false;
+// the host runs the computer players
+let bots: Bot[] = [];
 const lobby = new Lobby({
   solo: () => goTo('/test'),
   start: (m) => startMatch(m),
@@ -774,6 +777,7 @@ function leaveGame(): void {
   setMenu(false);
   const m = match;
   match = null;
+  bots = [];
   built = { w: 0, h: 0 };
   loading.hidden = true;
   picker.hidden = true;
@@ -801,6 +805,7 @@ function startMatch(m: Match): void {
   g.mapId = m.mapId;
   g.onSelect = showSelection;
   g.onCommand = (cmd) => m.sendCommand(cmd);
+  bots = m.host ? m.players.filter((p) => p.bot).map((p) => new Bot(g, p.f, p.bot!)) : [];
   g.onOutcome = (won) => (won ? showBanner('Victory', 'Everyone else is out.') : showBanner('Defeated', 'You have nothing left.'));
   m.onCommand = (f, cmd) => g.exec(f, cmd);
   m.onSnapshot = (snap) => {
@@ -1558,6 +1563,7 @@ function frame(now: number): void {
     clampCen();
     if (!netPaused) {
       game.update(dt);
+      if (match?.host) for (const b of bots) b.update(dt);
       sendNet(now);
     }
     setMood(game.mood?.() ?? 'base');
@@ -1654,3 +1660,4 @@ Object.defineProperty(window, 'look', {
     cen.y = y;
   },
 });
+Object.defineProperty(window, 'bots', { get: () => bots });
