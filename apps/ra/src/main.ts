@@ -5,9 +5,9 @@ import { CH } from './tiles';
 import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
-import { musicMuted, setMood, setMusicMuted } from './music';
-import { setVoiceMuted, voiceMuted } from './voice';
-import { play, setSfxMuted, setWorldLevel, sfxMuted, ui } from './sfx';
+import { setMood } from './music';
+import { play, setWorldLevel, ui } from './sfx';
+import { onSettings, resetSettings, setSetting, settings, type Settings } from './settings';
 import { initBuild } from './build-ui';
 import { Lobby, type Match } from './lobby';
 import { Bot } from './v2/bot';
@@ -93,6 +93,7 @@ const globe = new Globe();
 
 function setMenu(open: boolean): void {
   menu.hidden = !open;
+  if (!open) menu.classList.remove('settings-open');
   menuBtn.setAttribute('aria-expanded', String(open));
 }
 menuBtn.addEventListener('click', () => setMenu(menu.hidden));
@@ -987,44 +988,37 @@ window.addEventListener('resize', () => {
   resizeTimer = window.setTimeout(() => game && built.w && fit(), 150);
 });
 
-// Voices: units answer and the base announcer speaks (src/voice.ts).
-const voiceBtn = document.querySelector<HTMLButtonElement>('#voiceBtn')!;
-const showVoice = () => {
-  const on = !voiceMuted();
-  voiceBtn.textContent = `Voices: ${on ? 'on' : 'off'}`;
-  voiceBtn.setAttribute('aria-pressed', String(on));
-};
-showVoice();
-voiceBtn.addEventListener('click', () => {
-  setVoiceMuted(!voiceMuted());
-  showVoice();
-});
-
-// Music: a loop for fighting, one for troops out in the field, one for the base (src/music.ts).
-const musicBtn = document.querySelector<HTMLButtonElement>('#musicBtn')!;
-const showMusic = () => {
-  const on = !musicMuted();
-  musicBtn.textContent = `Music: ${on ? 'on' : 'off'}`;
-  musicBtn.setAttribute('aria-pressed', String(on));
-};
-showMusic();
-musicBtn.addEventListener('click', () => {
-  setMusicMuted(!musicMuted());
-  showMusic();
-});
-
-// Sounds: guns, engines, explosions and the buttons (src/sfx.ts).
-const sfxBtn = document.querySelector<HTMLButtonElement>('#sfxBtn')!;
-const showSfx = () => {
-  const on = !sfxMuted();
-  sfxBtn.textContent = `Sounds: ${on ? 'on' : 'off'}`;
-  sfxBtn.setAttribute('aria-pressed', String(on));
-};
-showSfx();
-sfxBtn.addEventListener('click', () => {
-  setSfxMuted(!sfxMuted());
-  showSfx();
-});
+// Settings: how loud the music, sounds and voices are, and how fast the keys
+// scroll and the wheel zooms (src/settings.ts). They open in place of the
+// menu's buttons.
+const settingsBtn = document.querySelector<HTMLButtonElement>('#settingsBtn')!;
+const settingsEl = document.querySelector<HTMLDivElement>('#settings')!;
+function setSettingsOpen(open: boolean): void {
+  menu.classList.toggle('settings-open', open);
+  settingsBtn.setAttribute('aria-expanded', String(open));
+  if (open) settingsEl.querySelector<HTMLButtonElement>('#setBack')!.focus({ preventScroll: true });
+}
+settingsBtn.addEventListener('click', () => setSettingsOpen(true));
+settingsEl.querySelector('#setBack')!.addEventListener('click', () => setSettingsOpen(false));
+settingsEl.querySelector('#setReset')!.addEventListener('click', () => resetSettings());
+const sliders = [...settingsEl.querySelectorAll<HTMLInputElement>('input[type=range]')];
+const VOLUMES = new Set(['music', 'sfx', 'voice']);
+function showSettings(): void {
+  const s = settings();
+  for (const el of sliders) {
+    const k = el.dataset.k as keyof Settings;
+    const v = s[k];
+    if (document.activeElement !== el) el.value = String(Math.round(v * 100));
+    el.closest('label')!.querySelector('output')!.textContent = VOLUMES.has(k) ? (v ? `${Math.round(v * 100)}%` : 'Off') : `${+v.toFixed(2)}×`;
+  }
+}
+for (const el of sliders) {
+  el.addEventListener('input', () => setSetting(el.dataset.k as keyof Settings, +el.value / 100));
+  // let go of the Sounds slider: a click at the new level
+  if (el.dataset.k === 'sfx') el.addEventListener('change', () => ui('ui_click'));
+}
+onSettings(showSettings);
+showSettings();
 
 // A panel (the menu, the build sheet, the selection menu) slides as it opens
 // or shuts, when a tap did it; every other button clicks.
@@ -1467,7 +1461,7 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
-    zoomTo(zoom * Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)), e.clientX, e.clientY);
+    zoomTo(zoom * Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015) * settings().zoom), e.clientX, e.clientY);
   },
   { passive: false },
 );
@@ -1478,7 +1472,10 @@ for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEv
 
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
-  if (!game || (e.target as HTMLElement).tagName === 'SELECT') return;
+  const tag = (e.target as HTMLElement).tagName;
+  if (!game || tag === 'SELECT') return;
+  // (a focused slider in Settings takes the arrow keys; Esc still goes back)
+  if (tag === 'INPUT' && e.key !== 'Escape') return;
   if (!picker.hidden) {
     if (e.key === 'Escape' && !pickClose.hidden) pickClose.click();
     return;
@@ -1491,7 +1488,8 @@ window.addEventListener('keydown', (e) => {
     else pickGroup(+digit[1] - 1);
   }
   if (e.key === 'Escape') {
-    if (!menu.hidden) setMenu(false);
+    if (menu.classList.contains('settings-open')) menu.querySelector<HTMLButtonElement>('#setBack')!.click();
+    else if (!menu.hidden) setMenu(false);
     else if (paletteOn) setPalette(false);
     else if (placingNow()) game.act?.('unplace');
     else if (pending) setPending(null);
@@ -1596,7 +1594,7 @@ function frame(now: number): void {
       drawAttract(false);
     }
   } else if (game && built.w && loading.hidden) {
-    const sp = (320 * dt) / zoom;
+    const sp = (320 * settings().scroll * dt) / zoom; // Scroll speed in Settings
     if (keys.has('arrowleft') || keys.has('a')) cen.x -= sp;
     if (keys.has('arrowright') || keys.has('d')) cen.x += sp;
     if (keys.has('arrowup') || keys.has('w')) cen.y -= sp / 2;

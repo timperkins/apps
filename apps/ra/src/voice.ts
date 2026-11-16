@@ -6,6 +6,8 @@
 // Played through Web Audio, which phones only allow after a tap: the context
 // starts on the first pointer or key press, and the clips load then.
 
+import { onSettings, settings } from './settings';
+
 export type UnitVoice = 'soldier' | 'tank' | 'copter' | 'scout' | 'harvester';
 export type UnitLine = 'select' | 'move' | 'attack' | 'harvest' | 'full';
 export type Announce =
@@ -67,12 +69,8 @@ const unlockFns: ((c: AudioContext) => void)[] = [];
 let unitSrc: AudioBufferSourceNode | null = null;
 let annSrc: AudioBufferSourceNode | null = null;
 let annQueue: string[] = [];
-let muted = false;
-try {
-  muted = localStorage.getItem('ra.voice') === 'off';
-} catch {
-  /* private window */
-}
+// the Voices volume in Settings (squared, so the slider sounds even)
+const level = () => 0.9 * settings().voice ** 2;
 
 function load(u: string): Promise<AudioBuffer | null> {
   const hit = buffers.get(u);
@@ -106,7 +104,7 @@ function unlock(): void {
     if (!AC) return;
     ctx = new AC();
     out = ctx.createGain();
-    out.gain.value = 0.9;
+    out.gain.value = level();
     out.connect(ctx.destination);
     // load everything in the background, a few at a time
     const todo = allUrls();
@@ -155,7 +153,7 @@ function pick(voice: string, line: string, n: number): string {
 
 /** A unit answers. A new answer cuts off the one before, as in the old RTS games. */
 export function sayUnit(voice: UnitVoice, line: UnitLine): void {
-  if (muted || !ctx) return;
+  if (!level() || !ctx) return;
   const n = UNIT_CLIPS[voice][line];
   if (!n) return;
   const u = pick(voice, line, n);
@@ -174,7 +172,7 @@ export function sayUnit(voice: UnitVoice, line: UnitLine): void {
 
 /** The base announcer. Announcements queue up instead of talking over each other. */
 export function announce(what: Announce, now = performance.now() / 1000): void {
-  if (muted || !ctx) return;
+  if (!level() || !ctx) return;
   const gap = ANNOUNCE_GAP[what] ?? 2;
   if (now - (lastSaid.get(what) ?? -1e9) < gap) return;
   lastSaid.set(what, now);
@@ -199,18 +197,9 @@ function playNext(): void {
   });
 }
 
-export function voiceMuted(): boolean {
-  return muted;
-}
-
-export function setVoiceMuted(m: boolean): void {
-  muted = m;
-  try {
-    localStorage.setItem('ra.voice', m ? 'off' : 'on');
-  } catch {
-    /* private window */
-  }
-  if (m) {
+onSettings(() => {
+  if (ctx && out) out.gain.setTargetAtTime(level(), ctx.currentTime, 0.05);
+  if (!level()) {
     annQueue = [];
     try {
       unitSrc?.stop();
@@ -219,4 +208,4 @@ export function setVoiceMuted(m: boolean): void {
       /* already ended */
     }
   }
-}
+});

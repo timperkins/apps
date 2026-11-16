@@ -7,6 +7,7 @@
 // audio context src/voice.ts starts) and crossfade when the mood changes.
 
 import { onAudioUnlock } from './voice';
+import { onSettings, settings } from './settings';
 
 export type Mood = 'battle' | 'shroud' | 'base';
 
@@ -22,12 +23,8 @@ const buffers = new Map<Mood, AudioBuffer>();
 const playing = new Map<Mood, { src: AudioBufferSourceNode; gain: GainNode }>();
 let want: Mood = 'base';
 let on: Mood | null = null;
-let muted = false;
-try {
-  muted = localStorage.getItem('ra.music') === 'off';
-} catch {
-  /* private window */
-}
+// the Music volume in Settings (squared, so the slider sounds even)
+const level = () => settings().music ** 2;
 
 // mp3 decoding pads a little silence at each end, which would tick at the
 // loop point: loop just the part with sound in it.
@@ -74,7 +71,7 @@ function play(m: Mood): void {
 onAudioUnlock((c) => {
   ctx = c;
   master = c.createGain();
-  master.gain.value = muted ? 0 : 1;
+  master.gain.value = level();
   master.connect(c.destination);
   // the one wanted now first, then the rest
   const order = [want, ...MOODS.filter((m) => m !== want)];
@@ -99,21 +96,10 @@ export function setMood(m: Mood): void {
   if (on !== m && buffers.has(m)) play(m);
 }
 
-export function musicMuted(): boolean {
-  return muted;
-}
-
-export function setMusicMuted(m: boolean): void {
-  muted = m;
-  try {
-    localStorage.setItem('ra.music', m ? 'off' : 'on');
-  } catch {
-    /* private window */
-  }
-  if (ctx && master) {
-    const t = ctx.currentTime;
-    master.gain.cancelScheduledValues(t);
-    master.gain.setValueAtTime(master.gain.value, t);
-    master.gain.linearRampToValueAtTime(m ? 0 : 1, t + 0.4);
-  }
-}
+onSettings(() => {
+  if (!ctx || !master) return;
+  const t = ctx.currentTime;
+  master.gain.cancelScheduledValues(t);
+  master.gain.setValueAtTime(master.gain.value, t);
+  master.gain.linearRampToValueAtTime(level(), t + 0.15);
+});
