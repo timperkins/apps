@@ -81,6 +81,9 @@ export interface GameLike {
   renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void;
   // Objects of the copy of the map at the origin, within a rect in its coordinates.
   renderObjects(x0: number, y0: number, x1: number, y1: number): void;
+  // Drawn once over all the copies, in unwrapped map pixels (the shroud and
+  // whatever shows over it).
+  renderOver?(x0: number, y0: number, x1: number, y1: number): void;
   // A coarse picture of the whole map for the globe views (the bases included),
   // and the units as coloured dots.
   // The coarse picture is built a little at a time: mapStep(ms) works on it

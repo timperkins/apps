@@ -9,6 +9,7 @@ import { StackSprite, drawSprite, renderStack, toScreen, toWorld } from './stack
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
+import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
@@ -249,6 +250,13 @@ function markKind(m: { foe?: boolean; ore?: boolean }): 'move' | 'attack' | 'har
 }
 
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
+// How far each of your units sees, in cells: it lifts the shroud that far
+// round itself.
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6 };
+// and buildings, past the edge of their footprint (the radar mast further)
+const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
+// Play without the shroud, for testing: ?noshroud in the URL.
+const NO_SHROUD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('noshroud');
 
 // Stages to start a game in, for testing: the real start, or straight into a
 // fight with a full base each, close together.
@@ -326,6 +334,14 @@ export class IsoGame implements GameLike {
   // which map generate() makes (see maps.ts), and the stage it starts at
   mapId = MAPS[0].id;
   stage: Stage = 'initial';
+  // black over what you haven't seen yet (see shroud.ts)
+  shroud: Shroud | null = null;
+  // where each unit of yours last lifted it, and the buildings that have
+  private looked = new WeakMap<Unit, [number, number]>();
+  private lookedB = new WeakSet<Building>();
+  // the shroud's version the globe's picture shows, and when it was redrawn
+  private shroudV = 0;
+  private shroudT = 0;
 
   stages(): { id: string; name: string; blurb: string }[] {
     return STAGES;
@@ -676,7 +692,50 @@ export class IsoGame implements GameLike {
     const yard = combat && this.buildings.find((b) => b.own && b.kind === 'yard');
     this.home = yard ? { x: toScreen(yard.x, yard.y)[0], y: toScreen(yard.x, yard.y)[1] } : mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
+    this.shroud = NO_SHROUD ? null : new Shroud(w, h);
+    this.looked = new WeakMap();
+    this.lookedB = new WeakSet();
+    this.shroudV = this.shroudT = 0;
+    this.lookAround();
     this.emit();
+  }
+
+  // ---------- The shroud ----------
+
+  // Where a unit is on screen, for the shroud: its feet, or a copter's body.
+  private spot(u: Unit): [number, number] {
+    return toScreen(u.x, u.y, u.z + (u.kind === 'heli' ? HELI_ALT : 0));
+  }
+
+  // Can you see this enemy unit (it isn't under the shroud)? Yours always.
+  private shown(u: Unit): boolean {
+    return u.f === ME || !this.shroud || this.shroud.seen(...this.spot(u));
+  }
+
+  // Your units and buildings lift the shroud round themselves.
+  private lookAround(): void {
+    const sh = this.shroud;
+    if (!sh) return;
+    for (const u of this.units) {
+      if (u.f !== ME || u.dead) continue;
+      const last = this.looked.get(u);
+      if (last && Math.abs(last[0] - u.x) + Math.abs(last[1] - u.y) < 6) continue;
+      this.looked.set(u, [u.x, u.y]);
+      sh.reveal(...this.spot(u), SIGHT[u.kind] * CELL);
+    }
+    for (const b of this.buildings) {
+      if (b.f !== ME || this.lookedB.has(b)) continue;
+      this.lookedB.add(b);
+      const [sx, sy] = toScreen(b.x, b.y);
+      sh.reveal(sx, sy, Math.max(b.art.rx, b.art.ry) + (BSIGHT[b.kind] ?? 5) * CELL);
+    }
+    // the globe's picture shows the shroud too: redraw it now and then as
+    // more is seen
+    if (sh.version !== this.shroudV && this.time - this.shroudT > 2.5) {
+      this.shroudV = sh.version;
+      this.shroudT = this.time;
+      this.mapVersion++;
+    }
   }
 
   private home = { x: 0, y: 0 };
@@ -1593,6 +1652,7 @@ export class IsoGame implements GameLike {
     let bestLap: [number, number] = [0, 0];
     let bd = 1e9;
     for (const u of this.units) {
+      if (!this.shown(u)) continue;
       const lap = this.copyNear(u, x, y);
       const [sx, sy] = this.screenOf(u);
       const d = Math.hypot(sx + lap[0] * this.w - x, sy + lap[1] * this.h - y);
@@ -1684,7 +1744,10 @@ export class IsoGame implements GameLike {
 
   // The building under screen point (x, y), on any copy of the map.
   private buildingAt(x: number, y: number): Building | null {
+    // enemy buildings under the shroud can't be picked out
+    const hidden = this.shroud && !this.shroud.seen(x, y);
     for (const b of this.buildings) {
+      if (hidden && b.f !== ME) continue;
       const [bsx, bsy] = toScreen(b.x, b.y);
       const lx = Math.round((x - bsx) / this.w) * this.w;
       const ly = Math.round((y - bsy) / this.h) * this.h;
@@ -2248,6 +2311,7 @@ export class IsoGame implements GameLike {
     }
     for (const s of this.sparkles) s.life += dt;
     this.sparkles = this.sparkles.filter((s) => s.life < 1.2);
+    this.lookAround();
   }
 
   // ---------- The enemy (Combat stage) ----------
@@ -3098,7 +3162,29 @@ export class IsoGame implements GameLike {
       c.globalAlpha = 1;
       this.drawFoot(gh.pad, col, 0.8 + 0.2 * Math.sin(this.time * 6), false, true);
     }
+  }
 
+  // Drawn once over every copy of the map, in unwrapped map pixels: the
+  // shroud, then where you have sent your units, which shows over it.
+  renderOver(x0: number, y0: number, x1: number, y1: number): void {
+    const c = this.ctx;
+    this.shroud?.draw(c, x0, y0, x1, y1);
+    const pad = 80;
+    for (let j = Math.floor((y0 - pad) / this.h); j <= Math.floor((y1 + pad) / this.h); j++)
+      for (let k = Math.floor((x0 - pad) / this.w); k <= Math.floor((x1 + pad) / this.w); k++) {
+        c.save();
+        c.translate(k * this.w, j * this.h);
+        this.drawOrders(x0 - k * this.w, y0 - j * this.h, x1 - k * this.w, y1 - j * this.h);
+        c.restore();
+      }
+  }
+
+  // Lines out to where your units are going, and the order markers, on this
+  // copy of the map within screen rect (x0, y0)-(x1, y1).
+  private drawOrders(x0: number, y0: number, x1: number, y1: number): void {
+    const c = this.ctx;
+    const pad = 56;
+    const inView = (sx: number, sy: number) => sx > x0 - pad && sx < x1 + pad && sy > y0 - pad && sy < y1 + pad * 1.5;
     // faint lines out to where your units were sent, until they get there
     c.save();
     c.strokeStyle = 'rgba(157,255,157,0.3)';
@@ -3258,6 +3344,7 @@ export class IsoGame implements GameLike {
         const [fx, fy] = this.lapped(r.x, r.y, -Math.floor(sx / this.w), -Math.floor(sy / this.h));
         this.blit(r.states.ruin.spr, fx, fy, 0);
       }
+      this.shroud?.draw(c, 0, 0, this.w, this.h);
     } finally {
       this.ctx = ctx;
     }
@@ -3266,13 +3353,14 @@ export class IsoGame implements GameLike {
 
   // Units as dots of their faction's colour, for the globe (screen positions).
   mapDots(): [number, number, RGB][] {
-    return this.units.map((u) => {
+    return this.units.filter((u) => this.shown(u)).map((u) => {
       const [sx, sy] = toScreen(u.x, u.y);
       return [sx, sy, FACTIONS[u.f].light];
     });
   }
 
   private drawUnit(u: Unit): void {
+    if (!this.shown(u)) return;
     this.lit = this.justHit(u) ? 0.45 : 0;
     this.aimed = this.aimFlash(u);
     try {
