@@ -10,6 +10,7 @@ import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview } from './maps';
 import { Shroud } from './shroud';
+import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, HIT_SPREAD, DAMAGED, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
@@ -59,6 +60,20 @@ const RISE_S = 1.8;
 const DOCK: [number, number] = [12, 11];
 // Buildings that make units, and so have rally points.
 const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
+
+// Whose voice each kind of unit answers in (src/voice.ts).
+const VOICE: Record<Kind, UnitVoice> = {
+  inf: 'soldier',
+  rocket: 'soldier',
+  light: 'tank',
+  heavy: 'tank',
+  arty: 'tank',
+  mcv: 'tank',
+  boat: 'tank',
+  buggy: 'scout',
+  heli: 'copter',
+  hauler: 'harvester',
+};
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
 const PACK_S = 1.2;
@@ -369,7 +384,27 @@ export class IsoGame implements GameLike {
 
   private emit(): void {
     const b = this.selB();
+    // units of yours newly picked answer (the most common kind among them)
+    const now = new Set(this.units.filter((u) => u.sel && u.f === ME && !u.dead));
+    const fresh = [...now].filter((u) => !this.heard.has(u));
+    this.heard = now;
+    if (fresh.length) this.speak(fresh, 'select');
     this.onSelect(b ? [MAKERS.includes(b.kind) ? `${BNAME[b.kind]} · tap ground: rally point` : BNAME[b.kind]] : this.selected().map((u) => UNIT[u.kind].name));
+  }
+
+  // The units of yours that were selected last time the selection changed.
+  private heard = new Set<Unit>();
+
+  // The most common kind among us says a line.
+  private speak(us: Unit[], line: UnitLine): void {
+    const n = new Map<Kind, number>();
+    let best: Kind | null = null;
+    for (const u of us) {
+      const c = (n.get(u.kind) ?? 0) + 1;
+      n.set(u.kind, c);
+      if (!best || c > n.get(best)!) best = u.kind;
+    }
+    if (best) sayUnit(VOICE[best], line);
   }
 
   private selB(): Building | undefined {
@@ -970,6 +1005,7 @@ export class IsoGame implements GameLike {
         q.push(t);
         this.queue.set(t.tab, q);
       }
+      announce('training');
       return;
     }
     if (j && j.tech === t) {
@@ -984,6 +1020,7 @@ export class IsoGame implements GameLike {
     if (!this.available().includes(t)) return;
     if (t.building && !this.have().has('yard')) return;
     this.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+    announce('building');
   }
 
   buildCancel(id: string): void {
@@ -1060,7 +1097,10 @@ export class IsoGame implements GameLike {
     if (opened) this.notice('New construction options');
     const pw = this.power();
     const low = pw.used > pw.made;
-    if (low && !this.lowPower) this.notice('Low power: build a power plant');
+    if (low && !this.lowPower) {
+      this.notice('Low power: build a power plant');
+      announce('low_power');
+    } else if (!low && this.lowPower) announce('power_restored');
     this.lowPower = low;
     for (const j of this.jobs.values()) {
       if (j.ready || j.paused) continue;
@@ -1070,17 +1110,22 @@ export class IsoGame implements GameLike {
       const pay = Math.min(want, this.credits, j.tech.cost - j.spent);
       this.credits -= pay;
       j.spent += pay;
-      if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) this.notice('Not enough credits');
+      if (pay < want - 1e-6 && j.spent < j.tech.cost - 1e-6) {
+        this.notice('Not enough credits');
+        announce('insufficient_funds');
+      }
       if (j.spent >= j.tech.cost - 1e-6) {
         j.spent = j.tech.cost;
         if (j.tech.unit) {
           if (this.deliver(j.tech)) {
             this.notice(`${j.tech.name} ready`);
+            announce('unit_ready');
             this.nextJob(j.tech.tab);
           }
         } else {
           j.ready = true;
           this.notice(`${j.tech.name} ready: tap it to place`);
+          announce('construction_complete');
         }
       }
     }
@@ -1338,7 +1383,11 @@ export class IsoGame implements GameLike {
           const [sx, sy] = toScreen(n.x, n.y, 2);
           this.particles.push({ x: sx + (Math.random() - 0.5) * 6, y: sy, vx: (Math.random() - 0.5) * 6, vy: -4, life: 0, max: 0.8, kind: 'dust', size: 1 });
         }
-        if (u.load >= ORE.load - 0.5) j.st = 'home';
+        if (u.load >= ORE.load - 0.5) {
+          j.st = 'home';
+          // a hauler you are looking after says it is heading home
+          if (u.sel && u.f === ME) sayUnit('harvester', 'full');
+        }
         break;
       }
       case 'home': {
@@ -1730,6 +1779,7 @@ export class IsoGame implements GameLike {
     const foe = shortest ? null : this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
       this.attack(sel, foe);
+      this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
       return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
@@ -1748,6 +1798,7 @@ export class IsoGame implements GameLike {
       if (near.length && sel.every((u) => u.kind === 'hauler' && u.f === ME)) {
         const [mx, my] = this.fold(...this.groundAt(x, y));
         if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: 0, t: 0, ore: true });
+        this.speak(sel, 'harvest');
         return;
       }
     }
@@ -1792,6 +1843,7 @@ export class IsoGame implements GameLike {
       u.target = undefined;
       u.forced = u.chase = false;
     }
+    this.speak(sel, 'move');
   }
 
   // If your unit u is inside a screen rect, the copy of it there (as laps).
@@ -2684,9 +2736,14 @@ export class IsoGame implements GameLike {
     // a flash of light where a big round lands (buildings shrug off bullets)
     if (!isB(t) || amt >= 12) t.flashT = this.time;
     if (t.hp <= 0) {
+      if (t.f === ME) announce(isB(t) ? 'building_lost' : 'unit_lost');
       if (isB(t)) this.raze(t);
       else this.kill(t);
       return;
+    }
+    if (t.f === ME && src) {
+      if (isB(t)) announce('base_under_attack');
+      else if (t.kind === 'hauler') announce('harvester_under_attack');
     }
     if (!src || src.dead) return;
     // it fights back, and its friends nearby come to help
@@ -3389,17 +3446,7 @@ export class IsoGame implements GameLike {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
     const grp = u.f === ME && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
-    if (grp) {
-      // in a colour group: a ring of its colour round the unit's feet, and
-      // its corners in that colour too
-      const ex = rx + 1;
-      const ey = Math.max(3, Math.round(ex / 2));
-      const cy = y + ry - ey + 1;
-      c.fillStyle = 'rgba(0,0,0,0.55)';
-      ringPx(c, x, cy + 1, ex, ey);
-      c.fillStyle = grp;
-      ringPx(c, x, cy, ex, ey);
-    }
+    // in a colour group: its corners are in the group's colour
     c.fillStyle = grp ?? (u.f === ME ? '#ffffff' : '#ff6a5a');
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
@@ -3513,21 +3560,6 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
   c.fillRect(bx, by, Math.round(bw * hp), 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
   for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
-}
-
-// A one-pixel ellipse outline with radii rx, ry round (x, y).
-function ringPx(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number): void {
-  const n = Math.ceil(Math.PI * (rx + ry) * 1.2);
-  const seen = new Set<number>();
-  for (let i = 0; i < n; i++) {
-    const t = (i / n) * Math.PI * 2;
-    const px = Math.round(x + Math.cos(t) * rx);
-    const py = Math.round(y + Math.sin(t) * ry);
-    const k = px * 4096 + py;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    c.fillRect(px, py, 1, 1);
-  }
 }
 
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {

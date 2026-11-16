@@ -5,6 +5,7 @@ import { CH } from './tiles';
 import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
+import { setVoiceMuted, voiceMuted } from './voice';
 import { initBuild } from './build-ui';
 import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
@@ -127,7 +128,7 @@ function lockOnPan(): void {
 }
 
 // ---------- Colour groups ----------
-// Color puts the selection into one of eight colour groups (Shift+1-8); the
+// Group puts the selection into one of eight colour groups (Shift+1-8); the
 // groups in use show at the front of the selection menu, and tapping one (or
 // 1-8) selects it again, wherever its units are. Tapping the one already
 // selected takes you to it.
@@ -251,7 +252,9 @@ function refreshTypes(): void {
   }
   const inGroup = groups.find((g) => g.sel);
   colorBtn.hidden = !canColor;
-  colorBtn.style.setProperty('--grp', inGroup ? inGroup.hex : 'transparent');
+  // in a colour group: the Group icon takes its colour
+  if (inGroup) colorBtn.style.setProperty('--grp', inGroup.hex);
+  else colorBtn.style.removeProperty('--grp');
   for (const [i, b] of [...paletteEl.children].entries()) b.setAttribute('aria-pressed', String(inGroup?.color === i));
   noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
   // All and Clear share one slot, so the bar doesn't shift: All while nothing
@@ -277,6 +280,14 @@ function refreshTypes(): void {
   groupsEl.hidden = !groups.length;
   typesEl.classList.toggle('group', locked);
   typesEl.style.setProperty('--grp', inGroup?.hex ?? '#9dff9d');
+  // a colour group already shows as its own button in front, pressed: no
+  // second button for it
+  if (locked && inGroup) {
+    typesEl.replaceChildren();
+    typesEl.hidden = true;
+    return;
+  }
+  typesEl.hidden = false;
   if (locked) {
     // the group as one button: the picture of its most common kind and how
     // many there are in all; tap it to go to them
@@ -667,6 +678,19 @@ let resizeTimer = 0;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => game && built.w && fit(), 150);
+});
+
+// Voices: units answer and the base announcer speaks (src/voice.ts).
+const voiceBtn = document.querySelector<HTMLButtonElement>('#voiceBtn')!;
+const showVoice = () => {
+  const on = !voiceMuted();
+  voiceBtn.textContent = `Voices: ${on ? 'on' : 'off'}`;
+  voiceBtn.setAttribute('aria-pressed', String(on));
+};
+showVoice();
+voiceBtn.addEventListener('click', () => {
+  setVoiceMuted(!voiceMuted());
+  showVoice();
 });
 
 // New map: a fresh seed, and (where there is a choice) pick the map again.
