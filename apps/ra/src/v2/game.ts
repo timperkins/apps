@@ -3301,17 +3301,7 @@ export class IsoGame implements GameLike {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
     const grp = u.f === ME && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
-    if (grp) {
-      // in a colour group: a ring of its colour round the unit's feet, and
-      // its corners in that colour too
-      const ex = rx + 1;
-      const ey = Math.max(3, Math.round(ex / 2));
-      const cy = y + ry - ey + 1;
-      c.fillStyle = 'rgba(0,0,0,0.55)';
-      ringPx(c, x, cy + 1, ex, ey);
-      c.fillStyle = grp;
-      ringPx(c, x, cy, ex, ey);
-    }
+    // in a colour group: its corners are in the group's colour
     c.fillStyle = grp ?? (u.f === ME ? '#ffffff' : '#ff6a5a');
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
@@ -3425,21 +3415,6 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
   c.fillRect(bx, by, Math.round(bw * hp), 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
   for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
-}
-
-// A one-pixel ellipse outline with radii rx, ry round (x, y).
-function ringPx(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number): void {
-  const n = Math.ceil(Math.PI * (rx + ry) * 1.2);
-  const seen = new Set<number>();
-  for (let i = 0; i < n; i++) {
-    const t = (i / n) * Math.PI * 2;
-    const px = Math.round(x + Math.cos(t) * rx);
-    const py = Math.round(y + Math.sin(t) * ry);
-    const k = px * 4096 + py;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    c.fillRect(px, py, 1, 1);
-  }
 }
 
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {

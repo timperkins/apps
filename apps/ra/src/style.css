@@ -246,6 +246,7 @@ body {
 #selMenu[hidden],
 #palette[hidden],
 #groups[hidden],
+#types[hidden],
 #colorBtn[hidden],
 #acts[hidden],
 #noTypes[hidden],
@@ -306,7 +307,7 @@ body {
 }
 
 /* the colour groups in use, before the kinds of unit */
-#groups {
+#groups:has(+ #types:not([hidden])) {
   padding-right: 4px;
   border-right: 2px solid var(--edge);
 }
@@ -343,23 +344,15 @@ body {
 }
 
 
-/* Color: opens the palette above the menu */
+/* Group: opens the palette of colours above the menu */
 #selBar #colorBtn {
   flex: none;
-  width: 48px;
-  min-width: 48px;
+  width: 56px;
+  min-width: 56px;
 }
 
-#colorBtn .swatch {
-  display: block;
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 2px 0;
-  box-sizing: border-box;
-  border: 2px solid #10140c;
-  background: conic-gradient(#4a9dff 0 12.5%, #3fe6e6 0 25%, #b4f03c 0 37.5%, #ffd93b 0 50%, #ff9a2e 0 62.5%, #ff6fb5 0 75%, #b07cff 0 87.5%, #f4f7ea 0);
-  box-shadow: 0 0 0 2px var(--grp);
+#selBar #selMenu #colorBtn svg {
+  fill: var(--grp, currentColor);
 }
 
 #selBar #colorBtn[aria-expanded='true'] {
