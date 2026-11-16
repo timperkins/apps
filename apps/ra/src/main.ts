@@ -1,5 +1,5 @@
 import './style.css';
-import type { GameLike } from './types';
+import { GROUP_COLORS, GROUP_NAMES, type GameLike } from './types';
 import { Globe, View } from './planet';
 import { CH } from './tiles';
 import { ART } from './gfx';
@@ -31,6 +31,9 @@ const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
 const selMenu = document.querySelector<HTMLDivElement>('#selMenu')!;
 const typesEl = document.querySelector<HTMLSpanElement>('#types')!;
+const groupsEl = document.querySelector<HTMLSpanElement>('#groups')!;
+const colorBtn = document.querySelector<HTMLButtonElement>('#colorBtn')!;
+const paletteEl = document.querySelector<HTMLDivElement>('#palette')!;
 const noTypes = document.querySelector<HTMLSpanElement>('#noTypes')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
@@ -100,14 +103,91 @@ document.addEventListener('pointerdown', (e) => {
 let lastNames: string[] = [];
 let selOpen = false;
 // Once you order the selection somewhere it is locked as a group: the menu
-// shows just those units, and taps send them rather than pick others, until
-// you clear it.
+// shows just those units, as one button with how many there are, and taps
+// send them rather than pick others, until you clear it. A selection made
+// with the menu's buttons is locked too as soon as you pan away or tap the
+// map, so it doesn't drop the units that go off screen.
 let locked = false;
+// the selection was made with the menu, at this camera position
+let menuPick: { x: number; y: number } | null = null;
 function lockGroup(): void {
+  menuPick = null;
   if (!game || !game.selectedPoints().length || !game.selectedTypes) return;
+  if (!game.selectedTypes().length) return; // a building: nothing to lock
   locked = true;
   typesKey = '';
   if (!selOpen) setSelOpen(true);
+}
+function pickedWithMenu(): void {
+  if (!locked && lastNames.length) menuPick = { x: cen.x, y: cen.y };
+}
+// Every frame: a menu selection is locked once the view moves.
+function lockOnPan(): void {
+  if (menuPick && !locked && Math.hypot(cen.x - menuPick.x, cen.y - menuPick.y) > 2) lockGroup();
+}
+
+// ---------- Colour groups ----------
+// Color puts the selection into one of eight colour groups (Shift+1-8); the
+// groups in use show at the front of the selection menu, and tapping one (or
+// 1-8) selects it again, wherever its units are. Tapping the one already
+// selected takes you to it.
+let paletteOn = false;
+function setPalette(on: boolean): void {
+  paletteOn = on && !!game?.setGroup;
+  paletteEl.hidden = !paletteOn;
+  colorBtn.setAttribute('aria-expanded', String(paletteOn));
+  typesKey = '';
+}
+paletteEl.replaceChildren(
+  ...GROUP_COLORS.map((hex, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch';
+    b.style.setProperty('--grp', hex);
+    b.textContent = String(i + 1);
+    b.title = `${GROUP_NAMES[i]} (Shift+${i + 1})`;
+    b.setAttribute('aria-label', `Make the selection the ${GROUP_NAMES[i]} group`);
+    b.addEventListener('click', () => assignGroup(i));
+    return b;
+  }),
+);
+colorBtn.addEventListener('click', () => setPalette(!paletteOn));
+function assignGroup(g: number): void {
+  if (!game?.setGroup || !game.selectedTypes?.().length) return;
+  game.setGroup(g);
+  setPalette(false);
+  lockGroup();
+}
+function pickGroup(g: number): void {
+  if (!game?.selectGroup || !game.groups) return;
+  const was = game.groups().find((x) => x.color === g)?.sel;
+  setPending(null);
+  setPalette(false);
+  if (!game.selectGroup(g)) return;
+  lockGroup();
+  if (was) goToSelection();
+}
+
+// Centre the view on the selection (the copy of it nearest the camera).
+function goToSelection(): void {
+  const pts = game?.selectedPoints() ?? [];
+  if (!pts.length || !built.w) return;
+  const [rx, ry] = pts[0];
+  let sx = 0;
+  let sy = 0;
+  for (const [x, y] of pts) {
+    sx += x - Math.round((x - rx) / built.w) * built.w;
+    sy += y - Math.round((y - ry) / built.h) * built.h;
+  }
+  const px = sx / pts.length;
+  const py = sy / pts.length;
+  cen.x = px + Math.round((cen.x - px) / built.w) * built.w;
+  cen.y = py + Math.round((cen.y - py) / built.h) * built.h;
+  if (planet) {
+    zoom = 1;
+    applyScale();
+  }
+  clampCen();
 }
 
 function setSelOpen(open: boolean): void {
@@ -117,7 +197,10 @@ function setSelOpen(open: boolean): void {
   updateSelBar();
 }
 selectBtn.addEventListener('click', () => setSelOpen(!selOpen));
-allBtn.addEventListener('click', () => selectView(true));
+allBtn.addEventListener('click', () => {
+  selectView(true);
+  pickedWithMenu();
+});
 clearBtn.addEventListener('click', () => game?.deselect());
 
 // Commands for the selection (Deploy, Pack up...), drawn as buttons before
@@ -138,6 +221,7 @@ let hasActs = false;
 function updateSelBar(): void {
   const menuOn = selOpen && !placingNow();
   selMenu.hidden = !menuOn;
+  if (!menuOn && paletteOn) setPalette(false);
   actsEl.hidden = !hasActs;
   selBar.hidden = !menuOn && !hasActs;
 }
@@ -155,10 +239,20 @@ let typesKey = '';
 function refreshTypes(): void {
   if (!selOpen || selMenu.hidden || !game) return;
   const types = locked ? (game.selectedTypes?.() ?? []) : (game.unitTypes?.(...viewRect()) ?? []);
-  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), lastNames.length]);
+  const groups = game.groups?.() ?? [];
+  const canColor = !!game.setGroup && (game.selectedTypes?.().length ?? 0) > 0;
+  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), groups.map((g) => [g.color, g.count, g.sel, g.icon]), lastNames.length, canColor, paletteOn]);
   if (key === typesKey) return;
   typesKey = key;
-  typesEl.classList.toggle('group', locked);
+  if (!canColor && paletteOn) {
+    paletteOn = false;
+    paletteEl.hidden = true;
+    colorBtn.setAttribute('aria-expanded', 'false');
+  }
+  const inGroup = groups.find((g) => g.sel);
+  colorBtn.hidden = !canColor;
+  colorBtn.style.setProperty('--grp', inGroup ? inGroup.hex : 'transparent');
+  for (const [i, b] of [...paletteEl.children].entries()) b.setAttribute('aria-pressed', String(inGroup?.color === i));
   noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
   // All and Clear share one slot, so the bar doesn't shift: All while nothing
   // is selected (greyed out with nothing on screen), Clear once something is
@@ -166,6 +260,40 @@ function refreshTypes(): void {
   allBtn.hidden = any;
   allBtn.disabled = !!game.unitTypes && types.length === 0;
   clearBtn.hidden = !any;
+  groupsEl.replaceChildren(
+    ...groups.map((g) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'type grp';
+      b.style.setProperty('--grp', g.hex);
+      b.setAttribute('aria-pressed', String(g.sel));
+      b.title = `${GROUP_NAMES[g.color]} group: ${g.count} (${g.color + 1})${g.sel ? ', tap again to go to them' : ''}`;
+      b.setAttribute('aria-label', b.title);
+      b.append(pictureOf(g.icon), countOf(String(g.count)));
+      b.addEventListener('click', () => pickGroup(g.color));
+      return b;
+    }),
+  );
+  groupsEl.hidden = !groups.length;
+  typesEl.classList.toggle('group', locked);
+  typesEl.style.setProperty('--grp', inGroup?.hex ?? '#9dff9d');
+  if (locked) {
+    // the group as one button: the picture of its most common kind and how
+    // many there are in all; tap it to go to them
+    const total = types.reduce((n, t) => n + t.count, 0);
+    const top = [...types].sort((a, b) => b.count - a.count)[0];
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'type whole';
+    b.setAttribute('aria-pressed', 'true');
+    b.title = `${types.map((t) => `${t.count} ${t.name}`).join(', ')}: tap to go to them (Clear to pick again)`;
+    b.setAttribute('aria-label', b.title);
+    if (top) b.append(pictureOf(top.icon));
+    b.append(countOf(String(total)));
+    b.addEventListener('click', goToSelection);
+    typesEl.replaceChildren(b);
+    return;
+  }
   typesEl.replaceChildren(
     ...types.map((t) => {
       const b = document.createElement('button');
@@ -174,24 +302,32 @@ function refreshTypes(): void {
       const all = t.sel === t.count;
       b.classList.toggle('part', t.sel > 0 && !all);
       b.setAttribute('aria-pressed', String(all));
-      b.title = locked ? `${t.name}: ${t.count} in this group (Clear to pick again)` : `${t.name}: ${t.sel ? `${t.sel} of ${t.count} selected` : `${t.count} on screen`}`;
-      b.disabled = locked;
+      b.title = `${t.name}: ${t.sel ? `${t.sel} of ${t.count} selected` : `${t.count} on screen`}`;
       b.setAttribute('aria-label', b.title);
-      const img = document.createElement('img');
-      img.src = t.icon;
-      img.alt = '';
-      const n = document.createElement('span');
-      n.className = 'count';
-      n.textContent = t.sel && !all ? `${t.sel}/${t.count}` : String(t.count);
-      const pic = document.createElement('span');
-      pic.className = 'pic';
-      pic.append(img);
-      b.append(pic, n);
+      b.append(pictureOf(t.icon), countOf(t.sel && !all ? `${t.sel}/${t.count}` : String(t.count)));
       // a kind not all selected: add the rest; all selected: drop them
-      b.addEventListener('click', () => game.selectKind?.(t.kind, !all, ...viewRect()));
+      b.addEventListener('click', () => {
+        game.selectKind?.(t.kind, !all, ...viewRect());
+        pickedWithMenu();
+      });
       return b;
     }),
   );
+}
+function pictureOf(src: string): HTMLSpanElement {
+  const img = document.createElement('img');
+  img.src = src;
+  img.alt = '';
+  const pic = document.createElement('span');
+  pic.className = 'pic';
+  pic.append(img);
+  return pic;
+}
+function countOf(text: string): HTMLSpanElement {
+  const n = document.createElement('span');
+  n.className = 'count';
+  n.textContent = text;
+  return n;
 }
 function refreshActions(): void {
   const acts = (!planet && game?.actions?.()) || [];
@@ -230,6 +366,8 @@ function showSelection(names: string[]): void {
   if (!names.length) {
     setPending(null);
     locked = false;
+    menuPick = null;
+    if (paletteOn) setPalette(false);
   }
   updateSelBar();
 }
@@ -771,6 +909,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (multi || down) return;
   if (game.moveMarks !== undefined) game.moveMarks = e.pointerType !== 'mouse';
+  // the first tap after picking with the menu locks the selection as a group
+  if (menuPick && !locked && !placingNow()) lockGroup();
   const p = toMap(e.clientX, e.clientY);
   if (placingNow()) {
     if (e.button === 2) {
@@ -965,8 +1105,14 @@ window.addEventListener('keydown', (e) => {
   }
   // (with ctrl or cmd held, letters are the browser's: ctrl+S, ctrl+D...)
   if (!e.ctrlKey && !e.metaKey && !e.altKey) keys.add(e.key.toLowerCase());
+  const digit = /^Digit([1-8])$/.exec(e.code);
+  if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.shiftKey) assignGroup(+digit[1] - 1);
+    else pickGroup(+digit[1] - 1);
+  }
   if (e.key === 'Escape') {
     if (!menu.hidden) setMenu(false);
+    else if (paletteOn) setPalette(false);
     else if (placingNow()) game.act?.('unplace');
     else if (pending) setPending(null);
     else if (lastNames.length) game.deselect();
@@ -1091,6 +1237,7 @@ function draw(now: number, first: boolean): void {
   }
   refreshActions();
   syncGhost();
+  lockOnPan();
   refreshTypes();
   placeConfirm();
   build.update(now);

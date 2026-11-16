@@ -2,7 +2,7 @@
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import type { Action, BuildItem, BuildMenu, CursorAt, GameLike, UnitType } from '../types';
+import { GROUP_COLORS, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, drawSprite, renderStack, toScreen, toWorld } from './stack';
@@ -77,6 +77,8 @@ interface Unit {
   ty: number;
   moving: boolean;
   sel: boolean;
+  // the colour group you put it in (an index into GROUP_COLORS), if any
+  grp?: number;
   anim: number;
   hp: number;
   idle: number;
@@ -1845,6 +1847,47 @@ export class IsoGame implements GameLike {
     return this.home;
   }
 
+  // ---------- Colour groups ----------
+  // You can put the selection into one of GROUP_COLORS' groups, then pick the
+  // group again later from the selection menu (or 1-8), wherever its units
+  // have gone. A unit is in one group at most; putting it in another moves it.
+
+  // The groups that have any units, with how many, the picture of their most
+  // common kind, and whether the selection is exactly that group.
+  groups(): GroupInfo[] {
+    const out: GroupInfo[] = [];
+    for (let g = 0; g < GROUP_COLORS.length; g++) {
+      const us = this.units.filter((u) => u.grp === g && u.f === ME && !u.dead);
+      if (!us.length) continue;
+      const kinds = new Map<Kind, number>();
+      for (const u of us) kinds.set(u.kind, (kinds.get(u.kind) ?? 0) + 1);
+      const top = [...kinds].sort((a, b) => b[1] - a[1])[0][0];
+      const sel = us.every((u) => u.sel) && this.mine().length === us.length;
+      out.push({ color: g, hex: GROUP_COLORS[g], count: us.length, icon: this.unitIcon(top), sel });
+    }
+    return out;
+  }
+
+  // Put the units of yours that are selected into group g (and out of the
+  // one they were in); whoever was in g before and isn't selected leaves it.
+  setGroup(g: number): void {
+    const mine = this.mine();
+    if (!mine.length) return;
+    for (const u of this.units) if (u.grp === g) u.grp = undefined;
+    for (const u of mine) u.grp = g;
+  }
+
+  // Select group g, wherever its units are (each stays on the copy of the
+  // world it was last picked on, so orders go the way they went before).
+  selectGroup(g: number): boolean {
+    const us = this.units.filter((u) => u.grp === g && u.f === ME && !u.dead);
+    if (!us.length) return false;
+    for (const b of this.buildings) b.sel = false;
+    for (const u of this.units) u.sel = us.includes(u);
+    this.emit();
+    return true;
+  }
+
   selectedPoints(): [number, number][] {
     const b = this.selB();
     return b ? [toScreen(b.x, b.y)] : this.selected().map((u) => toScreen(u.x, u.y));
@@ -3257,7 +3300,19 @@ export class IsoGame implements GameLike {
   private drawSelection(u: Unit): void {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
-    c.fillStyle = u.f === ME ? '#ffffff' : '#ff6a5a';
+    const grp = u.f === ME && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
+    if (grp) {
+      // in a colour group: a ring of its colour round the unit's feet, and
+      // its corners in that colour too
+      const ex = rx + 1;
+      const ey = Math.max(3, Math.round(ex / 2));
+      const cy = y + ry - ey + 1;
+      c.fillStyle = 'rgba(0,0,0,0.55)';
+      ringPx(c, x, cy + 1, ex, ey);
+      c.fillStyle = grp;
+      ringPx(c, x, cy, ex, ey);
+    }
+    c.fillStyle = grp ?? (u.f === ME ? '#ffffff' : '#ff6a5a');
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
     healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
@@ -3370,6 +3425,21 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
   c.fillRect(bx, by, Math.round(bw * hp), 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
   for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
+}
+
+// A one-pixel ellipse outline with radii rx, ry round (x, y).
+function ringPx(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number): void {
+  const n = Math.ceil(Math.PI * (rx + ry) * 1.2);
+  const seen = new Set<number>();
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const px = Math.round(x + Math.cos(t) * rx);
+    const py = Math.round(y + Math.sin(t) * ry);
+    const k = px * 4096 + py;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    c.fillRect(px, py, 1, 1);
+  }
 }
 
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {
