@@ -1,0 +1,72 @@
+.jv {
+  position: fixed; inset: 0; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none;
+  touch-action: none; background: #2e6b2f; color: #fff;
+  font: 15px/1.35 ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+.jv button { font: inherit; cursor: pointer; }
+.jv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.jv-hud { position: absolute; left: 10px; top: calc(10px + env(safe-area-inset-top)); display: flex; flex-direction: column; gap: 6px; max-width: min(60vw, 360px); pointer-events: none; }
+.jv-money { align-self: flex-start; background: #1f8a4c; border: 3px solid #fff; border-radius: 14px; padding: 2px 14px; font-size: 26px; font-weight: 900; text-shadow: 0 2px 0 rgba(0,0,0,.3); box-shadow: 0 3px 0 rgba(0,0,0,.25); }
+.jv-job { background: rgba(20,30,40,.78); border-radius: 12px; padding: 6px 10px; font-size: 13.5px; }
+.jv-job b { display: block; color: #ffe14d; font-size: 15px; }
+
+.jv-topright { position: absolute; right: 10px; top: calc(10px + env(safe-area-inset-top)); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.jv-mini { width: 130px; height: 130px; border: 3px solid #fff; border-radius: 12px; background: #000; cursor: pointer; image-rendering: pixelated; box-shadow: 0 3px 0 rgba(0,0,0,.25); }
+.jv-btns { display: flex; gap: 6px; }
+.jv-btn { width: 44px; height: 44px; border-radius: 12px; border: 2px solid #fff; background: rgba(20,30,40,.8); color: #fff; font-size: 20px; }
+
+.jv-prompt { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0; transition: .15s; background: rgba(20,30,40,.88); border: 2px solid #ffe14d; border-radius: 14px; padding: 8px 16px; font-weight: 800; font-size: 17px; white-space: nowrap; pointer-events: none; }
+.jv-prompt.show { opacity: 1; transform: translateX(-50%); }
+.jv-prompt.off { border-color: #999; color: #ccc; }
+.jv-prompt kbd { display: inline-block; background: #ffe14d; color: #333; border-radius: 6px; padding: 0 7px; margin-right: 4px; font: inherit; }
+
+.jv-toast { position: absolute; left: 50%; top: calc(16px + env(safe-area-inset-top)); transform: translate(-50%, -80px); max-width: min(90vw, 460px); background: #fff; color: #333; border-radius: 14px; padding: 10px 16px; font-weight: 700; text-align: center; box-shadow: 0 4px 0 rgba(0,0,0,.25); transition: transform .25s; pointer-events: none; }
+.jv-toast.show { transform: translate(-50%, 0); }
+
+/* touch controls */
+.jv-stick, .jv-act { display: none; }
+.jv.touch .jv-act { display: flex; }
+.jv.touch .jv-stick.on { display: block; }
+.jv.touch .jv-hud { max-width: 55vw; }
+.jv.touch .jv-mini { width: 96px; height: 96px; }
+.jv.touch .jv-toast { top: auto; bottom: 150px; transform: translate(-50%, 300px); }
+.jv.touch .jv-toast.show { transform: translate(-50%, 0); }
+.jv-stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.18); border: 3px solid rgba(255,255,255,.5); pointer-events: none; }
+.jv-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,.85); transform: translate(-50%,-50%); }
+.jv-act { position: absolute; right: calc(18px + env(safe-area-inset-right)); bottom: calc(22px + env(safe-area-inset-bottom)); width: 104px; height: 104px; border-radius: 50%; border: 4px solid #fff; background: #f2a516; color: #fff; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 5px 0 #a86c00; touch-action: none; padding: 4px; }
+.jv-act .i { font-size: 38px; line-height: 1; }
+.jv-act .l { font-size: 11px; font-weight: 800; line-height: 1.1; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jv-act.dim { background: #777; box-shadow: 0 5px 0 #444; opacity: .75; }
+.jv-act:active { transform: translateY(3px); box-shadow: 0 2px 0 #a86c00; }
+
+/* modals */
+.jv-modal { position: absolute; inset: 0; background: rgba(10,20,30,.55); display: grid; place-items: center; padding: 16px; z-index: 5; }
+.jv-modal.hidden { display: none; }
+.jv-card { background: #fff8ec; color: #3b2a1a; border: 5px solid #9a6435; border-radius: 20px; padding: 16px 18px; width: min(560px, 100%); max-height: calc(100% - 20px); overflow: auto; box-shadow: 0 8px 0 rgba(0,0,0,.3); touch-action: pan-y; }
+.jv-card h2 { margin: 0 0 6px; font-size: 24px; color: #7a3f12; text-align: center; }
+.jv-card p { margin: 6px 0; }
+.jv-card .sub { color: #7c6650; font-size: 13.5px; text-align: center; }
+.jv-card button { border: none; border-radius: 12px; padding: 9px 16px; font-weight: 800; }
+.jv-close { display: block; margin: 12px auto 0; background: #9a6435; color: #fff; }
+.jv-close.big { font-size: 20px; padding: 12px 32px; background: #2e9d5a; }
+.jv-steps { margin: 6px 0; padding-left: 22px; }
+.jv-steps li { margin: 6px 0; }
+
+.jv-jobs { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.jv-jobrow { display: flex; align-items: center; gap: 10px; background: #fff; border: 2px solid #e5d3b8; border-radius: 14px; padding: 8px 10px; }
+.jv-jobrow.mine { border-color: #2e9d5a; background: #eefbf1; }
+.jv-jobrow.locked { opacity: .6; }
+.jv-jicon { font-size: 34px; width: 44px; text-align: center; }
+.jv-jtext { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.jv-jtext b { font-size: 16px; }
+.jv-jtext .pay { color: #1f8a4c; font-weight: 800; font-size: 14px; }
+.jv-jtext small { color: #7c6650; }
+.jv-take { background: #f2a516; color: #fff; white-space: nowrap; }
+.jv-tag { background: #2e9d5a; color: #fff; border-radius: 10px; padding: 6px 10px; font-weight: 800; font-size: 13px; white-space: nowrap; }
+.jv-lock { font-size: 12px; font-weight: 700; color: #8a6d50; text-align: right; max-width: 90px; }
+
+.jv-menu { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.jv-menu button { background: #9a6435; color: #fff; font-size: 17px; padding: 12px; }
+.jv-menu button.danger { background: #b03a2e; }
+.jv-bigmap canvas { width: 100%; max-width: 540px; aspect-ratio: 1; display: block; margin: 0 auto; border-radius: 12px; image-rendering: pixelated; }

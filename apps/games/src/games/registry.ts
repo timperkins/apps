@@ -39,4 +39,23 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./space-defender/index'),
   },
+  {
+    id: 'jobville',
+    title: 'Jobville',
+    tagline: 'Explore a huge village, pick a job off the job board and spend your $ on shop upgrades.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#7cc35b"/>
+      <rect x="0" y="50" width="120" height="8" fill="#cdb994"/><rect x="56" y="0" width="8" height="80" fill="#cdb994"/>
+      <rect x="6" y="8" width="20" height="16" fill="#f2d7b6"/><rect x="4" y="6" width="24" height="11" fill="#b5483a"/>
+      <rect x="32" y="8" width="20" height="16" fill="#c9dcef"/><rect x="30" y="6" width="24" height="11" fill="#3f6aa1"/>
+      <rect x="70" y="6" width="44" height="26" fill="#ffe08a"/><rect x="68" y="4" width="48" height="16" fill="#d04a7a"/>
+      <rect x="80" y="8" width="24" height="8" rx="2" fill="#fff"/><text x="92" y="15" font-size="7" font-weight="900" text-anchor="middle" fill="#d04a7a" font-family="sans-serif">SHOP</text>
+      <rect x="14" y="32" width="28" height="12" fill="#9a6435" stroke="#5a3418" stroke-width="1.5"/>
+      <rect x="17" y="35" width="6" height="6" fill="#fff8dc"/><rect x="25" y="34" width="6" height="6" fill="#e0f0ff"/><rect x="33" y="35" width="6" height="6" fill="#ffe0e0"/>
+      <circle cx="88" cy="66" r="9" fill="#1f8a4c" stroke="#fff" stroke-width="2"/><text x="88" y="70" font-size="11" font-weight="900" text-anchor="middle" fill="#fff" font-family="sans-serif">$</text>
+      <circle cx="60" cy="64" r="4" fill="#f1c27d"/><rect x="56" y="67" width="8" height="7" rx="2" fill="#e74c3c"/>
+      <circle cx="10" cy="68" r="7" fill="#2e7d32"/><circle cx="110" cy="44" r="6" fill="#2e7d32"/>
+    </svg>`,
+    load: () => import('./jobville/index'),
+  },
 ];
