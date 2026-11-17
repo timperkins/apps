@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { gapBetween, step, type Body } from './physics';
 import { arc, laneOffset, pointAt, shifted } from './curves';
-import { ANIMATION_SECONDS, EVENT_PAUSE, FLIGHT_SECONDS, Player } from './player';
+import { ANIMATION_SECONDS, EVENT_PAUSE, FLIGHT_SECONDS, MOVE_PAUSE, Player } from './player';
 import { Timeline } from '../engine/timeline';
 import { monthIndex } from '../engine/time';
 import type { LifeEvent, Person } from '../data/types';
@@ -111,7 +111,7 @@ describe('Player', () => {
     expect(p.t).toBeCloseTo(monthIndex('2000-06') + 6);
   });
 
-  it('stops on every event until its animation is done, then 3 more seconds', () => {
+  it('stops on every event until its animation is done, then 3 more seconds (1 for moves)', () => {
     const p = new Player(tl);
     p.play();
     expect(p.advance(10).map((e) => e.event.id)).toEqual(['1']);
@@ -121,7 +121,7 @@ describe('Player', () => {
     // Time resumes and stops again at the move.
     expect(p.advance(10).map((e) => e.event.id)).toEqual(['2']);
     const moved = p.t;
-    p.advance(FLIGHT_SECONDS + EVENT_PAUSE - 0.1);
+    p.advance(FLIGHT_SECONDS + MOVE_PAUSE - 0.1);
     expect(p.t).toBe(moved);
     p.advance(0.5);
     expect(p.t).toBeGreaterThan(moved);
