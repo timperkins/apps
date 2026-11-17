@@ -73,6 +73,11 @@
 .np-titlebox { text-align: center; display: grid; gap: 10px; width: min(400px, 100%); background: rgba(255,255,255,.95); }
 .np-titlebox h1 { margin: 0; font-size: 34px; color: #1d2a44; }
 .np-titlebox p { margin: 0 0 6px; color: #4a5a78; }
+.np-saves { text-align: left; display: grid; gap: 6px; }
+.np-saves h3 { margin: 4px 0 0; font-size: 16px; }
+.np-save { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; background: #f1f5fb; border-radius: 12px; padding: 6px 8px; }
+.np-save small { display: block; color: #5a6a88; font-size: 12px; }
+.np-save .np-btn { padding: 8px 12px; font-size: 14px; }
 .np-logo { font-size: 46px; }
 
 @media (max-width: 640px) {
