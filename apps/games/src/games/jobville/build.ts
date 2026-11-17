@@ -76,6 +76,7 @@ add('Shop', 'object', [
   ['Basket', '🧺', 10, 1], ['Shopping Cart', '🛒', 25, 2], ['Price Sign', '🏷️', 6, 1], ['Scale', '⚖️', 20, 2],
   ['Open Sign', '🪧', 10, 3], ['Gift Wrap', '🎁', 15, 2], ['Clothes Rack', '👕', 35, 4, ], ['Shoe Stand', '👟', 35, 4],
   ['Hat Stand', '🎩', 30, 3], ['Toy Shelf', '🧸', 40, 5], ['Book Stand', '📚', 30, 3], ['Flower Stand', '💐', 30, 4],
+  ['Neon Sign', '💡', 150, 15], ['Gold Sign', '🌟', 500, 40],
 ]);
 add('Furniture', 'object', [
   ['Table', '🪑', 20], ['Chair', '💺', 10], ['Sofa', '🛋️', 45], ['Bed', '🛏️', 50], ['Lamp', '💡', 12],
@@ -128,6 +129,7 @@ export const ROLES: Role[] = [
   { name: 'Musician', icon: '🎵', needs: ['piano', 'guitar', 'drums'] },
   { name: 'Game Host', icon: '🕹️', needs: ['arcade', 'pool-table', 'game-console'] },
   { name: 'Manager', icon: '👔', needs: ['desk', 'computer'] },
+  { name: 'Waiter', icon: '🍽️', needs: ['table', 'chair'] },
 ];
 
 export const NAMES = [

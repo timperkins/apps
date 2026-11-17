@@ -30,6 +30,7 @@
 .jv.touch .jv-stick.on { display: block; }
 .jv.touch .jv-hud { max-width: 55vw; }
 .jv.touch .jv-mini { width: 96px; height: 96px; }
+.jv.touch .jv-btns { display: grid; grid-template-columns: repeat(2, 44px); }
 .jv.touch .jv-toast { top: auto; bottom: 150px; transform: translate(-50%, 300px); }
 .jv.touch .jv-toast.show { transform: translate(-50%, 0); }
 .jv-stick { position: absolute; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; background: rgba(255,255,255,.18); border: 3px solid rgba(255,255,255,.5); pointer-events: none; }
@@ -125,3 +126,49 @@
 .jv-diploma .seal { position: absolute; right: 10px; top: 6px; font-size: 34px; }
 .jv.touch .jv-bb-item { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 .jv.touch .jv-bb-item small { display: none; }
+
+/* level, time, quests */
+.jv-toprow { display: flex; align-items: center; gap: 6px; pointer-events: auto; flex-wrap: wrap; }
+.jv-lvl { position: relative; overflow: hidden; border: 2px solid #fff; border-radius: 12px; background: #6b4fbb; color: #fff; font-weight: 900; padding: 4px 10px; font-size: 15px; }
+.jv-lvl i { position: absolute; left: 0; bottom: 0; height: 4px; background: #ffe14d; }
+.jv-sky { background: rgba(20,30,40,.78); border-radius: 10px; padding: 4px 8px; font-weight: 800; font-size: 13px; }
+.jv-job .orders, .jv-job .pantry, .jv-job .event { display: block; margin-top: 3px; font-weight: 700; }
+.jv-job .orders { color: #ffd27a; }
+.jv-job .pantry { color: #d7f5ff; }
+.jv-job .event { color: #ff9ff3; }
+.jv-xp { height: 14px; background: #eadcc6; border-radius: 8px; overflow: hidden; }
+.jv-xp i { display: block; height: 100%; background: linear-gradient(90deg, #6b4fbb, #b388ff); }
+.jv-quest { background: #fff; border-radius: 10px; padding: 8px 10px; margin: 5px 0; display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; }
+.jv-quest .bar { grid-column: 1 / -1; height: 8px; background: #eadcc6; border-radius: 5px; overflow: hidden; }
+.jv-quest .bar i { display: block; height: 100%; background: #2e9d5a; }
+.jv-quest small { color: #1f8a4c; font-weight: 800; }
+.jv-achs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+.jv-ach { background: #eee4d4; border-radius: 10px; padding: 6px 4px; text-align: center; opacity: .45; filter: grayscale(1); }
+.jv-ach.got { opacity: 1; filter: none; background: #fff3c4; }
+.jv-ach span { font-size: 26px; display: block; }
+.jv-ach small { font-size: 11px; font-weight: 700; color: #5a3a1a; }
+
+/* menu */
+.jv-pantry { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 6px 0 10px; font-weight: 800; }
+.jv-pantry span { background: #fff; border-radius: 10px; padding: 4px 8px; }
+.jv-pantry span.no { opacity: .4; }
+.jv-recipes { display: flex; flex-direction: column; gap: 6px; }
+.jv-recipe { display: flex; align-items: center; gap: 10px; background: #fff; border: 2px solid #e5d3b8; border-radius: 12px; padding: 6px 10px; }
+.jv-recipe.on { border-color: #2e9d5a; background: #eefbf1; }
+.jv-recipe.locked { opacity: .65; }
+.jv-recipe .ic { font-size: 30px; }
+.jv-recipe > div { flex: 1; min-width: 0; }
+.jv-recipe small { display: block; color: #7c6650; }
+.jv-recipe .pay { color: #1f8a4c; font-weight: 800; }
+.jv-recipe .lock { font-size: 11.5px; color: #8a6d50; max-width: 140px; text-align: right; }
+.jv-madd { background: #f2a516; color: #fff; }
+.jv-madd:disabled { opacity: .5; }
+.jv-mrm { background: #2e9d5a; color: #fff; }
+.jv-card button.big { display: block; margin: 8px auto; font-size: 17px; padding: 11px 22px; background: #2e9d5a; color: #fff; }
+.jv-card button.big:disabled { opacity: .5; }
+
+/* photo mode */
+.jv-photobar { display: none; position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); gap: 8px; }
+.jv-photobar button { border: 2px solid #fff; border-radius: 12px; background: rgba(20,30,40,.85); color: #fff; font-weight: 800; padding: 10px 16px; }
+.jv.photo .jv-photobar { display: flex; }
+.jv.photo .jv-hud, .jv.photo .jv-topright, .jv.photo .jv-prompt, .jv.photo .jv-act, .jv.photo .jv-buildbar, .jv.photo .jv-toast, .jv.photo .jv-stick { display: none !important; }

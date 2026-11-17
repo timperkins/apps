@@ -94,8 +94,21 @@ export const BLOCKS = 8;
 export const SOLID = new Set<number>([T.Water, T.Tree, T.Building, T.Rock, T.Hedge, T.Board, T.Fence]);
 
 /** Your own lot, west of town between the forest and the houses. */
-export const LOT = { x: 26, y: 100, w: 16, h: 14, gateY: 106 };
-export const inLot = (x: number, y: number) => x >= LOT.x && y >= LOT.y && x < LOT.x + LOT.w && y < LOT.y + LOT.h;
+export interface Lot {
+  id: 'you' | 'home' | 'r1' | 'r2' | 'r3';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  gateY: number;
+}
+const mkLot = (id: Lot['id'], y: number): Lot => ({ id, x: 26, y, w: 16, h: 14, gateY: y + 6 });
+export const LOTS: Lot[] = [mkLot('you', 100), mkLot('r1', 22), mkLot('r2', 50), mkLot('r3', 120), mkLot('home', 140)];
+export const LOT = LOTS[0];
+export const LOT_BY_ID = Object.fromEntries(LOTS.map((l) => [l.id, l])) as Record<Lot['id'], Lot>;
+const inside = (l: Lot, x: number, y: number) => x >= l.x && y >= l.y && x < l.x + l.w && y < l.y + l.h;
+export const inLot = (x: number, y: number) => inside(LOT, x, y);
+export const lotAt = (x: number, y: number) => LOTS.find((l) => inside(l, x, y)) ?? null;
 
 export function makeWorld(): World {
   const r = rng(20261117);
@@ -289,17 +302,21 @@ export function makeWorld(): World {
   addBuilding({ kind: 'mine', label: 'MINE', x: 89, y: 4, w: 8, h: 4, wall: '#7d7466', roof: '#4b453d', door: { x: 93, y: 8 }, up: false });
   addBuilding({ kind: 'fishhut', label: 'BAIT', x: 106, y: 141, w: 5, h: 3, wall: '#9fd0e0', roof: '#2b6f8c', door: { x: 108, y: 144 }, up: false });
 
-  // Your lot: cleared ground with a fence and a gate on the town side
-  for (let y = LOT.y - 3; y < LOT.y + LOT.h + 3; y++)
-    for (let x = LOT.x - 3; x <= LOT.x + LOT.w + 1; x++) if (get(x, y) === T.Tree || get(x, y) === T.Flowers) set(x, y, T.Grass);
-  for (let y = LOT.y - 1; y <= LOT.y + LOT.h; y++)
-    for (let x = LOT.x - 1; x <= LOT.x + LOT.w; x++) {
-      const edge = x === LOT.x - 1 || x === LOT.x + LOT.w || y === LOT.y - 1 || y === LOT.y + LOT.h;
-      set(x, y, edge ? T.Fence : T.Lot);
+  // A road along the west edge of town that reaches every lot
+  for (let y = 16; y < 162; y++) for (let d = 0; d < 2; d++) if (get(GRID_X0 + d, y) !== T.Water) set(GRID_X0 + d, y, T.Road);
+  // Lots: cleared ground with a fence and a gate on the town side
+  for (const L of LOTS) {
+    for (let y = L.y - 3; y < L.y + L.h + 3; y++)
+      for (let x = L.x - 3; x <= L.x + L.w + 1; x++) if (get(x, y) === T.Tree || get(x, y) === T.Flowers) set(x, y, T.Grass);
+    for (let y = L.y - 1; y <= L.y + L.h; y++)
+      for (let x = L.x - 1; x <= L.x + L.w; x++) {
+        const edge = x === L.x - 1 || x === L.x + L.w || y === L.y - 1 || y === L.y + L.h;
+        set(x, y, edge ? T.Fence : T.Lot);
+      }
+    for (let d = 0; d < 2; d++) {
+      set(L.x + L.w, L.gateY + d, T.Path);
+      set(L.x + L.w + 1, L.gateY + d, T.Path);
     }
-  for (let d = 0; d < 2; d++) {
-    set(LOT.x + LOT.w, LOT.gateY + d, T.Path);
-    set(LOT.x + LOT.w + 1, LOT.gateY + d, T.Path);
   }
 
   // Number the houses along the streets

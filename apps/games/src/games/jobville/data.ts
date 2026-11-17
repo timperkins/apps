@@ -24,7 +24,7 @@ export const JOBS: Job[] = [
 
 export const JOB_BY_ID = Object.fromEntries(JOBS.map((j) => [j.id, j])) as Record<JobId, Job>;
 
-export type UpgradeId = 'shoes' | 'bag' | 'tools' | 'hat' | 'magnet' | 'rod' | 'watch' | 'pet' | 'hover' | 'trophy';
+export type UpgradeId = 'shoes' | 'bag' | 'tools' | 'hat' | 'magnet' | 'rod' | 'watch' | 'pet' | 'hover' | 'car' | 'trophy';
 
 export interface Tier {
   name: string;
@@ -101,6 +101,10 @@ export const UPGRADES: Upgrade[] = [
   {
     id: 'hover',
     tiers: [{ name: 'Hoverboard', icon: '🛸', price: 1800, desc: 'Fly super fast, even over water' }],
+  },
+  {
+    id: 'car',
+    tiers: [{ name: 'Car', icon: '🚗', price: 1200, desc: 'Zoom super fast on roads' }],
   },
   {
     id: 'trophy',
