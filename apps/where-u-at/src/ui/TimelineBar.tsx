@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Timeline } from '../engine/timeline';
 import { formatMonth } from '../engine/time';
 import { BABY_BOY, BABY_GIRL } from '../data/index';
@@ -10,7 +10,31 @@ interface Props {
   timeline: Timeline;
 }
 
-/** Play/pause and a scrubbable timeline with a dot for every birth and wedding. */
+/** The play button hides after this long without the pointer moving, while playing. */
+const IDLE_MS = 8000;
+
+/** True once the pointer, a touch or a key hasn't been used for IDLE_MS. */
+function useIdle(): boolean {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    let timer = 0;
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    };
+    const events = ['pointermove', 'pointerdown', 'keydown', 'wheel'] as const;
+    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    wake();
+    return () => {
+      clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, wake);
+    };
+  }, []);
+  return idle;
+}
+
+/** Play/pause, and a scrubbable timeline along the bottom edge with optional dots for births and weddings. */
 export function TimelineBar({ scene, state, timeline }: Props) {
   const { start, end } = timeline;
   const span = end - start;
@@ -31,7 +55,9 @@ export function TimelineBar({ scene, state, timeline }: Props) {
       }),
     [timeline, start, span],
   );
-  const visible = state.babies ? marks : marks.filter((m) => m.kind !== 'child');
+  const visible = !state.dots ? [] : state.babies ? marks : marks.filter((m) => m.kind !== 'child');
+  const idle = useIdle();
+  const hidePlay = state.playing && idle;
 
   const seekTo = (clientX: number) => {
     const rect = trackRef.current!.getBoundingClientRect();
@@ -41,7 +67,7 @@ export function TimelineBar({ scene, state, timeline }: Props) {
 
   return (
     <div className="bar">
-      <button className="play" onClick={() => scene.togglePlay()} aria-label={state.playing ? 'Pause' : 'Play'} title="Play / pause (Space)">
+      <button className={`play ${hidePlay ? 'hidden' : ''}`} tabIndex={hidePlay ? -1 : 0} onClick={() => scene.togglePlay()} aria-label={state.playing ? 'Pause' : 'Play'} title="Play / pause (Space)">
         {state.playing ? (
           <svg viewBox="0 0 24 24" aria-hidden>
             <rect x="6" y="5" width="4" height="14" rx="1.2" />

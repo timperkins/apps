@@ -79,6 +79,9 @@ export function Menu({ scene, state }: { scene: Scene; state: SceneState }) {
             <Toggle on={state.pauseForEvents} onChange={(on) => scene.setPauseForEvents(on)} title="Stop on every birth, wedding and long move (L)">
               Pause on each event
             </Toggle>
+            <Toggle on={state.dots} onChange={(on) => scene.setDots(on)} title="Show a dot on the timeline for each birth and wedding">
+              Event dots
+            </Toggle>
             <Toggle on={state.babies} onChange={(on) => scene.setBabies(on)} title="Show children and their births">
               Baby births
             </Toggle>

@@ -25,6 +25,8 @@ export interface SceneState {
   traces: boolean;
   /** Whether children and their births are shown. */
   babies: boolean;
+  /** Whether the timeline shows a dot for each birth and wedding. */
+  dots: boolean;
   view: View;
   /** Friends switched off in the filter. */
   hidden: string[];
@@ -111,6 +113,7 @@ export class Scene {
   private snap = true;
   private traces = true;
   private babies = true;
+  private dots = false;
   private hidden = new Set<string>();
   private view: View = 'fit';
   private fitKey = '';
@@ -236,6 +239,11 @@ export class Scene {
 
   setTraces(on: boolean): void {
     this.traces = on;
+    this.emit();
+  }
+
+  setDots(on: boolean): void {
+    this.dots = on;
     this.emit();
   }
 
@@ -587,7 +595,6 @@ export class Scene {
     ctx.restore();
     const initials = actor.person.name.split(' ').map((w) => w[0]).join('').slice(0, 2);
     circleImage(ctx, actor.img, x, y, r, actor.color, initials);
-    if (friend) ring(ctx, x, y, r + 0.5, 'rgba(255,255,255,0.9)', 1.5);
   }
 
   private drawWeddingHalos() {
@@ -769,7 +776,7 @@ export class Scene {
   }
 
   private padding() {
-    return { top: 110, bottom: 120, left: 90, right: 90 };
+    return { top: 110, bottom: 110, left: 90, right: 90 };
   }
 
   private resize() {
@@ -809,6 +816,7 @@ export class Scene {
       pauseForEvents: this.player.pauseForEvents,
       traces: this.traces,
       babies: this.babies,
+      dots: this.dots,
       view: this.view,
       hidden: [...this.hidden],
     };

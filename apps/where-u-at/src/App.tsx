@@ -11,7 +11,12 @@ function nowMonth(): number {
   return d.getFullYear() * 12 + d.getMonth() + 0.99;
 }
 
-const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, babies: true, view: 'fit', hidden: [] };
+/** Steps around the color wheel by the golden angle, so neighboring years never look alike. */
+function yearHue(year: number): number {
+  return Math.round((year * 137.508) % 360);
+}
+
+const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, babies: true, dots: false, view: 'fit', hidden: [] };
 const noop = () => () => {};
 
 export function App() {
@@ -77,7 +82,9 @@ export function App() {
       {scene && (
         <header className="when" aria-live="off">
           <div className="month">{formatMonth(state.t).split(' ')[0]}</div>
-          <div className="year">{formatMonth(state.t).split(' ')[1]}</div>
+          <div className="year" style={{ '--hue': yearHue(Number(formatMonth(state.t).split(' ')[1])) } as React.CSSProperties}>
+            {formatMonth(state.t).split(' ')[1]}
+          </div>
         </header>
       )}
       {scene && <Menu scene={scene} state={state} />}
