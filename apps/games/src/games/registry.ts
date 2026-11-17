@@ -115,4 +115,33 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./robopoculeps/index'),
   },
+  {
+    id: 'survivle-long',
+    title: 'Survivle (Long Edition)',
+    tagline: 'Survivle, but bigger: a 3× tougher Dark Beast, the Sword of Light, raider camps and 25 more things to find.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#1d2140"/>
+      <path d="M0 62L34 46L68 62L34 78Z" fill="#63b04b"/><path d="M0 62L34 78V80H0Z" fill="#8a6c4c"/>
+      <path d="M58 44L88 30L118 44L88 58Z" fill="#a8895a"/>
+      <g transform="translate(88 44)">
+        <path d="M-6 2l-3-9M6 2l3-9M-6-6l-3 9M6-6l3 9" stroke="#6b4424" stroke-width="1.6"/>
+        <circle cx="-9" cy="-7" r="2" fill="#e0302a"/><circle cx="9" cy="-7" r="2" fill="#e0302a"/>
+        <ellipse cx="0" cy="0" rx="5" ry="2.5" fill="#6a6460"/>
+        <path d="M0-1q-4-4 0-10q4 6 0 10z" fill="#ffa530"/><path d="M0-1q-2-3 0-6q2 3 0 6z" fill="#ffe27a"/>
+      </g>
+      <g transform="translate(60 40)">
+        <rect x="-14" y="-4" width="28" height="6" rx="2" fill="#6e6a78"/>
+        <rect x="-1.5" y="-30" width="3" height="27" fill="#fff7c8"/><rect x="-6" y="-31" width="12" height="2.5" fill="#e0b53c"/><rect x="-1.2" y="-38" width="2.4" height="7" fill="#3b6fcb"/>
+        <path d="M-8-38L8-38L4 0L-4 0Z" fill="#fff2a0" opacity=".25"/>
+      </g>
+      <g transform="translate(30 62)">
+        <rect x="-4" y="-6" width="3" height="7" fill="#2f7d31"/><rect x="1" y="-6" width="3" height="7" fill="#2f7d31"/>
+        <rect x="-5" y="-15" width="10" height="10" rx="3" fill="#dfe5ec"/>
+        <circle cx="0" cy="-19" r="5" fill="#f0c7a0"/><path d="M-6-17Q-6-26 0-25Q6-26 6-17L4-20Q0-23-4-20Z" fill="#1b4a20"/>
+        <ellipse cx="-7" cy="-10" rx="4" ry="5" fill="#3b6fcb" stroke="#e0b53c" stroke-width="1.2"/>
+      </g>
+      <text x="60" y="14" font-size="9" font-weight="900" text-anchor="middle" fill="#fff2a0" font-family="sans-serif" letter-spacing="2">LONG EDITION</text>
+    </svg>`,
+    load: () => import('./survivle-long/index'),
+  },
 ];

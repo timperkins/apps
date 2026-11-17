@@ -1,0 +1,119 @@
+.svl {
+  position: fixed; inset: 0; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none;
+  color: #f4ecff; font: 15px/1.4 ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif; background: #120c1c;
+}
+.svl-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+.svl-ui { position: absolute; inset: 0; pointer-events: none; }
+.svl-ui > * { pointer-events: auto; }
+.svl button { font: inherit; }
+
+.svl-title { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px;
+  background: radial-gradient(ellipse at center, rgba(18,8,30,.35), rgba(10,4,18,.85)); text-align: center; overflow-y: auto; }
+.svl-logo { display: flex; flex-direction: column; align-items: center; }
+.svl-logo h1 { margin: -8px 0 0; font-size: clamp(48px, 10vw, 88px); font-weight: 900; letter-spacing: .04em; color: #eaffd8;
+  text-shadow: 0 4px 0 #1f4d22, 0 0 30px rgba(170,90,255,.6); }
+.svl-tag { max-width: 520px; margin: 0; color: #dccbff; }
+.svl-note { margin: 0; color: #a993c9; font-size: 13px; }
+.svl-menu { display: flex; flex-direction: column; gap: 8px; min-width: 240px; }
+.svl-row { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+.svl-btn { background: #2d2145; color: #f4ecff; border: 2px solid #6b4fa0; border-radius: 12px; padding: 9px 18px; cursor: pointer; font-weight: 700; }
+.svl-btn:hover { border-color: #c69bff; background: #3a2b5a; }
+.svl-btn.big { background: #3e9b3a; border-color: #1b4a20; color: #fff; font-size: 17px; }
+.svl-btn.big:hover { background: #4cb247; }
+.svl-btn.ghost { background: transparent; }
+.svl-keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 2px 18px; max-width: 560px; font-size: 13px; color: #cdbdee; text-align: left;
+  background: rgba(20,12,34,.7); border: 1px solid #4a3870; border-radius: 12px; padding: 10px 14px; margin-top: 8px; }
+.svl-keys b { color: #fff; }
+
+.svl-dim-bg { position: absolute; inset: 0; background: rgba(8,4,16,.6); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
+.svl-dim-bg.win { background: radial-gradient(circle, rgba(255,230,140,.35), rgba(20,40,20,.75)); }
+.svl-dim-bg.lose { background: rgba(0,0,0,.92); }
+.svl-panel { background: linear-gradient(#251a3a, #1a1229); border: 2px solid #6b4fa0; border-radius: 18px; padding: 20px 22px; max-width: 520px; width: 100%;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6); text-align: center; max-height: 100%; overflow-y: auto; }
+.svl-panel.wide { max-width: 760px; }
+.svl-panel h2 { margin: 0 0 8px; font-size: 26px; color: #eaffd8; }
+.svl-panel h3 { margin: 12px 0 6px; font-size: 15px; color: #c69bff; text-align: left; }
+.svl-panel .svl-keys { margin: 14px auto 0; }
+.svl-dim { color: #b6a3d8; font-size: 13.5px; }
+.svl-msg { color: #ffe27a; font-weight: 700; }
+.svl-create label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; text-align: left; max-width: 280px; margin: 0 auto; }
+.svl-create input { font: inherit; font-size: 18px; padding: 8px 12px; border-radius: 10px; border: 2px solid #6b4fa0; background: #120c1c; color: #fff; outline: none; }
+.svl-create input:focus { border-color: #c69bff; }
+.svl-preview { display: block; margin: 0 auto 6px; }
+.svl-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; text-align: left; }
+.svl-item { display: flex; align-items: center; gap: 8px; width: 100%; margin: 3px 0; background: #2d2145; color: #f4ecff; border: 2px solid #4a3870; border-radius: 10px;
+  padding: 7px 10px; cursor: pointer; text-align: left; }
+.svl-item:hover:not(:disabled) { border-color: #c69bff; }
+.svl-item:disabled { opacity: .45; cursor: default; }
+.svl-item.on { border-color: #5fe07a; background: #24402a; }
+.svl-item em { margin-left: auto; font-style: normal; color: #ffd34d; font-size: 13px; }
+.svl-item i { width: 16px; height: 16px; border-radius: 4px; border: 3px solid; flex: none; }
+.svl-shop { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 10px; }
+.svl-saves { display: flex; flex-direction: column; gap: 6px; }
+.svl-save { display: flex; gap: 6px; }
+.svl-save .svl-btn { flex: 1; display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.svl-save .svl-btn span { font-weight: 400; font-size: 12.5px; color: #b6a3d8; }
+.svl-x { background: transparent; border: 2px solid #4a3870; color: #ff9a9a; border-radius: 10px; width: 40px; cursor: pointer; }
+
+.svl-cut { position: absolute; inset: 0; pointer-events: none; }
+.svl-cut-text { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); width: min(720px, 92%); text-align: center; font-size: clamp(18px, 3vw, 26px);
+  font-weight: 800; color: #f1e4ff; text-shadow: 0 2px 8px #000, 0 0 20px rgba(160,60,255,.6); }
+.svl-cut-text.in { animation: svl-fade 1s; }
+.svl-skip { position: absolute; right: 18px; bottom: 14px; color: #a993c9; font-size: 13px; }
+@keyframes svl-fade { from { opacity: 0; transform: translate(-50%, 10px); } }
+.svl-say { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); max-width: min(640px, 92%); pointer-events: none; z-index: 2;
+  background: rgba(20,14,34,.85); border: 2px solid #ffd34d; color: #fff; font-weight: 800; padding: 8px 16px; border-radius: 16px; text-align: center; }
+.svl-say::before { content: '🗣 '; }
+.svl-say.in { animation: svl-pop .25s; }
+@keyframes svl-pop { from { transform: translateX(-50%) scale(.85); opacity: 0; } }
+.svl-voice { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 12px; font-size: 13px; color: #cdbdee; }
+.svl-voice label { display: flex; flex-direction: column; gap: 3px; text-align: left; font-weight: 700; }
+.svl-voice select { font: inherit; background: #120c1c; color: #fff; border: 2px solid #6b4fa0; border-radius: 8px; padding: 5px 8px; max-width: 260px; }
+.svl-jobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px; }
+.svl-item.job { flex-direction: column; align-items: flex-start; gap: 3px; }
+.svl-item.job span { font-size: 12.5px; color: #cdbdee; }
+.svl-coop { margin: 8px 0 12px; padding: 10px 12px; border-radius: 12px; background: rgba(90, 200, 255, .12); color: #bfefff; font-size: 13.5px; text-align: center; }
+.svl-coop .svl-btn { margin-top: 8px; }
+.svl-bigcode { display: block; font-size: 34px; letter-spacing: 6px; color: #fff; margin: 4px 0; }
+.svl-coop-btn { width: 100%; margin-bottom: 10px; }
+.svl-create input.svl-code { text-transform: uppercase; letter-spacing: 3px; }
+.svl-touch { position: absolute; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; touch-action: none; }
+.svl-touch[hidden] { display: none; }
+.svl-touch button, .svl-stick { pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent; }
+.svl-stick { position: absolute; left: 18px; bottom: 74px; width: 128px; height: 128px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.3); }
+.svl-knob { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: rgba(255,255,255,.45); border: 2px solid rgba(255,255,255,.7); }
+.svl-tbtns { position: absolute; right: 14px; bottom: 74px; display: grid; grid-template-columns: repeat(3, 52px); gap: 8px; direction: rtl; }
+.svl-touch button { width: 52px; height: 52px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(20,12,34,.55); color: #fff; font: 900 20px ui-rounded, system-ui, sans-serif; padding: 0; }
+.svl-touch button:active { background: rgba(198,155,255,.6); }
+.svl-tbtns .big { width: 64px; height: 64px; font-size: 26px; grid-row: span 2; align-self: center; }
+.svl-ttop { position: absolute; right: 12px; top: 200px; display: flex; flex-direction: column; gap: 8px; }
+.svl-ttop button { width: 44px; height: 44px; font-size: 18px; }
+@media (max-width: 600px) {
+  .svl-panel { max-height: calc(100% - 24px); overflow-y: auto; }
+}
+
+/* Long Edition */
+.svl-edition { margin-top: -6px; font-size: clamp(18px, 4vw, 28px); font-weight: 900; letter-spacing: .3em; text-transform: uppercase; color: #fff2a0;
+  text-shadow: 0 2px 0 #6a4d1d, 0 0 18px rgba(255,230,140,.6); }
+.svl-new { max-width: 560px; text-align: left; font-size: 13px; color: #dccbff; background: rgba(20,12,34,.7); border: 1px solid #4a3870; border-radius: 12px; padding: 8px 14px; }
+.svl-new summary { cursor: pointer; font-weight: 800; color: #fff2a0; }
+.svl-new ul { margin: 6px 0 2px; padding-left: 18px; }
+.svl-sub { display: block; font-size: 12px; color: #b6a3d8; font-weight: 400; }
+.svl-item b + .svl-sub { margin-top: 2px; }
+.svl-shop .svl-item { flex-wrap: wrap; }
+.svl-bigmap { display: block; width: 100%; max-width: 640px; height: auto; margin: 0 auto 8px; border-radius: 12px; background: #10141c; }
+.svl-touch button.on { background: rgba(95,224,122,.55); }
+/* phones: buttons in 4 columns, the menu buttons in a row under the hearts, the narrator up top */
+.svl-ttop { left: 12px; right: auto; top: 74px; flex-direction: row; }
+@media (max-width: 600px), (max-height: 500px) {
+  .svl-tbtns { grid-template-columns: repeat(4, 48px); gap: 6px; }
+  .svl-touch button { width: 48px; height: 48px; font-size: 18px; }
+  .svl-tbtns .big { width: 58px; height: 58px; font-size: 24px; }
+  .svl-ttop button { width: 40px; height: 40px; font-size: 16px; }
+  .svl-say { bottom: auto; top: 124px; font-size: 13px; padding: 6px 12px; }
+}
+@media (max-height: 500px) {
+  .svl-tbtns { bottom: 14px; }
+  .svl-stick { bottom: 18px; }
+  .svl-say { top: 60px; max-width: 46%; }
+}
