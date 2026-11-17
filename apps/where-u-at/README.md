@@ -1,7 +1,7 @@
 # Where u at
 
 A world map with a timeline for showing where a group of friends was born, married, moved and had
-kids over time. Live at https://trom-where-u-at.web.app (no trom.dev domain).
+kids over time. Live at https://where-u-at.trom.dev.
 
 ## Data
 
