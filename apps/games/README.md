@@ -21,6 +21,16 @@ The Space game from Ground Defender (as of its play-together branch) on its own:
 
 It is its own page, `space-defender.html` (code in `src/games/space-defender/`), which the hub runs in a frame, so Ground Defender's page-wide styles and key handlers stay out of the launcher. "Back to games" on its start screen returns to the hub. Saves, settings and blueprints are kept under `spacedef.` in localStorage. It's a copy, so later Ground Defender changes don't show up here by themselves.
 
+## North Pole Village
+
+Build a village at the North Pole and keep the polar bears out. Code in `src/games/north-pole/`.
+
+- Chop trees for wood; 30 trees chopped gives you a base. Fences cost 1 wood: bears can't get through them, but you can.
+- Two minutes after the base, polar bears come in waves. They don't hurt fences, only you, and only when no fence is between you. If you get knocked out, the nearest villager walks out, carries you back to base and you're healed.
+- Shoot bears with the crossbow for meat, sell meat to villagers for gold coins, and buy crossbow towers (load them with L), conveyor belts, grabbers and new villagers (10,000 gold; they chop trees for you).
+- A stick pile in the back never runs out; the arrow machine turns each stick into two arrows. Grabbers take from behind and put in front, so sticks → machine → towers can run by itself.
+- Touch controls on phones (joystick, Use, Shoot/Place, Load, Turn, Pick up). Saves in localStorage under `north-pole-save-v1`.
+
 ## Develop
 
 ```

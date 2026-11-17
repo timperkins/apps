@@ -39,4 +39,21 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./space-defender/index'),
   },
+  {
+    id: 'north-pole',
+    title: 'North Pole Village',
+    tagline: 'Chop trees, build fences and keep the polar bears out of your village.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#eaf2fa"/>
+      <g fill="#245c43"><path d="M10 40l9-22 9 22z"/><path d="M96 36l8-20 8 20z"/><path d="M100 70l7-16 7 16z"/></g>
+      <g fill="#fff"><path d="M19 18l3 8h-6z"/><path d="M104 16l3 7h-6z"/></g>
+      <path d="M44 34l16-14 16 14z" fill="#b8362c"/><rect x="47" y="34" width="26" height="18" fill="#7a4a28"/>
+      <rect x="57" y="42" width="7" height="10" fill="#3e2412"/><rect x="50" y="38" width="5" height="5" fill="#ffd27a"/>
+      <g stroke="#8a5a32" stroke-width="3"><path d="M34 60H86M34 66H86"/></g>
+      <g fill="#5a3a20"><rect x="33" y="56" width="4" height="13"/><rect x="51" y="56" width="4" height="13"/><rect x="69" y="56" width="4" height="13"/><rect x="85" y="56" width="4" height="13"/></g>
+      <g transform="translate(18 66)"><ellipse rx="11" ry="7" fill="#f6f6f0" stroke="#b8bcc4"/><circle cx="10" cy="-3" r="5" fill="#f6f6f0" stroke="#b8bcc4"/><circle cx="13" cy="-3" r="1.2" fill="#111"/></g>
+      <g fill="#fff"><circle cx="30" cy="10" r="1.5"/><circle cx="80" cy="8" r="1.2"/><circle cx="64" cy="70" r="1.3"/><circle cx="90" cy="48" r="1"/></g>
+    </svg>`,
+    load: () => import('./north-pole/index'),
+  },
 ];
