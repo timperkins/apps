@@ -133,10 +133,7 @@ export function localActions(g: () => Game): Actions {
     rotate(e, dir) {
       const game = g();
       if (dir === undefined) game.rotate(e);
-      else {
-        e.dir = dir;
-        if (e.def.kind === 'belt') game.updateCurves(e.x, e.y);
-      }
+      else game.turn(e, dir);
     },
     give(e, slot, n) {
       const game = g();

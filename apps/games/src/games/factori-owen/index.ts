@@ -1,6 +1,6 @@
 // Factori-owen: mount the game into a container. Title screen, input, the loop, saving and the HUD.
 import './style.css';
-import { ENTITIES, ITEMS, RECIPE_BY_ID, type ItemId } from './data';
+import { ENTITIES, footprint, ITEMS, RECIPE_BY_ID, type ItemId } from './data';
 import { isMuted, setMuted, sfx } from './audio';
 import { Renderer, type Ghost, type Overlay } from './render';
 import { Game, TPS, type Dir, type Entity } from './sim';
@@ -610,11 +610,12 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     if (!item || !mouseIn || mode !== 'game') return null;
     const type = ITEMS[item].place;
     if (!type) return null;
-    const d = ENTITIES[type];
+    const dir = ENTITIES[type].rotatable ? cursorDir : 0;
+    const [w, h] = footprint(type, dir);
     const [wx, wy] = renderer.screenToWorld(mouseX, mouseY);
-    const x = Math.floor(wx - d.w / 2 + 0.5), y = Math.floor(wy - d.h / 2 + 0.5);
-    const inReach = Math.hypot(x + d.w / 2 - game.px, y + d.h / 2 - game.py) <= reach();
-    return { type, x, y, dir: cursorDir, ok: inReach && game.inv.count(item) > 0 && game.canPlace(type, x, y) };
+    const x = Math.floor(wx - w / 2 + 0.5), y = Math.floor(wy - h / 2 + 0.5);
+    const inReach = Math.hypot(x + w / 2 - game.px, y + h / 2 - game.py) <= reach();
+    return { type, x, y, dir: cursorDir, ok: inReach && game.inv.count(item) > 0 && game.canPlace(type, x, y, dir) };
   };
 
   function tryPlace() {
@@ -625,7 +626,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     if (key === lastPlaced) return;
     // dragging over an existing belt turns it
     const existing = game.entAt(gh.x, gh.y);
-    if (existing && existing.type === gh.type && existing.def.rotatable && existing.dir !== cursorDir && ENTITIES[gh.type].w === 1) {
+    if (existing && existing.type === gh.type && existing.def.rotatable && existing.dir !== cursorDir && existing.w === 1 && existing.h === 1) {
       act.rotate(existing, cursorDir);
       lastPlaced = key;
       return;
@@ -1015,7 +1016,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
         if (e) {
           if (Math.hypot(e.cx - game.px, e.cy - game.py) <= reach())
             target = {
-              key: 'e' + e.id, time: e.def.mineTime, x: e.x, y: e.y, w: e.def.w, h: e.def.h,
+              key: 'e' + e.id, time: e.def.mineTime, x: e.x, y: e.y, w: e.w, h: e.h,
               done: () => {
                 act.remove(e);
                 if (ui.entity === e) ui.panel = null;

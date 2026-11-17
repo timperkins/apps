@@ -1,5 +1,5 @@
 // Draws the world, buildings and overlays onto the main canvas.
-import { ENTITIES, maxHp, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
+import { ENTITIES, footprint, maxHp, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
 import { BUG_KINDS, NEST_HP, playerWeapon, RELOAD_TICKS } from './combat';
 import { beltItemPos, DEFAULT_LOOK, DIR_ANGLE, drawBelt, drawBug, drawBuilding, drawEngineer, drawNest, type GunKind, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, type Look, type PlayerLook } from './art';
 import { iconCanvas } from './icons';
@@ -230,7 +230,7 @@ export class Renderer {
     const vis: Entity[] = [];
     for (const e of g.ents.values()) {
       const d = e.def;
-      if (e.x + d.w < x0 || e.x > x1 || e.y + d.h < y0 - 1 || e.y > y1) continue;
+      if (e.x + e.w < x0 || e.x > x1 || e.y + e.h < y0 - 1 || e.y > y1) continue;
       vis.push(e);
     }
     const look = (e: Entity): Look => ({
@@ -260,7 +260,7 @@ export class Renderer {
     for (const e of vis)
       if (e.def.kind === 'splitter') {
         drawBuilding(c, e.type, e.x, e.y, look(e));
-        if (e.items[0]) c.drawImage(iconCanvas(e.items[0].item, 32), e.x + 0.29, e.y + 0.29, 0.42, 0.42);
+        if (e.items[0]) c.drawImage(iconCanvas(e.items[0].item, 32), e.x + e.w / 2 - 0.21, e.y + e.h / 2 - 0.21, 0.42, 0.42);
       }
 
     // inserter bases sit under everything tall
@@ -272,7 +272,7 @@ export class Renderer {
     for (const e of vis) {
       const k = e.def.kind;
       if (k === 'belt' || k === 'inserter' || k === 'floor' || k === 'mine' || k === 'splitter') continue;
-      tall.push({ y: e.y + e.def.h, f: () => this.building(e, look(e)) });
+      tall.push({ y: e.y + e.h, f: () => this.building(e, look(e)) });
     }
     for (let y = y0; y <= y1; y++)
       for (let x = x0; x <= x1; x++) {
@@ -442,7 +442,7 @@ export class Renderer {
     for (const e of vis) {
       const m = maxHp(e.type);
       if (e.hp >= m) continue;
-      const w = Math.min(1.6, e.def.w * 0.8);
+      const w = Math.min(1.6, e.w * 0.8);
       const x = e.cx - w / 2, y = e.y - 0.25;
       c.fillStyle = 'rgba(0,0,0,.6)';
       c.fillRect(x, y, w, 0.12);
@@ -535,7 +535,7 @@ export class Renderer {
       if (k === 'lamp' && e.working) light(e.cx, e.cy - 0.3, 7.5, 0.95);
       else if (k === 'pole') light(e.cx, e.cy, 3.5, 0.6);
       else if (e.working && (k === 'furnace' || k === 'lab' || k === 'generator' || k === 'assembler' || k === 'drill'))
-        light(e.cx, e.cy, e.def.w + 1.5, 0.75);
+        light(e.cx, e.cy, e.w + 1.5, 0.75);
     }
     void x0;
     void y0;
@@ -553,7 +553,7 @@ export class Renderer {
       c.strokeStyle = ov.reachOk ? 'rgba(255,230,140,.95)' : 'rgba(255,120,100,.9)';
       c.lineWidth = 0.06;
       c.setLineDash([0.2, 0.12]);
-      c.strokeRect(e.x + 0.03, e.y + 0.03, e.def.w - 0.06, e.def.h - 0.06);
+      c.strokeRect(e.x + 0.03, e.y + 0.03, e.w - 0.06, e.h - 0.06);
       c.setLineDash([]);
       if (e.def.kind === 'inserter') this.inserterMarks(e.x, e.y, e.dir, e.def.reach ?? 1);
       if (e.def.kind === 'drill') this.drillArea(e.type, e.x, e.y, e.dir);
@@ -575,7 +575,7 @@ export class Renderer {
       } else drawBuilding(c, gh.type, gh.x, gh.y, l);
       c.globalAlpha = 1;
       c.fillStyle = gh.ok ? 'rgba(80,220,120,.22)' : 'rgba(240,70,60,.3)';
-      c.fillRect(gh.x, gh.y, d.w, d.h);
+      c.fillRect(gh.x, gh.y, ...footprint(gh.type, d.rotatable ? gh.dir : 0));
       if (d.kind === 'inserter') this.inserterMarks(gh.x, gh.y, gh.dir, d.reach ?? 1);
       if (d.kind === 'drill') this.drillArea(gh.type, gh.x, gh.y, gh.dir);
       if (d.kind === 'pole') {
@@ -625,7 +625,7 @@ export class Renderer {
     c.strokeStyle = 'rgba(120,200,255,.6)';
     c.lineWidth = 0.04;
     c.strokeRect(x - o, y - o, a, a);
-    const [ox, oy] = drillOut({ x, y, dir, def: d } as unknown as Entity);
+    const [ox, oy] = drillOut({ x, y, dir, def: d, w: d.w, h: d.h } as unknown as Entity);
     c.strokeStyle = 'rgba(255,210,63,.95)';
     c.lineWidth = 0.06;
     c.strokeRect(ox + 0.12, oy + 0.12, 0.76, 0.76);

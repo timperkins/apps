@@ -96,8 +96,8 @@ export class Minimap {
     }
     for (const e of g.ents.values()) {
       const col = e.def.kind === 'belt' ? BELT : BUILDING;
-      for (let y = e.y; y < e.y + e.def.h; y++) {
-        for (let x = e.x; x < e.x + e.def.w; x++) {
+      for (let y = e.y; y < e.y + e.h; y++) {
+        for (let x = e.x; x < e.x + e.w; x++) {
           const i = y * WORLD + x;
           if (i < 0 || i >= WORLD * WORLD || !g.explored[i]) continue;
           d[i * 4] = col[0];

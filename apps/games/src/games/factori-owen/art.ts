@@ -1,5 +1,5 @@
 // Procedural drawings for buildings, trees and the player. All coordinates are in tiles.
-import { ENTITIES, type EntityType } from './data';
+import { ENTITIES, footprint, type EntityType } from './data';
 import { gear, owenO } from './icons';
 
 type Ctx = CanvasRenderingContext2D;
@@ -291,9 +291,35 @@ function statusBadge(c: Ctx, x: number, y: number, w: number, l: Look) {
   }
 }
 
+/**
+ * Size each building's drawing was made at. Buildings now fill one tile, so these are drawn at
+ * this size and shrunk to fit.
+ */
+const ART_SIZE: Partial<Record<EntityType, number>> = {
+  'burner-drill': 2, 'electric-drill': 3, 'stone-furnace': 2, 'steel-furnace': 2, 'electric-furnace': 3,
+  'assembler': 3, 'assembler-2': 3, 'lab': 3, 'generator': 3, 'solar-panel': 3, 'owen-monument': 5,
+  'gun-turret': 2, 'rail-turret': 3, 'battery-bank': 2,
+};
+export function artSize(type: EntityType): number {
+  return ART_SIZE[type] ?? 1;
+}
+
 export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: Look) {
+  const s = artSize(type);
+  if (s === 1) {
+    const [w, h] = footprint(type, l.dir);
+    drawBuildingAt(c, type, x, y, l, w, h);
+    return;
+  }
+  c.save();
+  c.translate(x, y);
+  c.scale(1 / s, 1 / s);
+  drawBuildingAt(c, type, 0, 0, l, s, s);
+  c.restore();
+}
+
+function drawBuildingAt(c: Ctx, type: EntityType, x: number, y: number, l: Look, w: number, h: number) {
   const d = ENTITIES[type];
-  const { w, h } = d;
   switch (d.kind) {
     case 'chest': {
       const [body, top, edge] = type === 'wooden-chest'
@@ -337,7 +363,7 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
         c.save();
         c.translate(x, y);
         c.scale(w / 2, h / 2);
-        drawBuilding(c, 'steel-furnace', 0, 0, { ...l, noPower: false, noFuel: false });
+        drawBuildingAt(c, 'steel-furnace', 0, 0, { ...l, noPower: false, noFuel: false }, 2, 2);
         c.restore();
         c.fillStyle = '#5adcff';
         c.fillRect(x + 0.4, y + 0.3, w - 0.8, 0.12);
@@ -517,15 +543,19 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
       break;
     }
     case 'splitter': {
-      shadow(c, x, y, 1, 1);
+      // two tiles side by side, across the way the belts run
+      shadow(c, x, y, w, h);
       c.fillStyle = '#33404d';
-      rr(c, x + 0.05, y + 0.05, 0.9, 0.9, 0.12);
+      rr(c, x + 0.05, y + 0.05, w - 0.1, h - 0.1, 0.12);
       c.fill();
       c.fillStyle = '#e3b341';
-      rr(c, x + 0.15, y + 0.15, 0.7, 0.7, 0.1);
+      rr(c, x + 0.15, y + 0.15, w - 0.3, h - 0.3, 0.1);
       c.fill();
-      // three little arrows: left, front, right
-      for (const t of [3, 0, 1]) arrow(c, x + 0.5 + DX[(l.dir + t) % 4] * 0.22, y + 0.5 + DY[(l.dir + t) % 4] * 0.22, (l.dir + t) % 4, 0.12, '#2b3440');
+      // an arrow out the front of each tile
+      for (const k of [0, 1]) {
+        const tx = x + 0.5 + (k ? w - 1 : 0), ty = y + 0.5 + (k ? h - 1 : 0);
+        arrow(c, tx + DX[l.dir] * 0.18, ty + DY[l.dir] * 0.18, l.dir, 0.14, '#2b3440');
+      }
       break;
     }
     case 'lamp': {
@@ -626,7 +656,11 @@ export function drawEntityIcon(c: Ctx, type: EntityType) {
     c.scale(0.7, 0.7);
     inserterBase(c, type, 0, 0, { ...look, dir: 0 });
     inserterArm(c, type, 0, 0, { ...look, dir: 0, t: 0.35 }, 0.7);
-  } else if (d.kind === 'floor' || d.kind === 'mine' || d.kind === 'splitter') {
+  } else if (d.kind === 'splitter') {
+    c.translate(0.05, 0.3);
+    c.scale(0.45, 0.45);
+    drawBuilding(c, type, 0, 0, { ...look, dir: 0 });
+  } else if (d.kind === 'floor' || d.kind === 'mine') {
     c.translate(0.1, 0.1);
     c.scale(0.8, 0.8);
     drawBuilding(c, type, 0, 0, { ...look, dir: 0 });
@@ -974,10 +1008,12 @@ export function drawNest(c: Ctx, x: number, y: number, pulse: number, hpFrac: nu
 
 export function drawTurretHead(c: Ctx, type: EntityType, x: number, y: number, angle: number, charge: number) {
   const d = ENTITIES[type];
-  const cx = x + d.w / 2, cy = y + d.h / 2 - 0.2;
+  const k = 1 / artSize(type);
+  const cx = x + d.w / 2, cy = y + d.h / 2 - 0.2 * k;
   c.save();
   c.translate(cx, cy);
   c.rotate(angle);
+  c.scale(k, k);
   if (type === 'rail-turret') {
     c.fillStyle = '#39424f';
     c.beginPath();

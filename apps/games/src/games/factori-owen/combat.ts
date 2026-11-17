@@ -511,8 +511,8 @@ function updateBug(g: Game, b: Bug) {
         tx = b.tx;
         ty = b.ty;
         // close enough to the building's edge: bite it
-        const ex = Math.max(best.x, Math.min(b.x, best.x + best.def.w));
-        const ey = Math.max(best.y, Math.min(b.y, best.y + best.def.h));
+        const ex = Math.max(best.x, Math.min(b.x, best.x + best.w));
+        const ey = Math.max(best.y, Math.min(b.y, best.y + best.h));
         if (Math.hypot(ex - b.x, ey - b.y) < 0.35 + k.size * 0.5) {
           if (b.cd <= 0) {
             damageEntity(g, best, k.damage);
