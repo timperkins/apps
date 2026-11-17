@@ -203,7 +203,7 @@
     "id": "hillary-reggie",
     "name": "Reggie",
     "kind": "child",
-    "sex": "male",
+    "sex": "female",
     "motherId": "hillary",
     "order": 108
   },
