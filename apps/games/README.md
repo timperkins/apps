@@ -21,6 +21,23 @@ The Space game from Ground Defender (as of its play-together branch) on its own:
 
 It is its own page, `space-defender.html` (code in `src/games/space-defender/`), which the hub runs in a frame, so Ground Defender's page-wide styles and key handlers stay out of the launcher. "Back to games" on its start screen returns to the hub. Saves, settings and blueprints are kept under `spacedef.` in localStorage. It's a copy, so later Ground Defender changes don't show up here by themselves.
 
+## Jobville
+
+A huge village (180 × 180 tiles, about 200 numbered houses, villagers walking the streets). Original code and art; items and icons are emoji.
+
+- **Job board** in the town square: pick a job, switch any time. Street Sweeper and Farmer are open from the start; Fisher, Mail Carrier, Lumberjack, Pizza Delivery and Miner unlock as your total earnings grow.
+- **Jobs:** pick up trash, harvest crops on the farms, fish off the dock (press when the ! shows), carry letters from the Post Office to houses, chop trees in the forest, deliver pizzas before they go cold (tips for speed), break rocks in the quarry (sometimes a gem).
+- **Shop:** walk inside and up to a podium to buy. 10 podiums, several with tiers: shoes → skates → bike, bags, tools, hats (earn more), magnet, fishing rods, Magic Watch, pets (puppy, dragon), hoverboard (fly over water) and the $10,000 Golden Trophy, which puts a golden statue of you in the square.
+- **Your own shop:** a fenced lot west of town. Press 🔨 (or B), name your shop and type any kind of job for it. Buy bricks for walls, then place things in front of you: 145 items in 10 groups (walls, floors, kitchen, food, shop, furniture, work, fun, decor, nature). Customers walk in (they need a way in) and pay into the 💰 money box, which you walk up to and collect; the amount stays hidden until you do.
+- **Workers:** with a money box down, job seekers turn up at your gate with a diploma that says their job, skill and the pay they want. Hire them, promote them (more pay, more work), change their job to any listed one or anything you type, or fire them. Each job works twice as well next to its tool (a Baker by an oven). Wages come out every minute.
+- **Rivals:** 12 rival workers sweep trash, harvest crops, chop trees and mine rocks too, so they take things before you. Walk up and prank them with a banana peel to stop them for 25 seconds (sometimes they catch you and you pay a $10 fine).
+- **Menu and cooking:** pick up to 8 dishes for your menu (20 recipes). Customers sit at your tables and chairs and order from it. Gather the ingredients (harvest wheat, carrots and pumpkins, go fishing, pick apples, collect milk and eggs at the barn), cook each dish on the right machine (Cooked Fish goes in the oven), then carry it to the customer before they lose patience. Chefs and waiters can cook and serve for you.
+- **Rival stores:** Rex's Diner, Bea's Bakery and Gus's Fish Fry build their own shops brick by brick on lots near yours and steal customers. Sneak up and throw a stink bomb to scare their customers away.
+- **More fun:** day and night with street lamps, rain and snow, daily quests, 23 achievements, player levels with gifts, customer star reviews, Shop of the Week prize, treasure chests, golden trash, festivals, sales and parades, a car, a pet that digs up coins, your own house with a bed, a fishing reel meter, robbers and pranksters (hire a guard), worker moods, neon and gold shop signs, the mayor election at Town Hall, background music and a photo mode.
+- A yellow arrow and the minimap always point to your next task; M or the map button shows the whole village.
+- Keyboard (arrows/WASD, E or Space, M, Esc) and touch (drag on the left to walk, big button to act).
+- Saves in localStorage under `jobville-save-v1`.
+
 ## Survivle
 
 An open-world adventure designed by Tim (original code and art). Name your hero, then defeat the Dark Beast in the castle at the middle of the map before 4 hours of play run out, or the world goes black.
