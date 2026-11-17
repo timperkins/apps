@@ -16,6 +16,7 @@
 //            be, and it glides there.
 
 import { onAudioUnlock } from './voice';
+import { onSettings, settings } from './settings';
 
 export type Sfx =
   | 'rifle_shot'
@@ -117,7 +118,7 @@ const base = import.meta.env.BASE_URL;
 const url = (name: string) => `${base}sfx/${name}.mp3`;
 
 let ctx: AudioContext | null = null;
-let master: GainNode | null = null; // everything; the Sounds button
+let master: GainNode | null = null; // everything; the Sounds volume
 let world: GainNode | null = null; // sounds from the map (quieter from space)
 const bytes = new Map<string, Promise<ArrayBuffer | null>>();
 const buffers = new Map<string, AudioBuffer>();
@@ -125,12 +126,8 @@ const reversed = new Map<string, AudioBuffer>();
 const live = new Map<string, number>();
 const lastStart = new Map<string, number>();
 const loops = new Map<Loop, { src: AudioBufferSourceNode; gain: GainNode; want: number }>();
-let muted = false;
-try {
-  muted = localStorage.getItem('ra.sfx') === 'off';
-} catch {
-  /* private window */
-}
+// the Sounds volume in Settings (squared, so the slider sounds even)
+const sfxVol = () => settings().sfx ** 2;
 
 // Fetch every clip now, while the loading screen is up: they are small.
 function fetchAll(): void {
@@ -148,7 +145,7 @@ if (typeof window !== 'undefined') fetchAll();
 onAudioUnlock((c) => {
   ctx = c;
   master = c.createGain();
-  master.gain.value = muted ? 0 : 1;
+  master.gain.value = sfxVol();
   master.connect(c.destination);
   world = c.createGain();
   world.connect(master);
@@ -212,7 +209,7 @@ export interface PlayOpts {
 
 /** A one-shot at volume vol (0..1, how near it is). */
 export function play(n: Sfx, vol = 1, o: PlayOpts = {}): void {
-  if (muted || !ctx || !master || !world || vol < 0.02) return;
+  if (!sfxVol() || !ctx || !master || !world || vol < 0.02) return;
   let buf = buffers.get(n);
   if (!buf) return;
   const t = ctx.currentTime + (o.delay ?? 0);
@@ -255,21 +252,10 @@ export function setWorldLevel(v: number): void {
   world.gain.setTargetAtTime(v, ctx.currentTime, 0.3);
 }
 
-export function sfxMuted(): boolean {
-  return muted;
-}
-
-export function setSfxMuted(m: boolean): void {
-  muted = m;
-  try {
-    localStorage.setItem('ra.sfx', m ? 'off' : 'on');
-  } catch {
-    /* private window */
-  }
-  if (ctx && master) {
-    const t = ctx.currentTime;
-    master.gain.cancelScheduledValues(t);
-    master.gain.setValueAtTime(master.gain.value, t);
-    master.gain.linearRampToValueAtTime(m ? 0 : 1, t + 0.2);
-  }
-}
+onSettings(() => {
+  if (!ctx || !master) return;
+  const t = ctx.currentTime;
+  master.gain.cancelScheduledValues(t);
+  master.gain.setValueAtTime(master.gain.value, t);
+  master.gain.linearRampToValueAtTime(sfxVol(), t + 0.1);
+});

@@ -34,10 +34,17 @@
       <button id="regen" type="button">New map</button>
       <button id="leaveBtn" type="button" hidden>Leave game</button>
       <button id="lobbyBtn" type="button" title="Back to the multiplayer lobby">Multiplayer</button>
-      <button id="voiceBtn" type="button" aria-pressed="true">Voices: on</button>
-      <button id="musicBtn" type="button" aria-pressed="true">Music: on</button>
-      <button id="sfxBtn" type="button" aria-pressed="true">Sounds: on</button>
+      <button id="settingsBtn" type="button" aria-controls="settings" aria-expanded="false">Settings</button>
       <a id="unitsLink" href="./units/">Units &amp; buildings</a>
+      <div id="settings" role="group" aria-label="Settings">
+        <button id="setBack" type="button" title="Back to the menu (Esc)"><span aria-hidden="true">&lsaquo;</span> Settings</button>
+        <label class="set"><span>Music <output></output></span><input type="range" data-k="music" min="0" max="100" step="5" /></label>
+        <label class="set"><span>Sounds <output></output></span><input type="range" data-k="sfx" min="0" max="100" step="5" /></label>
+        <label class="set"><span>Voices <output></output></span><input type="range" data-k="voice" min="0" max="100" step="5" /></label>
+        <label class="set" title="How fast WASD and the arrow keys move the view"><span>Scroll speed <output></output></span><input type="range" data-k="scroll" min="25" max="300" step="25" /></label>
+        <label class="set" title="How fast the mouse wheel or a trackpad pinch zooms"><span>Zoom speed <output></output></span><input type="range" data-k="zoom" min="25" max="300" step="25" /></label>
+        <button id="setReset" type="button">Reset to defaults</button>
+      </div>
     </div>
     <canvas id="mini" aria-label="Minimap: drag to spin the world, tap to jump there"></canvas>
     <div id="selBar" hidden>
