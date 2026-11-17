@@ -11,7 +11,7 @@ import { DARK, LIGHT, mapStyle, type Theme } from '../map/style';
 import { step, type Body } from './physics';
 import { arc, easeInOut, laneOffset, pointAt, shifted, type Pt } from './curves';
 import { FLIGHT_SECONDS, Player } from './player';
-import { babySvg, balloon, banner, circleImage, heart, label, rays, ring, roundRect, sparkle, spotlight, star, weddingRing } from './draw';
+import { babySvg, balloon, banner, circleImage, heart, label, rays, ring, roundRect, sparkle, star, weddingRing } from './draw';
 
 setWorkerUrl(workerUrl);
 
@@ -40,12 +40,12 @@ const WORLD: [[number, number], [number, number]] = [[-168, -50], [192, 74]];
 /** How high above their spot a newborn starts floating down on balloons, in pixels. */
 const BABY_DROP = 240;
 /** When things land in each show: the baby touches down, the shooting star hits, the rings clink. */
-const BABY_DESCENT = 1.4;
-const STAR_FALL = 0.8;
-const RING_MEET = 0.9;
+const BABY_DESCENT = 1.05;
+const STAR_FALL = 0.6;
+const RING_MEET = 0.7;
 /** When each wedding firework launches, in seconds into the show. */
-const FIREWORKS = [1.15, 1.65, 2.15, 2.7];
-const SHOW_SECONDS: Record<Show['kind'], number> = { baby: 4.6, star: 4.2, wedding: 5.2 };
+const FIREWORKS = [0.85, 1.2, 1.6, 2.0];
+const SHOW_SECONDS: Record<Show['kind'], number> = { baby: 3.6, star: 3.2, wedding: 4 };
 /** Keeps big moments smooth on phones. */
 const MAX_PARTICLES = 700;
 const GOLD = '#F2C94C';
@@ -559,7 +559,7 @@ export class Scene {
           const e = 1 - (1 - k) * (1 - k);
           baby.drop = -BABY_DROP * (1 - e);
           baby.dropV = 0;
-          baby.sway = Math.sin(age * 4.5 + s.seed * 6) * 16 * (1 - e);
+          baby.sway = Math.sin(age * 6 + s.seed * 6) * 16 * (1 - e);
           baby.scale = 1;
           baby.scaleV = 0;
         } else if (this.beat(s, 'land', BABY_DESCENT)) {
@@ -604,13 +604,13 @@ export class Scene {
           if (this.beat(s, `firework${i}`, at)) this.rocket(s, c, i);
         });
         // Hearts float up from the couple, and confetti rains down over everything.
-        if (age < 2.2 && Math.random() < 0.6) {
+        if (age < 1.7 && Math.random() < 0.6) {
           const colors = [s.a.color, s.b.color, '#FF6F9F'];
           const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
           const speed = 60 + Math.random() * 80;
           this.add(this.particle('heart', c.x + (Math.random() - 0.5) * 40, c.y - 10, Math.cos(angle) * speed, Math.sin(angle) * speed, colors[Math.floor(Math.random() * 3)], 1.8, 9 + Math.random() * 6));
         }
-        if (s.banner && age > RING_MEET && age < 3.2) {
+        if (s.banner && age > RING_MEET && age < 2.5) {
           const colors = [s.a.color, s.b.color, GOLD, '#ffffff', '#FF6F9F'];
           for (let n = dt * 80; n > 0; n--) {
             if (n < 1 && Math.random() > n) break;
@@ -678,7 +678,7 @@ export class Scene {
     const fromY = Math.min(this.height - 20, c.y + 70);
     const toX = Math.max(40, Math.min(this.width - 40, c.x + (Math.random() - 0.5) * 260));
     const toY = Math.max(50, c.y - 120 - Math.random() * 90);
-    const climb = 0.55;
+    const climb = 0.45;
     const p = this.particle('rocket', fromX, fromY, (toX - fromX) / climb, (toY - fromY) / climb, color, climb, 2.5);
     this.add({ ...p, gravity: 0, drag: 0, onDone: () => this.explode(toX, toY, color, i % 2 ? 'heart' : 'ring', 42, 150) });
   }
@@ -838,7 +838,7 @@ export class Scene {
     return s.kind === 'baby' ? BABY_DESCENT : s.kind === 'star' ? STAR_FALL : RING_MEET;
   }
 
-  /** The spotlight, light beams and big heart, all behind the bubbles. */
+  /** The light beams and big heart, behind the bubbles. */
   private drawShowsBehind() {
     const ctx = this.ctx;
     for (const s of this.shows) {
@@ -847,7 +847,6 @@ export class Scene {
       const c = this.showCenter(s);
       const wedding = s.kind === 'wedding';
       const half = Math.hypot(s.b.body.x - s.a.body.x, s.b.body.y - s.a.body.y) / 2;
-      if (s.banner) spotlight(ctx, this.width, this.height, c.x, c.y, wedding ? half + 70 : 60, (this.theme.dark ? 0.55 : 0.42) * fade);
       const since = age - this.landing(s);
       if (since < 0) continue;
       const on = Math.min(1, since * 3) * fade;

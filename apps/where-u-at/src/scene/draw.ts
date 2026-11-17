@@ -195,16 +195,6 @@ export function rays(ctx: CanvasRenderingContext2D, x: number, y: number, outer:
   ctx.fill();
 }
 
-/** Dims everything except a soft circle around (x, y), like a stage spotlight. */
-export function spotlight(ctx: CanvasRenderingContext2D, w: number, h: number, x: number, y: number, r: number, alpha: number) {
-  if (alpha <= 0) return;
-  const g = ctx.createRadialGradient(x, y, r, x, y, r * 3.2);
-  g.addColorStop(0, 'rgba(12,10,24,0)');
-  g.addColorStop(1, `rgba(12,10,24,${alpha})`);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-}
-
 /** Big headline text with a white outline, for births and weddings. */
 export function banner(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, fill: string, alpha: number, scale: number, rot: number) {
   if (alpha <= 0 || scale <= 0.01) return;
