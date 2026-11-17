@@ -11,6 +11,7 @@ import { buildingArt as workerBuilding, prefetch } from './art-pool';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor } from './maps';
+import { clearLine, findPath } from './path';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
@@ -112,6 +113,7 @@ interface Unit {
   // it home, unloading, or waiting for something to change
   job?: { st: 'seek' | 'go' | 'dig' | 'home' | 'ret' | 'unload' | 'wait'; node?: OreNode; ref?: Building; t: number };
   load?: number;
+  noOre?: Set<OreNode>; // clumps it found it can't get to
   // getting round water: which way it is sliding along the shore, and how
   // long since it last got any closer to where it is going
   slide?: number;
@@ -119,6 +121,9 @@ interface Unit {
   stuck?: number;
   goal?: [number, number];
   slideT?: number;
+  // the corners to drive past on the way round cliffs and water, in turn
+  path?: [number, number][];
+  rerouted?: boolean;
   // standing about: soldiers pace round the spot they stopped on (home),
   // stepping to `pace`; artillery shifts on its wheels to `look` (a buggy
   // blinks its aerial light instead: see drawUnit)
@@ -158,6 +163,8 @@ interface Unit {
 
 type Target = Unit | Building;
 const isB = (t: Target): t is Building => 'pad' in t;
+// Milliseconds a frame may spend finding ways round cliffs and water.
+const ROUTE_MS = 6;
 // How far a unit chases whoever hit it before it gives up and goes back.
 const LEASH = 10 * CELL;
 // How close a friend has to be to come and help when one of its side is hit.
@@ -654,6 +661,8 @@ export class IsoGame implements GameLike {
     this.aiT = 0;
     this.ore = [];
     this.oreGrid = new Map();
+    this.seaCells = new Map();
+    this.landCells = new Map();
     this.lowWarned = false;
     this.known = new Set();
     this.fresh = new Set();
@@ -1634,11 +1643,12 @@ export class IsoGame implements GameLike {
         break;
       case 'seek': {
         // the nearest clump with ore left, looking further out step by step
-        let node: OreNode | undefined = j.node && j.node.amt > 20 ? j.node : undefined;
+        // (leaving out any it found it couldn't get to, walled in by cliffs or water)
+        let node: OreNode | undefined = j.node && j.node.amt > 20 && !u.noOre?.has(j.node) ? j.node : undefined;
         for (let r = 60; r <= 1500 && !node; r *= 2) {
           let bd = 1e9;
           for (const n of this.oreNear(u.x, u.y, r)) {
-            if (n.amt <= 20) continue;
+            if (n.amt <= 20 || u.noOre?.has(n)) continue;
             const [px, py] = this.nearPoint(u.x, u.y, n.x, n.y);
             const d = Math.hypot(px - u.x, py - u.y);
             if (d < bd) {
@@ -1663,6 +1673,15 @@ export class IsoGame implements GameLike {
       }
       case 'go':
         if (!u.moving) {
+          const n = j.node;
+          const [nx, ny] = n ? this.nearPoint(u.x, u.y, n.x, n.y) : [u.x, u.y];
+          if (n && Math.hypot(nx - u.x, ny - u.y) > 14) {
+            // stopped short: there is no way to it
+            (u.noOre ??= new Set()).add(n);
+            j.node = undefined;
+            j.st = 'seek';
+            break;
+          }
           j.st = 'dig';
           u.turretGoal = 0;
         }
@@ -1958,10 +1977,29 @@ export class IsoGame implements GameLike {
     return { canvas: p.canvas, foam: p.foam, foam2: p.foam2, props, used: 0 };
   }
 
-  // Can unit u be at (x, y)? Boats need water, everyone else dry land.
+  // Can unit u be at (x, y)? Boats need water, everyone else dry land off
+  // the cliffs (helicopters fly over it all).
   private okAt(u: Unit, x: number, y: number): boolean {
     const w = this.terrain.k(x, y) === K.Water;
-    return u.kind === 'boat' ? w : !w;
+    return u.kind === 'boat' ? w : !w && (u.kind === 'heli' || !this.terrain.cliff(x, y));
+  }
+
+  // which grid cells of the way-finding grid are open, for boats and for the rest
+  private seaCells = new Map<number, boolean>();
+  private landCells = new Map<number, boolean>();
+  private routeMs = 0; // spent finding ways this frame
+
+  // The way for unit u to its destination round cliffs and water (see path.ts).
+  private route(u: Unit): void {
+    u.path = undefined;
+    if (u.kind === 'heli' || !this.okAt(u, u.x, u.y)) return;
+    const boat = u.kind === 'boat';
+    const okFn = (x: number, y: number) => this.okAt(u, x, y);
+    const t0 = performance.now();
+    const p = findPath(okFn, u.x, u.y, u.tx, u.ty, boat ? this.seaCells : this.landCells);
+    this.routeMs += performance.now() - t0;
+    if (p === null) u.moving = false;
+    else if (p.length) u.path = p;
   }
 
   private groundZ(u: Unit): number {
@@ -2440,6 +2478,7 @@ export class IsoGame implements GameLike {
 
   update(dt: number): void {
     this.time += dt;
+    this.routeMs = 0;
     this.updateBuild(dt);
     this.enemyAI(dt);
     if (this.net !== 'client') for (const u of this.units) if (u.job) this.haul(u, dt);
@@ -2461,22 +2500,54 @@ export class IsoGame implements GameLike {
         }
       }
       const foot = u.kind === 'inf' || u.kind === 'rocket';
-      if (u.moving && !u.deploy) {
-        const dx = u.tx - u.x;
-        const dy = u.ty - u.y;
-        const dist = Math.hypot(dx, dy);
+      // (finding ways takes time: past a few milliseconds' worth in a frame,
+      // units with somewhere new to go wait for the next)
+      const wait = this.routeMs > ROUTE_MS && u.kind !== 'heli' && (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty);
+      if (u.moving && !u.deploy && !wait) {
+        let dx = u.tx - u.x;
+        let dy = u.ty - u.y;
+        let dist = Math.hypot(dx, dy);
         if (dist < 0.8) {
           u.moving = false;
           u.x = u.tx;
           u.y = u.ty;
+          u.path = undefined;
         } else {
-          // a new destination: start afresh
+          // a new destination: start afresh, and find the way round any
+          // cliffs or water in between
           if (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty) {
             u.goal = [u.tx, u.ty];
-            u.best = dist;
+            u.best = undefined;
+            u.rerouted = false;
             u.stuck = 0;
             u.slide = undefined;
+            // (a chase nudges the goal along: keep the way it has if the
+            // new goal is near the old end and in sight of the last corner)
+            const p = u.path;
+            const last = p && p[p.length - 1];
+            const prev = p && p.length > 1 ? p[p.length - 2] : [u.x, u.y];
+            if (p && last && Math.hypot(last[0] - u.tx, last[1] - u.ty) < 16 && clearLine((x, y) => this.okAt(u, x, y), prev[0], prev[1], u.tx, u.ty)) p[p.length - 1] = [u.tx, u.ty];
+            else this.route(u);
           }
+          // on a way round: head for the next corner of it (and count the
+          // distance left as the length of the way, for giving up)
+          if (u.path) {
+            while (u.path.length > 1 && Math.hypot(u.path[0][0] - u.x, u.path[0][1] - u.y) < 3) u.path.shift();
+            const [px, py] = u.path[0];
+            if (u.path.length === 1 && Math.hypot(px - u.tx, py - u.ty) > 0.5 && Math.hypot(px - u.x, py - u.y) < 0.8) {
+              // got as near as it can to somewhere it can't reach
+              u.moving = false;
+              u.path = undefined;
+            } else {
+              dx = px - u.x;
+              dy = py - u.y;
+              let left = Math.hypot(dx, dy);
+              for (let i = 1; i < u.path.length; i++) left += Math.hypot(u.path[i][0] - u.path[i - 1][0], u.path[i][1] - u.path[i - 1][1]);
+              dist = left;
+              if (u.path.length === 1 && Math.hypot(px - u.tx, py - u.ty) <= 0.5) u.path = undefined;
+            }
+          }
+          u.best ??= dist;
           const want = Math.atan2(dy, dx);
           const free = foot || u.kind === 'heli';
           let ang = free ? want : u.a;
@@ -2488,7 +2559,7 @@ export class IsoGame implements GameLike {
           let slideA: number | null = null;
           if (u.kind !== 'heli' && this.okAt(u, u.x, u.y)) {
             const ahead = (a: number) =>
-              this.okAt(u, u.x + Math.cos(a) * 2, u.y + Math.sin(a) * 2) && this.okAt(u, u.x + Math.cos(a) * 3.5, u.y + Math.sin(a) * 3.5) && this.okAt(u, u.x + Math.cos(a) * 5, u.y + Math.sin(a) * 5);
+              this.okAt(u, u.x + Math.cos(a) * 0.9, u.y + Math.sin(a) * 0.9) && this.okAt(u, u.x + Math.cos(a) * 2, u.y + Math.sin(a) * 2) && this.okAt(u, u.x + Math.cos(a) * 3.5, u.y + Math.sin(a) * 3.5) && this.okAt(u, u.x + Math.cos(a) * 5, u.y + Math.sin(a) * 5);
             if (!ahead(want)) {
               const side = u.slide ?? (hash2(Math.floor(u.x), Math.floor(u.y), 5) < 0.5 ? 1 : -1);
               search: for (const k of [0.35, 0.7, 1.05, 1.4, 1.75, 2.1]) {
@@ -2523,7 +2594,13 @@ export class IsoGame implements GameLike {
           // give up if it has got hardly any closer in the last few seconds
           // (it has hit a dead end)
           if ((u.stuck = (u.stuck ?? 0) + dt) > 4) {
-            if ((u.best ?? 1e9) - dist < 4) u.moving = false;
+            if ((u.best ?? 1e9) - dist < 4) {
+              // off its way round somehow: look for the way again, once
+              if (u.path && !u.rerouted) {
+                u.rerouted = true;
+                this.route(u);
+              } else u.moving = false;
+            }
             u.best = dist;
             u.stuck = 0;
           }
@@ -2533,6 +2610,19 @@ export class IsoGame implements GameLike {
           if (u.kind === 'heli' || this.okAt(u, nx, ny) || !this.okAt(u, u.x, u.y)) {
             u.x = nx;
             u.y = ny;
+          } else if (sp > 0) {
+            // clipping a corner of rock or shore: slip along it instead
+            for (const [ex, ey] of [
+              [nx, u.y],
+              [u.x, ny],
+              [u.x + Math.cos(ang + 0.6) * sp, u.y + Math.sin(ang + 0.6) * sp],
+              [u.x + Math.cos(ang - 0.6) * sp, u.y + Math.sin(ang - 0.6) * sp],
+            ])
+              if (this.okAt(u, ex, ey)) {
+                u.x = ex;
+                u.y = ey;
+                break;
+              }
           }
           u.trackAcc += sp;
           if (u.trackAcc > 1.5) {
@@ -2588,7 +2678,7 @@ export class IsoGame implements GameLike {
         u.knock[1] -= dy;
         if (Math.hypot(u.knock[0], u.knock[1]) < 0.05) u.knock = undefined;
       }
-      // smoothly follow the ground height (units climb plateaus freely)
+      // smoothly follow the ground height
       const gz = this.groundZ(u);
       u.z += (gz - u.z) * Math.min(1, dt * 8);
       if (Math.abs(gz - u.z) < 0.05) u.z = gz;
