@@ -177,24 +177,6 @@ export function balloon(ctx: CanvasRenderingContext2D, x: number, y: number, r: 
   ctx.fill();
 }
 
-/** Spinning beams of light fanning out from a point. */
-export function rays(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number, n: number, rot: number, color: string, alpha: number) {
-  if (alpha <= 0) return;
-  const g = ctx.createRadialGradient(x, y, 0, x, y, outer);
-  g.addColorStop(0, withAlpha(color, alpha));
-  g.addColorStop(0.35, withAlpha(color, alpha * 0.7));
-  g.addColorStop(1, withAlpha(color, 0));
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const a0 = rot + (i * Math.PI * 2) / n;
-    ctx.moveTo(x, y);
-    ctx.arc(x, y, outer, a0, a0 + (Math.PI / n) * 0.9);
-    ctx.closePath();
-  }
-  ctx.fillStyle = g;
-  ctx.fill();
-}
-
 /** Big headline text with a white outline, for births and weddings. */
 export function banner(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, fill: string, alpha: number, scale: number, rot: number) {
   if (alpha <= 0 || scale <= 0.01) return;

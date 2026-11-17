@@ -11,7 +11,7 @@ import { DARK, LIGHT, mapStyle, type Theme } from '../map/style';
 import { step, type Body } from './physics';
 import { arc, easeInOut, laneOffset, pointAt, shifted, type Pt } from './curves';
 import { FLIGHT_SECONDS, Player } from './player';
-import { babySvg, balloon, banner, circleImage, heart, label, rays, ring, roundRect, sparkle, star, weddingRing } from './draw';
+import { babySvg, balloon, banner, circleImage, heart, label, ring, roundRect, sparkle, star, weddingRing } from './draw';
 
 setWorkerUrl(workerUrl);
 
@@ -838,7 +838,7 @@ export class Scene {
     return s.kind === 'baby' ? BABY_DESCENT : s.kind === 'star' ? STAR_FALL : RING_MEET;
   }
 
-  /** The light beams and big heart, behind the bubbles. */
+  /** The big heart behind a wedding couple. */
   private drawShowsBehind() {
     const ctx = this.ctx;
     for (const s of this.shows) {
@@ -850,7 +850,6 @@ export class Scene {
       const since = age - this.landing(s);
       if (since < 0) continue;
       const on = Math.min(1, since * 3) * fade;
-      rays(ctx, c.x, c.y, wedding ? 200 : 160, 12, age * 0.5 + s.seed * 6, s.kind === 'baby' ? s.a.color : '#FFD86B', (s.kind === 'baby' ? 0.45 : 0.36) * on);
       if (wedding) {
         const pop = backOut(Math.min(1, since / 0.45));
         // A double thump, like a heartbeat.
