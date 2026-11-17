@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { events, people } from './data/index';
 import { Timeline } from './engine/timeline';
-import { yearOf } from './engine/time';
+import { formatMonth } from './engine/time';
 import { Scene, type SceneState } from './scene/Scene';
-import { Controls } from './ui/Controls';
+import { Menu } from './ui/Menu';
 import { TimelineBar } from './ui/TimelineBar';
 
 function nowMonth(): number {
@@ -11,7 +11,12 @@ function nowMonth(): number {
   return d.getFullYear() * 12 + d.getMonth() + 0.99;
 }
 
-const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, view: 'fit', hidden: [] };
+/** Steps around the color wheel by the golden angle, so neighboring years never look alike. */
+function yearHue(year: number): number {
+  return Math.round((year * 137.508) % 360);
+}
+
+const EMPTY: SceneState = { t: 0, playing: false, speed: 2, pauseForEvents: true, traces: true, babies: true, dots: false, view: 'fit', hidden: [] };
 const noop = () => () => {};
 
 export function App() {
@@ -74,13 +79,15 @@ export function App() {
         <div className="map" ref={mapRef} />
         <canvas className="overlay" ref={canvasRef} />
       </div>
-      <header className="title">
-        <h1>Where u at</h1>
-        <div className="year" aria-live="off">
-          {scene ? yearOf(state.t) : ''}
-        </div>
-      </header>
-      {scene && <Controls scene={scene} state={state} />}
+      {scene && (
+        <header className="when" aria-live="off">
+          <div className="month">{formatMonth(state.t).split(' ')[0]}</div>
+          <div className="year" style={{ '--hue': yearHue(Number(formatMonth(state.t).split(' ')[1])) } as React.CSSProperties}>
+            {formatMonth(state.t).split(' ')[1]}
+          </div>
+        </header>
+      )}
+      {scene && <Menu scene={scene} state={state} />}
       {scene && <TimelineBar scene={scene} state={state} timeline={timeline} />}
     </div>
   );

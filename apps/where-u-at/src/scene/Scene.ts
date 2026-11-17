@@ -23,6 +23,10 @@ export interface SceneState {
   speed: number;
   pauseForEvents: boolean;
   traces: boolean;
+  /** Whether children and their births are shown. */
+  babies: boolean;
+  /** Whether the timeline shows a dot for each birth and wedding. */
+  dots: boolean;
   view: View;
   /** Friends switched off in the filter. */
   hidden: string[];
@@ -108,6 +112,8 @@ export class Scene {
   private frameId = 0;
   private snap = true;
   private traces = true;
+  private babies = true;
+  private dots = false;
   private hidden = new Set<string>();
   private view: View = 'fit';
   private fitKey = '';
@@ -236,6 +242,18 @@ export class Scene {
     this.emit();
   }
 
+  setDots(on: boolean): void {
+    this.dots = on;
+    this.emit();
+  }
+
+  /** Shows or hides every child, along with their births on the map and the timeline. */
+  setBabies(on: boolean): void {
+    this.babies = on;
+    this.snap = true;
+    this.emit();
+  }
+
   /** Shows or hides a friend; their children go with them when they're the parent. */
   setHidden(id: string, hidden: boolean): void {
     if (hidden) this.hidden.add(id);
@@ -253,6 +271,7 @@ export class Scene {
   private isHidden(id: string): boolean {
     const person = this.timeline.people.get(id);
     if (!person) return false;
+    if (person.kind === 'child' && !this.babies) return true;
     return this.hidden.has(person.kind === 'child' ? person.motherId : id);
   }
 
@@ -576,7 +595,6 @@ export class Scene {
     ctx.restore();
     const initials = actor.person.name.split(' ').map((w) => w[0]).join('').slice(0, 2);
     circleImage(ctx, actor.img, x, y, r, actor.color, initials);
-    if (friend) ring(ctx, x, y, r + 0.5, 'rgba(255,255,255,0.9)', 1.5);
   }
 
   private drawWeddingHalos() {
@@ -758,7 +776,7 @@ export class Scene {
   }
 
   private padding() {
-    return { top: 110, bottom: 150, left: 90, right: 90 };
+    return { top: 110, bottom: 110, left: 90, right: 90 };
   }
 
   private resize() {
@@ -797,6 +815,8 @@ export class Scene {
       speed: this.player.speed,
       pauseForEvents: this.player.pauseForEvents,
       traces: this.traces,
+      babies: this.babies,
+      dots: this.dots,
       view: this.view,
       hidden: [...this.hidden],
     };

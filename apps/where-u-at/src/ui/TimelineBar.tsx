@@ -1,9 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Timeline } from '../engine/timeline';
-import { formatMonth, parseDateInput, yearOf } from '../engine/time';
+import { formatMonth } from '../engine/time';
 import { BABY_BOY, BABY_GIRL } from '../data/index';
 import type { Scene, SceneState } from '../scene/Scene';
-import { SPEEDS, SPEED_LABELS } from '../scene/player';
 
 interface Props {
   scene: Scene;
@@ -11,6 +10,31 @@ interface Props {
   timeline: Timeline;
 }
 
+/** The play button hides after this long without the pointer moving, while playing. */
+const IDLE_MS = 8000;
+
+/** True once the pointer, a touch or a key hasn't been used for IDLE_MS. */
+function useIdle(): boolean {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    let timer = 0;
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = window.setTimeout(() => setIdle(true), IDLE_MS);
+    };
+    const events = ['pointermove', 'pointerdown', 'keydown', 'wheel'] as const;
+    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    wake();
+    return () => {
+      clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, wake);
+    };
+  }, []);
+  return idle;
+}
+
+/** Play/pause, and a scrubbable timeline along the bottom edge with optional dots for births and weddings. */
 export function TimelineBar({ scene, state, timeline }: Props) {
   const { start, end } = timeline;
   const span = end - start;
@@ -31,14 +55,9 @@ export function TimelineBar({ scene, state, timeline }: Props) {
       }),
     [timeline, start, span],
   );
-
-  const years = useMemo(() => {
-    const list: { year: number; left: number; major: boolean }[] = [];
-    for (let y = Math.ceil(start / 12); y * 12 <= end; y++) {
-      list.push({ year: y, left: ((y * 12 - start) / span) * 100, major: y % 5 === 0 });
-    }
-    return list;
-  }, [start, end, span]);
+  const visible = !state.dots ? [] : state.babies ? marks : marks.filter((m) => m.kind !== 'child');
+  const idle = useIdle();
+  const hidePlay = state.playing && idle;
 
   const seekTo = (clientX: number) => {
     const rect = trackRef.current!.getBoundingClientRect();
@@ -48,7 +67,7 @@ export function TimelineBar({ scene, state, timeline }: Props) {
 
   return (
     <div className="bar">
-      <button className="play" onClick={() => scene.togglePlay()} aria-label={state.playing ? 'Pause' : 'Play'} title="Play / pause (Space)">
+      <button className={`play ${hidePlay ? 'hidden' : ''}`} tabIndex={hidePlay ? -1 : 0} onClick={() => scene.togglePlay()} aria-label={state.playing ? 'Pause' : 'Play'} title="Play / pause (Space)">
         {state.playing ? (
           <svg viewBox="0 0 24 24" aria-hidden>
             <rect x="6" y="5" width="4" height="14" rx="1.2" />
@@ -61,13 +80,6 @@ export function TimelineBar({ scene, state, timeline }: Props) {
         )}
       </button>
 
-      <div className="speed">
-        <button onClick={() => scene.setSpeed((state.speed + 1) % SPEEDS.length)} title={`${SPEEDS[state.speed]} seconds per year. Click to change.`}>
-          {SPEED_LABELS[state.speed]}
-        </button>
-        <span className="hint">{SPEEDS[state.speed]}s / year</span>
-      </div>
-
       <div
         className="track"
         ref={trackRef}
@@ -79,9 +91,15 @@ export function TimelineBar({ scene, state, timeline }: Props) {
         onPointerMove={(e) => dragging.current && seekTo(e.clientX)}
         onPointerUp={() => (dragging.current = false)}
         onPointerCancel={() => (dragging.current = false)}
+        role="slider"
+        aria-label="Timeline"
+        aria-valuemin={start}
+        aria-valuemax={end}
+        aria-valuenow={Math.floor(state.t)}
+        aria-valuetext={formatMonth(state.t)}
       >
         <div className="marks">
-          {marks.map((m) => (
+          {visible.map((m) => (
             <span key={m.id} className={`mark ${m.kind}`} style={{ left: `${m.left}%`, background: m.color }} title={m.title} />
           ))}
         </div>
@@ -89,77 +107,7 @@ export function TimelineBar({ scene, state, timeline }: Props) {
           <div className="fill" style={{ width: `${pct}%` }} />
           <div className="thumb" style={{ left: `${pct}%` }} />
         </div>
-        <div className="years">
-          {years.map((y) => (
-            <span key={y.year} className={y.major ? 'major' : ''} style={{ left: `${y.left}%` }}>
-              {y.major && <em>{y.year}</em>}
-            </span>
-          ))}
-        </div>
       </div>
-
-      <DateBox t={state.t} onSeek={(t) => scene.seek(t)} />
-
-      <button
-        className={`pill small ${state.pauseForEvents ? 'on' : ''}`}
-        onClick={() => scene.setPauseForEvents(!state.pauseForEvents)}
-        aria-pressed={state.pauseForEvents}
-        title="Stop on every move, birth and wedding until it has played, then wait 3 seconds (L)"
-      >
-        <span className="switch" aria-hidden />
-        Pause on each event
-      </button>
     </div>
-  );
-}
-
-function DateBox({ t, onSeek }: { t: number; onSeek: (t: number) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState('');
-  const [bad, setBad] = useState(false);
-
-  if (!editing) {
-    return (
-      <button
-        className="date"
-        onClick={() => {
-          setText(formatMonth(t));
-          setBad(false);
-          setEditing(true);
-        }}
-        title="Type a date to jump there"
-      >
-        <span className="month">{formatMonth(t).split(' ')[0]}</span> <span className="yr">{yearOf(t)}</span>
-      </button>
-    );
-  }
-  return (
-    <form
-      className={`date editing ${bad ? 'bad' : ''}`}
-      onSubmit={(e) => {
-        e.preventDefault();
-        const parsed = parseDateInput(text);
-        if (parsed === null) {
-          setBad(true);
-          return;
-        }
-        onSeek(parsed + 0.5);
-        setEditing(false);
-      }}
-    >
-      <input
-        autoFocus
-        value={text}
-        onFocus={(e) => e.currentTarget.select()}
-        onChange={(e) => {
-          setText(e.target.value);
-          setBad(false);
-        }}
-        onBlur={() => setEditing(false)}
-        onKeyDown={(e) => e.key === 'Escape' && setEditing(false)}
-        placeholder="June 2014"
-        aria-label="Jump to date"
-      />
-    </form>
   );
 }
