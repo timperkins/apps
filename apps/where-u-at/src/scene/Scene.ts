@@ -493,7 +493,7 @@ export class Scene {
           const actor = this.byId.get(id);
           if (!actor?.body.active) continue;
           if (actor.person.kind === 'friend') {
-            this.shows.push(this.show('star', actor, actor, 'A star is born!'));
+            this.shows.push(this.show('star', actor, actor, `${actor.person.name.split(' ')[0]}!`));
             this.focus({ x: actor.body.x, y: actor.body.y });
             actor.label = { text: `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, start: this.clock + STAR_FALL, until: this.clock + STAR_FALL + 3.2 };
           } else {
