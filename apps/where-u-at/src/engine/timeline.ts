@@ -125,6 +125,13 @@ export class Timeline {
     return this.events.filter((e) => e.t > from && e.t <= to);
   }
 
+  /** The longest trip anyone makes in this event, in miles. 0 when nobody actually goes anywhere. */
+  moveMiles(eventId: string): number {
+    let miles = 0;
+    for (const leg of this.legs) if (leg.eventId === eventId) miles = Math.max(miles, milesBetween(leg.from, leg.to));
+    return miles;
+  }
+
   partnerOf(id: string): string | undefined {
     for (const { event } of this.events) {
       if (event.type === 'marriage' && event.people.includes(id)) {
@@ -166,6 +173,15 @@ export class Timeline {
   private orderOf(id: string): number {
     return this.people.get(id)?.order ?? 0;
   }
+}
+
+/** Great-circle distance in miles. */
+export function milesBetween(a: Place, b: Place): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 3958.8 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 function spreadWithinMonths(events: LifeEvent[]): TimedEvent[] {

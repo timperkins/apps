@@ -98,7 +98,7 @@ describe('Player', () => {
   const people: Person[] = [{ id: 'a', name: 'A', kind: 'friend', color: '#E5484D', photo: '', order: 0 }];
   const events: LifeEvent[] = [
     { id: '1', type: 'birth', date: '2000-01', people: ['a'], place: { name: 'X', lat: 0, lng: 0 } },
-    { id: '2', type: 'move', date: '2000-03', people: ['a'], place: { name: 'Y', lat: 1, lng: 1 } },
+    { id: '2', type: 'move', date: '2000-03', people: ['a'], place: { name: 'Y', lat: 10, lng: 10 } },
   ];
   const tl = new Timeline(people, events, monthIndex('2002-01'));
 
@@ -132,6 +132,21 @@ describe('Player', () => {
     p.skip = (e) => e.event.id === '1';
     p.play();
     expect(p.advance(10).map((e) => e.event.id)).toEqual(['1', '2']);
+  });
+
+  it("doesn't stop for moves under 500 miles", () => {
+    const hops: LifeEvent[] = [
+      { id: '1', type: 'birth', date: '2000-01', people: ['a'], place: { name: 'X', lat: 0, lng: 0 } },
+      { id: '2', type: 'move', date: '2000-03', people: ['a'], place: { name: 'Near', lat: 5, lng: 0 } },
+      { id: '3', type: 'move', date: '2000-05', people: ['a'], place: { name: 'Far', lat: 15, lng: 0 } },
+    ];
+    const short = new Timeline(people, hops, monthIndex('2002-01'));
+    expect(short.moveMiles('2')).toBeCloseTo(345, 0);
+    const p = new Player(short);
+    p.seek(monthIndex('2000-02'));
+    p.play();
+    // Time runs straight through the 345-mile move and stops at the 690-mile one.
+    expect(p.advance(10).map((e) => e.event.id)).toEqual(['2', '3']);
   });
 
   it('stops at the end', () => {
