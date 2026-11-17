@@ -3,7 +3,8 @@ import './style.css';
 import type { GameModule } from '../types';
 import { JOBS, JOB_BY_ID, UPGRADES, UPGRADE_BY_ID, type JobId, type UpgradeId } from './data';
 import { isMuted, setMuted, sfx } from './audio';
-import { H, SOLID, T, W, hash, idx, inMap, makeWorld, type Building, type World } from './world';
+import { H, LOT, SOLID, T, W, hash, idx, inLot, inMap, makeWorld, type Building, type World } from './world';
+import { CATS, CAT_ICON, ITEMS, ITEM_BY_ID, LEVEL_TITLES, NAMES, ROLES, type Item } from './build';
 
 const SAVE_KEY = 'jobville-save-v1';
 
@@ -19,6 +20,60 @@ interface Save {
   shirt: string;
   won: boolean;
   count: Partial<Record<JobId, number>>;
+  pranks?: number;
+  bricks: number;
+  objs: [number, string][];
+  floors: [number, string][];
+  biz: { name: string; kind: string } | null;
+  workers: Worker[];
+  box: number;
+  nextId: number;
+}
+
+interface Worker {
+  id: number;
+  name: string;
+  role: string;
+  level: number;
+  wage: number;
+  skill: number;
+  shirt: string;
+  skin: string;
+  hair: string;
+}
+
+interface Walker {
+  x: number;
+  y: number;
+  path: { x: number; y: number }[];
+  kind: 'customer' | 'worker' | 'applicant';
+  state: 'in' | 'stay' | 'out';
+  t: number;
+  shirt: string;
+  skin: string;
+  hair: string;
+  item?: string;
+  wid?: number;
+  app?: Worker;
+}
+
+interface Rival {
+  name: string;
+  job: 'sweeper' | 'farmer' | 'lumberjack' | 'miner';
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  ti: number;
+  trash: Trash | null;
+  work: number;
+  dizzy: number;
+  stuck: number;
+  lx: number;
+  ly: number;
+  shirt: string;
+  say: string;
+  sayT: number;
 }
 
 const SHIRTS = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f39c12', '#1abc9c', '#e84393', '#34495e'];
@@ -117,6 +172,13 @@ function loadSave(): Save {
     shirt: SHIRTS[Math.floor(Math.random() * SHIRTS.length)],
     won: false,
     count: {},
+    bricks: 0,
+    objs: [],
+    floors: [],
+    biz: null,
+    workers: [],
+    box: 0,
+    nextId: 1,
   };
   try {
     const raw = localStorage.getItem(SAVE_KEY);
@@ -148,11 +210,18 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     <div class="jv-topright">
       <canvas class="jv-mini" width="180" height="180"></canvas>
       <div class="jv-btns">
+        <button class="jv-btn" data-b="build" title="Build your shop (B)">🔨</button>
         <button class="jv-btn" data-b="map" title="Map (M)">🗺️</button>
         <button class="jv-btn" data-b="menu" title="Menu (Esc)">⏸</button>
       </div>
     </div>
     <div class="jv-prompt"></div>
+    <div class="jv-buildbar">
+      <button class="jv-bb-item" data-bb="menu"></button>
+      <button data-bb="place">✅ Place <kbd>E</kbd></button>
+      <button data-bb="remove">🗑 Remove <kbd>X</kbd></button>
+      <button data-bb="done">✔ Done</button>
+    </div>
     <div class="jv-toast"></div>
     <div class="jv-stick"><div class="jv-knob"></div></div>
     <button class="jv-act"><span class="i"></span><span class="l"></span></button>
@@ -242,6 +311,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     if (!inMap(tx, ty)) return true;
     const t = world.tiles[idx(tx, ty)];
     if (t === T.Water) return !tier('hover');
+    if (t === T.Lot) return placedSolid(idx(tx, ty));
     return SOLID.has(t);
   }
 
@@ -490,6 +560,38 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       return null;
     }
     // town
+    if (build.on) {
+      const it = build.item;
+      return it ? { label: `Place ${it.name}`, icon: it.icon, run: placeItem } : { label: 'Pick something', icon: '📦', run: openBuildMenu };
+    }
+    const bt = boxTile();
+    if (bt >= 0 && dist(p.x, p.y, (bt % W) + 0.5, ((bt / W) | 0) + 0.5) < 1.5)
+      return {
+        label: 'Collect money',
+        icon: '💰',
+        run: () => {
+          if (save.box <= 0) {
+            toast('The money box is empty. Wait for customers!');
+            return;
+          }
+          const amt = Math.floor(save.box);
+          save.money += amt;
+          save.earned += amt;
+          save.box = 0;
+          addFloat((bt % W) + 0.5, ((bt / W) | 0) - 0.2, `+${fmt(amt)} 💰`);
+          sfx.buy();
+        },
+      };
+    for (const k of walkers) {
+      if (dist(p.x, p.y, k.x, k.y) > 1.4) continue;
+      if (k.kind === 'applicant') return { label: `Read ${k.app!.name}'s diploma`, icon: '📜', run: () => openDiploma(k) };
+      if (k.kind === 'worker') {
+        const w = save.workers.find((x) => x.id === k.wid);
+        if (w) return { label: `Talk to ${w.name}`, icon: '💬', run: () => openWorker(w) };
+      }
+    }
+    for (const r of rivals)
+      if (r.dizzy <= 0 && dist(p.x, p.y, r.x, r.y) < 1.4) return { label: `Prank ${r.name} 🍌`, icon: '🍌', run: () => prank(r) };
     const b = world.board;
     if (dist(p.x, p.y, b.x + 1, b.y + 0.5) < 1.9) return { label: 'Job board', icon: '📋', run: openBoard };
     const shop = world.byKind.shop!;
@@ -544,6 +646,630 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     return null;
   }
 
+  // ---------- your own shop ----------
+  const objMap = new Map<number, string>(save.objs);
+  const floorMap = new Map<number, string>(save.floors);
+  const build = { on: false, item: null as Item | null };
+  let walkers: Walker[] = [];
+  let custT = 8;
+  let workT = 10;
+  let wageT = 60;
+  let appT = 25;
+  let noDoorT = 0;
+  let pathsDirty = true;
+  const GATE = { x: LOT.x + LOT.w + 1, y: LOT.gateY };
+
+  const syncLot = () => {
+    save.objs = [...objMap];
+    save.floors = [...floorMap];
+    pathsDirty = true;
+  };
+  const placedSolid = (i: number) => {
+    const id = objMap.get(i);
+    return !!id && ITEM_BY_ID[id]?.solid !== false;
+  };
+  const boxTile = () => {
+    for (const [i, id] of objMap) if (id === 'money-box') return i;
+    return -1;
+  };
+  const appeal = () => {
+    let a = 0;
+    for (const id of objMap.values()) a += ITEM_BY_ID[id]?.appeal ?? 0;
+    for (const id of floorMap.values()) a += ITEM_BY_ID[id]?.appeal ?? 0;
+    return a;
+  };
+  const lotPass = (x: number, y: number) =>
+    (inLot(x, y) && !placedSolid(idx(x, y))) || ((x === LOT.x + LOT.w || x === GATE.x) && (y === LOT.gateY || y === LOT.gateY + 1));
+
+  /** Shortest walk inside your lot, to any tile next to the goal tile. */
+  function lotPath(sx: number, sy: number, gx: number, gy: number): { x: number; y: number }[] | null {
+    const key = (x: number, y: number) => y * W + x;
+    const prev = new Map<number, number>();
+    const start = key(sx, sy);
+    prev.set(start, -1);
+    const q = [start];
+    const goal = (x: number, y: number) => Math.abs(x - gx) + Math.abs(y - gy) === 1 || (x === gx && y === gy);
+    while (q.length) {
+      const k = q.shift()!;
+      const x = k % W;
+      const y = (k / W) | 0;
+      if (goal(x, y)) {
+        const out: { x: number; y: number }[] = [];
+        for (let c = k; c !== -1; c = prev.get(c)!) out.push({ x: (c % W) + 0.5, y: ((c / W) | 0) + 0.5 });
+        return out.reverse();
+      }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        const nk = key(nx, ny);
+        if (prev.has(nk) || !lotPass(nx, ny)) continue;
+        prev.set(nk, k);
+        q.push(nk);
+      }
+    }
+    return null;
+  }
+
+  const randLook = () => ({
+    shirt: SHIRTS[Math.floor(Math.random() * SHIRTS.length)],
+    skin: SKINS[Math.floor(Math.random() * SKINS.length)],
+    hair: HAIRS[Math.floor(Math.random() * HAIRS.length)],
+  });
+
+  function stationFor(w: Worker) {
+    const role = ROLES.find((r) => r.name === w.role);
+    const tiles = [...objMap].filter(([, id]) => ITEM_BY_ID[id]?.layer === 'object');
+    const match = role ? tiles.find(([, id]) => role.needs.includes(id)) : undefined;
+    return { tile: match ?? tiles[w.id % Math.max(1, tiles.length)], matched: !!match };
+  }
+
+  function placeWorkers() {
+    walkers = walkers.filter((k) => k.kind !== 'worker');
+    for (const w of save.workers) {
+      const st = stationFor(w);
+      let path: { x: number; y: number }[] | null = null;
+      if (st.tile) path = lotPath(GATE.x, GATE.y, st.tile[0] % W, (st.tile[0] / W) | 0);
+      const end = path?.[path.length - 1] ?? { x: LOT.x + LOT.w - 1.5, y: LOT.gateY + 0.5 };
+      walkers.push({ x: end.x, y: end.y, path: [], kind: 'worker', state: 'stay', t: 0, shirt: w.shirt, skin: w.skin, hair: w.hair, wid: w.id });
+    }
+  }
+
+  function workerRate(w: Worker) {
+    const matched = !w.role || ROLES.some((r) => r.name === w.role) ? stationFor(w).matched : true;
+    return (w.wage * (matched ? 2 : 1.3) * (0.6 + 0.2 * w.skill) * (1 + 0.5 * (w.level - 1)));
+  }
+
+  function spawnCustomer() {
+    const targets = [...objMap].filter(([, id]) => {
+      const it = ITEM_BY_ID[id];
+      return it && it.layer === 'object' && id !== 'money-box' && it.appeal > 0;
+    });
+    if (!targets.length) return;
+    const pick = targets.find(([, id]) => ITEM_BY_ID[id].sells && Math.random() < 0.5) ?? targets[Math.floor(Math.random() * targets.length)];
+    const path = lotPath(GATE.x, GATE.y, pick[0] % W, (pick[0] / W) | 0);
+    if (!path) {
+      if (noDoorT <= 0) {
+        toast("Customers can't get into your shop! Leave a gap or put in a 🚪 door.");
+        noDoorT = 40;
+      }
+      return;
+    }
+    walkers.push({ x: GATE.x + 0.5, y: GATE.y + 0.5, path, kind: 'customer', state: 'in', t: 0, ...randLook(), item: pick[1] });
+  }
+
+  function stepWalkers(dt: number) {
+    for (const k of walkers) {
+      if (k.path.length) {
+        const n = k.path[0];
+        const d = dist(k.x, k.y, n.x, n.y);
+        const s = 2.2 * dt;
+        if (d <= s) {
+          k.x = n.x;
+          k.y = n.y;
+          k.path.shift();
+        } else {
+          k.x += ((n.x - k.x) / d) * s;
+          k.y += ((n.y - k.y) / d) * s;
+        }
+        continue;
+      }
+      if (k.kind === 'customer') {
+        if (k.state === 'in') {
+          k.state = 'stay';
+          k.t = 2.5;
+        } else if (k.state === 'stay') {
+          k.t -= dt;
+          if (k.t <= 0) {
+            const it = ITEM_BY_ID[k.item ?? ''];
+            const bt = boxTile();
+            if (it && bt >= 0) {
+              const pay = Math.round((3 + Math.min(30, appeal() / 15) + (it.sells ? it.price / 3 : 1)) * payMult());
+              save.box += pay;
+            }
+            k.state = 'out';
+            const back = lotPath(Math.floor(k.x), Math.floor(k.y), GATE.x, GATE.y);
+            k.path = back ?? [];
+            if (!back) k.t = -99;
+          }
+        } else k.t = -99;
+      }
+    }
+    walkers = walkers.filter((k) => !(k.kind === 'customer' && k.state === 'out' && !k.path.length));
+  }
+
+  function updateBusiness(dt: number) {
+    if (pathsDirty) {
+      pathsDirty = false;
+      placeWorkers();
+    }
+    stepWalkers(dt);
+    noDoorT -= dt;
+    const hasBox = boxTile() >= 0;
+    const a = appeal();
+    if (hasBox && a > 0) {
+      custT -= dt;
+      if (custT <= 0) {
+        custT = Math.max(2, 22 - a / 12 - save.workers.length * 1.5) * (0.7 + Math.random() * 0.6);
+        if (walkers.filter((k) => k.kind === 'customer').length < 12) spawnCustomer();
+      }
+    }
+    if (hasBox && save.workers.length) {
+      workT -= dt;
+      if (workT <= 0) {
+        workT = 10;
+        for (const w of save.workers) save.box += Math.round((workerRate(w) / 6) * payMult());
+      }
+    }
+    if (save.workers.length) {
+      wageT -= dt;
+      if (wageT <= 0) {
+        wageT = 60;
+        for (const w of [...save.workers]) {
+          if (save.money >= w.wage) save.money -= w.wage;
+          else if (save.box >= w.wage) save.box -= w.wage;
+          else {
+            save.workers = save.workers.filter((x) => x !== w);
+            toast(`${w.name} quit because you couldn't pay them. 😢`);
+            pathsDirty = true;
+            continue;
+          }
+        }
+        if (save.workers.length) addFloat(p.x, p.y - 1, `-${fmt(save.workers.reduce((s, w) => s + w.wage, 0))} wages`, '#ff8a80');
+      }
+    }
+    // job seekers
+    if (save.biz && hasBox && save.workers.length < 10 && !walkers.some((k) => k.kind === 'applicant')) {
+      appT -= dt;
+      if (appT <= 0) {
+        appT = 35 + Math.random() * 35;
+        const look = randLook();
+        const roles = [...ROLES.map((r) => r.name), `${save.biz.kind} Worker`];
+        const skill = 1 + Math.floor(Math.random() * 5);
+        const app: Worker = {
+          id: save.nextId++,
+          name: NAMES[Math.floor(Math.random() * NAMES.length)],
+          role: roles[Math.floor(Math.random() * roles.length)],
+          level: 1,
+          skill,
+          wage: 3 + skill * 2 + Math.floor(Math.random() * 4),
+          ...look,
+        };
+        const path = lotPath(GATE.x, GATE.y, LOT.x + LOT.w - 3, LOT.gateY) ?? [];
+        walkers.push({ x: GATE.x + 0.5, y: GATE.y + 0.5, path, kind: 'applicant', state: 'stay', t: 0, ...look, app });
+        toast(`${app.name} wants a job at ${save.biz.name}! Go read their diploma 📜`);
+      }
+    }
+  }
+
+  function hire(k: Walker, yes: boolean) {
+    walkers = walkers.filter((x) => x !== k);
+    if (yes && k.app) {
+      save.workers.push(k.app);
+      sfx.job();
+      toast(`${k.app.name} works for you now! 🎉`);
+      pathsDirty = true;
+      writeSave();
+    }
+  }
+
+  // ---------- rivals ----------
+  const RIVAL_NAMES = ['Rex', 'Bea', 'Gus', 'Dot', 'Ziggy', 'Moe', 'Kit', 'Bubba', 'Fern', 'Nico', 'Tess', 'Waldo'];
+  const RIVAL_JOBS: Rival['job'][] = ['sweeper', 'sweeper', 'sweeper', 'sweeper', 'farmer', 'farmer', 'farmer', 'lumberjack', 'lumberjack', 'lumberjack', 'miner', 'miner'];
+  const rivals: Rival[] = RIVAL_JOBS.map((job, i) => {
+    const start = job === 'farmer' ? { x: 147, y: 46 + i * 6 } : job === 'lumberjack' ? { x: 30 + i, y: 88 } : job === 'miner' ? { x: 93, y: 12 } : randomRoad();
+    return {
+      name: RIVAL_NAMES[i], job, x: start.x + 0.5, y: start.y + 0.5, tx: start.x + 0.5, ty: start.y + 0.5, ti: -1, trash: null,
+      work: 0, dizzy: 0, stuck: 0, lx: 0, ly: 0, shirt: '#444', say: '', sayT: 0,
+    };
+  });
+  const RIVAL_TOOL: Record<Rival['job'], string> = { sweeper: '🧹', farmer: '🌾', lumberjack: '🪓', miner: '⛏️' };
+
+  function rivalTarget(r: Rival) {
+    r.ti = -1;
+    r.trash = null;
+    let best = Infinity;
+    const jitter = () => Math.random() * 8;
+    if (r.job === 'sweeper') {
+      for (const t of trash) {
+        const d = dist(r.x, r.y, t.x, t.y) + jitter();
+        if (d < best) {
+          best = d;
+          r.trash = t;
+        }
+      }
+      if (r.trash) {
+        r.tx = r.trash.x;
+        r.ty = r.trash.y;
+      }
+      return;
+    }
+    const list = r.job === 'farmer' ? world.fields : r.job === 'miner' ? world.rocks : world.forest;
+    for (const i of list) {
+      const ok = r.job === 'farmer' ? ripe(i) : r.job === 'miner' ? world.tiles[i] === T.Rock : world.tiles[i] === T.Tree && i % W < 44;
+      if (!ok) continue;
+      const d = dist(r.x, r.y, (i % W) + 0.5, ((i / W) | 0) + 0.5) + jitter();
+      if (d < best) {
+        best = d;
+        r.ti = i;
+      }
+    }
+    if (r.ti >= 0) {
+      r.tx = (r.ti % W) + 0.5;
+      r.ty = ((r.ti / W) | 0) + 0.5;
+    }
+  }
+
+  const rivalBlocked = (x: number, y: number) => {
+    for (const [dx, dy] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) {
+      const tx = Math.floor(x + dx);
+      const ty = Math.floor(y + dy);
+      if (!inMap(tx, ty)) return true;
+      const t = world.tiles[idx(tx, ty)];
+      if (SOLID.has(t) || inLot(tx, ty)) return true;
+    }
+    return false;
+  };
+
+  function stepRival(r: Rival, dt: number) {
+    r.sayT -= dt;
+    if (r.dizzy > 0) {
+      r.dizzy -= dt;
+      return;
+    }
+    const valid =
+      r.job === 'sweeper' ? !!r.trash && trash.includes(r.trash) : r.ti >= 0 && (r.job === 'farmer' ? ripe(r.ti) : world.tiles[r.ti] === (r.job === 'miner' ? T.Rock : T.Tree));
+    if (!valid) {
+      rivalTarget(r);
+      r.work = 0;
+      return;
+    }
+    const d = dist(r.x, r.y, r.tx, r.ty);
+    const reach = r.job === 'sweeper' || r.job === 'farmer' ? 0.5 : 1.2;
+    if (d > reach) {
+      const s = 3 * dt;
+      const mx = ((r.tx - r.x) / d) * s;
+      const my = ((r.ty - r.y) / d) * s;
+      if (!rivalBlocked(r.x + mx, r.y)) r.x += mx;
+      if (!rivalBlocked(r.x, r.y + my)) r.y += my;
+      r.stuck += dt;
+      if (r.stuck > 1.5) {
+        if (dist(r.x, r.y, r.lx, r.ly) < 0.3) {
+          // stuck: hop to a road and try something else
+          const rr = randomRoad();
+          if (r.job === 'sweeper') {
+            r.x = rr.x + 0.5;
+            r.y = rr.y + 0.5;
+          }
+          r.ti = -1;
+          r.trash = null;
+        }
+        r.stuck = 0;
+        r.lx = r.x;
+        r.ly = r.y;
+      }
+      return;
+    }
+    r.work += dt;
+    if (r.work < (r.job === 'sweeper' ? 0.4 : 1.6)) return;
+    r.work = 0;
+    if (r.job === 'sweeper' && r.trash) trash.splice(trash.indexOf(r.trash), 1);
+    else if (r.job === 'farmer') world.regrow[r.ti] = now + CROP_TIME;
+    else if (r.job === 'lumberjack') {
+      world.tiles[r.ti] = T.Stump;
+      world.regrow[r.ti] = now + 60;
+    } else if (r.job === 'miner') {
+      world.tiles[r.ti] = T.Quarry;
+      world.regrow[r.ti] = now + 50;
+    }
+    r.ti = -1;
+    r.trash = null;
+  }
+
+  function prank(r: Rival) {
+    r.dizzy = 25;
+    r.say = ['Whoa!', 'Hey!!', 'Who did that?', 'Oof!', 'My tools!'][Math.floor(Math.random() * 5)];
+    r.sayT = 2.5;
+    sfx.splash();
+    save.pranks = (save.pranks ?? 0) + 1;
+    if (Math.random() < 0.2 && save.money >= 10) {
+      save.money -= 10;
+      toast(`${r.name} saw you! You paid a $10 fine. 😬`);
+    } else toast(`🍌 ${r.name} slipped on a banana peel! They can't work for a while.`);
+  }
+
+  // ---------- building ----------
+  function ghostTile() {
+    let dx = 0;
+    let dy = 0;
+    if (Math.abs(p.fx) > Math.abs(p.fy)) dx = Math.sign(p.fx);
+    else dy = Math.sign(p.fy) || 1;
+    return { x: Math.floor(p.x) + dx, y: Math.floor(p.y) + dy };
+  }
+
+  function canPlace(it: Item, x: number, y: number): string | null {
+    if (!inLot(x, y)) return 'Build inside your lot (the fenced area west of town).';
+    const i = idx(x, y);
+    if (it.layer === 'floor') return null;
+    if (objMap.has(i)) return 'Something is already there. Remove it first.';
+    if (it.solid && Math.floor(p.x) === x && Math.floor(p.y) === y) return "You're standing there!";
+    if (it.solid && walkers.some((k) => Math.floor(k.x) === x && Math.floor(k.y) === y)) return 'Someone is standing there!';
+    if (it.id === 'money-box' && boxTile() >= 0) return 'You already have a money box.';
+    if (save.bricks < it.bricks) return `You need ${it.bricks} 🧱 (you have ${save.bricks}). Buy bricks in the build menu.`;
+    if (save.money < it.price) return `You need ${fmt(it.price)} for the ${it.name}.`;
+    return null;
+  }
+
+  function placeItem() {
+    const it = build.item;
+    if (!it) return openBuildMenu();
+    const g = ghostTile();
+    const why = canPlace(it, g.x, g.y);
+    if (why) {
+      sfx.nope();
+      toast(why);
+      return;
+    }
+    const i = idx(g.x, g.y);
+    if (it.layer === 'floor') {
+      if (floorMap.get(i) === it.id) return;
+      if (save.money < it.price) {
+        sfx.nope();
+        toast(`You need ${fmt(it.price)}.`);
+        return;
+      }
+      floorMap.set(i, it.id);
+    } else objMap.set(i, it.id);
+    // step back if the new thing touches you
+    if (it.solid) {
+      const e = R + 0.01;
+      if (p.y + R > g.y && p.y - R < g.y + 1) {
+        if (p.x < g.x && p.x + R > g.x) p.x = g.x - e;
+        if (p.x > g.x + 1 && p.x - R < g.x + 1) p.x = g.x + 1 + e;
+      }
+      if (p.x + R > g.x && p.x - R < g.x + 1) {
+        if (p.y < g.y && p.y + R > g.y) p.y = g.y - e;
+        if (p.y > g.y + 1 && p.y - R < g.y + 1) p.y = g.y + 1 + e;
+      }
+    }
+    save.money -= it.price;
+    save.bricks -= it.bricks;
+    sfx.pick();
+    syncLot();
+    if (it.id === 'money-box') toast('💰 Money box placed! Customers pay into it. Walk up to it to collect.');
+  }
+
+  function removeItem() {
+    const g = ghostTile();
+    if (!inLot(g.x, g.y)) return;
+    const i = idx(g.x, g.y);
+    const id = objMap.get(i) ?? floorMap.get(i);
+    if (!id) return;
+    const it = ITEM_BY_ID[id];
+    if (objMap.has(i)) objMap.delete(i);
+    else floorMap.delete(i);
+    if (it) {
+      save.money += Math.floor(it.price / 2);
+      save.bricks += it.bricks;
+    }
+    if (id === 'money-box' && save.box > 0) {
+      save.money += save.box;
+      addFloat(g.x + 0.5, g.y, `+${fmt(save.box)}`);
+      save.box = 0;
+    }
+    sfx.rock();
+    syncLot();
+  }
+
+  function setBuild(on: boolean) {
+    build.on = on;
+    el.classList.toggle('building', on);
+    targetTimer = 0;
+  }
+
+  function buildBarLabel() {
+    const it = build.item;
+    const b = el.querySelector<HTMLButtonElement>('.jv-bb-item')!;
+    b.innerHTML = it
+      ? `<span class="ic">${it.icon}</span> ${it.name} · ${it.bricks ? `${it.bricks}🧱 (${save.bricks} left)` : fmt(it.price)} <small>change</small>`
+      : '📦 Pick something';
+  }
+
+  function openBizSetup(then?: () => void) {
+    openModal(
+      `<h2>🏪 Your own shop!</h2>
+      <p>Build a shop on your lot west of town. It can be any job you want!</p>
+      <label class="jv-field">Shop name<input class="jv-in-name" maxlength="24" placeholder="Tim's Shop" value="${save.biz?.name ?? ''}"></label>
+      <label class="jv-field">What kind of shop or job? (anything!)<input class="jv-in-kind" maxlength="20" placeholder="Bakery, Pet Shop, Hair Salon…" value="${save.biz?.kind ?? ''}"></label>
+      <button class="jv-close big jv-ok">Save</button>`,
+      (e) => {
+        if (!(e.target as HTMLElement).closest('.jv-ok')) return;
+        const name = modal.querySelector<HTMLInputElement>('.jv-in-name')!.value.trim() || 'My Shop';
+        const kind = modal.querySelector<HTMLInputElement>('.jv-in-kind')!.value.trim() || 'Shop';
+        save.biz = { name, kind };
+        writeSave();
+        closeModal();
+        then?.();
+      },
+    );
+    setTimeout(() => modal.querySelector<HTMLInputElement>('.jv-in-name')?.focus(), 50);
+  }
+
+  let buildCat: string = CATS[0];
+  function openBuildMenu() {
+    if (!save.biz) return openBizSetup(openBuildMenu);
+    const tabs = [...CATS, 'Staff']
+      .map((c) => `<button class="jv-tab ${c === buildCat ? 'on' : ''}" data-cat="${c}">${c === 'Staff' ? '👥' : CAT_ICON[c]} ${c}</button>`)
+      .join('');
+    let body = '';
+    if (buildCat === 'Staff') {
+      body = save.workers.length
+        ? save.workers.map((w) => `<div class="jv-staff"><b>${w.name}</b> <span>${LEVEL_TITLES[w.level]} ${w.role}</span> <span class="pay">${fmt(w.wage)}/min</span><button data-talk="${w.id}">Talk</button></div>`).join('')
+        : `<p class="sub">No workers yet. Put down a 💰 Money Box and people will come asking for a job with their diploma.</p>`;
+    } else {
+      body = `<div class="jv-items">${ITEMS.filter((i) => i.cat === buildCat)
+        .map((i) => {
+          const sw = i.layer === 'floor' ? `<span class="sw" style="background:${i.color}"></span>` : i.layer === 'wall' && i.color && i.id !== 'door' && i.id !== 'window' ? `<span class="sw" style="background:${i.color}"></span>` : `<span class="ic">${i.icon}</span>`;
+          const cost = [i.bricks ? `${i.bricks}🧱` : '', i.price ? fmt(i.price) : ''].filter(Boolean).join(' + ') || 'free';
+          return `<button class="jv-item ${build.item?.id === i.id ? 'on' : ''}" data-item="${i.id}">${sw}<b>${i.name}</b><small>${cost}</small></button>`;
+        })
+        .join('')}</div>`;
+    }
+    openModal(
+      `<h2>🔨 ${save.biz.name}</h2>
+      <p class="sub">${save.biz.kind} · <a href="#" class="jv-rename">✏️ rename</a> · ${ITEMS.length} things to build</p>
+      <div class="jv-bricks">You have <b>${save.bricks} 🧱</b>
+        <button data-bricks="10">Buy 10 🧱 $20</button><button data-bricks="50">Buy 50 🧱 $90</button></div>
+      <div class="jv-tabs">${tabs}</div>
+      ${body}
+      <button class="jv-close">Close</button>`,
+      (e) => {
+        const t = e.target as HTMLElement;
+        if (t.closest('.jv-rename')) {
+          e.preventDefault();
+          return openBizSetup(openBuildMenu);
+        }
+        const cat = t.closest<HTMLElement>('[data-cat]');
+        if (cat) {
+          buildCat = cat.dataset.cat!;
+          return openBuildMenu();
+        }
+        const br = t.closest<HTMLElement>('[data-bricks]');
+        if (br) {
+          const n = Number(br.dataset.bricks);
+          const cost = n === 10 ? 20 : 90;
+          if (save.money < cost) {
+            sfx.nope();
+            toast(`You need ${fmt(cost)} for ${n} bricks.`);
+          } else {
+            save.money -= cost;
+            save.bricks += n;
+            sfx.coin();
+          }
+          return openBuildMenu();
+        }
+        const talk = t.closest<HTMLElement>('[data-talk]');
+        if (talk) {
+          const w = save.workers.find((x) => x.id === Number(talk.dataset.talk));
+          if (w) openWorker(w);
+          return;
+        }
+        const itEl = t.closest<HTMLElement>('[data-item]');
+        if (itEl) {
+          build.item = ITEM_BY_ID[itEl.dataset.item!];
+          setBuild(true);
+          closeModal();
+          if (scene === 'town' && !inLot(Math.floor(p.x), Math.floor(p.y)))
+            toast(`Follow the arrow to your lot, then face a spot and press ${touchMode ? 'Place' : 'E'}.`);
+          return;
+        }
+        if (t.closest('.jv-close')) closeModal();
+      },
+    );
+  }
+
+  function stars(n: number) {
+    return '★'.repeat(n) + '☆'.repeat(5 - n);
+  }
+
+  function openDiploma(k: Walker) {
+    const a = k.app!;
+    openModal(
+      `<div class="jv-diploma">
+        <div class="seal">🎓</div>
+        <h3>DIPLOMA</h3>
+        <p>This says that</p>
+        <div class="who">${a.name}</div>
+        <p>is great at being a</p>
+        <div class="what">${a.role}</div>
+        <p>Skill: <span class="stars">${stars(a.skill)}</span></p>
+        <div class="want">I want to be paid <b>${fmt(a.wage)} a minute</b></div>
+      </div>
+      <div class="jv-row"><button class="jv-yes">✅ Hire ${a.name}</button><button class="jv-no">❌ No thanks</button></div>`,
+      (e) => {
+        const t = e.target as HTMLElement;
+        if (t.closest('.jv-yes')) {
+          closeModal();
+          hire(k, true);
+        } else if (t.closest('.jv-no')) {
+          closeModal();
+          hire(k, false);
+          toast(`${a.name} says "Okay, bye!"`);
+        }
+      },
+    );
+  }
+
+  function openWorker(w: Worker) {
+    const st = stationFor(w);
+    const role = ROLES.find((r) => r.name === w.role);
+    const needs = role ? role.needs.map((id) => ITEM_BY_ID[id]?.icon + ' ' + ITEM_BY_ID[id]?.name).join(' or ') : '';
+    const roleBtns = [...ROLES.map((r) => `${r.icon} ${r.name}`)]
+      .map((r, i) => `<button class="jv-role ${ROLES[i].name === w.role ? 'on' : ''}" data-role="${ROLES[i].name}">${r}</button>`)
+      .join('');
+    openModal(
+      `<h2>${w.name}</h2>
+      <p class="sub">${LEVEL_TITLES[w.level]} ${w.role} · Skill ${stars(w.skill)} · Level ${w.level}/5</p>
+      <p>Paid <b>${fmt(w.wage)} a minute</b>. Earns your shop about <b>${fmt(workerRate(w) * payMult())} a minute</b>.</p>
+      ${role ? `<p class="sub">${st.matched ? '✅ Has what they need to work.' : `⚠️ Works twice as well with a ${needs}.`}</p>` : ''}
+      <div class="jv-row">
+        <button class="jv-promote" ${w.level >= 5 ? 'disabled' : ''}>⬆ Promote (+$3/min pay, works 50% better)</button>
+        <button class="jv-fire">👋 Fire</button>
+      </div>
+      <h3>Change job</h3>
+      <div class="jv-roles">${roleBtns}</div>
+      <div class="jv-row"><input class="jv-in-role" maxlength="24" placeholder="…or type any job"><button class="jv-setrole">Set</button></div>
+      <button class="jv-close">Close</button>`,
+      (e) => {
+        const t = e.target as HTMLElement;
+        const r = t.closest<HTMLElement>('[data-role]');
+        if (t.closest('.jv-promote') && w.level < 5) {
+          w.level++;
+          w.wage += 3;
+          sfx.buy();
+          toast(`${w.name} is now a ${LEVEL_TITLES[w.level]} ${w.role}! 🎉`);
+          openWorker(w);
+        } else if (t.closest('.jv-fire')) {
+          save.workers = save.workers.filter((x) => x !== w);
+          pathsDirty = true;
+          closeModal();
+          toast(`${w.name} doesn't work for you anymore.`);
+        } else if (r) {
+          w.role = r.dataset.role!;
+          pathsDirty = true;
+          openWorker(w);
+        } else if (t.closest('.jv-setrole')) {
+          const v = modal.querySelector<HTMLInputElement>('.jv-in-role')!.value.trim();
+          if (v) {
+            w.role = v;
+            pathsDirty = true;
+            openWorker(w);
+          }
+        } else if (t.closest('.jv-close')) closeModal();
+        writeSave();
+      },
+    );
+  }
+
   function pickTrash(t: Trash) {
     const i = trash.indexOf(t);
     if (i < 0) return;
@@ -555,6 +1281,10 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
   function updateTarget() {
     target = null;
     if (scene !== 'town') return;
+    if (build.on) {
+      if (!inLot(Math.floor(p.x), Math.floor(p.y))) target = { x: GATE.x + 0.5, y: GATE.y + 1 };
+      return;
+    }
     const job = save.job;
     if (!job) {
       target = { x: world.board.x + 1, y: world.board.y - 0.7 };
@@ -735,6 +1465,11 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
             scene = 'town';
             carry = [];
             fishing = null;
+            objMap.clear();
+            floorMap.clear();
+            walkers = [];
+            pathsDirty = true;
+            setBuild(false);
             closeModal();
             showIntro();
           } else {
@@ -771,6 +1506,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     label('⛏️ Quarry', 93, 30);
     label('🌾 Farms', 160, 26 + 4);
     label('🎣 Pond', 128, 160);
+    label(save.biz ? `🏪 ${save.biz.name}` : '🔨 Your Lot', LOT.x + LOT.w / 2, LOT.y + LOT.h / 2);
     label('📋 Jobs', world.board.x + 1, world.board.y + 4);
     const named: [string, Building | undefined][] = [
       ['🛒 Shop', world.byKind.shop],
@@ -852,6 +1588,8 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       [T.Hedge]: [30, 90, 40],
       [T.Board]: [140, 90, 40],
       [T.Dock]: [160, 112, 63],
+      [T.Lot]: [207, 177, 132],
+      [T.Fence]: [184, 135, 79],
     };
     for (let i = 0; i < W * H; i++) {
       const c = col[world.tiles[i]] ?? [0, 0, 0];
@@ -881,6 +1619,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
   }
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement) return;
     const k = e.key.toLowerCase();
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
     if (paused) {
@@ -891,7 +1630,10 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     if (k === 'e' || k === ' ' || k === 'enter') {
       if (!e.repeat) press();
       actHeld = true;
-    } else if (k === 'escape' || k === 'p') openMenu();
+    } else if (k === 'b') openBuildMenu();
+    else if ((k === 'x' || k === 'delete' || k === 'backspace') && build.on) removeItem();
+    else if (k === 'escape' && build.on) setBuild(false);
+    else if (k === 'escape' || k === 'p') openMenu();
     else if (k === 'm') openMap();
     else keys.add(k);
   };
@@ -959,6 +1701,16 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
   actBtn.addEventListener('pointerleave', actUp);
 
   el.querySelector('[data-b="map"]')!.addEventListener('click', openMap);
+  el.querySelector('[data-b="build"]')!.addEventListener('click', openBuildMenu);
+  el.querySelector('.jv-buildbar')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-bb]');
+    if (!b) return;
+    const what = b.dataset.bb;
+    if (what === 'menu') openBuildMenu();
+    else if (what === 'place') placeItem();
+    else if (what === 'remove') removeItem();
+    else if (what === 'done') setBuild(false);
+  });
   el.querySelector('[data-b="menu"]')!.addEventListener('click', openMenu);
   mini.addEventListener('click', openMap);
 
@@ -995,9 +1747,10 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       const my = iy * speed() * dt;
       // sub-steps so fast upgrades never skip through walls
       const steps = Math.ceil(Math.max(Math.abs(mx), Math.abs(my)) / 0.2) || 1;
+      const stuck = blocked(p.x, p.y);
       for (let s = 0; s < steps; s++) {
-        if (!blocked(p.x + mx / steps, p.y)) p.x += mx / steps;
-        if (!blocked(p.x, p.y + my / steps)) p.y += my / steps;
+        if (stuck || !blocked(p.x + mx / steps, p.y)) p.x += mx / steps;
+        if (stuck || !blocked(p.x, p.y + my / steps)) p.y += my / steps;
       }
       p.walk += sp * 2.2;
       if (fishing && dist(p.x, p.y, fishing.x, fishing.y) > 0.4) fishing = null;
@@ -1016,6 +1769,8 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     }
 
     for (const n of npcs) stepNpc(n, dt);
+    for (const r of rivals) stepRival(r, dt);
+    updateBusiness(dt);
 
     // trash comes back
     trashT -= dt;
@@ -1230,6 +1985,21 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
             g.fillStyle = '#8e6232';
             for (let k = 1; k < 4; k++) g.fillRect(sx, sy + (k * ts) / 4, ts, 2);
             break;
+          case T.Lot: {
+            const fl = floorMap.get(idx(x, y));
+            const fi = fl ? ITEM_BY_ID[fl] : null;
+            if (fi) {
+              g.fillStyle = fi.id === 'checker-floor' ? ((x + y) % 2 ? '#222' : '#eee') : fi.color!;
+              g.fillRect(sx, sy, ts, ts);
+              g.strokeStyle = 'rgba(0,0,0,.12)';
+              g.lineWidth = 1;
+              g.strokeRect(sx + 0.5, sy + 0.5, ts - 1, ts - 1);
+            } else {
+              g.fillStyle = h < 0.5 ? '#cfb184' : '#c9aa7c';
+              g.fillRect(sx, sy, ts, ts);
+            }
+            break;
+          }
           case T.Building:
             g.fillStyle = world.owner[idx(x, y)] >= 0 ? '#7cc35b' : '#e6dfcf';
             g.fillRect(sx, sy, ts, ts);
@@ -1263,7 +2033,14 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
           circle(sx + ts / 2, sy + ts / 2, ts * 0.22, '#8b5a2b');
           circle(sx + ts / 2, sy + ts / 2, ts * 0.14, '#c49a63');
         } else if (t === T.Rock) drawRock(sx, sy, hash(x, y), world.hits[i]);
+        else if (t === T.Fence) drawFence(sx, sy, x, y);
+        else if (t === T.Lot) {
+          const id = objMap.get(i);
+          if (id) drawPlaced(ITEM_BY_ID[id], sx, sy, x, y);
+        }
       }
+    drawLotSign();
+    if (build.on) drawGhost();
 
     for (const t of trash)
       if (t.x > x0 - 1 && t.x < x1 + 1 && t.y > y0 - 1 && t.y < y1 + 1) {
@@ -1303,6 +2080,28 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       drawPerson(n.x, n.y, n.shirt, n.skin, n.hair, (n.x + n.y) * 3, true);
       if (n.sayT > 0) bubble(n.x * ts, n.y * ts - ts * 0.75, n.say);
     }
+    for (const k of walkers) {
+      if (k.x < x0 - 1 || k.x > x1 + 1 || k.y < y0 - 1 || k.y > y1 + 1) continue;
+      drawPerson(k.x, k.y, k.shirt, k.skin, k.hair, (k.x + k.y) * 4, k.path.length > 0);
+      if (k.kind === 'applicant') emoji('📜', k.x * ts, k.y * ts - ts * (0.95 + Math.abs(Math.sin(now * 4)) * 0.15), ts * 0.45);
+      else if (k.kind === 'customer' && k.state === 'stay' && k.item) bubble(k.x * ts, k.y * ts - ts * 0.7, ITEM_BY_ID[k.item]?.icon ?? '🙂');
+      else if (k.kind === 'worker') {
+        const w = save.workers.find((x) => x.id === k.wid);
+        if (w) nameTag(k.x, k.y, `${ROLES.find((r) => r.name === w.role)?.icon ?? '⭐'} ${w.name}`, '#2e9d5a');
+      }
+    }
+    for (const r of rivals) {
+      if (r.x < x0 - 1 || r.x > x1 + 1 || r.y < y0 - 1 || r.y > y1 + 1) continue;
+      drawPerson(r.x, r.y, r.shirt, '#e0ac69', '#111', now * 8, r.dizzy <= 0 && dist(r.x, r.y, r.tx, r.ty) > 0.6);
+      emoji(r.dizzy > 0 ? '🍌' : RIVAL_TOOL[r.job], r.x * ts + ts * 0.3, r.y * ts - ts * 0.05, ts * 0.32);
+      nameTag(r.x, r.y, `${r.name} (rival)`, '#c0392b');
+      if (r.dizzy > 0)
+        for (let k = 0; k < 3; k++) {
+          const a = now * 5 + (k * Math.PI * 2) / 3;
+          emoji('⭐', r.x * ts + Math.cos(a) * ts * 0.3, r.y * ts - ts * 0.75 + Math.sin(a) * ts * 0.1, ts * 0.22);
+        }
+      if (r.sayT > 0) bubble(r.x * ts, r.y * ts - ts * 1.25, r.say);
+    }
     drawPet();
     drawPlayer();
     if (save.won) drawStatue();
@@ -1310,6 +2109,150 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     drawWorldFx();
     g.restore();
     drawArrow(cx, cy);
+  }
+
+  function nameTag(x: number, y: number, text: string, color: string) {
+    g.font = `bold ${Math.round(ts * 0.24)}px system-ui, sans-serif`;
+    const w = g.measureText(text).width + 8;
+    g.fillStyle = color;
+    g.globalAlpha = 0.85;
+    g.beginPath();
+    g.roundRect(x * ts - w / 2, y * ts - ts * 0.98, w, ts * 0.3, 5);
+    g.fill();
+    g.globalAlpha = 1;
+    g.fillStyle = '#fff';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, x * ts, y * ts - ts * 0.83);
+  }
+
+  function drawFence(sx: number, sy: number, x: number, y: number) {
+    g.fillStyle = '#b8874f';
+    const horiz = y === LOT.y - 1 || y === LOT.y + LOT.h;
+    if (horiz) {
+      g.fillRect(sx, sy + ts * 0.35, ts, ts * 0.1);
+      g.fillRect(sx, sy + ts * 0.6, ts, ts * 0.1);
+    } else {
+      g.fillRect(sx + ts * 0.35, sy, ts * 0.1, ts);
+      g.fillRect(sx + ts * 0.6, sy, ts * 0.1, ts);
+    }
+    g.fillStyle = '#8a5f32';
+    g.fillRect(sx + ts * 0.4, sy + ts * 0.25, ts * 0.2, ts * 0.5);
+    void x;
+  }
+
+  function drawPlaced(it: Item | undefined, sx: number, sy: number, x: number, y: number) {
+    if (!it) return;
+    if (it.layer === 'wall') {
+      if (it.id === 'door') {
+        g.fillStyle = '#7a4a26';
+        g.fillRect(sx + ts * 0.1, sy + ts * 0.1, ts * 0.8, ts * 0.8);
+        g.fillStyle = '#a0683a';
+        g.fillRect(sx + ts * 0.18, sy + ts * 0.18, ts * 0.64, ts * 0.64);
+        circle(sx + ts * 0.7, sy + ts * 0.5, ts * 0.06, '#ffd54f');
+        return;
+      }
+      g.fillStyle = it.color!;
+      g.fillRect(sx, sy, ts, ts);
+      if (it.id === 'window') {
+        g.strokeStyle = '#fff';
+        g.lineWidth = 3;
+        g.strokeRect(sx + 3, sy + 3, ts - 6, ts - 6);
+        g.beginPath();
+        g.moveTo(sx + ts / 2, sy + 3);
+        g.lineTo(sx + ts / 2, sy + ts - 3);
+        g.stroke();
+        return;
+      }
+      if (it.id === 'fence') {
+        g.fillStyle = '#7cc35b';
+        g.fillRect(sx, sy, ts, ts);
+        g.fillStyle = it.color!;
+        g.fillRect(sx, sy + ts * 0.4, ts, ts * 0.2);
+        g.fillRect(sx + ts * 0.4, sy + ts * 0.15, ts * 0.2, ts * 0.7);
+        return;
+      }
+      // bricks
+      g.strokeStyle = 'rgba(0,0,0,.22)';
+      g.lineWidth = 1;
+      for (let r = 0; r < 4; r++) {
+        const yy = sy + (r * ts) / 4;
+        g.beginPath();
+        g.moveTo(sx, yy);
+        g.lineTo(sx + ts, yy);
+        g.stroke();
+        const off = r % 2 ? ts / 4 : 0;
+        for (let c = off; c < ts; c += ts / 2) {
+          g.beginPath();
+          g.moveTo(sx + c, yy);
+          g.lineTo(sx + c, yy + ts / 4);
+          g.stroke();
+        }
+      }
+      g.fillStyle = 'rgba(255,255,255,.12)';
+      g.fillRect(sx, sy, ts, ts * 0.12);
+      return;
+    }
+    // objects
+    g.fillStyle = 'rgba(0,0,0,.15)';
+    g.beginPath();
+    g.ellipse(sx + ts / 2, sy + ts * 0.78, ts * 0.36, ts * 0.12, 0, 0, 7);
+    g.fill();
+    if (it.cat === 'Shop' || it.cat === 'Kitchen') {
+      g.fillStyle = it.id === 'counter' ? '#8b5a2b' : 'rgba(255,255,255,.55)';
+      g.beginPath();
+      g.roundRect(sx + ts * 0.08, sy + ts * 0.12, ts * 0.84, ts * 0.76, 6);
+      g.fill();
+    }
+    if (it.id !== 'counter') emoji(it.icon, sx + ts / 2, sy + ts * 0.48, ts * 0.66);
+    if (it.id === 'money-box' && save.box > 0) {
+      const a = now * 4 + x + y;
+      emoji('✨', sx + ts / 2 + Math.cos(a) * ts * 0.35, sy + ts * 0.3 + Math.sin(a) * ts * 0.2, ts * 0.3);
+    }
+  }
+
+  function drawLotSign() {
+    const cx = (LOT.x + LOT.w / 2) * ts;
+    const cy = (LOT.y - 1.9) * ts;
+    const text = save.biz ? `${save.biz.name} · ${save.biz.kind}` : 'YOUR LOT · tap 🔨 to build';
+    g.font = `900 ${Math.round(ts * 0.42)}px system-ui, sans-serif`;
+    const w = g.measureText(text).width + 24;
+    g.fillStyle = '#6d4424';
+    g.fillRect(cx - w / 2 + 10, cy, 6, ts * 1.1);
+    g.fillRect(cx + w / 2 - 16, cy, 6, ts * 1.1);
+    g.fillStyle = '#fff3d6';
+    g.strokeStyle = '#6d4424';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.roundRect(cx - w / 2, cy - ts * 0.4, w, ts * 0.8, 10);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#7a3f12';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, cx, cy + 1);
+  }
+
+  function drawGhost() {
+    const gt = ghostTile();
+    const it = build.item;
+    const ok = it ? !canPlace(it, gt.x, gt.y) : false;
+    const sx = gt.x * ts;
+    const sy = gt.y * ts;
+    if (it && ok) {
+      g.globalAlpha = 0.55;
+      if (it.layer === 'object') emoji(it.icon, sx + ts / 2, sy + ts / 2, ts * 0.66);
+      else {
+        g.fillStyle = it.color ?? '#fff';
+        g.fillRect(sx, sy, ts, ts);
+      }
+      g.globalAlpha = 1;
+    }
+    g.strokeStyle = ok ? '#57ff8c' : '#ff5b5b';
+    g.lineWidth = 3;
+    g.setLineDash([6, 4]);
+    g.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
+    g.setLineDash([]);
   }
 
   function drawWorldFx() {
@@ -1840,13 +2783,16 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       } else if (job.id === 'fisher') task = fishing ? (fishing.phase === 'bite' ? 'Reel it in NOW!' : 'Wait for the ! ...') : 'Go to the pond and cast your line';
       else task = job.how;
     }
-    const hud = `${save.money}|${job?.id}|${task}`;
+    if (build.on) task = inLot(Math.floor(p.x), Math.floor(p.y)) ? 'Face a spot and place it. Walls need bricks 🧱' : 'Follow the arrow to your lot to build';
+    const biz = save.biz ? `<span class="biz">🏪 ${save.biz.name} · ${save.workers.length} worker${save.workers.length === 1 ? '' : 's'}${boxTile() < 0 ? ' · needs a 💰 box' : ''}</span>` : '';
+    const hud = `${save.money}|${job?.id}|${task}|${biz}|${save.bricks}|${build.item?.id}`;
     if (hud !== lastHud) {
       lastHud = hud;
       moneyEl.textContent = fmt(save.money);
-      jobEl.innerHTML = job
+      jobEl.innerHTML = (job
         ? `<b>${job.icon} ${job.name}</b><span>${task}</span>`
-        : `<b>😀 No job yet</b><span>${task}</span>`;
+        : `<b>😀 No job yet</b><span>${task}</span>`) + biz;
+      buildBarLabel();
     }
     const a = action;
     const label = a ? a.label : '';
