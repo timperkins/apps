@@ -10,7 +10,7 @@ export const SPEED_LABELS = ['0.25x', '0.5x', '1x', '2x', '4x'];
 /** How long a move's flight takes, in seconds. */
 export const FLIGHT_SECONDS = 2.4;
 /** How long each kind of event's animation runs, in seconds. */
-export const ANIMATION_SECONDS: Record<LifeEvent['type'], number> = { move: FLIGHT_SECONDS, birth: 1.5, marriage: 3 };
+export const ANIMATION_SECONDS: Record<LifeEvent['type'], number> = { move: FLIGHT_SECONDS, birth: 2, marriage: 2.6 };
 /** Seconds to wait after an event's animation before time moves on. */
 export const EVENT_PAUSE = 3;
 /** Moves wait less after landing, since the flight itself already took a while. */

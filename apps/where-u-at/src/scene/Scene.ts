@@ -11,7 +11,7 @@ import { DARK, LIGHT, mapStyle, type Theme } from '../map/style';
 import { step, type Body } from './physics';
 import { arc, easeInOut, laneOffset, pointAt, shifted, type Pt } from './curves';
 import { FLIGHT_SECONDS, Player } from './player';
-import { babySvg, circleImage, heart, label, ring, roundRect, sparkle, star, weddingRing } from './draw';
+import { babySvg, balloon, banner, circleImage, heart, label, ring, roundRect, sparkle, star, weddingRing } from './draw';
 
 setWorkerUrl(workerUrl);
 
@@ -37,6 +37,18 @@ const CHILD_R = 13;
 const PLACE_LABEL_SECONDS = 2;
 const TRACE_LANE = 4.5;
 const WORLD: [[number, number], [number, number]] = [[-168, -50], [192, 74]];
+/** How high above their spot a newborn starts floating down on balloons, in pixels. */
+const BABY_DROP = 240;
+/** When things land in each show: the baby touches down, the shooting star hits, the rings clink. */
+const BABY_DESCENT = 1.05;
+const STAR_FALL = 0.6;
+const RING_MEET = 0.7;
+/** When each wedding firework launches, in seconds into the show. */
+const FIREWORKS = [0.85, 1.2, 1.6, 2.0];
+const SHOW_SECONDS: Record<Show['kind'], number> = { baby: 3.6, star: 3.2, wedding: 4 };
+/** Keeps big moments smooth on phones. */
+const MAX_PARTICLES = 700;
+const GOLD = '#F2C94C';
 
 interface Flight {
   from: Place;
@@ -62,12 +74,14 @@ interface Actor {
   drop: number;
   dropV: number;
   justBorn: boolean;
+  /** Sideways swing while a newborn floats down. */
+  sway: number;
   label: { text: string; start: number; until: number } | null;
   prevAnchor: Pt | null;
 }
 
 interface Particle {
-  kind: 'sparkle' | 'heart' | 'confetti' | 'star' | 'wave';
+  kind: 'sparkle' | 'heart' | 'confetti' | 'star' | 'wave' | 'balloon' | 'spark' | 'rocket';
   /** Position on screen, or relative to the bubble it follows. */
   x: number;
   y: number;
@@ -83,12 +97,31 @@ interface Particle {
   color: string;
   born: number;
   life: number;
+  /** How far a wave's ring spreads over its life, in pixels. */
+  grow?: number;
+  /** Runs once when the particle burns out: a rocket bursts into a firework. */
+  onDone?: () => void;
 }
 
-interface Wedding {
+/** One birth or wedding celebration, from the build-up to the fireworks. */
+interface Show {
+  kind: 'baby' | 'star' | 'wedding';
   a: Actor;
+  /** The partner, or the same actor again for births and weddings shown on one bubble. */
   b: Actor;
+  /** A newborn's mother, who bounces for joy when the baby lands. */
+  parent?: Actor;
+  /** The big headline, or null for a show that shares another's (the second twin). */
+  banner: string | null;
   start: number;
+  /** Moments of the show that already happened. */
+  beats: Set<string>;
+  seed: number;
+}
+
+function backOut(t: number): number {
+  const u = t - 1;
+  return 1 + 2.70158 * u * u * u + 1.70158 * u * u;
 }
 
 /** "It's a boy!" for a baby with no name yet, else "Welcome, Ada!". */
@@ -105,7 +138,12 @@ export class Scene {
   private readonly actors: Actor[] = [];
   private readonly byId = new Map<string, Actor>();
   private particles: Particle[] = [];
-  private weddings: Wedding[] = [];
+  private shows: Show[] = [];
+  private flashAt = -10;
+  private flashStrength = 0;
+  /** Set when the camera swung over to frame a show, so it can settle back after. */
+  private refitAfterShow = false;
+  private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private theme: Theme;
   private clock = 0;
   private last = 0;
@@ -173,6 +211,7 @@ export class Scene {
         drop: 0,
         dropV: 0,
         justBorn: false,
+        sway: 0,
         label: null,
         prevAnchor: null,
       };
@@ -221,7 +260,7 @@ export class Scene {
     this.player.seek(t);
     this.snap = true;
     // Celebrations belong to the moment they happened; don't carry them to the new date.
-    this.weddings = [];
+    this.shows = [];
     this.particles = [];
     for (const a of this.actors) a.label = null;
     this.emit();
@@ -298,6 +337,7 @@ export class Scene {
     this.updatePlaces(animate);
     this.updateBodies(dt);
     if (animate) this.celebrate(crossed);
+    this.updateShows(dt);
     this.updateCamera();
     this.render(dt);
     this.snap = false;
@@ -338,13 +378,12 @@ export class Scene {
         Object.assign(body, { x: start.x + (Math.random() - 0.5), y: start.y + (Math.random() - 0.5), vx: 0, vy: 0, ax: p.x, ay: p.y, active: true, flying: false });
         actor.prevAnchor = p;
         if (animate && actor.justBorn) {
-          actor.scale = 0;
+          // The show takes it from here: babies float down on balloons, friends arrive as a shooting star.
+          const child = actor.person.kind === 'child';
+          actor.scale = child ? 1 : 0;
           actor.scaleV = 0;
-          if (actor.person.kind === 'child') {
-            actor.scale = 0.6;
-            actor.drop = -70;
-            actor.dropV = 0;
-          }
+          actor.drop = child ? -BABY_DROP : 0;
+          actor.dropV = 0;
         } else {
           actor.scale = 1;
           actor.drop = 0;
@@ -454,27 +493,216 @@ export class Scene {
           const actor = this.byId.get(id);
           if (!actor?.body.active) continue;
           if (actor.person.kind === 'friend') {
-            this.burst('sparkle', actor, 18, [actor.color, '#F2C94C', actor.color], 70, 1.4);
-            this.particles.push({ ...this.particle('wave', 0, 0, 0, 0, actor.color, 1.1, FRIEND_R), follow: actor });
-            this.setLabel(actor, `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, 3);
+            this.shows.push(this.show('star', actor, actor, `${actor.person.name.split(' ')[0]}!`));
+            this.focus({ x: actor.body.x, y: actor.body.y });
+            actor.label = { text: `Born in ${event.place?.name ?? actor.place?.name ?? ''}`, start: this.clock + STAR_FALL, until: this.clock + STAR_FALL + 3.2 };
           } else {
-            this.burst('star', actor, 14, [actor.color, '#ffffff', actor.color], 90, 1.5);
-            // Twins share one label so the two don't sit on top of each other.
-            if (id === event.people[0]) this.setLabel(actor, event.people.length > 1 ? 'Twins!' : babyLabel(actor.person.name, actor.person.sex), 3);
+            // Twins share one headline so the two don't sit on top of each other.
+            const headline = id === event.people[0] ? (event.people.length > 1 ? 'Twins!' : babyLabel(actor.person.name, actor.person.sex)) : null;
+            const s = this.show('baby', actor, actor, headline);
+            s.parent = this.byId.get(actor.person.motherId);
+            this.shows.push(s);
+            if (headline) this.focus(this.projectPlace(actor.place ?? event.place!));
           }
         }
       } else if (event.type === 'marriage') {
         const a = this.byId.get(event.people[0]);
-        // A spouse who isn't in the app: the halo goes around one bubble.
+        // A spouse who isn't in the app: the show goes around one bubble.
         const b = event.people[1] ? this.byId.get(event.people[1]) : a;
         if (!a?.body.active || !b?.body.active) continue;
-        // Partners who still live apart each get their own halo.
+        // Partners who still live apart each get their own show.
         const together = Math.hypot(a.body.x - b.body.x, a.body.y - b.body.y) < FRIEND_R * 6;
-        if (together) this.weddings.push({ a, b, start: this.clock });
-        else this.weddings.push({ a, b: a, start: this.clock }, { a: b, b, start: this.clock });
-        this.setLabel(a, event.place ? `Married in ${event.place.name}` : 'Just married!', 3.4);
+        if (together) this.shows.push(this.show('wedding', a, b, 'Just married!'));
+        else this.shows.push(this.show('wedding', a, a, 'Just married!'), this.show('wedding', b, b, null));
+        this.setLabel(a, event.place ? `Married in ${event.place.name}` : 'Just married!', 4.4);
+        this.focus(together ? { x: (a.body.x + b.body.x) / 2, y: (a.body.y + b.body.y) / 2 } : { x: a.body.x, y: a.body.y });
       }
     }
+  }
+
+  /** Swings the camera over when a show would happen too near the edge to see. */
+  private focus(c: Pt) {
+    const safeX = Math.min(130, this.width * 0.3);
+    const safeY = Math.min(170, this.height * 0.25);
+    const dx = c.x < safeX ? c.x - safeX : c.x > this.width - safeX ? c.x - (this.width - safeX) : 0;
+    const dy = c.y < safeY ? c.y - safeY : c.y > this.height - safeY ? c.y - (this.height - safeY) : 0;
+    if (!dx && !dy) return;
+    this.map.panBy([dx, dy], { duration: 700 });
+    if (this.view === 'fit') this.refitAfterShow = true;
+  }
+
+  private show(kind: Show['kind'], a: Actor, b: Actor, headline: string | null): Show {
+    return { kind, a, b, banner: headline, start: this.clock, beats: new Set(), seed: Math.random() };
+  }
+
+  /** True once, on the first frame at or after `at` seconds into the show. */
+  private beat(s: Show, name: string, at: number): boolean {
+    if (this.clock - s.start < at || s.beats.has(name)) return false;
+    s.beats.add(name);
+    return true;
+  }
+
+  /** Runs each show's timed moments, and steers the bubbles it's animating. */
+  private updateShows(dt: number) {
+    this.shows = this.shows.filter((s) => this.clock - s.start < SHOW_SECONDS[s.kind] && s.a.body.active && s.b.body.active);
+    if (!this.shows.length && this.refitAfterShow) {
+      this.refitAfterShow = false;
+      this.fitKey = '';
+    }
+    for (const s of this.shows) {
+      const age = this.clock - s.start;
+      const c = this.showCenter(s);
+      if (s.kind === 'baby') {
+        const baby = s.a;
+        if (age < BABY_DESCENT) {
+          const k = age / BABY_DESCENT;
+          const e = 1 - (1 - k) * (1 - k);
+          baby.drop = -BABY_DROP * (1 - e);
+          baby.dropV = 0;
+          baby.sway = Math.sin(age * 6 + s.seed * 6) * 16 * (1 - e);
+          baby.scale = 1;
+          baby.scaleV = 0;
+        } else if (this.beat(s, 'land', BABY_DESCENT)) {
+          baby.drop = 0;
+          baby.dropV = 0;
+          baby.sway = 0;
+          // Squash on landing, then the spring pops it up big.
+          baby.scale = 0.7;
+          baby.scaleV = 12;
+          if (s.parent?.body.active) s.parent.scaleV += 6;
+          for (const b of this.balloonSpots(s)) {
+            const p = this.particle('balloon', b.x, b.y, (b.x - c.x) * 1.2 + (Math.random() - 0.5) * 20, -40, b.color, 2.6, 12);
+            this.add({ ...p, gravity: -110, drag: 0.3, vr: 2 + Math.random() * 2 });
+          }
+          if (s.banner) this.flash(0.35);
+          this.waves(c, baby.color);
+          this.cannon(c.x, c.y, 46, [baby.color, '#ffffff', GOLD, baby.color]);
+          this.burst('star', baby, 16, [baby.color, '#ffffff', GOLD], 130, 1.6);
+        }
+      } else if (s.kind === 'star') {
+        const a = s.a;
+        if (age < STAR_FALL) {
+          a.scale = 0;
+          a.scaleV = 0;
+        } else if (this.beat(s, 'impact', STAR_FALL)) {
+          a.scale = 0.2;
+          a.scaleV = 14;
+          this.flash(0.4);
+          this.waves(c, GOLD);
+          this.burst('sparkle', a, 26, [a.color, GOLD, '#ffffff'], 150, 1.6);
+          this.cannon(c.x, c.y, 30, [a.color, GOLD, '#ffffff']);
+        }
+      } else {
+        if (this.beat(s, 'clink', RING_MEET)) {
+          const r = this.ringPoint(s);
+          if (s.banner) this.flash(0.4);
+          s.a.scaleV += 7;
+          if (s.b !== s.a) s.b.scaleV += 7;
+          this.explode(r.x, r.y, GOLD, 'ring', 26, 110);
+        }
+        FIREWORKS.forEach((at, i) => {
+          if (this.beat(s, `firework${i}`, at)) this.rocket(s, c, i);
+        });
+        // Hearts float up from the couple, and confetti rains down over everything.
+        if (age < 1.7 && Math.random() < 0.6) {
+          const colors = [s.a.color, s.b.color, '#FF6F9F'];
+          const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
+          const speed = 60 + Math.random() * 80;
+          this.add(this.particle('heart', c.x + (Math.random() - 0.5) * 40, c.y - 10, Math.cos(angle) * speed, Math.sin(angle) * speed, colors[Math.floor(Math.random() * 3)], 1.8, 9 + Math.random() * 6));
+        }
+        if (s.banner && age > RING_MEET && age < 2.5) {
+          const colors = [s.a.color, s.b.color, GOLD, '#ffffff', '#FF6F9F'];
+          for (let n = dt * 80; n > 0; n--) {
+            if (n < 1 && Math.random() > n) break;
+            const p = this.particle('confetti', Math.random() * this.width, -10, (Math.random() - 0.5) * 60, 60 + Math.random() * 70, colors[Math.floor(Math.random() * colors.length)], 4.5, 6 + Math.random() * 3);
+            this.add({ ...p, gravity: 30, drag: 0.4, vr: (Math.random() - 0.5) * 10 });
+          }
+        }
+      }
+    }
+  }
+
+  /** Where a show is happening: the newborn, or between the couple. */
+  private showCenter(s: Show): Pt {
+    const a = s.a.body;
+    const b = s.b.body;
+    if (s.kind === 'baby') return { x: a.x + s.a.sway, y: a.y + s.a.drop };
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  /** Where the wedding rings meet, just above the couple. */
+  private ringPoint(s: Show): Pt {
+    const c = this.showCenter(s);
+    return { x: c.x, y: Math.min(s.a.body.y, s.b.body.y) - FRIEND_R - 26 };
+  }
+
+  /** The three balloons a newborn floats down on. */
+  private balloonSpots(s: Show): { x: number; y: number; color: string }[] {
+    const c = this.showCenter(s);
+    const t = this.clock * 3 + s.seed * 10;
+    const color = s.a.color;
+    return [
+      { x: c.x - 18 + Math.sin(t) * 2, y: c.y - 50 + Math.cos(t * 1.3) * 2, color },
+      { x: c.x + Math.sin(t + 2) * 2, y: c.y - 64 + Math.cos(t + 1) * 2, color: '#FDE68A' },
+      { x: c.x + 18 + Math.sin(t + 4) * 2, y: c.y - 50 + Math.cos(t * 1.1 + 3) * 2, color },
+    ];
+  }
+
+  private flash(strength: number) {
+    this.flashAt = this.clock;
+    this.flashStrength = this.reducedMotion.matches ? strength * 0.25 : strength;
+  }
+
+  /** Two shockwave rings spreading out from a point. */
+  private waves(c: Pt, color: string) {
+    this.add({ ...this.particle('wave', c.x, c.y, 0, 0, color, 0.9, FRIEND_R), grow: 150 });
+    const late = this.particle('wave', c.x, c.y, 0, 0, '#ffffff', 1.1, FRIEND_R);
+    this.add({ ...late, born: this.clock + 0.12, grow: 190 });
+  }
+
+  /** Confetti shot up into the air from a point. */
+  private cannon(x: number, y: number, n: number, colors: string[]) {
+    for (let i = 0; i < n; i++) {
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+      const speed = 220 + Math.random() * 260;
+      const p = this.particle('confetti', x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, colors[i % colors.length], 2.2 + Math.random() * 0.8, 6 + Math.random() * 3);
+      this.add({ ...p, gravity: 260, drag: 2.2, vr: (Math.random() - 0.5) * 14 });
+    }
+  }
+
+  /** A firework rocket that climbs from below the couple and bursts above them. */
+  private rocket(s: Show, c: Pt, i: number) {
+    const colors = [s.a.color, GOLD, s.b === s.a ? '#FF6F9F' : s.b.color, '#FF6F9F'];
+    const color = colors[i % colors.length];
+    const fromX = c.x + (Math.random() - 0.5) * 160;
+    const fromY = Math.min(this.height - 20, c.y + 70);
+    const toX = Math.max(40, Math.min(this.width - 40, c.x + (Math.random() - 0.5) * 260));
+    const toY = Math.max(50, c.y - 120 - Math.random() * 90);
+    const climb = 0.45;
+    const p = this.particle('rocket', fromX, fromY, (toX - fromX) / climb, (toY - fromY) / climb, color, climb, 2.5);
+    this.add({ ...p, gravity: 0, drag: 0, onDone: () => this.explode(toX, toY, color, i % 2 ? 'heart' : 'ring', 42, 150) });
+  }
+
+  /** A firework burst of streaking sparks, round or heart-shaped. */
+  private explode(x: number, y: number, color: string, shape: 'ring' | 'heart', n: number, speed: number) {
+    for (let i = 0; i < n; i++) {
+      const t = (i / n) * Math.PI * 2;
+      let vx: number;
+      let vy: number;
+      if (shape === 'heart') {
+        vx = 16 * Math.sin(t) ** 3;
+        vy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+        vx *= speed / 16;
+        vy *= speed / 16;
+      } else {
+        const v = speed * (0.85 + Math.random() * 0.3);
+        vx = Math.cos(t) * v;
+        vy = Math.sin(t) * v;
+      }
+      const p = this.particle('spark', x, y, vx, vy, i % 4 === 0 ? '#ffffff' : color, 1.2 + Math.random() * 0.4, 2.4);
+      this.add({ ...p, gravity: 45, drag: 1.5 });
+    }
+    this.add({ ...this.particle('wave', x, y, 0, 0, color, 0.5, 4), grow: 60 });
   }
 
   private updateCamera() {
@@ -515,13 +743,16 @@ export class Scene {
     ctx.clearRect(0, 0, this.width, this.height);
 
     if (this.traces) this.drawTraces();
+    this.drawShowsBehind();
     this.drawWeddingHalos();
     this.drawTethers();
     const order = this.actors.filter((a) => a.body.active).sort((x, y) => Number(!!x.flight) - Number(!!y.flight) || y.body.r - x.body.r);
     for (const actor of order) this.drawBubble(actor);
     this.drawParticles(dt);
-    this.drawWeddingRings();
+    this.drawShowsInFront();
     this.drawLabels();
+    this.drawBanners();
+    this.drawFlash();
   }
 
   private drawTraces() {
@@ -581,7 +812,7 @@ export class Scene {
     const scale = Math.max(0, actor.scale);
     if (scale < 0.02) return;
     const r = b.r * scale;
-    const x = b.x;
+    const x = b.x + actor.sway;
     const y = b.y + actor.drop;
     const friend = actor.person.kind === 'friend';
     ctx.save();
@@ -597,12 +828,44 @@ export class Scene {
     circleImage(ctx, actor.img, x, y, r, actor.color, initials);
   }
 
+  /** Fades a show in over its first moment and out over its last. */
+  private showFade(s: Show): number {
+    const age = this.clock - s.start;
+    return Math.max(0, Math.min(1, age / 0.35, (SHOW_SECONDS[s.kind] - age) / 0.8));
+  }
+
+  private landing(s: Show): number {
+    return s.kind === 'baby' ? BABY_DESCENT : s.kind === 'star' ? STAR_FALL : RING_MEET;
+  }
+
+  /** The big heart behind a wedding couple. */
+  private drawShowsBehind() {
+    const ctx = this.ctx;
+    for (const s of this.shows) {
+      const age = this.clock - s.start;
+      const fade = this.showFade(s);
+      const c = this.showCenter(s);
+      const wedding = s.kind === 'wedding';
+      const half = Math.hypot(s.b.body.x - s.a.body.x, s.b.body.y - s.a.body.y) / 2;
+      const since = age - this.landing(s);
+      if (since < 0) continue;
+      const on = Math.min(1, since * 3) * fade;
+      if (wedding) {
+        const pop = backOut(Math.min(1, since / 0.45));
+        // A double thump, like a heartbeat.
+        const thump = 1 + 0.09 * Math.abs(Math.sin(since * Math.PI * 1.4)) ** 8;
+        const size = (half * 2 + FRIEND_R * 2 + 56) * pop * thump;
+        heart(ctx, c.x, c.y + size * 0.06, size, withAlpha('#FF5E8A', 0.3 * on));
+      }
+    }
+  }
+
   private drawWeddingHalos() {
     const ctx = this.ctx;
-    this.weddings = this.weddings.filter((w) => this.clock - w.start < 3);
-    for (const w of this.weddings) {
+    for (const w of this.shows) {
+      if (w.kind !== 'wedding') continue;
       const age = this.clock - w.start;
-      const alpha = Math.min(1, age * 3) * Math.min(1, (3 - age) * 1.5);
+      const alpha = this.showFade(w);
       const ax = w.a.body.x;
       const ay = w.a.body.y;
       const bx = w.b.body.x;
@@ -628,40 +891,111 @@ export class Scene {
     }
   }
 
-  private drawWeddingRings() {
+  /** Balloons, the shooting star and the wedding rings, in front of the bubbles. */
+  private drawShowsInFront() {
     const ctx = this.ctx;
-    for (const w of this.weddings) {
-      const age = this.clock - w.start;
-      const cx = (w.a.body.x + w.b.body.x) / 2;
-      const cy = Math.min(w.a.body.y, w.b.body.y) - FRIEND_R - 22 - age * 8;
-      const pop = Math.min(1, age * 4);
-      const size = 15 * (pop < 1 ? pop * 1.2 : 1);
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, (3 - age) * 1.5);
-      weddingRing(ctx, cx, cy, size);
-      ctx.restore();
-      // Hearts and confetti keep coming for the first second.
-      if (age < 1 && Math.random() < 0.6) {
-        const colors = [w.a.color, w.b.color, '#F2C94C'];
-        const color = colors[Math.floor(Math.random() * colors.length)];
-        const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
-        const speed = 60 + Math.random() * 80;
-        const kind = Math.random() < 0.55 ? 'heart' : 'confetti';
-        this.particles.push(this.particle(kind, cx + (Math.random() - 0.5) * 30, cy + 20, Math.cos(angle) * speed, Math.sin(angle) * speed, color, 1.6, kind === 'heart' ? 9 + Math.random() * 5 : 6));
+    for (const s of this.shows) {
+      const age = this.clock - s.start;
+      const c = this.showCenter(s);
+      if (s.kind === 'baby' && age < BABY_DESCENT) {
+        const tieY = c.y - CHILD_R - 2;
+        for (const b of this.balloonSpots(s)) balloon(ctx, b.x, b.y, 12, b.color, c.x, tieY);
+      } else if (s.kind === 'star' && age < STAR_FALL) {
+        const k = age / STAR_FALL;
+        const e = k * k;
+        const fromX = c.x + 240;
+        const fromY = c.y - 300;
+        const x = fromX + (c.x - fromX) * e;
+        const y = fromY + (c.y - fromY) * e;
+        const tail = Math.max(0, e - 0.3);
+        const tx = fromX + (c.x - fromX) * tail;
+        const ty = fromY + (c.y - fromY) * tail;
+        const g = ctx.createLinearGradient(tx, ty, x, y);
+        g.addColorStop(0, 'rgba(255,216,107,0)');
+        g.addColorStop(1, 'rgba(255,216,107,0.95)');
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        star(ctx, x, y, 11, age * 8, '#FFD86B');
+        star(ctx, x, y, 5, age * 8, '#ffffff');
+      } else if (s.kind === 'wedding') {
+        const r = this.ringPoint(s);
+        ctx.save();
+        ctx.globalAlpha = this.showFade(s);
+        if (age < RING_MEET) {
+          // Two rings fly in from either side, spinning, and clink together.
+          const k = age / RING_MEET;
+          const e = k * k;
+          for (const side of [-1, 1]) {
+            const x = r.x + side * (150 - 143 * e);
+            const y = r.y - 120 * (1 - e) - Math.sin(Math.PI * k) * 30;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.scale(Math.max(0.15, Math.abs(Math.cos(age * 14 + side))), 1);
+            weddingRing(ctx, 0, 0, 15);
+            ctx.restore();
+          }
+        } else {
+          const since = age - RING_MEET;
+          const size = 15 * (1 + 0.45 * Math.exp(-since * 6));
+          const y = r.y - since * 8;
+          weddingRing(ctx, r.x - 7, y, size);
+          weddingRing(ctx, r.x + 7, y + 2, size);
+        }
+        ctx.restore();
       }
     }
   }
 
+  /** The big headline that pops in as each show lands. */
+  private drawBanners() {
+    const ctx = this.ctx;
+    for (const s of this.shows) {
+      if (!s.banner) continue;
+      const age = this.clock - s.start;
+      const since = age - this.landing(s);
+      if (since < 0) continue;
+      const c = this.showCenter(s);
+      const wedding = s.kind === 'wedding';
+      const font = wedding ? "italic 700 34px Georgia, 'Times New Roman', serif" : '800 30px Inter, system-ui, sans-serif';
+      ctx.font = font;
+      const half = ctx.measureText(s.banner).width / 2 + 10;
+      const x = Math.max(half, Math.min(this.width - half, c.x));
+      const above = wedding ? Math.min(s.a.body.y, s.b.body.y) - FRIEND_R - 82 : c.y - 70;
+      const y = Math.max(34, above);
+      const fill = s.kind === 'baby' ? s.a.color : '#C8920F';
+      const alpha = Math.min(1, (SHOW_SECONDS[s.kind] - age) / 0.6);
+      banner(ctx, s.banner, x, y, font, fill, alpha, backOut(Math.min(1, since / 0.5)), Math.sin(age * 2.6) * 0.05);
+    }
+  }
+
+  private drawFlash() {
+    const age = this.clock - this.flashAt;
+    if (age >= 0.35) return;
+    const k = 1 - age / 0.35;
+    this.ctx.fillStyle = `rgba(255,255,255,${this.flashStrength * k * k})`;
+    this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
   private drawParticles(dt: number) {
     const ctx = this.ctx;
-    this.particles = this.particles.filter((p) => this.clock - p.born < p.life);
-    for (const p of this.particles) {
+    const alive: Particle[] = [];
+    const done: Particle[] = [];
+    for (const p of this.particles) (this.clock - p.born < p.life ? alive : done).push(p);
+    this.particles = alive;
+    for (const p of done) p.onDone?.();
+    for (const p of alive) {
       p.vx *= 1 - p.drag * dt;
       p.vy = p.vy * (1 - p.drag * dt) + p.gravity * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.rot += p.vr * dt;
       const age = (this.clock - p.born) / p.life;
+      if (age < 0) continue;
       ctx.save();
       if (p.follow) ctx.translate(p.follow.body.x, p.follow.body.y + p.follow.drop);
       ctx.globalAlpha = Math.max(0, 1 - age * age);
@@ -678,12 +1012,40 @@ export class Scene {
         case 'confetti':
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rot);
+          // Flipping end over end as it flutters.
+          ctx.scale(1, Math.cos(p.rot * 1.7) || 0.1);
           ctx.fillStyle = p.color;
           ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
           break;
         case 'wave':
           ctx.globalAlpha = 0.6 * (1 - age);
-          ring(ctx, p.x, p.y, p.size + age * 55, p.color, 3 * (1 - age) + 0.5);
+          ring(ctx, p.x, p.y, p.size + age * (p.grow ?? 55), p.color, 3 * (1 - age) + 0.5);
+          break;
+        case 'balloon':
+          balloon(ctx, p.x, p.y, p.size, p.color, p.x + Math.sin(p.rot) * 5, p.y + p.size * 3.2);
+          break;
+        case 'spark':
+          ctx.beginPath();
+          ctx.moveTo(p.x - p.vx * 0.05, p.y - p.vy * 0.05);
+          ctx.lineTo(p.x, p.y);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = p.size * (1 - age * 0.6);
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          break;
+        case 'rocket':
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.moveTo(p.x - p.vx * 0.12, p.y - p.vy * 0.12);
+          ctx.lineTo(p.x, p.y);
+          ctx.strokeStyle = withAlpha(p.color, 0.7);
+          ctx.lineWidth = 2.5;
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
           break;
       }
       ctx.restore();
@@ -744,8 +1106,12 @@ export class Scene {
       const v = speed * (0.6 + Math.random() * 0.6);
       const size = kind === 'star' ? 4 + Math.random() * 3 : 4 + Math.random() * 4;
       const p = this.particle(kind, 0, 0, Math.cos(angle) * v, Math.sin(angle) * v - (kind === 'star' ? 40 : 0), colors[i % colors.length], life * (0.7 + Math.random() * 0.5), size);
-      this.particles.push({ ...p, follow: from });
+      this.add({ ...p, follow: from });
     }
+  }
+
+  private add(p: Particle) {
+    if (this.particles.length < MAX_PARTICLES) this.particles.push(p);
   }
 
   private particle(kind: Particle['kind'], x: number, y: number, vx: number, vy: number, color: string, life: number, size: number): Particle {
