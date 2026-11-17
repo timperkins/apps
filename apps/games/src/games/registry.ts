@@ -96,4 +96,23 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./survivle/index'),
   },
+  {
+    id: 'robopoculeps',
+    title: 'Robopoculeps',
+    tagline: 'Dig in a mine and build flying robots that mine for you.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#3e332b"/>
+      <rect width="120" height="14" fill="#1d1714"/><rect y="10" width="120" height="5" fill="#4a3c33"/>
+      <rect x="10" y="2" width="30" height="20" fill="#2b1b10" stroke="#5b3a1f" stroke-width="2"/><rect x="8" y="20" width="34" height="5" fill="#8a5a2b"/>
+      <circle cx="25" cy="13" r="4" fill="#f1c9a0"/><path d="M20 10h10l-3-7z" fill="#1b2a6b"/><circle cx="25" cy="6" r="1" fill="#ffe36b"/>
+      <path d="M78 58l8-12 14 2 6 12-10 8-16-2z" fill="#8b8580"/><circle cx="88" cy="56" r="2" fill="#b9b3ad"/><circle cx="96" cy="60" r="2" fill="#b9b3ad"/>
+      <path d="M100 66l4-6 8 1 2 6-6 4z" fill="#6f665c"/><circle cx="107" cy="65" r="1.6" fill="#ffd23f"/>
+      <g transform="translate(70 34)"><path d="M0-11v-4" stroke="#d9dde3" stroke-width="1.5"/><ellipse cy="-15" rx="10" ry="1.5" fill="#d9dde3"/>
+        <ellipse rx="11" ry="9" fill="#b8c0cc"/><ellipse cx="1" cy="-1" rx="7" ry="4" fill="#16222c"/><rect x="-3" y="-3" width="2" height="2" fill="#e0e0e0"/><rect x="2" y="-3" width="2" height="2" fill="#e0e0e0"/>
+        <path d="M0 8L10 20" stroke="#ff7a50" stroke-width="1.5" stroke-dasharray="2 1.5"/></g>
+      <rect x="6" y="62" width="40" height="10" fill="#3a3f45"/><path d="M12 64l4 3-4 3M24 64l4 3-4 3M36 64l4 3-4 3" stroke="#e8b33a" stroke-width="1.5" fill="none"/>
+      <rect x="48" y="60" width="14" height="14" fill="#2f8a4c"/><text x="55" y="71" font-size="10" font-weight="900" text-anchor="middle" fill="#d4ffda" font-family="sans-serif">$</text>
+    </svg>`,
+    load: () => import('./robopoculeps/index'),
+  },
 ];

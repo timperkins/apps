@@ -67,6 +67,18 @@ An open-world adventure designed by Tim (original code and art). Name your hero,
 
 Saves and narrator settings stay in the browser (localStorage, `survivle-` keys).
 
+## Robopoculeps
+
+A mining game designed by Tim (original code and art). You're in a mine: dig stone, trade it to the shopkeeper in the shop in the wall, and build flying robots that mine for you. Code in `src/games/robopoculeps/`.
+
+- Hold E or Space (⛏️ on phones) next to a rock to mine it. Walk up to the shop and the shopkeeper says "Stars and the moon, sun in the sky, hey baby hey, what do you want?" (with the browser's speech voice, and in a bubble), then the shop opens.
+- The shop buys stone ($5), coal ($12), iron ($30), gold ($80) and diamond ($300), and sells robots: a stone-mining robot costs $50, then coal $300, iron $1,000, gold $3,500, diamond $12,000.
+- Robots fly to the nearest rock of their ore, mine it, and drop what they carry in the nearest crate (or bring it to you if you have no crates). E by a crate takes what's in it.
+- Machines: belts ($5, drag to lay a line), grabbers ($20, pick up from the crate or belt behind them and drop in front), payers ($40, pay the store price for every thing they get) and crates ($30). 1–4 picks one, R turns it, 5 or right-click removes it (you get it back).
+- Five caves in a row (Stone Hollow, Coal Cavern, Iron Depths, Gold Grotto, Diamond Deep), each blocked by boulders. Dynamite from the shop ($150, $600, $2,000, $6,000) blasts them open and unlocks that cave's robots. Rocks grow back over time.
+- Upgrades: turbo propellers (faster robots) and bigger robot bags. The $50,000 Golden Robot King mines every ore 3× faster and wins the game.
+- 💾 saves (localStorage, `robopoculeps-save-v1`); Continue on the title screen loads it. Phones get a joystick, a mine button, and tap-to-build.
+
 ## Develop
 
 ```
