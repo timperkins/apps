@@ -23,6 +23,8 @@ export interface SceneState {
   speed: number;
   pauseForEvents: boolean;
   traces: boolean;
+  /** Whether children and their births are shown. */
+  babies: boolean;
   view: View;
   /** Friends switched off in the filter. */
   hidden: string[];
@@ -108,6 +110,7 @@ export class Scene {
   private frameId = 0;
   private snap = true;
   private traces = true;
+  private babies = true;
   private hidden = new Set<string>();
   private view: View = 'fit';
   private fitKey = '';
@@ -236,6 +239,13 @@ export class Scene {
     this.emit();
   }
 
+  /** Shows or hides every child, along with their births on the map and the timeline. */
+  setBabies(on: boolean): void {
+    this.babies = on;
+    this.snap = true;
+    this.emit();
+  }
+
   /** Shows or hides a friend; their children go with them when they're the parent. */
   setHidden(id: string, hidden: boolean): void {
     if (hidden) this.hidden.add(id);
@@ -253,6 +263,7 @@ export class Scene {
   private isHidden(id: string): boolean {
     const person = this.timeline.people.get(id);
     if (!person) return false;
+    if (person.kind === 'child' && !this.babies) return true;
     return this.hidden.has(person.kind === 'child' ? person.motherId : id);
   }
 
@@ -758,7 +769,7 @@ export class Scene {
   }
 
   private padding() {
-    return { top: 110, bottom: 150, left: 90, right: 90 };
+    return { top: 110, bottom: 120, left: 90, right: 90 };
   }
 
   private resize() {
@@ -797,6 +808,7 @@ export class Scene {
       speed: this.player.speed,
       pauseForEvents: this.player.pauseForEvents,
       traces: this.traces,
+      babies: this.babies,
       view: this.view,
       hidden: [...this.hidden],
     };
