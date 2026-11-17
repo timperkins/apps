@@ -79,6 +79,17 @@ A mining game designed by Tim (original code and art). You're in a mine: dig sto
 - Upgrades: turbo propellers (faster robots) and bigger robot bags. The $50,000 Golden Robot King mines every ore 3× faster and wins the game.
 - 💾 saves (localStorage, `robopoculeps-save-v1`); Continue on the title screen loads it. Phones get a joystick, a mine button, and tap-to-build.
 
+## Survivle (Long Edition)
+
+A separate copy of Survivle (`src/games/survivle-long/`, hub id `survivle-long`) with the second half of Tim's handwritten note added. Its saves use `survivle-long-` keys and its co-op codes use their own PeerJS prefix, so it never mixes with the first Survivle.
+
+- The Dark Beast is 3× harder: 1,500 health (was 500), hits harder, attacks faster, and splits three times.
+- The Sword of Light (T.S.O.L.) stands in a ring of trees south-east of the camp (a gold arrow points to it). It does 30 damage, and double to bosses (the Dark Beast and the mini bosses). You need 10 full hearts to pull it out.
+- Shift changes weapons: sword, bow, spear, and the Sword of Light. Space (or click) uses the one in your hand.
+- Raider camps (`world.ts` sites, `long.ts`): a fire with 4 spears with apples on them, tents and a flag. Press E by a spear to take it and its apple. Raiders carry swords, bows and spears, some have armor and shields, big camps have a captain. Their shields break, and so does yours (hold F, right mouse, or 🛡 to block). Armor from the blacksmith, captains and camp loot chests soaks up part of each hit.
+- 25 open-world extras (listed in `LONG_FEATURES` in `data.ts` and on the title screen): shrines with spirit orbs and fast travel, watchtowers that fill in the big map (M), a glider, sprint (X), horses, day and night, rain, bombs (G), fire arrows, mushrooms, cooking at any fire, camp loot chests, captains, camp alarms, sleeping raiders (sneak attacks ×3), weapon and shield drops, blacksmiths, healing springs, cold in the snow, ore rocks with gems, falling stars, village elder quests and wolf packs.
+- In co-op, the host runs camps and raiders; friends see the raiders and fight them, but camp spears and loot are tracked on each player's own game.
+
 ## Develop
 
 ```
