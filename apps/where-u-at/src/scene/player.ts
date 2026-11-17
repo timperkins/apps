@@ -13,12 +13,14 @@ export const FLIGHT_SECONDS = 2.4;
 export const ANIMATION_SECONDS: Record<LifeEvent['type'], number> = { move: FLIGHT_SECONDS, birth: 1.5, marriage: 3 };
 /** Seconds to wait after an event's animation before time moves on. */
 export const EVENT_PAUSE = 3;
+/** Moves wait less after landing, since the flight itself already took a while. */
+export const MOVE_PAUSE = 1;
 
 /** Moves shorter than this many miles play without stopping time. */
 export const SHORT_MOVE_MILES = 500;
 
 export function holdFor(e: TimedEvent): number {
-  return ANIMATION_SECONDS[e.event.type] + EVENT_PAUSE;
+  return ANIMATION_SECONDS[e.event.type] + (e.event.type === 'move' ? MOVE_PAUSE : EVENT_PAUSE);
 }
 
 export class Player {
