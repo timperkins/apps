@@ -152,3 +152,79 @@ export function babySvg(color: string): string {
 <rect x="45" y="66" width="10" height="5" rx="2" fill="#ffffff"/>
 </svg>`;
 }
+
+/** A party balloon with its string running down to (tieX, tieY). */
+export function balloon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, tieX: number, tieY: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + r * 1.05);
+  ctx.quadraticCurveTo((x + tieX) / 2 + 6, (y + r + tieY) / 2, tieX, tieY);
+  ctx.strokeStyle = 'rgba(120,120,130,0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x, y, r * 0.84, r, 0, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y + r * 0.92);
+  ctx.lineTo(x + r * 0.2, y + r * 1.15);
+  ctx.lineTo(x - r * 0.2, y + r * 1.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x - r * 0.32, y - r * 0.38, r * 0.18, r * 0.3, -0.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fill();
+}
+
+/** Spinning beams of light fanning out from a point. */
+export function rays(ctx: CanvasRenderingContext2D, x: number, y: number, outer: number, n: number, rot: number, color: string, alpha: number) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, outer);
+  g.addColorStop(0, withAlpha(color, alpha));
+  g.addColorStop(0.35, withAlpha(color, alpha * 0.7));
+  g.addColorStop(1, withAlpha(color, 0));
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const a0 = rot + (i * Math.PI * 2) / n;
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, outer, a0, a0 + (Math.PI / n) * 0.9);
+    ctx.closePath();
+  }
+  ctx.fillStyle = g;
+  ctx.fill();
+}
+
+/** Dims everything except a soft circle around (x, y), like a stage spotlight. */
+export function spotlight(ctx: CanvasRenderingContext2D, w: number, h: number, x: number, y: number, r: number, alpha: number) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(x, y, r, x, y, r * 3.2);
+  g.addColorStop(0, 'rgba(12,10,24,0)');
+  g.addColorStop(1, `rgba(12,10,24,${alpha})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+}
+
+/** Big headline text with a white outline, for births and weddings. */
+export function banner(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, fill: string, alpha: number, scale: number, rot: number) {
+  if (alpha <= 0 || scale <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.scale(scale, scale);
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 3;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 7;
+  ctx.strokeText(text, 0, 0);
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = fill;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
