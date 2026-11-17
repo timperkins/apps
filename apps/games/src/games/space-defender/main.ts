@@ -150,7 +150,7 @@ const INTRO: { icon: string; title: string; lines: string[] }[] = [
   { icon: '🧑‍🚀', title: 'Saving and friends', lines: [
     'Press <kbd>Esc</kbd> (or the pause button) to pause. From there you can <b>Save</b> your game and <b>Load</b> any save.',
     'Pick <b>Cheat</b> as the mode before you start. Then the pause menu lets you choose Survival or Creative: in Creative everything is free, crafting is instant and nothing hurts you.',
-    '<b>Play together</b> (up to 4): your code is on the start screen and top left in the game; friends type it in and tap Join. Everyone has their own inventory. If you get knocked out, you drop your things and come back in 10 seconds.'] },
+    '<b>Play together</b> (up to 8): your code is on the start screen and top left in the game; friends type it in and tap Join. Everyone has their own inventory. If you get knocked out, you drop your things and come back in 10 seconds.'] },
 ];
 let introPage = 0, introThen: (() => void) | null = null;
 function showIntro(then: (() => void) | null) { introPage = 0; introThen = then; renderIntro(); show('survIntro'); }

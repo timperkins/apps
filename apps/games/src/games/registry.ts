@@ -56,4 +56,44 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./north-pole/index'),
   },
+  {
+    id: 'jobville',
+    title: 'Jobville',
+    tagline: 'Explore a huge village, pick a job off the job board and spend your $ on shop upgrades.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#7cc35b"/>
+      <rect x="0" y="50" width="120" height="8" fill="#cdb994"/><rect x="56" y="0" width="8" height="80" fill="#cdb994"/>
+      <rect x="6" y="8" width="20" height="16" fill="#f2d7b6"/><rect x="4" y="6" width="24" height="11" fill="#b5483a"/>
+      <rect x="32" y="8" width="20" height="16" fill="#c9dcef"/><rect x="30" y="6" width="24" height="11" fill="#3f6aa1"/>
+      <rect x="70" y="6" width="44" height="26" fill="#ffe08a"/><rect x="68" y="4" width="48" height="16" fill="#d04a7a"/>
+      <rect x="80" y="8" width="24" height="8" rx="2" fill="#fff"/><text x="92" y="15" font-size="7" font-weight="900" text-anchor="middle" fill="#d04a7a" font-family="sans-serif">SHOP</text>
+      <rect x="14" y="32" width="28" height="12" fill="#9a6435" stroke="#5a3418" stroke-width="1.5"/>
+      <rect x="17" y="35" width="6" height="6" fill="#fff8dc"/><rect x="25" y="34" width="6" height="6" fill="#e0f0ff"/><rect x="33" y="35" width="6" height="6" fill="#ffe0e0"/>
+      <circle cx="88" cy="66" r="9" fill="#1f8a4c" stroke="#fff" stroke-width="2"/><text x="88" y="70" font-size="11" font-weight="900" text-anchor="middle" fill="#fff" font-family="sans-serif">$</text>
+      <circle cx="60" cy="64" r="4" fill="#f1c27d"/><rect x="56" y="67" width="8" height="7" rx="2" fill="#e74c3c"/>
+      <circle cx="10" cy="68" r="7" fill="#2e7d32"/><circle cx="110" cy="44" r="6" fill="#2e7d32"/>
+    </svg>`,
+    load: () => import('./jobville/index'),
+  },
+  {
+    id: 'survivle',
+    title: 'Survivle',
+    tagline: 'Explore a huge land and beat the Dark Beast before the world goes black.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#2a2140"/>
+      <path d="M0 60L30 45L60 60L30 75Z" fill="#63b04b"/><path d="M0 60L30 75V80H0Z" fill="#8a6c4c"/>
+      <path d="M50 40L80 25L110 40L80 55Z" fill="#918c84"/><path d="M50 40L80 55V80H50Z" fill="#77726b"/><path d="M80 55L110 40V80H80Z" fill="#5f5b55"/>
+      <rect x="70" y="14" width="20" height="18" fill="#8c8996"/><path d="M68 14h4v-4h4v4h4v-4h4v4h4v-4h4v4h-24z" fill="#8c8996"/>
+      <circle cx="80" cy="10" r="9" fill="#1a0b28"/><circle cx="80" cy="10" r="9" fill="none" stroke="#9b3ad6" stroke-width="2" opacity=".7"/>
+      <circle cx="77" cy="9" r="1.5" fill="#ff4fd8"/><circle cx="83" cy="9" r="1.5" fill="#ff4fd8"/>
+      <g transform="translate(28 58)">
+        <rect x="-4" y="-6" width="3" height="7" fill="#2f7d31"/><rect x="1" y="-6" width="3" height="7" fill="#2f7d31"/>
+        <rect x="-5" y="-15" width="10" height="10" rx="3" fill="#3e9b3a"/>
+        <circle cx="0" cy="-19" r="5" fill="#f0c7a0"/><path d="M-6-17Q-6-26 0-25Q6-26 6-17L4-20Q0-23-4-20Z" fill="#1b4a20"/>
+        <rect x="6" y="-24" width="2" height="12" fill="#b98b52" transform="rotate(25 7 -14)"/>
+      </g>
+      <g transform="translate(12 44)"><rect x="-1.5" y="0" width="3" height="8" fill="#6b4424"/><circle cx="0" cy="-3" r="6" fill="#3f9440"/></g>
+    </svg>`,
+    load: () => import('./survivle/index'),
+  },
 ];
