@@ -766,9 +766,14 @@ export class Scene {
       if (leg.t > t) break;
       const actor = this.byId.get(leg.personId);
       if (!actor?.body.active) continue;
-      let upto = 1;
-      if (actor.flight?.leg === leg) upto = easeInOut(Math.min(1, (this.clock - actor.flight.start) / FLIGHT_SECONDS));
       const a = shifted(arc(this.projectPlace(leg.from), this.projectPlace(leg.to)), laneOffset(leg.lane, leg.laneCount, TRACE_LANE));
+      let upto = 1;
+      if (actor.flight?.leg === leg) {
+        // The bubble trails its flight path a little on its spring, so the line stops where the
+        // bubble actually is instead of running out ahead of it.
+        const timed = easeInOut(Math.min(1, (this.clock - actor.flight.start) / FLIGHT_SECONDS));
+        upto = Math.min(timed, nearestOnArc(a, actor.body.x, actor.body.y, timed));
+      }
       ctx.beginPath();
       const steps = 48;
       for (let i = 0; i <= steps; i++) {
@@ -1192,4 +1197,21 @@ export class Scene {
     this.state = this.snapshot();
     for (const fn of this.listeners) fn();
   }
+}
+
+/** How far along an arc (0 to 1, searching up to `max`) the point closest to (x, y) is. */
+function nearestOnArc(a: ReturnType<typeof arc>, x: number, y: number, max: number): number {
+  const steps = 64;
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i <= steps; i++) {
+    const s = (i / steps) * max;
+    const p = pointAt(a, s);
+    const d = (p.x - x) ** 2 + (p.y - y) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = s;
+    }
+  }
+  return best;
 }
