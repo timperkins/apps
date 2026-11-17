@@ -254,6 +254,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
         <button class="jv-btn" data-b="build" title="Build your shop (B)">🔨</button>
         <button class="jv-btn" data-b="stats" title="Quests and achievements (Q)">🏅</button>
         <button class="jv-btn" data-b="map" title="Map (M)">🗺️</button>
+        <button class="jv-btn" data-b="save" title="Save game">💾</button>
         <button class="jv-btn" data-b="menu" title="Menu (Esc)">⏸</button>
       </div>
     </div>
@@ -2368,6 +2369,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       `<h2>⏸ Paused</h2>
       <div class="jv-menu">
         <button data-m="resume">▶ Keep playing</button>
+        <button data-m="save">💾 Save game</button>
         <button data-m="sound">${isMuted() ? '🔇 Sound: off' : '🔊 Sound: on'}</button>
         <button data-m="music">${save.music ? '🎵 Music: on' : '🎵 Music: off'}</button>
         <button data-m="photo">📸 Photo mode</button>
@@ -2382,7 +2384,10 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
         if (!b) return;
         const m = b.dataset.m;
         if (m === 'resume') closeModal();
-        else if (m === 'sound') {
+        else if (m === 'save') {
+          saveNow();
+          b.textContent = '✅ Saved!';
+        } else if (m === 'sound') {
           setMuted(!isMuted());
           save.muted = isMuted();
           b.textContent = isMuted() ? '🔇 Sound: off' : '🔊 Sound: on';
@@ -2666,6 +2671,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     else if (what === 'done') setBuild(false);
   });
   el.querySelector('[data-b="menu"]')!.addEventListener('click', openMenu);
+  el.querySelector('[data-b="save"]')!.addEventListener('click', saveNow);
   mini.addEventListener('click', openMap);
 
   window.addEventListener('keydown', onKeyDown);
@@ -2810,6 +2816,12 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       writeSave();
       saveT = 4;
     }
+  }
+
+  function saveNow() {
+    writeSave();
+    sfx.coin();
+    toast('💾 Saved! Your game is safe.');
   }
 
   function writeSave() {
