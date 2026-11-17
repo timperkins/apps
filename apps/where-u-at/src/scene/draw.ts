@@ -152,3 +152,51 @@ export function babySvg(color: string): string {
 <rect x="45" y="66" width="10" height="5" rx="2" fill="#ffffff"/>
 </svg>`;
 }
+
+/** A party balloon with its string running down to (tieX, tieY). */
+export function balloon(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, tieX: number, tieY: number) {
+  ctx.beginPath();
+  ctx.moveTo(x, y + r * 1.05);
+  ctx.quadraticCurveTo((x + tieX) / 2 + 6, (y + r + tieY) / 2, tieX, tieY);
+  ctx.strokeStyle = 'rgba(120,120,130,0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x, y, r * 0.84, r, 0, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y + r * 0.92);
+  ctx.lineTo(x + r * 0.2, y + r * 1.15);
+  ctx.lineTo(x - r * 0.2, y + r * 1.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x - r * 0.32, y - r * 0.38, r * 0.18, r * 0.3, -0.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fill();
+}
+
+/** Big headline text with a white outline, for births and weddings. */
+export function banner(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, font: string, fill: string, alpha: number, scale: number, rot: number) {
+  if (alpha <= 0 || scale <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.scale(scale, scale);
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 3;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 7;
+  ctx.strokeText(text, 0, 0);
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = fill;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}

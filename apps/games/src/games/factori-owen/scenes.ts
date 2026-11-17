@@ -53,23 +53,24 @@ function factory(enemies: boolean): Game {
   ore(g, OX, OY, 12, 3, Res.Owen);
   ore(g, OX - 9, OY + 10, 6, 6, Res.Coal);
   const P = (t: Parameters<Game['place']>[0], x: number, y: number, d: Dir = 0) => g.place(t, OX + x, OY + y, d);
-  for (let i = 0; i < 4; i++) P('electric-drill', i * 3, 0, 2);
+  for (let i = 0; i < 6; i++) P('electric-drill', 1 + i * 2, 2, 2);
   for (let x = 0; x < 15; x++) P('belt', x, 3, 1);
   for (let y = 3; y < 12; y++) P('belt', 15, y, 2);
   for (const y of [4, 7, 10]) {
     P('inserter', 16, y, 1);
     const f = P('stone-furnace', 17, y);
     if (f) f.fuel = { item: 'coal', n: 50 };
-    P('inserter', 19, y, 1);
-    P('wooden-chest', 20, y);
+    P('inserter', 18, y, 1);
+    P('wooden-chest', 19, y);
   }
   for (let i = 0; i < 2; i++) {
-    const d = P('burner-drill', -9 + i * 2, 10, 1);
+    const d = P('burner-drill', -8, 11 + i * 2, 1);
     if (d) d.fuel = { item: 'coal', n: 30 };
+    P('wooden-chest', -7, 11 + i * 2);
   }
-  const gen = P('generator', 2, 6);
+  const gen = P('generator', 4, 6);
   if (gen) gen.fuel = { item: 'coal', n: 50 };
-  for (const [x, y] of [[5, 4], [10, 4], [16, 6], [16, 9], [18, 12], [12, 12], [6, 12]]) P('pole', x, y);
+  for (const [x, y] of [[1, 4], [6, 4], [11, 4], [10, 8], [16, 6], [16, 9], [18, 12], [12, 12], [6, 12]]) P('pole', x, y);
   const a = P('assembler', 8, 7);
   if (a) {
     a.recipe = 'owen-gear';

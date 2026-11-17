@@ -76,7 +76,7 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   'stone-path': { id: 'stone-path', name: 'Stone path', stack: 100, place: 'stone-path', category: 'logistics', desc: 'Walk 30% faster on it.' },
   'steel-furnace': { id: 'steel-furnace', name: 'Steel furnace', stack: 50, place: 'steel-furnace', category: 'production', desc: 'Smelts twice as fast as a stone furnace.' },
   'electric-furnace': { id: 'electric-furnace', name: 'Electric furnace', stack: 50, place: 'electric-furnace', category: 'production', desc: 'Smelts twice as fast, using power instead of fuel.' },
-  'splitter': { id: 'splitter', name: 'Belt splitter', stack: 50, place: 'splitter', category: 'logistics', desc: 'Takes items from the belt behind it and hands them out in turn to belts on its left, front and right.' },
+  'splitter': { id: 'splitter', name: 'Belt splitter', stack: 50, place: 'splitter', category: 'logistics', desc: 'Two tiles wide. Takes items from the belts behind it and hands them out in turn to the two belts in front.' },
   'underground-belt': { id: 'underground-belt', name: 'Underground belt', stack: 50, place: 'underground-belt', category: 'logistics', desc: 'Place two facing the same way, up to 4 tiles apart. Items go in the first and come out the second.' },
   'lamp': { id: 'lamp', name: 'Lamp', stack: 50, place: 'lamp', category: 'logistics', desc: 'Lights up the area at night. Needs power.' },
   'express-belt': { id: 'express-belt', name: 'Express belt', stack: 100, place: 'express-belt', category: 'logistics', desc: 'Three times as fast as a normal belt.' },
@@ -159,28 +159,28 @@ export const ENTITIES: Record<EntityType, EntityDef> = {
   'inserter': { type: 'inserter', kind: 'inserter', w: 1, h: 1, item: 'inserter', rotatable: true, power: 13e3, electric: true, speed: 0.85, reach: 1, mineTime: 0.1 },
   'long-inserter': { type: 'long-inserter', kind: 'inserter', w: 1, h: 1, item: 'long-inserter', rotatable: true, power: 20e3, electric: true, speed: 1.2, reach: 2, mineTime: 0.1 },
   'fast-inserter': { type: 'fast-inserter', kind: 'inserter', w: 1, h: 1, item: 'fast-inserter', rotatable: true, power: 46e3, electric: true, speed: 2.3, reach: 1, mineTime: 0.1 },
-  'burner-drill': { type: 'burner-drill', kind: 'drill', w: 2, h: 2, item: 'burner-drill', rotatable: true, power: 150e3, speed: 0.25, area: 2, mineTime: 0.3 },
-  'electric-drill': { type: 'electric-drill', kind: 'drill', w: 3, h: 3, item: 'electric-drill', rotatable: true, power: 90e3, electric: true, speed: 0.5, area: 5, mineTime: 0.3 },
-  'stone-furnace': { type: 'stone-furnace', kind: 'furnace', w: 2, h: 2, item: 'stone-furnace', power: 90e3, speed: 1, mineTime: 0.3 },
-  'assembler': { type: 'assembler', kind: 'assembler', w: 3, h: 3, item: 'assembler', power: 75e3, electric: true, speed: 0.75, mineTime: 0.3 },
-  'lab': { type: 'lab', kind: 'lab', w: 3, h: 3, item: 'lab', power: 60e3, electric: true, speed: 1, mineTime: 0.3 },
+  'burner-drill': { type: 'burner-drill', kind: 'drill', w: 1, h: 1, item: 'burner-drill', rotatable: true, power: 150e3, speed: 0.25, area: 1, mineTime: 0.3 },
+  'electric-drill': { type: 'electric-drill', kind: 'drill', w: 1, h: 1, item: 'electric-drill', rotatable: true, power: 90e3, electric: true, speed: 0.5, area: 3, mineTime: 0.3 },
+  'stone-furnace': { type: 'stone-furnace', kind: 'furnace', w: 1, h: 1, item: 'stone-furnace', power: 90e3, speed: 1, mineTime: 0.3 },
+  'assembler': { type: 'assembler', kind: 'assembler', w: 1, h: 1, item: 'assembler', power: 75e3, electric: true, speed: 0.75, mineTime: 0.3 },
+  'lab': { type: 'lab', kind: 'lab', w: 1, h: 1, item: 'lab', power: 60e3, electric: true, speed: 1, mineTime: 0.3 },
   'pole': { type: 'pole', kind: 'pole', w: 1, h: 1, item: 'pole', mineTime: 0.1 },
-  'generator': { type: 'generator', kind: 'generator', w: 3, h: 3, item: 'generator', output: 900e3, mineTime: 0.3 },
-  'solar-panel': { type: 'solar-panel', kind: 'solar', w: 3, h: 3, item: 'solar-panel', output: 60e3, mineTime: 0.3 },
-  'owen-monument': { type: 'owen-monument', kind: 'monument', w: 5, h: 5, item: 'owen-monument', mineTime: 1, hp: 5000 },
-  'gun-turret': { type: 'gun-turret', kind: 'turret', w: 2, h: 2, item: 'gun-turret', mineTime: 0.4, hp: 400, range: 18, ammo: 'owen-ammo', damage: 6, fireRate: 6 },
-  'rail-turret': { type: 'rail-turret', kind: 'turret', w: 3, h: 3, item: 'rail-turret', mineTime: 0.5, hp: 1000, range: 40, ammo: 'rail-ammo', damage: 400, fireRate: 0.4, power: 400e3, electric: true },
+  'generator': { type: 'generator', kind: 'generator', w: 1, h: 1, item: 'generator', output: 900e3, mineTime: 0.3 },
+  'solar-panel': { type: 'solar-panel', kind: 'solar', w: 1, h: 1, item: 'solar-panel', output: 60e3, mineTime: 0.3 },
+  'owen-monument': { type: 'owen-monument', kind: 'monument', w: 1, h: 1, item: 'owen-monument', mineTime: 1, hp: 5000 },
+  'gun-turret': { type: 'gun-turret', kind: 'turret', w: 1, h: 1, item: 'gun-turret', mineTime: 0.4, hp: 400, range: 18, ammo: 'owen-ammo', damage: 6, fireRate: 6 },
+  'rail-turret': { type: 'rail-turret', kind: 'turret', w: 1, h: 1, item: 'rail-turret', mineTime: 0.5, hp: 1000, range: 40, ammo: 'rail-ammo', damage: 400, fireRate: 0.4, power: 400e3, electric: true },
   'wall': { type: 'wall', kind: 'wall', w: 1, h: 1, item: 'wall', mineTime: 0.2, hp: 350 },
   'stone-path': { type: 'stone-path', kind: 'floor', w: 1, h: 1, item: 'stone-path', mineTime: 0.1, hp: 200 },
-  'steel-furnace': { type: 'steel-furnace', kind: 'furnace', w: 2, h: 2, item: 'steel-furnace', power: 90e3, speed: 2, mineTime: 0.3, hp: 350 },
-  'electric-furnace': { type: 'electric-furnace', kind: 'furnace', w: 3, h: 3, item: 'electric-furnace', power: 180e3, electric: true, speed: 2, mineTime: 0.3, hp: 350 },
-  'splitter': { type: 'splitter', kind: 'splitter', w: 1, h: 1, item: 'splitter', rotatable: true, speed: 7.5, mineTime: 0.1 },
+  'steel-furnace': { type: 'steel-furnace', kind: 'furnace', w: 1, h: 1, item: 'steel-furnace', power: 90e3, speed: 2, mineTime: 0.3, hp: 350 },
+  'electric-furnace': { type: 'electric-furnace', kind: 'furnace', w: 1, h: 1, item: 'electric-furnace', power: 180e3, electric: true, speed: 2, mineTime: 0.3, hp: 350 },
+  'splitter': { type: 'splitter', kind: 'splitter', w: 2, h: 1, item: 'splitter', rotatable: true, speed: 7.5, mineTime: 0.1 },
   'underground-belt': { type: 'underground-belt', kind: 'belt', w: 1, h: 1, item: 'underground-belt', rotatable: true, speed: 1.875, mineTime: 0.1, ug: true },
   'lamp': { type: 'lamp', kind: 'lamp', w: 1, h: 1, item: 'lamp', power: 5e3, electric: true, mineTime: 0.1 },
   'express-belt': { type: 'express-belt', kind: 'belt', w: 1, h: 1, item: 'express-belt', rotatable: true, speed: 5.625, mineTime: 0.1 },
-  'assembler-2': { type: 'assembler-2', kind: 'assembler', w: 3, h: 3, item: 'assembler-2', power: 150e3, electric: true, speed: 1.5, mineTime: 0.3, hp: 400 },
+  'assembler-2': { type: 'assembler-2', kind: 'assembler', w: 1, h: 1, item: 'assembler-2', power: 150e3, electric: true, speed: 1.5, mineTime: 0.3, hp: 400 },
   'big-pole': { type: 'big-pole', kind: 'pole', w: 1, h: 1, item: 'big-pole', mineTime: 0.2, wireReach: 28, supply: 1.5, hp: 200 },
-  'battery-bank': { type: 'battery-bank', kind: 'battery', w: 2, h: 2, item: 'battery-bank', mineTime: 0.3, capacity: 5e6, rate: 300e3 },
+  'battery-bank': { type: 'battery-bank', kind: 'battery', w: 1, h: 1, item: 'battery-bank', mineTime: 0.3, capacity: 5e6, rate: 300e3 },
   'filter-inserter': { type: 'filter-inserter', kind: 'inserter', w: 1, h: 1, item: 'filter-inserter', rotatable: true, power: 46e3, electric: true, speed: 2.3, reach: 1, mineTime: 0.1, filter: true },
   'steel-wall': { type: 'steel-wall', kind: 'wall', w: 1, h: 1, item: 'steel-wall', mineTime: 0.2, hp: 1050 },
   'land-mine': { type: 'land-mine', kind: 'mine', w: 1, h: 1, item: 'land-mine', mineTime: 0.1, hp: 50 },
@@ -193,6 +193,15 @@ const DEFAULT_HP: Record<Kind, number> = {
 };
 export function maxHp(t: EntityType): number {
   return ENTITIES[t].hp ?? DEFAULT_HP[ENTITIES[t].kind];
+}
+
+/**
+ * Tiles an entity covers when facing `dir`. Sizes in ENTITIES are for facing up; a rotatable
+ * entity that isn't square (the splitter) swaps width and height when it faces sideways.
+ */
+export function footprint(type: EntityType, dir: number): [number, number] {
+  const d = ENTITIES[type];
+  return d.rotatable && dir % 2 === 1 ? [d.h, d.w] : [d.w, d.h];
 }
 
 export const POLE_WIRE_REACH = 7.5;
@@ -318,7 +327,7 @@ export const TECHS: Tech[] = [
   { id: 'long-arms', name: "Long arms", desc: "Build and pick things up from 5 tiles farther away.", packs: ['red-pack'], units: 30, time: 10, requires: ['logistics'] },
   { id: 'stone-paths', name: "Stone paths", desc: "Floor tiles that make you walk 30% faster.", packs: ['red-pack'], units: 20, time: 10, requires: ['military'] },
   { id: 'steel-furnace', name: "Steel furnace", desc: "A furnace that smelts twice as fast.", packs: ['red-pack'], units: 60, time: 10, requires: ['steel'] },
-  { id: 'splitter', name: "Belt splitter", desc: "Split one belt into two or three.", packs: ['red-pack'], units: 40, time: 10, requires: ['logistics'] },
+  { id: 'splitter', name: "Belt splitter", desc: "Split one belt into two.", packs: ['red-pack'], units: 40, time: 10, requires: ['logistics'] },
   { id: 'underground', name: "Underground belt", desc: "Belts that go under up to 4 tiles.", packs: ['red-pack'], units: 40, time: 10, requires: ['logistics'] },
   { id: 'lamps', name: "Lamps", desc: "Light up your base at night.", packs: ['red-pack'], units: 20, time: 10, requires: ['automation'] },
   { id: 'express-belt', name: "Express belt", desc: "Belts three times as fast as normal ones.", packs: ['red-pack',  'green-pack'], units: 80, time: 15, requires: ['green-science',  'splitter'] },
