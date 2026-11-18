@@ -13,7 +13,7 @@
 // The host runs the game for everyone (see "Multiplayer" in src/v2/game.ts);
 // here is the lobby and the messages that carry the game once it starts.
 import { FACTIONS } from './v1/sprites';
-import { MAPS, mapPreview, mapsFor } from './v2/maps';
+import { MAPS, mapPreview, mapsFor, worldOf } from './v2/maps';
 import type { Command, Player, Snapshot } from './v2/game';
 import { BOT_LEVELS, type BotLevel } from './v2/bot';
 import { isValidCode, normalizeCode } from './net/codes';
@@ -716,7 +716,9 @@ export class Lobby {
     const key = `${id}:${this.seed}`;
     let c = this.previews.get(key);
     if (!c) {
-      c = mapPreview(MAPS.find((m) => m.id === id)!, this.seed, 128 * 80, 128 * 40, 120, 60, true);
+      const def = MAPS.find((m) => m.id === id)!;
+      const ws = worldOf(def, 128 * 80, 128 * 40);
+      c = mapPreview(def, this.seed, ws.w, ws.h, 120, 60, true);
       this.previews.set(key, c);
     }
     // a canvas can only be in one place: draw a copy

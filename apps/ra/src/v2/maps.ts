@@ -3,6 +3,7 @@
 // ground, and (for the ocean maps) where the land is. Where your army and the
 // enemy's base start is given as fractions of the screen-space map.
 import { RGB, WrapNoise, hex, mix, rng, wrapNoise } from '../gfx';
+import { CH } from '../tiles';
 import { HIGH_CELL, LAKE_CELL } from './terrain';
 
 // Shapes the land: added to the lake field at screen point (sx, sy), so higher
@@ -16,6 +17,9 @@ export interface MapDef {
   water: number; // share of the planet under water
   high: number; // share of the land raised into plateaus
   mask?: Mask;
+  // how big the planet is, against the usual one (1): the small maps are a
+  // fraction of it across, so the bases are close and games are quick
+  size?: number;
   // how many players it is made for, fewest to most
   players: [number, number];
   // where players can start, as fractions of the map (at least players[1]
@@ -104,6 +108,72 @@ export function startsFor(def: Pick<MapDef, 'starts'>, n: number): [number, numb
 type Recipe = Omit<MapDef, 'home' | 'enemy'>;
 
 const RECIPES: Recipe[] = [
+  // ----- small maps: a few screens across, for quick games -----
+  {
+    id: 'islet',
+    name: 'Islet',
+    blurb: 'A little island alone in the ocean, with the enemy just down the beach.',
+    water: 0.8,
+    high: 0.06,
+    size: 0.25,
+    mask: (sx, sy, w, h, N, s) => coast(blob(sx, sy, w, h, N, s, 0.5, 0.5, 0.21, 0.15), w, 0.06),
+    players: [2, 2],
+    starts: [
+      [0.38, 0.5],
+      [0.62, 0.5],
+    ],
+  },
+  {
+    id: 'skirmish',
+    name: 'Skirmish',
+    blurb: 'A small world of open grassland with a few ponds. Nowhere to hide.',
+    water: 0.1,
+    high: 0.08,
+    size: 0.25,
+    players: [2, 4],
+    starts: lattice(2, 2, 0.25, 0.25),
+  },
+  {
+    id: 'twins',
+    name: 'Twin Isles',
+    blurb: 'Two small islands joined by a sandbar, a base on each.',
+    water: 0.72,
+    high: 0.08,
+    size: 0.3,
+    mask: (sx, sy, w, h, N, s) => {
+      const d = Math.min(
+        blob(sx, sy, w, h, N, s, 0.3, 0.5, 0.15, 0.15),
+        blob(sx, sy, w, h, N, s + 3, 0.7, 0.5, 0.15, 0.15),
+        segDist(sx, sy, w, h, 0.3, 0.5, 0.7, 0.5) - 0.05 * w,
+      );
+      return coast(d, w, 0.05);
+    },
+    players: [2, 2],
+    starts: [
+      [0.27, 0.5],
+      [0.73, 0.5],
+    ],
+  },
+  {
+    id: 'brook',
+    name: 'Brookside',
+    blurb: 'A stream winds through a small world. Cross at the fords, or go the long way round.',
+    water: 0.14,
+    high: 0.1,
+    size: 0.3,
+    mask: (sx, sy, w, h, N, s) => {
+      const xc = 0.5 * w + (N(0, sy, w / 3, s + 1, 2) - 0.5) * w * 0.08;
+      let r = 0.03 * w - loop(sx - xc, w);
+      for (const fv of [0.15, 0.65]) if (loop(sy / h - fv, 1) < 0.06) r = Math.min(r, -0.02 * w);
+      return coast(r, w, 0.025);
+    },
+    players: [2, 2],
+    starts: [
+      [0.25, 0.4],
+      [0.75, 0.4],
+    ],
+  },
+  // ----- planet-sized maps -----
   {
     id: 'isle',
     name: 'Long Isle',
@@ -465,8 +535,17 @@ export const MAPS: MapDef[] = RECIPES.map((r) => {
 export const mapsFor = (n: number): MapDef[] => MAPS.filter((m) => n >= m.players[0] && n <= m.players[1]);
 
 // Where you start in the Combat stage: a base of your own a short drive
-// from the enemy's (about a screen and a half).
-export const combatHome = (def: MapDef): [number, number] => [(def.enemy[0] + 0.89) % 1, def.enemy[1]];
+// from the enemy's (about a screen and a half). On a small map your usual
+// start is already that close.
+export const combatHome = (def: MapDef): [number, number] => ((def.size ?? 1) < 1 ? def.home : [(def.enemy[0] + 0.89) % 1, def.enemy[1]]);
+
+// The size of the planet a map makes, given the usual one (w x h map pixels):
+// scaled by its size, in whole ground tiles.
+export function worldOf(def: Pick<MapDef, 'size'>, w: number, h: number): { w: number; h: number } {
+  const s = def.size ?? 1;
+  if (s === 1) return { w, h };
+  return { w: Math.max(4, Math.round((w / CH) * s)) * CH, h: Math.max(2, Math.round((h / CH) * s)) * CH };
+}
 
 export const mapDef = (id: string): MapDef => MAPS.find((m) => m.id === id) ?? MAPS[0];
 

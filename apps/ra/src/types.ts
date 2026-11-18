@@ -151,6 +151,9 @@ export interface GameLike {
   maps?(): { id: string; name: string; blurb: string; players?: [number, number] }[];
   preview?(id: string, w: number, h: number): HTMLCanvasElement;
   mapId?: string;
+  // The size of the world generate() should be given for mapId, from the
+  // usual one (some maps are smaller planets).
+  worldSize?(w: number, h: number): { w: number; h: number };
   // Stages to start in, for testing (the normal start, a ready-made fight...);
   // stage is the one generate() makes.
   stages?(): { id: string; name: string; blurb: string }[];

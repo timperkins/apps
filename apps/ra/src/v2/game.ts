@@ -10,7 +10,7 @@ import { StackSprite, dirSet, drawSprite, renderStack, toScreen, toWorld } from 
 import { buildingArt as workerBuilding, prefetch } from './art-pool';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
-import { MAPS, combatHome, mapDef, mapPreview, startsFor } from './maps';
+import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
@@ -451,7 +451,12 @@ export class IsoGame implements GameLike {
   }
   preview(id: string, w: number, h: number): HTMLCanvasElement {
     const def = mapDef(id);
-    return mapPreview(this.stage === 'combat' ? { ...def, home: combatHome(def) } : def, this.seed, w, h);
+    const ws = worldOf(def, w, h);
+    return mapPreview(this.stage === 'combat' ? { ...def, home: combatHome(def) } : def, this.seed, ws.w, ws.h);
+  }
+  // The planet this map makes, given the usual size (small maps are smaller).
+  worldSize(w: number, h: number): { w: number; h: number } {
+    return worldOf(mapDef(this.mapId), w, h);
   }
 
   constructor(
@@ -918,7 +923,7 @@ export class IsoGame implements GameLike {
     const yard = combat && this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
     this.home = yard ? { x: toScreen(yard.x, yard.y)[0], y: toScreen(yard.x, yard.y)[1] } : mine.length ? { x: mine.reduce((a, p) => a + p[0], 0) / mine.length, y: mine.reduce((a, p) => a + p[1], 0) / mine.length } : { x: homeSite.sx, y: homeSite.sy };
     this.tiles = new Tiles(w, h, (tx, ty) => this.buildTile(tx, ty), 220);
-    this.shroud = NO_SHROUD || this.noShroud ? null : new Shroud(w, h);
+    this.shroud = NO_SHROUD || this.noShroud ? null : new Shroud(w, h, (sx, sy) => T.isWater(sx, sy));
     this.looked = new WeakMap();
     this.lookedB = new WeakSet();
     this.lookAround();

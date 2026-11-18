@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MAPS, landGrid, mapsFor, startsFor } from './maps';
+import { MAPS, landGrid, mapsFor, startsFor, worldOf } from './maps';
 
-// The world is CH * 80 by CH * 40 map pixels (see main.ts).
-const W = 128 * 80;
-const H = 128 * 40;
+// The usual world is CH * 80 by CH * 40 map pixels (see main.ts); small maps
+// make a fraction of it.
+const W0 = 128 * 80;
+const H0 = 128 * 40;
 const PW = 480;
 const PH = 240;
 const SEEDS = [1, 77, 4242, 31337, 90001];
@@ -45,9 +46,9 @@ function reachable(kind: Uint8Array, q: number): Uint8Array {
 }
 
 describe('maps', () => {
-  it('has twenty, with player counts from 2 to 8', () => {
-    expect(MAPS).toHaveLength(20);
-    expect(new Set(MAPS.map((m) => m.id)).size).toBe(20);
+  it('has twenty-four, with player counts from 2 to 8', () => {
+    expect(MAPS).toHaveLength(24);
+    expect(new Set(MAPS.map((m) => m.id)).size).toBe(24);
     for (let n = 2; n <= 8; n++) expect(mapsFor(n).length).toBeGreaterThanOrEqual(4);
     for (const m of MAPS) {
       expect(m.players[0]).toBeGreaterThanOrEqual(2);
@@ -59,6 +60,7 @@ describe('maps', () => {
   for (const m of MAPS)
     it(`${m.name}: every start is on land that joins up with the others`, () => {
       const n = m.players[1];
+      const { w: W, h: H } = worldOf(m, W0, H0);
       for (const seed of SEEDS) {
         const { kind } = landGrid(m, seed, W, H, PW, PH);
         const cells = startsFor(m, n).map(([u, v]) => nearestLand(kind, u, v));
@@ -74,4 +76,21 @@ describe('maps', () => {
         });
       }
     });
+
+  it('starts with four small maps, the first an island with the bases close', () => {
+    const small = MAPS.slice(0, 4);
+    expect(small.every((m) => (m.size ?? 1) < 1)).toBe(true);
+    expect(MAPS.slice(4).every((m) => (m.size ?? 1) === 1)).toBe(true);
+    const isle = MAPS[0];
+    const { w, h } = worldOf(isle, W0, H0);
+    expect(w % 128 + (h % 128)).toBe(0);
+    expect(w).toBeLessThan(W0 / 2);
+    // the bases under a screen and a half apart on the ground
+    const du = Math.abs(isle.home[0] - isle.enemy[0]) * w;
+    const dv = Math.abs(isle.home[1] - isle.enemy[1]) * h * 2;
+    expect(Math.hypot(du, dv)).toBeLessThan(1000);
+    // and mostly water round the island
+    const { kind } = landGrid(isle, 1, w, h, 160, 80);
+    expect(kind.filter((k) => k === 0).length / kind.length).toBeGreaterThan(0.6);
+  });
 });
