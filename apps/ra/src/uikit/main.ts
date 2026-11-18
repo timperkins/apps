@@ -1,27 +1,19 @@
 // The UI kit page (/ui/): every piece of the game's interface, on its own and
-// in the game, in eleven designs (today's look and ten new ones) that the tabs
-// at the top switch between. Nothing here is used by the game yet: it is for
-// choosing a design. Each design is a set of CSS variables and rules in
+// in the game, in each design on the table (today's look, Refined Pixel and
+// variations on it), which the tabs at the top switch between. Nothing here
+// is used by the game yet: it is for choosing a design. Each design is a set of CSS variables and rules in
 // kit.css under [data-theme='<id>'], so every component below is the same
 // markup in every design.
 import './kit.css';
-import { COIN_ART, IconName, IconSet, icon } from './icons';
+import { COIN_ART, IconName, IconSet, icon, prepareIcons } from './icons';
+import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, CursorKind, HARVEST_FRAMES, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames } from '../cursors';
 import { GROUP_COLORS, PLAYER_COLORS, THEMES, Theme } from './themes';
-import { boltPlate, chamfer, contours, hexGrid, pixelFrame } from './frames';
+import { pixelFrame } from './frames';
 
 // Frames and textures some designs draw with (see frames.ts), as CSS variables.
 const FRAMES: Record<string, Record<string, string>> = {
   now: {
     '--fr-wood': pixelFrame({ fill: '#2a1e13', line: '#24170b', hi: '#c98a4b', lo: '#6a3f1d', trim: '#9b6232' }),
-  },
-  field: {
-    '--fr-panel': chamfer({ fill: '#3c4327', line: '#14170b', hi: '#6c764a', lo: '#252915', rivet: '#d1ad5c', cut: 7 }),
-    '--fr-btn': chamfer({ fill: '#4a5232', line: '#14170b', hi: '#7a8455', lo: '#2c311b', cut: 5 }),
-    '--fr-hover': chamfer({ fill: '#566039', line: '#14170b', hi: '#89935f', lo: '#2c311b', cut: 5 }),
-    '--fr-on': chamfer({ fill: '#c9a24e', line: '#2a2210', hi: '#f1d58e', lo: '#8a6a28', cut: 5 }),
-    '--fr-danger': chamfer({ fill: '#8f3a24', line: '#1e0c06', hi: '#c86a4c', lo: '#5a2010', cut: 5 }),
-    '--fr-well': chamfer({ fill: '#23271a', line: '#14170b', hi: '#181b10', lo: '#565f3a', cut: 4 }),
-    '--fr-toast': chamfer({ fill: '#d8cc9a', line: '#2a2610', hi: '#f4ecc4', lo: '#a49866', cut: 5 }),
   },
   pixel: {
     '--fr-panel': pixelFrame({ fill: '#1b2440', line: '#060912', hi: '#36457a', lo: '#111833', trim: '#a8873c' }),
@@ -33,11 +25,56 @@ const FRAMES: Record<string, Record<string, string>> = {
     '--fr-well': pixelFrame({ fill: '#0d1326', line: '#060912', hi: '#090d1b', lo: '#2a3558' }),
     '--fr-toast': pixelFrame({ fill: '#f2d27a', line: '#2a1a04', hi: '#fff6cc', lo: '#b88a2a' }),
   },
-  iron: {
-    '--fr-panel': boltPlate({ fill: '#2f343b', line: '#0b0c0f', hi: '#5c636d', lo: '#191b1f', bolt: '#9097a1' }),
+  fine: {
+    '--fr-panel': pixelFrame({ fill: '#1b2440', line: '#0a0f1e', hi: '#2f3c68', lo: '#141b33', trim: '#8d7234' }),
+    '--fr-btn': pixelFrame({ fill: '#26314f', line: '#0a0f1e', hi: '#3c4a7c', lo: '#1a2240' }),
+    '--fr-hover': pixelFrame({ fill: '#2e3a60', line: '#0a0f1e', hi: '#4a5a92', lo: '#1a2240' }),
+    '--fr-on': pixelFrame({ fill: '#3a78c8', line: '#0a1a33', hi: '#8fbcf5', lo: '#285a9c' }),
+    '--fr-primary': pixelFrame({ fill: '#dcae4c', line: '#2a1a04', hi: '#f8e2a0', lo: '#a37a26' }),
+    '--fr-danger': pixelFrame({ fill: '#b0442f', line: '#2a0a04', hi: '#f08a70', lo: '#7a261a' }),
+    '--fr-well': pixelFrame({ fill: '#10162b', line: '#0a0f1e', hi: '#0c1122', lo: '#26314f' }),
+    '--fr-toast': pixelFrame({ fill: '#f0d488', line: '#2a1a04', hi: '#fff4cc', lo: '#b88f36' }),
   },
-  recon: { '--tex': contours('rgba(110,72,26,.22)') },
-  holo: { '--tex': hexGrid('rgba(120,220,255,.10)') },
+  steel: {
+    '--fr-panel': pixelFrame({ fill: '#262b33', line: '#0b0d11', hi: '#434b57', lo: '#1a1e24', trim: '#3d6db0' }),
+    '--fr-btn': pixelFrame({ fill: '#333a45', line: '#0b0d11', hi: '#56606e', lo: '#22272f' }),
+    '--fr-hover': pixelFrame({ fill: '#3c4451', line: '#0b0d11', hi: '#66707f', lo: '#22272f' }),
+    '--fr-on': pixelFrame({ fill: '#4f74a8', line: '#0c1626', hi: '#8fb2dc', lo: '#2c446b' }),
+    '--fr-primary': pixelFrame({ fill: '#f0b43c', line: '#2a1804', hi: '#ffe39a', lo: '#b07a18' }),
+    '--fr-danger': pixelFrame({ fill: '#b8432f', line: '#2a0a04', hi: '#ff9a80', lo: '#78241a' }),
+    '--fr-well': pixelFrame({ fill: '#15181d', line: '#0b0d11', hi: '#101318', lo: '#3a414c' }),
+    '--fr-toast': pixelFrame({ fill: '#e8edf3', line: '#0b0d11', hi: '#ffffff', lo: '#a9b4c2' }),
+  },
+  deck: {
+    '--fr-panel': pixelFrame({ fill: '#18213b', line: '#060912', hi: '#33416f', lo: '#10172d', trim: '#a8873c' }),
+    '--fr-btn': pixelFrame({ fill: '#26314f', line: '#060912', hi: '#46578e', lo: '#18203d' }),
+    '--fr-hover': pixelFrame({ fill: '#303c64', line: '#060912', hi: '#5668a6', lo: '#18203d' }),
+    '--fr-on': pixelFrame({ fill: '#3f82d6', line: '#06142a', hi: '#a4ceff', lo: '#24569a' }),
+    '--fr-primary': pixelFrame({ fill: '#e0b04a', line: '#2a1a04', hi: '#fff0b0', lo: '#9a6e1c' }),
+    '--fr-danger': pixelFrame({ fill: '#b8432f', line: '#2a0a04', hi: '#ff9a80', lo: '#78241a' }),
+    '--fr-well': pixelFrame({ fill: '#0d1326', line: '#060912', hi: '#090d1b', lo: '#2a3558' }),
+    '--fr-toast': pixelFrame({ fill: '#f2d27a', line: '#2a1a04', hi: '#fff6cc', lo: '#b88a2a' }),
+  },
+  signal: {
+    '--fr-panel': pixelFrame({ fill: '#0e1426', line: '#03060d', hi: '#24305a', lo: '#0a0f1d', trim: '#6e5a2a' }),
+    '--fr-btn': pixelFrame({ fill: '#18203a', line: '#03060d', hi: '#2f3d6c', lo: '#10162b' }),
+    '--fr-hover': pixelFrame({ fill: '#202a4a', line: '#03060d', hi: '#3c4c84', lo: '#10162b' }),
+    '--fr-on': pixelFrame({ fill: '#2a1c06', line: '#03060d', hi: '#ffb43c', lo: '#7a4a10' }),
+    '--fr-primary': pixelFrame({ fill: '#ffae2e', line: '#2a1804', hi: '#ffe0a0', lo: '#b06a10' }),
+    '--fr-danger': pixelFrame({ fill: '#a8392a', line: '#2a0a04', hi: '#ff8a70', lo: '#6e2016' }),
+    '--fr-well': pixelFrame({ fill: '#05080f', line: '#03060d', hi: '#04060c', lo: '#1c2440' }),
+    '--fr-toast': pixelFrame({ fill: '#120c02', line: '#03060d', hi: '#ffb43c', lo: '#7a4a10' }),
+  },
+  soft: {
+    '--fr-panel': pixelFrame({ fill: '#1a3640', line: '#07141a', hi: '#2f5866', lo: '#122830', trim: '#d9c08a', steps: [5, 3, 2, 1, 1] }),
+    '--fr-btn': pixelFrame({ fill: '#24485a', line: '#07141a', hi: '#3e6c80', lo: '#18343f', steps: [5, 3, 2, 1, 1] }),
+    '--fr-hover': pixelFrame({ fill: '#2b5468', line: '#07141a', hi: '#4b7c92', lo: '#18343f', steps: [5, 3, 2, 1, 1] }),
+    '--fr-on': pixelFrame({ fill: '#f2e3bc', line: '#2a2010', hi: '#ffffff', lo: '#c4b080', steps: [5, 3, 2, 1, 1] }),
+    '--fr-primary': pixelFrame({ fill: '#f08a5c', line: '#2a1006', hi: '#ffc8a8', lo: '#b25a30', steps: [5, 3, 2, 1, 1] }),
+    '--fr-danger': pixelFrame({ fill: '#c0453a', line: '#2a0a06', hi: '#ff9a8a', lo: '#80261e', steps: [5, 3, 2, 1, 1] }),
+    '--fr-well': pixelFrame({ fill: '#0f232b', line: '#07141a', hi: '#0b1b21', lo: '#2a4e5c', steps: [5, 3, 2, 1, 1] }),
+    '--fr-toast': pixelFrame({ fill: '#f2e3bc', line: '#2a2010', hi: '#ffffff', lo: '#c4b080', steps: [5, 3, 2, 1, 1] }),
+  },
 };
 
 const art = import.meta.glob('./art/*.{png,webp}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
@@ -76,6 +113,72 @@ type ItemState = '' | 'building' | 'ready' | 'paused' | 'blocked' | 'locked';
 interface ItemOpts { state?: ItemState; prog?: number; fresh?: boolean; count?: number }
 
 const fmt = (n: number) => n.toLocaleString('en-US');
+
+// ---------- Command Deck: the bigger layout overhaul ----------
+
+// Menu, credits and power in one strip at the top.
+function resBar(phone = false) {
+  return `<div class="k-resbar s-panel${phone ? ' phone' : ''}"><button class="k-ibtn s-btn sm" aria-label="Menu">${I('menu')}</button><div class="k-res">${coin()}<span class="num">12,450</span>${phone ? '' : '<span class="cap">/ 15,000</span>'}</div><div class="k-res pwr" title="Power">${I('bolt')}<div class="k-hbar"><i style="--p:.72"></i><b style="--u:.55"></b></div>${phone ? '' : '<span class="cap">210 / 290</span>'}</div></div>`;
+}
+
+// What you have selected: a big portrait, health, stats and the kinds in it.
+function unitCard(compact = false) {
+  return `<div class="k-unitcard s-well${compact ? ' compact' : ''}"><div class="por"><img src="${A('c-lancer.webp')}" alt=""><b class="count">×4</b></div><div class="info"><b class="uname">Lancer tank</b><span class="k-label">Group 4 · 6 selected</span><div class="k-hp big hi"><i style="--hp:.8"></i></div>${compact ? '' : `<div class="stats"><span>Armour <b>Heavy</b></span><span>Range <b>5</b></span><span>Speed <b>Med</b></span></div>`}<div class="chips">${utype('lancer', 4, true)}${utype('bastion', 2, true)}${compact ? '' : utype('rifle', 6)}</div></div></div>`;
+}
+
+function cmd(icon: IconName, label: string, key: string, cls = '') {
+  return `<button class="k-cmd s-btn ${cls}">${I(icon)}<span>${label}</span><kbd>${key}</kbd></button>`;
+}
+
+function cmdGrid() {
+  return `<div class="k-cmds">${cmd('select', 'Select', 'Q', 'on')}${cmd('all', 'All', '^A')}${cmd('home', 'Home', 'H')}${cmd('group', 'Group', '⇧1')}${cmd('flag', 'Rally', 'R')}${cmd('clear', 'Clear', 'Esc')}</div>`;
+}
+
+function consoleDesk() {
+  const st: ItemOpts[] = [{ state: 'building', prog: 0.4 }, { state: 'ready' }, {}, { state: 'paused', prog: 0.7 }, { fresh: true }, { state: 'blocked' }];
+  return `<div class="k-console s-panel">${unitCard()}${cmdGrid()}<div class="k-console-build">${buildTabs(0)}<div class="k-row">${BUILD_BASE.slice(0, 6)
+    .map((x, i) => item(x.k, x.n, x.c, st[i]))
+    .join('')}</div></div></div>`;
+}
+
+function tabbar(on: 'select' | 'build' | 'home' | '' = '') {
+  const t = (k: string, ic: IconName, n: string, alert = false) => `<button class="k-tbtab${on === k ? ' on' : ''}${alert ? ' alert' : ''}">${I(ic)}<span>${n}</span></button>`;
+  return `<nav class="k-tabbar s-panel">${t('select', 'select', 'Select')}${t('group', 'group', 'Groups')}${t('home', 'home', 'Home')}${t('build', 'build', 'Build', on !== 'build')}</nav>`;
+}
+
+function deckDesk() {
+  return `
+    <div class="pos tl">${resBar()}</div>
+    <div class="pos tc deck">${toast('Lancer tank ready')}</div>
+    <div class="pos tr">${mini()}</div>
+    <div class="pos console">${consoleDesk()}</div>
+    <div class="pos tipat deck">${tip()}</div>`;
+}
+
+function deckPhones() {
+  return `${phone('Building', -1035, -445, `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos tray">${buildPanel('sheet', 0, 6)}</div><div class="pos dock">${tabbar('build')}</div>`)}
+      ${phone(
+        'Units selected',
+        -570,
+        -470,
+        `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos tc lower">${toast('Group 4 · 6 units')}</div><div class="pos conf" style="left:236px;top:400px">${confirmCheck()}</div><div class="pos tray">${unitCard(true)}</div><div class="pos dock">${tabbar('select')}</div>`,
+        `${selbox(414, 510, 44, 34, 0.9, GROUP_COLORS[3])}${selbox(452, 744, 40, 30, 0.6, GROUP_COLORS[3])}${moveLine(436, 527, 545, 590)}`,
+      )}
+      ${phone('Deploying', -330, -505, `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos deployat">${deploy()}</div><div class="pos tc lower">${toast('Tap Deploy to set up your base')}</div><div class="pos dock">${tabbar('')}</div>`)}
+`;
+}
+
+function deckCards() {
+  return `<h3 class="pg-h3">Command Deck parts</h3>
+    <div class="pg-grid">
+      ${card('Console (desktop)', `<div class="pg-console">${consoleDesk()}</div>`, 'Selection, commands and the build row in one panel along the bottom', 'full')}
+      ${card('Resource strip', resBar(), 'Menu, credits and power together at the top', 'span2')}
+      ${card('Phone tab bar', `<div class="pg-tabbar">${tabbar('select')}</div>`, 'Full width along the bottom of a phone', 'span2')}
+      ${card('Selected-unit card', unitCard(), 'Portrait, group, health, stats and the kinds selected', 'span2')}
+      ${card('Commands', cmdGrid(), 'Each with its key on a computer', 'span2')}
+    </div>`;
+}
+
 
 // ---------- Components (the same markup for every design) ----------
 
@@ -163,9 +266,10 @@ function deploy(disabled = false) {
   return `<button class="k-deploy s-btn primary"${disabled ? ' disabled' : ''}>${I('deploy')}<span>Deploy</span></button>`;
 }
 
+// The phone's order check, with the game's own arrowheads (or ore diamond)
+// turning round it; the timer below steps through their frames.
 function confirmCheck(kind: '' | 'foe' | 'ore' = '') {
-  const head = (r: number) => `<path transform="rotate(${r} 32 32)" d="M32 3 l6 8 h-12z"/>`;
-  return `<div class="k-confirm ${kind}"><svg class="ring" viewBox="0 0 64 64" aria-hidden="true">${[0, 90, 180, 270].map(head).join('')}</svg><button class="ok" aria-label="Send them here">${I('check')}</button></div>`;
+  return `<div class="k-confirm ${kind}"><img class="ring" data-ring="${kind || 'move'}" src="${RINGS[kind || 'move'][0]}" alt=""><button class="ok" aria-label="Send them here">${I('check')}</button></div>`;
 }
 
 function toast(text: string, kind = '') {
@@ -268,39 +372,37 @@ function moveLine(x1: number, y1: number, x2: number, y2: number) {
   return `<i class="k-moveline" style="left:${x1}px;top:${y1}px;width:${len}px;transform:rotate(${a}deg)"></i>`;
 }
 
-// ---------- Cursors, drawn in each design's colours and style ----------
+// ---------- Cursors: the game's own, from cursors.ts ----------
 
-function cursorSvgs(t: Theme) {
-  const [main, out, foe, ore] = t.cur;
-  const st = t.cursor;
-  const sw = st === 'line' ? 1.4 : st === 'solid' ? 1.6 : 2;
-  const crisp = st === 'pixel' ? ' shape-rendering="crispEdges"' : '';
-  const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"${crisp}>${body}</svg>`;
-  const arrow =
-    st === 'pixel'
-      ? svg(`<path d="M2 2h2v2h2v2h2v2h2v2h2v2h2v2h2v2h-6v2h2v4h-2v2h-2v-4h-2v-2H8v2H6v2H4v2H2z" fill="${out}"/><path d="M4 5h2v2h2v2h2v2h2v2h2v2h-6v2h2v4h-2v-4H8v2H6v2H4z" fill="${main}"/>`)
-      : st === 'line'
-        ? svg(`<path d="M4 3l18 11-8 2-4 8z" fill="${out}" fill-opacity=".55" stroke="${main}" stroke-width="${sw}" stroke-linejoin="round"/>`)
-        : svg(`<path d="M4 3l18 11-8 2-4 8z" fill="${main}" stroke="${out}" stroke-width="2" stroke-linejoin="round"/>`);
-  const four = (c: string, inner: string) => {
-    const heads = [0, 90, 180, 270]
-      .map((r) =>
-        st === 'line'
-          ? `<path transform="rotate(${r} 16 16)" d="M10 4l6 6 6-6" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`
-          : `<path transform="rotate(${r} 16 16)" d="M9 3h14l-7 7z" fill="${c}" stroke="${out}" stroke-width="1.5" stroke-linejoin="round"/>`,
-      )
-      .join('');
-    return svg(heads + inner);
-  };
-  const move = four(main, `<circle cx="16" cy="16" r="2" fill="${main}" stroke="${out}"/>`);
-  const attack = four(foe, `<circle cx="16" cy="16" r="5" fill="none" stroke="${foe}" stroke-width="1.6"/><circle cx="16" cy="16" r="1.5" fill="${foe}"/>`);
-  const harvest = svg(`<path d="M16 2l14 14-14 14L2 16z" fill="none" stroke="${out}" stroke-width="4"/><path d="M16 2l14 14-14 14L2 16z" fill="none" stroke="${ore}" stroke-width="2"/><path d="M12 15l4-4 4 4-2 5h-4z" fill="${ore}" stroke="${out}"/>`);
-  const corners = svg(['M3 10V3h7', 'M22 3h7v7', 'M29 22v7h-7', 'M10 29H3v-7'].map((d) => `<path d="${d}" fill="none" stroke="${out}" stroke-width="4"/><path d="${d}" fill="none" stroke="${main}" stroke-width="2"/>`).join(''));
-  const blocked = svg(`<circle cx="16" cy="16" r="11" fill="none" stroke="${out}" stroke-width="5"/><circle cx="16" cy="16" r="11" fill="none" stroke="${foe}" stroke-width="3"/><path d="M8.5 8.5l15 15" stroke="${out}" stroke-width="5"/><path d="M8.5 8.5l15 15" stroke="${foe}" stroke-width="3"/>`);
-  return { arrow, move, attack, harvest, corners, blocked };
-}
+initCursors();
+const RINGS: Record<string, string[]> = { move: moveRingFrames(), foe: attackRingFrames(), ore: harvestRingFrames() };
+const CURSOR_NAMES: [CursorKind, string][] = [
+  ['arrow', 'Pointer'], ['hand', 'Button'], ['move', 'Move'], ['attack', 'Attack'], ['harvest', 'Harvest'],
+  ['corners', 'Pick unit'], ['rally', 'Rally'], ['build', 'Place'], ['blocked', 'Can’t'], ['grab', 'Drag'],
+];
+const cursorImg = (css: string) => css.match(/url\(([^)]+)\)/)?.[1] ?? '';
+const ICON_NOTE: Record<IconSet, string> = {
+  pixel: 'Chunky pixel set (the game’s own)',
+  fine: 'Fine pixel set: one-pixel lines with a faint fill',
+  duo: 'Smooth two-tone set',
+  line: 'Line set',
+};
 
-const url = (s: string) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+// The move, attack and harvest cursors turn as they do in the game, and the
+// order checks' rings with them.
+let step = 0;
+setInterval(() => {
+  step = (step + 1) % MOVE_STEPS;
+  const corner = CORNER_FRAMES[Math.floor(step / 3) % CORNER_FRAMES.length];
+  const frame: Partial<Record<CursorKind, string>> = { move: moveCursor(step), attack: ATTACK_FRAMES[step], harvest: HARVEST_FRAMES[step], corners: corner };
+  const root = document.documentElement.style;
+  for (const [k, v] of Object.entries(frame)) root.setProperty(`--cur-${k}`, v);
+  for (const img of document.querySelectorAll<HTMLImageElement>('img[data-ring]')) img.src = RINGS[img.dataset.ring!][step];
+  for (const img of document.querySelectorAll<HTMLImageElement>('img[data-cur]')) {
+    const v = frame[img.dataset.cur as CursorKind];
+    if (v) img.src = cursorImg(v);
+  }
+}, 90);
 
 // ---------- The page ----------
 
@@ -325,18 +427,15 @@ function card(title: string, body: string, note = '', cls = '') {
 function render() {
   IS = T.icons;
   mapId = 0;
-  const cur = cursorSvgs(T);
   kit.style.cssText = '';
   kit.dataset.theme = T.id;
   document.documentElement.dataset.theme = T.id;
-  kit.style.setProperty('--cur-arrow', `${url(cur.arrow)} 3 3, default`);
-  kit.style.setProperty('--cur-move', `${url(cur.move)} 16 16, crosshair`);
-  kit.style.setProperty('--cur-attack', `${url(cur.attack)} 16 16, crosshair`);
-  kit.style.setProperty('--cur-pick', `${url(cur.corners)} 16 16, pointer`);
+  kit.dataset.family = document.documentElement.dataset.family = T.id === 'now' ? 'now' : 'pixel';
   kit.style.setProperty('--bg-url', `url("${BG}")`);
   for (const [k, v] of Object.entries(FRAMES[T.id] ?? {})) kit.style.setProperty(k, v);
 
   const idx = THEMES.indexOf(T);
+  const deck = T.layout === 'deck';
   kit.innerHTML = `
   <section class="pg-intro">
     <div class="pg-intro-text">
@@ -367,13 +466,13 @@ function render() {
           ${selbox(948, 560, 44, 34, 0.25)}
           ${rally(700, 520)}
         </div>
-        <div class="hud">
+        <div class="hud">${deck ? deckDesk() : `
           <div class="pos tl">${hudTop()}</div>
           <div class="pos tc">${toast('Lancer tank ready')}</div>
           <div class="pos tr">${mini()}</div>
           <div class="pos side">${buildPanel('side')}</div>
           <div class="pos bc">${selBar('full')}${toolbar('select')}</div>
-          <div class="pos tipat">${tip()}</div>
+          <div class="pos tipat">${tip()}</div>`}
         </div>
       </div>
     </div>
@@ -382,7 +481,7 @@ function render() {
   <section class="pg-sec">
     <h2 class="pg-h2">In the game <small>Phone</small></h2>
     <div class="phones">
-      ${phone('Building', -1035, -445, `<div class="pos tl">${hudTop()}</div><div class="pos tr">${mini()}</div><div class="pos sheet">${buildPanel('sheet', 0, 6)}</div><div class="pos bc">${toolbar('build')}</div>`)}
+${deck ? deckPhones() : `      ${phone('Building', -1035, -445, `<div class="pos tl">${hudTop()}</div><div class="pos tr">${mini()}</div><div class="pos sheet">${buildPanel('sheet', 0, 6)}</div><div class="pos bc">${toolbar('build')}</div>`)}
       ${phone(
         'Units selected',
         -570,
@@ -391,6 +490,7 @@ function render() {
         `${selbox(414, 510, 44, 34, 0.9, GROUP_COLORS[3])}${selbox(452, 744, 40, 30, 0.6, GROUP_COLORS[3])}${selbox(400, 760, 40, 30, 0.35, GROUP_COLORS[3])}${moveLine(436, 527, 545, 610)}`,
       )}
       ${phone('Deploying', -330, -505, `<div class="pos tl">${hudTop(5000)}</div><div class="pos tr">${mini()}</div><div class="pos deployat">${deploy()}</div><div class="pos tc low">${toast('Tap Deploy to set up your base')}</div><div class="pos bc">${toolbar('')}</div>`)}
+`}
       ${phone('Lobby', -1035, -300, `<div class="pos center">${lobbyRoom()}</div>`, '', 'dim')}
     </div>
   </section>
@@ -402,10 +502,11 @@ function render() {
       ${card('Buttons', `<div class="pg-col"><div class="pg-row"><button class="k-btn primary">${I('play')}<span>Primary</span></button><button class="k-btn">${I('gear')}<span>Secondary</span></button></div><div class="pg-row"><button class="k-btn danger">${I('back')}<span>Danger</span></button><button class="k-btn" disabled><span>Disabled</span></button><button class="k-btn ghost"><span>Ghost</span></button></div><div class="pg-row"><button class="k-btn sm"><span>Small</span></button><button class="k-ibtn s-btn" aria-label="Menu">${I('menu')}</button><button class="k-ibtn s-btn sm" aria-label="Close">${I('close')}</button><button class="k-ibtn s-btn on" aria-label="Menu">${I('menu')}</button></div></div>`, 'Primary, secondary, danger, disabled, ghost, small and icon buttons', 'plain span2')}
       ${card('Type and colour', `<div class="pg-col"><div class="k-title">Choose a map</div><div class="k-label">Section label</div><p class="k-p">Body text for blurbs, tooltips and hints. Ore hauler returning to refinery.</p><div class="pg-row">${badge('New')}${badge('3', 'count')}${badge('Host', 'tag')}<span class="k-alertdot"></span></div></div>`, 'Title, label, body, badges, count bubble and alert dot', 'plain')}
       ${card('Fields', `<div class="pg-col"><label class="k-field"><span class="k-label">Your name</span><input class="k-input s-well" value="Tim"></label><label class="k-field"><span class="k-label">Version</span><span class="k-select s-well"><select><option>v2 · Isometric</option></select></span></label>${seg(['Initial', 'Combat'])}${range('Music', 70)}</div>`, 'Text input, select, segmented switch and slider', 'plain')}
-      ${card('Cursors', `<div class="pg-cursors">${Object.entries(cur).map(([k, s]) => `<div><span class="cv">${s}</span><small>${k}</small></div>`).join('')}</div>`, 'Hover the in-game mockups to try them', 'plain span2')}
-      ${card('Icons', `<div class="pg-icons">${(['menu', 'select', 'home', 'build', 'group', 'all', 'clear', 'close', 'shuffle', 'units', 'check', 'deploy', 'gear', 'back', 'flag', 'bolt', 'play', 'users', 'bot'] as IconName[]).map((n) => I(n)).join('')}</div>`, T.icons === 'pixel' ? 'Pixel set (the game’s own)' : 'Line set', 'plain span2')}
+      ${card('Cursors', `<div class="pg-cursors">${CURSOR_NAMES.map(([k, n]) => `<div><span class="cv" style="cursor:${CURSORS[k]}"><img data-cur="${k}" src="${cursorImg(CURSORS[k])}" alt=""></span><small>${n}</small></div>`).join('')}</div>`, 'The game’s own cursors, kept in every design. Hover the map in the mockups to try the move cursor', 'plain span2')}
+      ${card('Icons', `<div class="pg-icons">${(['menu', 'select', 'home', 'build', 'group', 'all', 'clear', 'close', 'shuffle', 'units', 'check', 'deploy', 'gear', 'back', 'flag', 'bolt', 'play', 'users', 'bot'] as IconName[]).map((n) => I(n)).join('')}</div>`, ICON_NOTE[T.icons], 'plain span2')}
     </div>
 
+    ${deck ? deckCards() : ''}
     <h3 class="pg-h3">HUD</h3>
     <div class="pg-grid">
       ${card('Menu button and credits', hudTop(), 'Top left; credits turn red when power is short')}
@@ -584,7 +685,9 @@ if (!THEMES.some((t) => t.id === first)) {
     first = '';
   }
 }
-pick(first || THEMES[1].id, false);
+prepareIcons()
+  .catch(() => undefined)
+  .then(() => pick(first || THEMES[1].id, false));
 document.fonts?.ready.then(fitStages);
 window.addEventListener('hashchange', () => {
   const id = location.hash.slice(1);

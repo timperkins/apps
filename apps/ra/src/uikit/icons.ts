@@ -65,9 +65,62 @@ const LINE: Record<IconName, string> = {
   bot: '<rect x="4" y="7" width="16" height="12" rx="2.5"/><path d="M12 3.5V7M2 12v3M22 12v3"/><circle cx="9" cy="13" r="1.4"/><circle cx="15" cy="13" r="1.4"/>',
 };
 
-export type IconSet = 'pixel' | 'line';
+// pixel: the game's own chunky 11x11 icons. line: thin vector strokes.
+// duo: the line icons with a soft see-through fill (two-tone).
+// fine: the line icons redrawn as small pixel art (16x16, one-pixel lines
+// with a faint fill), made by rasterizing them once at start-up (prepareIcons).
+export type IconSet = 'pixel' | 'line' | 'duo' | 'fine';
+
+const fine = new Map<IconName, string>();
+
+function rasterize(svg: string, n: number): Promise<Uint8ClampedArray> {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = c.height = n;
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0, n, n);
+      res(g.getImageData(0, 0, n, n).data);
+    };
+    img.onerror = rej;
+    img.src = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  });
+}
+
+export async function prepareIcons(): Promise<void> {
+  const N = 16;
+  await Promise.all(
+    (Object.keys(LINE) as IconName[]).map(async (name) => {
+      const wrap = (attrs: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${N}" height="${N}" ${attrs}>${LINE[name]}</svg>`;
+      const [stroke, fill] = await Promise.all([
+        rasterize(wrap('fill="none" stroke="#000" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"'), N),
+        rasterize(wrap('fill="#000" stroke="none"'), N),
+      ]);
+      let solid = '';
+      let soft = '';
+      for (let y = 0; y < N; y++) {
+        let x = 0;
+        while (x < N) {
+          const kind = (i: number) => (stroke[(y * N + i) * 4 + 3] > 110 ? 2 : fill[(y * N + i) * 4 + 3] > 128 ? 1 : 0);
+          const k = kind(x);
+          let w = 1;
+          while (x + w < N && kind(x + w) === k) w++;
+          if (k === 2) solid += R(x, y, w, 1);
+          else if (k === 1) soft += R(x, y, w, 1);
+          x += w;
+        }
+      }
+      fine.set(name, `<g opacity=".3">${soft}</g>${solid}`);
+    }),
+  );
+}
 
 export function icon(name: IconName, set: IconSet, cls = 'ic'): string {
+  if (set === 'fine' && fine.has(name))
+    return `<svg class="${cls} fine" viewBox="0 0 16 16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${fine.get(name)}</svg>`;
+  if (set === 'duo')
+    return `<svg class="${cls} duo" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g fill="currentColor" fill-opacity=".28" stroke="none">${LINE[name]}</g><g fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)">${LINE[name]}</g></svg>`;
   if (set === 'line')
     return `<svg class="${cls} line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LINE[name]}</svg>`;
   const cut = PIXEL_CUT[name];
