@@ -1,5 +1,5 @@
-// Colours the game itself uses: the eight group colours and the twelve player
-// colours (the same in any design).
+// Colors the game itself uses: the eight group colors and the twelve player
+// colors (the same in any design).
 export const GROUP_COLORS = ['#4a9dff', '#3fe6e6', '#b4f03c', '#ffd93b', '#ff9a2e', '#ff6fb5', '#b07cff', '#f4f7ea'];
 export const GROUP_NAMES = ['Blue', 'Cyan', 'Lime', 'Yellow', 'Orange', 'Pink', 'Purple', 'White'];
 export const PLAYER_COLORS: [string, string][] = [

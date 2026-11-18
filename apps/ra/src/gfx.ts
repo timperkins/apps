@@ -1,4 +1,4 @@
-// Pixel buffers, noise and colour helpers. Every sprite in the game is drawn
+// Pixel buffers, noise and color helpers. Every sprite in the game is drawn
 // procedurally into one of these buffers and then copied to a canvas.
 
 export type RGB = [number, number, number];
@@ -279,7 +279,7 @@ export class Pix {
 }
 
 // A shader receives local sprite coordinates (u forward, v to the right of
-// travel) and returns a colour, or null for transparent.
+// travel) and returns a color, or null for transparent.
 export type Shader = (u: number, v: number, sx: number, sy: number) => RGB | null;
 
 // Renders a top-down vehicle in `dirs` evenly spaced headings by sampling the

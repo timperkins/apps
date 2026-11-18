@@ -17,7 +17,7 @@ export const enum K {
 
 // Map pixels per pixel of the overview used for the globe and unpainted tiles.
 export const OV = 4;
-// Margin of ground classified round a tile, for the painter's neighbour tests
+// Margin of ground classified round a tile, for the painter's neighbor tests
 // and for props whose jittered spot pokes over the edge.
 export const M = 8;
 // Ground features keep a fixed size however big the planet is.

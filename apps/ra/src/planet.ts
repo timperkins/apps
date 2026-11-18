@@ -3,7 +3,7 @@
 // The map wraps round both ways, so it can't be a true sphere's surface.
 // Instead the globe wraps the map round itself from the point under the
 // camera: each point on the globe is looked up by its distance and direction
-// from the centre of the disc (an azimuthal equidistant projection), with one
+// from the center of the disc (an azimuthal equidistant projection), with one
 // lap of the map equal to one lap of the globe. Every part of the map gets the
 // same treatment wherever it is, so panning just slides the map round the
 // globe without the stretching and pinching a latitude/longitude grid gives
@@ -21,10 +21,10 @@ const SUN = (() => {
 })();
 
 export interface View {
-  cx: number; // centre of the globe on the canvas
+  cx: number; // center of the globe on the canvas
   cy: number;
   r: number; // radius in canvas pixels
-  x: number; // map point at the centre of the globe
+  x: number; // map point at the center of the globe
   y: number;
 }
 
@@ -154,14 +154,14 @@ export class Globe {
   }
 
   // Map position of a canvas pixel, or null if it misses the globe. x comes
-  // back unwrapped, within half a world of the view's centre longitude.
+  // back unwrapped, within half a world of the view's center longitude.
   pick(v: View, px: number, py: number): { x: number; y: number } | null {
     const nx = (px - v.cx) / v.r;
     const ny = (py - v.cy) / v.r; // down
     const s = Math.hypot(nx, ny);
     if (s > 1) return null;
     if (s < 1e-9) return { x: v.x, y: v.y };
-    const k = Math.asin(s) / s; // angle from the centre, per unit of disc radius
+    const k = Math.asin(s) / s; // angle from the center, per unit of disc radius
     return { x: v.x + nx * k * (this.mw / TAU), y: v.y + ny * k * (this.mh / Math.PI) };
   }
 
@@ -202,7 +202,7 @@ export class Globe {
     const y0 = Math.max(0, Math.floor(v.cy - v.r * halo));
     const y1 = Math.min(H, Math.ceil(v.cy + v.r * halo));
     const inv = 1 / v.r;
-    // texels per radian of arc, and the texel under the centre
+    // texels per radian of arc, and the texel under the center
     const uK = tw / TAU;
     const vK = th / Math.PI;
     const u0 = (v.x / this.mw) * tw;
@@ -230,7 +230,7 @@ export class Globe {
           continue;
         }
         const nz = Math.sqrt(1 - r2);
-        // arc from the centre, along the pixel's direction from the centre
+        // arc from the center, along the pixel's direction from the center
         const sr = Math.sqrt(r2);
         const k = sr < 1e-9 ? 1 : Math.asin(sr > 1 ? 1 : sr) / sr;
         let uf = (u0 + nx * k * uK) % tw;

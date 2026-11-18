@@ -588,7 +588,7 @@ export function landGrid(def: MapDef, seed: number, w: number, h: number, pw: nu
   return { kind, depth };
 }
 
-// The colours players' start dots are drawn in on the previews (a start's
+// The colors players' start dots are drawn in on the previews (a start's
 // number is its place in startsFor).
 export const START_DOTS = ['#8fb2dc', '#eba05d'];
 // every place a player can start, all alike (the multiplayer lobby)

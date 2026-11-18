@@ -1,4 +1,7 @@
 import './style.css';
+import './theme.css';
+import { applyTheme } from './theme';
+import { lineIcon, type IconName } from './line-icons';
 import { GROUP_COLORS, GROUP_NAMES, type GameLike } from './types';
 import { Globe, View } from './planet';
 import { CH } from './tiles';
@@ -17,6 +20,8 @@ import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CU
 initCursors();
 
 // The newest PR in this build (set by CI), as a tiny label in the corner.
+applyTheme();
+
 const prNo = import.meta.env.VITE_PR_NUMBER;
 if (prNo) {
   const el = document.querySelector<HTMLDivElement>('#build-no')!;
@@ -84,7 +89,7 @@ function save(key: string, v: string): void {
 let seed = Math.floor(Math.random() * 100000);
 let game: GameLike;
 let built = { w: 0, h: 0 }; // map size in art pixels
-// The camera is the map point at the centre of the screen. The map wraps
+// The camera is the map point at the center of the screen. The map wraps
 // round both ways, and the camera's x and y keep counting as you go round,
 // which is how orders know which way round to send units.
 const cen = { x: 0, y: 0 };
@@ -134,8 +139,8 @@ function lockOnPan(): void {
   if (menuPick && !locked && Math.hypot(cen.x - menuPick.x, cen.y - menuPick.y) > 2) lockGroup();
 }
 
-// ---------- Colour groups ----------
-// Group puts the selection into one of eight colour groups (Shift+1-8); the
+// ---------- Color groups ----------
+// Group puts the selection into one of eight color groups (Shift+1-8); the
 // groups in use show at the front of the selection menu, and tapping one (or
 // 1-8) selects it again, wherever its units are. Tapping the one already
 // selected takes you to it.
@@ -176,7 +181,7 @@ function pickGroup(g: number): void {
   if (was) goToSelection();
 }
 
-// Centre the view on the selection (the copy of it nearest the camera).
+// Center the view on the selection (the copy of it nearest the camera).
 function goToSelection(): void {
   const pts = game?.selectedPoints() ?? [];
   if (!pts.length || !built.w) return;
@@ -214,15 +219,8 @@ clearBtn.addEventListener('click', () => game?.deselect());
 // Commands for the selection (Deploy, Pack up...), drawn as buttons before
 // More and Clear. They are refreshed every frame, but the buttons are only
 // rebuilt when something about them changes.
-const ICONS: Record<string, string> = {
-  // arrows pushing out from a box
-  deploy: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="1" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="9" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="1" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="9" y="4" width="1" height="3"/>',
-  // arrows folding in
-  ok: '<rect x="1" y="5" width="2" height="2"/><rect x="3" y="7" width="2" height="2"/><rect x="5" y="5" width="2" height="2"/><rect x="7" y="3" width="2" height="2"/><rect x="9" y="1" width="1" height="2"/>',
-  x: '<rect x="1" y="1" width="2" height="2"/><rect x="3" y="3" width="2" height="2"/><rect x="5" y="5" width="1" height="1"/><rect x="6" y="6" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="1" width="2" height="2"/><rect x="6" y="3" width="2" height="2"/><rect x="3" y="6" width="2" height="2"/><rect x="1" y="8" width="2" height="2"/>',
-  star: '<rect x="5" y="0" width="1" height="3"/><rect x="4" y="3" width="3" height="1"/><rect x="0" y="4" width="11" height="1"/><rect x="2" y="5" width="7" height="1"/><rect x="3" y="6" width="5" height="1"/><rect x="2" y="7" width="7" height="2"/><rect x="1" y="9" width="2" height="2"/><rect x="8" y="9" width="2" height="2"/>',
-  pack: '<rect x="4" y="4" width="3" height="3"/><rect x="5" y="0" width="1" height="3"/><rect x="4" y="2" width="3" height="1"/><rect x="5" y="8" width="1" height="3"/><rect x="4" y="8" width="3" height="1"/><rect x="0" y="5" width="3" height="1"/><rect x="2" y="4" width="1" height="3"/><rect x="8" y="5" width="3" height="1"/><rect x="8" y="4" width="1" height="3"/>',
-};
+// the icons on the selection's command buttons (types.ts Act.icon)
+const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack' };
 let actsKey = '';
 let hasActs = false;
 // The bar above the toolbar: commands for the selection, and the selection menu.
@@ -259,13 +257,13 @@ function refreshTypes(): void {
   }
   const inGroup = groups.find((g) => g.sel);
   colorBtn.hidden = !canColor;
-  // in a colour group: the Group icon takes its colour
+  // in a color group: the Group icon takes its color
   if (inGroup) colorBtn.style.setProperty('--grp', inGroup.hex);
   else colorBtn.style.removeProperty('--grp');
   for (const [i, b] of [...paletteEl.children].entries()) b.setAttribute('aria-pressed', String(inGroup?.color === i));
   noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
   // All and Clear share one slot, so the bar doesn't shift: All while nothing
-  // is selected (greyed out with nothing on screen), Clear once something is
+  // is selected (grayed out with nothing on screen), Clear once something is
   const any = lastNames.length > 0;
   allBtn.hidden = any;
   allBtn.disabled = !!game.unitTypes && types.length === 0;
@@ -287,7 +285,7 @@ function refreshTypes(): void {
   groupsEl.hidden = !groups.length;
   typesEl.classList.toggle('group', locked);
   typesEl.style.setProperty('--grp', inGroup?.hex ?? '#9dff9d');
-  // a colour group already shows as its own button in front, pressed: no
+  // a color group already shows as its own button in front, pressed: no
   // second button for it
   if (locked && inGroup) {
     typesEl.replaceChildren();
@@ -361,7 +359,7 @@ function refreshActions(): void {
       b.className = 'act';
       b.disabled = !!a.disabled;
       if (a.title) b.title = a.title;
-      b.innerHTML = `<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">${ICONS[a.icon] ?? ''}</svg>`;
+      b.innerHTML = ICONS[a.icon] ? lineIcon(ICONS[a.icon]) : '';
       b.append(a.label);
       b.addEventListener('click', () => game.act?.(a.id));
       return b;
@@ -434,7 +432,7 @@ function placeConfirm(): void {
   confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
 }
 // A lone selected MCU gets a Deploy button floating just above it.
-deployBtn.innerHTML = `<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true">${ICONS.deploy ?? ''}</svg>Deploy`;
+deployBtn.innerHTML = `${lineIcon('deploy')}Deploy`;
 deployBtn.addEventListener('click', () => game?.act?.('deploy'));
 let deployKey = '';
 function placeDeploy(): void {
@@ -562,7 +560,7 @@ function applyScale(): void {
 }
 
 // Zoom to `z`, keeping the map point under client position (cx, cy) still.
-// In space the globe always zooms about its centre.
+// In space the globe always zooms about its center.
 function zoomTo(z: number, cx: number, cy: number): void {
   const before = planet;
   const m = toMap(cx, cy);
@@ -1032,7 +1030,7 @@ function showPlayGate(): void {
   btn.type = 'button';
   btn.className = 'play';
   btn.innerHTML =
-    '<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="0" width="2" height="11"/><rect x="4" y="1" width="2" height="9"/><rect x="6" y="3" width="2" height="5"/><rect x="8" y="4" width="2" height="3"/></svg><span>Play</span>';
+    `${lineIcon('play')}<span>Play</span>`;
   const go = (): void => {
     if (!gate.isConnected) return;
     gate.remove();

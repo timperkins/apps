@@ -31,7 +31,7 @@ body {
 #menu {
   position: fixed;
   top: calc(8px + env(safe-area-inset-top));
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--ink);
   background: var(--panel);
   border: 2px solid var(--edge);
@@ -264,7 +264,7 @@ body {
   display: grid;
   place-items: center;
   background: #121c0f;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--ink);
 }
 #loading[hidden] {
@@ -349,7 +349,7 @@ body {
   background: var(--panel);
   border: 2px solid var(--edge);
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
 }
 
 #toolbar button {
@@ -428,7 +428,7 @@ body {
   gap: 6px;
 }
 
-/* the selection menu, all on one row: the colour groups and a button per
+/* the selection menu, all on one row: the color groups and a button per
    kind of unit on screen (scrolling sideways when there are too many), then
    Color and All or Clear, which always show */
 #selMenu {
@@ -473,7 +473,7 @@ body {
   gap: 4px;
 }
 
-/* the colour groups in use, before the kinds of unit */
+/* the color groups in use, before the kinds of unit */
 #groups:has(+ #types:not([hidden])) {
   padding-right: 4px;
   border-right: 2px solid var(--edge);
@@ -497,7 +497,7 @@ body {
 }
 
 /* a group you have given orders to: fixed until you clear it, shown as one
-   button with how many there are (in its colour, if it has one) */
+   button with how many there are (in its color, if it has one) */
 #types.group {
   padding: 3px;
   border: 1px dashed var(--grp);
@@ -511,7 +511,7 @@ body {
 }
 
 
-/* Group: opens the palette of colours above the menu */
+/* Group: opens the palette of colors above the menu */
 #selBar #colorBtn {
   flex: none;
   width: 56px;
@@ -526,7 +526,7 @@ body {
   border-color: #9dff9d;
 }
 
-/* the eight colours to give the selection */
+/* the eight colors to give the selection */
 #palette {
   display: flex;
   gap: 4px;
@@ -564,7 +564,7 @@ body {
 
 #noTypes {
   padding: 0 6px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   font-size: 10px;
   color: var(--ink);
   opacity: 0.75;
@@ -681,7 +681,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   font-size: 11px;
   color: #10170d;
   background: #e0b83c;
@@ -776,7 +776,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   font-size: 11px;
   color: var(--ink);
   background: var(--panel);
@@ -881,7 +881,7 @@ body {
   flex-direction: column;
   gap: 6px;
   padding: 4px 4px 6px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--cream);
   background: var(--board);
   background-clip: padding-box;
@@ -1248,7 +1248,7 @@ body.sheet-open #selBar {
 
 /* On a wide screen the menu is a sidebar down the right, under the minimap,
    and it is always open: the toolbar's Build button and the close button go,
-   and the toolbar centres itself on the rest of the screen. */
+   and the toolbar centers itself on the rest of the screen. */
 @media (min-width: 900px) {
   #build {
     left: auto;
@@ -1283,7 +1283,7 @@ body.sheet-open #selBar {
   position: fixed;
   left: calc(4px + env(safe-area-inset-left));
   bottom: calc(3px + env(safe-area-inset-bottom));
-  font: 8px/1 'Silkscreen', ui-monospace, monospace;
+  font: 8px/1 var(--f-text);
   color: rgba(255, 255, 255, 0.6);
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.6);
   pointer-events: none;
@@ -1302,7 +1302,7 @@ body.sheet-open #selBar {
   transform: translateX(-50%);
   max-width: calc(100vw - 32px);
   padding: 6px 12px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   font-size: 12px;
   color: #10170d;
   background: #e0b83c;
@@ -1344,7 +1344,7 @@ body.sheet-open #selBar {
   display: flex;
   padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
   background: rgba(8, 12, 7, 0.82);
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--ink);
   overflow-y: auto;
 }
@@ -1573,7 +1573,7 @@ body.sheet-open #selBar {
   background:
     repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 4px),
     radial-gradient(ellipse at 50% 45%, rgba(10, 16, 8, 0.15) 0%, rgba(10, 16, 8, 0.6) 80%);
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--ink);
   overflow-y: auto;
 }
@@ -1889,7 +1889,7 @@ body.sheet-open #selBar {
   justify-content: center;
   padding: 16px;
   background: rgba(8, 12, 7, 0.55);
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   color: var(--ink);
 }
 
@@ -1966,7 +1966,7 @@ body.attract #menu {
   align-items: center;
   gap: 18px;
   padding: 22px 46px 22px 38px;
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: var(--f-text);
   font-size: clamp(28px, 9vw, 44px);
   letter-spacing: 0.08em;
   text-transform: uppercase;

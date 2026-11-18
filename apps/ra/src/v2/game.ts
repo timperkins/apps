@@ -59,7 +59,7 @@ const BNAME: Record<BuildingKind, string> = {
 };
 // Deploying: the Foundry vehicle turns to line up, then the yard rises.
 const RISE_S = 1.8;
-// Where a hauler unloads at a refinery (its striped pad), from its centre.
+// Where a hauler unloads at a refinery (its striped pad), from its center.
 const DOCK: [number, number] = [12, 11];
 // Buildings that make units, and so have rally points.
 const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
@@ -97,7 +97,7 @@ interface Unit {
   ty: number;
   moving: boolean;
   sel: boolean;
-  // the colour group you put it in (an index into GROUP_COLORS), if any
+  // the color group you put it in (an index into GROUP_COLORS), if any
   grp?: number;
   anim: number;
   hp: number;
@@ -256,7 +256,7 @@ interface Particle {
 
 const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
 
-// Height of each unit's visual centre above the ground (for picking and brackets).
+// Height of each unit's visual center above the ground (for picking and brackets).
 // Which of the hauler's three pictures to show for a load: empty, partly
 // full or full.
 function haulerFill(load = 0): number {
@@ -319,7 +319,7 @@ interface Eco {
 }
 const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new Map(), lowPower: false });
 
-/** A player in a multiplayer game: the side (colour) they play and their name. */
+/** A player in a multiplayer game: the side (color) they play and their name. */
 export interface Player {
   f: number;
   name: string;
@@ -387,7 +387,7 @@ function whiteOf(img: HTMLCanvasElement): HTMLCanvasElement {
 
 export class IsoGame implements GameLike {
   readonly fine = true;
-  // The side you play: 0 (Cobalt) in single player; your colour in a
+  // The side you play: 0 (Cobalt) in single player; your color in a
   // multiplayer game, where players lists everyone and net says whether this
   // screen is the host (which runs the game) or a player's (which shows it).
   me = 0;
@@ -828,7 +828,7 @@ export class IsoGame implements GameLike {
       return [st.sx, st.sy];
     });
     // ore fields: two near each start, one by the enemy base, one half way
-    // between neighbours, and more scattered round the land
+    // between neighbors, and more scattered round the land
     const startSites = spots.map((ms) => this.siteOf(...toWorld(ms[0], ms[1], 0)));
     const field = (sx: number, sy: number, n: number) => {
       const reach = 6 + Math.sqrt(n) * 5.5;
@@ -1227,7 +1227,7 @@ export class IsoGame implements GameLike {
         blocked,
       });
     }
-    // every tab shows from the start; one with nothing on it yet is greyed out
+    // every tab shows from the start; one with nothing on it yet is grayed out
     const tabs = TABS.map((tb) => ({ ...tb, icon: this.tabIcon(tb.id), disabled: !items.some((i) => i.tab === tb.id) }));
     return { credits: Math.floor(this.credits), store: this.store(), power: this.power(), tabs, items };
   }
@@ -2394,7 +2394,7 @@ export class IsoGame implements GameLike {
     return this.home;
   }
 
-  // ---------- Colour groups ----------
+  // ---------- Color groups ----------
   // You can put the selection into one of GROUP_COLORS' groups, then pick the
   // group again later from the selection menu (or 1-8), wherever its units
   // have gone. A unit is in one group at most; putting it in another moves it.
@@ -3532,7 +3532,7 @@ export class IsoGame implements GameLike {
         const ay = aim[1] + Math.sin(ang) * r;
         aim = [ax, ay, isB(t) ? 2 : this.terrain.elev(ax, ay)];
       } else {
-        // each round lands somewhere on it, not always dead centre
+        // each round lands somewhere on it, not always dead center
         const ang = Math.random() * Math.PI * 2;
         let ox: number, oy: number, oz: number;
         if (isB(t)) {
@@ -3742,7 +3742,7 @@ export class IsoGame implements GameLike {
     if (u.kind === 'buggy' || u.kind === 'arty' || u.kind === 'heli') {
       this.sound(u.x, u.y, 'explosion_small', 1, { rate: 0.85 }, z);
     } else {
-      // tracked armour cooks off in a string of blasts
+      // tracked armor cooks off in a string of blasts
       this.sound(u.x, u.y, 'explosion_large', 1, {}, z);
       for (let i = 1; i < 3; i++) this.sound(u.x, u.y, 'explosion_small', 0.7, { delay: i * (0.25 + Math.random() * 0.2), rate: 0.8 + Math.random() * 0.3 }, z);
     }
@@ -4326,7 +4326,7 @@ export class IsoGame implements GameLike {
     return cv;
   }
 
-  // Units as dots of their faction's colour, for the globe (screen positions).
+  // Units as dots of their faction's color, for the globe (screen positions).
   mapDots(): [number, number, RGB][] {
     return this.units.filter((u) => this.shown(u)).map((u) => {
       const [sx, sy] = toScreen(u.x, u.y);
@@ -4409,7 +4409,7 @@ export class IsoGame implements GameLike {
     }
   }
 
-  // The box round a unit: half-size and centre on the screen.
+  // The box round a unit: half-size and center on the screen.
   private unitBox(u: Unit): { x: number; y: number; rx: number; ry: number } {
     const st = UNIT[u.kind];
     const [sx, sy] = this.screenOf(u);
@@ -4421,7 +4421,7 @@ export class IsoGame implements GameLike {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
     const grp = u.f === this.me && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
-    // in a colour group: its corners are in the group's colour
+    // in a color group: its corners are in the group's color
     c.fillStyle = grp ?? (u.f === this.me ? '#ffffff' : '#ff6a5a');
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);

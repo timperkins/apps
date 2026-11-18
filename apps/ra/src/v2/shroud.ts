@@ -100,7 +100,7 @@ export class Shroud {
     const bx: [number, number, number, number] = [i0 * S - m, j0 * S - m, (i1 + 1) * S + m, (j1 + 1) * S + m];
     const o = this.box;
     this.box = o ? [Math.min(o[0], bx[0]), Math.min(o[1], bx[1]), Math.max(o[2], bx[2]), Math.max(o[3], bx[3])] : bx;
-    // the tiles these cells reach (a cell's value blends into its neighbours)
+    // the tiles these cells reach (a cell's value blends into its neighbors)
     const t0 = Math.floor(((i0 - 1) * S) / CH);
     const t1 = Math.floor(((i1 + 2) * S) / CH);
     const u0 = Math.floor(((j0 - 1) * S) / CH);

@@ -157,7 +157,7 @@ export class Game {
       if (T.k(x, y) !== K.Grass || T.k(x + 60, y) !== K.Grass || T.k(x - 60, y) !== K.Grass) continue;
       sites.push({ x, y, f: sites.length % 2, home: false });
     }
-    // roads from each base to its two nearest neighbours
+    // roads from each base to its two nearest neighbors
     const lines: [number, number][][] = [];
     const done = new Set<string>();
     sites.forEach((a, i) => {
@@ -660,7 +660,7 @@ export class Game {
     return cv;
   }
 
-  // Units as dots of their faction's colour, for the globe.
+  // Units as dots of their faction's color, for the globe.
   mapDots(): [number, number, RGB][] {
     return this.units.map((u) => [u.x, u.y, FACTIONS[u.f].light]);
   }

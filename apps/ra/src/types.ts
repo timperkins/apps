@@ -32,12 +32,12 @@ export interface UnitType {
   sel: number; // how many of those are selected
 }
 
-// The colours you can give a selection, to pick it again later (1-8). Red
+// The colors you can give a selection, to pick it again later (1-8). Red
 // is left out: it is the enemy's.
 export const GROUP_COLORS = ['#4a9dff', '#3fe6e6', '#b4f03c', '#ffd93b', '#ff9a2e', '#ff6fb5', '#b07cff', '#f4f7ea'];
 export const GROUP_NAMES = ['Blue', 'Cyan', 'Lime', 'Yellow', 'Orange', 'Pink', 'Purple', 'White'];
 
-// A colour group with units in it.
+// A color group with units in it.
 export interface GroupInfo {
   color: number; // index into GROUP_COLORS
   hex: string;
@@ -95,7 +95,7 @@ export interface GameLike {
   // whatever shows over it).
   renderOver?(x0: number, y0: number, x1: number, y1: number): void;
   // A coarse picture of the whole map for the globe views (the bases included),
-  // and the units as coloured dots.
+  // and the units as colored dots.
   // The coarse picture is built a little at a time: mapStep(ms) works on it
   // for up to ms milliseconds and says whether it is ready.
   mapStep(ms: number): boolean;
@@ -120,7 +120,7 @@ export interface GameLike {
   selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
   // The kinds of unit of yours that are selected, wherever they are.
   selectedTypes?(): UnitType[];
-  // Colour groups: the ones in use, putting the selection into one, and
+  // Color groups: the ones in use, putting the selection into one, and
   // selecting one (false if it has no units left).
   groups?(): GroupInfo[];
   setGroup?(g: number): void;
@@ -137,7 +137,7 @@ export interface GameLike {
   // Goes up whenever the bases change, so the globe's picture is redrawn.
   mapVersion?: number;
   // Building: the build menu (null until there is anything to build), tapping
-  // an item (start, pause, resume, or place it when ready), cancelling it,
+  // an item (start, pause, resume, or place it when ready), canceling it,
   // and short messages for the player.
   buildMenu?(): BuildMenu | null;
   buildTap?(id: string): void;

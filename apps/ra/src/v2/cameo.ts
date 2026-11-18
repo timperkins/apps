@@ -19,7 +19,7 @@ const LH = CAMEO_H / 2;
 
 export type Scene = 'meadow' | 'forest' | 'ridge' | 'lake' | 'dusk' | 'ore' | 'dry' | 'battle';
 
-// Which landscape each picture gets: neighbours on the menu all differ.
+// Which landscape each picture gets: neighbors on the menu all differ.
 export const SCENES: Record<string, Scene> = {
   power: 'dusk',
   barracks: 'forest',
@@ -139,7 +139,7 @@ function ridgeLine(seed: number, base: number, amp: number, kind: 'hills' | 'pea
   };
 }
 
-// Paint the far part of the landscape (sky, hills, the ground's colour) at
+// Paint the far part of the landscape (sky, hills, the ground's color) at
 // half resolution.
 function paintLand(scene: Scene, seed: number): HTMLCanvasElement {
   const D = DEFS[scene];
@@ -313,8 +313,8 @@ function recede(c: CanvasRenderingContext2D): void {
       const dy = (y / CAMEO_H - 0.45) * 2;
       const vig = Math.min(1, Math.max(0, Math.hypot(dx, dy) - 0.55)) * 0.45;
       const k = 0.8 - vig;
-      const grey = (d[i] + d[i + 1] + d[i + 2]) / 3;
-      for (let ch = 0; ch < 3; ch++) d[i + ch] = (d[i + ch] * 0.78 + grey * 0.22) * k;
+      const gray = (d[i] + d[i + 1] + d[i + 2]) / 3;
+      for (let ch = 0; ch < 3; ch++) d[i + ch] = (d[i + ch] * 0.78 + gray * 0.22) * k;
     }
   c.putImageData(id, 0, 0);
 }

@@ -287,7 +287,7 @@ export interface BuildingArt {
   img: HTMLCanvasElement;
   w: number;
   h: number;
-  // pad (foundation) relative to the bottom-centre anchor
+  // pad (foundation) relative to the bottom-center anchor
   pad: { x: number; y: number; w: number; h: number };
 }
 

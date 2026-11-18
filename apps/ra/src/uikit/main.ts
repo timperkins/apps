@@ -1,69 +1,16 @@
 // The UI kit page (/ui/): every piece of the game's interface, on its own and
 // in the game, in Soft Pixel, with a panel for trying other fonts, icons and
-// colours on it. Nothing here is used by the game yet: it is for settling the
+// colors on it. Nothing here is used by the game yet: it is for settling the
 // design. The look is in kit.css under [data-theme='soft']; the panel sets
-// CSS variables (and the frames drawn from the colours), so every component
+// CSS variables (and the frames drawn from the colors), so every component
 // below is the same markup whatever is picked.
 import './kit.css';
 import { COIN_ART, IconName, IconSet, icon, prepareIcons } from './icons';
 import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, CursorKind, HARVEST_FRAMES, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames } from '../cursors';
 import { GROUP_COLORS, PLAYER_COLORS } from './colors';
-import { COLOR_KEYS, Colors, DEFAULT, Design, FONTS, ICON_SETS, PRESETS, ROLES, Role, fromHash, inkOn, mix, rgba, toHash } from './design';
+import { COLOR_KEYS, Colors, DEFAULT, Design, FONTS, ICON_SETS, PRESETS, ROLES, Role, fromHash, toHash } from './design';
 import { useFont } from './fonts';
-import { pixelFrame } from './frames';
-
-// The panel frames (see frames.ts) and the colour variables, from the eight
-// colours picked.
-const STEPS = [5, 3, 2, 1, 1];
-function colorVars(c: Colors): Record<string, string> {
-  const W = '#ffffff', K = '#000000';
-  const f = (fill: string, line: string, trim?: string) => pixelFrame({ fill, line, hi: mix(fill, W, 0.18), lo: mix(fill, K, 0.3), trim, steps: STEPS });
-  const btn = mix(c.panel, c.ink, 0.1);
-  const hover = mix(c.panel, c.ink, 0.17);
-  const well = mix(c.panel, K, 0.42);
-  const dark = (x: string) => mix(x, K, 0.82);
-  return {
-    '--fr-panel': f(c.panel, c.edge, c.trim),
-    '--fr-btn': f(btn, c.edge),
-    '--fr-hover': f(hover, c.edge),
-    '--fr-on': f(c.on, dark(c.on)),
-    '--fr-primary': f(c.accent, dark(c.accent)),
-    '--fr-danger': f(c.danger, dark(c.danger)),
-    '--fr-well': pixelFrame({ fill: well, line: c.edge, hi: mix(well, K, 0.25), lo: mix(c.panel, W, 0.1), steps: STEPS }),
-    '--fr-toast': f(c.ink, dark(c.ink)),
-    '--page': mix(c.panel, K, 0.58),
-    '--page-2': mix(c.panel, K, 0.4),
-    '--card': mix(c.panel, K, 0.5),
-    '--card-line': rgba(c.ink, 0.1),
-    '--panel-solid': c.panel,
-    '--line': c.edge,
-    '--trim': c.trim,
-    '--ink': c.ink,
-    '--page-ink': c.ink,
-    '--dim': mix(c.ink, c.panel, 0.38),
-    '--page-dim': mix(c.ink, c.panel, 0.42),
-    '--accent': c.accent,
-    '--accent-ink': dark(c.accent),
-    '--bubble': c.accent,
-    '--bubble-ink': dark(c.accent),
-    '--thumb': c.accent,
-    '--thumb-line': dark(c.accent),
-    '--accent-2': c.good,
-    '--ok': c.good,
-    '--new-ink': dark(c.good),
-    '--danger': mix(c.danger, W, 0.25),
-    '--on': c.on,
-    '--on-ink': inkOn(c.on, mix(c.panel, K, 0.3)),
-    '--sel': mix(c.ink, W, 0.4),
-    '--mini-view': mix(c.ink, W, 0.4),
-    '--toast-ink': inkOn(c.ink, mix(c.panel, K, 0.3)),
-    '--move-line': rgba(mix(c.ink, W, 0.4), 0.85),
-    '--title-shadow': `0 3px 0 ${c.edge}`,
-    '--track': well,
-    '--track-shadow': `inset 0 0 0 2px ${c.edge}`,
-    '--pwr-track': c.edge,
-  };
-}
+import { themeVars } from '../theme';
 
 const art = import.meta.glob('./art/*.{png,webp}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 const A = (n: string) => art[`./art/${n}`];
@@ -346,10 +293,10 @@ function render() {
   kit.innerHTML = `
   <section class="pg-intro">
     <div class="pg-intro-text">
-      <div class="pg-num">Your pick · now tweak it</div>
+      <div class="pg-num">Your pick · now in the game</div>
       <h1 class="pg-name">Soft Pixel</h1>
-      <p class="pg-tag">Rounder and warmer</p>
-      <p class="pg-blurb">Bigger, rounder stepped corners, a warm palette and thin pixel fonts. Use the Tweak panel to try a different font for each kind of text, another icon set and other colours. Everything on the page changes as you pick, and the address keeps your picks, so sending the link shows exactly what you chose.</p>
+      <p class="pg-tag">The game’s look</p>
+      <p class="pg-blurb">Bigger, rounder stepped corners, Night ops colors, Jersey 15 headings, DotGothic16 for everything else and smooth line icons: what the game now uses. The Tweak panel still tries other fonts, icons and colors, and the address keeps what you pick, so a link shows exactly what you chose.</p>
       <ul class="pg-traits" data-traits></ul>
     </div>
     <div class="pg-intro-side">
@@ -406,7 +353,7 @@ function render() {
     <h3 class="pg-h3">Basics</h3>
     <div class="pg-grid">
       ${card('Buttons', `<div class="pg-col"><div class="pg-row"><button class="k-btn primary">${I('play')}<span>Primary</span></button><button class="k-btn">${I('gear')}<span>Secondary</span></button></div><div class="pg-row"><button class="k-btn danger">${I('back')}<span>Danger</span></button><button class="k-btn" disabled><span>Disabled</span></button><button class="k-btn ghost"><span>Ghost</span></button></div><div class="pg-row"><button class="k-btn sm"><span>Small</span></button><button class="k-ibtn s-btn" aria-label="Menu">${I('menu')}</button><button class="k-ibtn s-btn sm" aria-label="Close">${I('close')}</button><button class="k-ibtn s-btn on" aria-label="Menu">${I('menu')}</button></div></div>`, 'Primary, secondary, danger, disabled, ghost, small and icon buttons', 'plain span2')}
-      ${card('Type and colour', `<div class="pg-col"><div class="k-title">Choose a map</div><div class="k-label">Section label</div><p class="k-p">Body text for blurbs, tooltips and hints. Ore hauler returning to refinery.</p><div class="pg-row">${badge('New')}${badge('3', 'count')}${badge('Host', 'tag')}<span class="k-alertdot"></span></div></div>`, 'Title, label, body, badges, count bubble and alert dot', 'plain')}
+      ${card('Type and color', `<div class="pg-col"><div class="k-title">Choose a map</div><div class="k-label">Section label</div><p class="k-p">Body text for blurbs, tooltips and hints. Ore hauler returning to refinery.</p><div class="pg-row">${badge('New')}${badge('3', 'count')}${badge('Host', 'tag')}<span class="k-alertdot"></span></div></div>`, 'Title, label, body, badges, count bubble and alert dot', 'plain')}
       ${card('Fields', `<div class="pg-col"><label class="k-field"><span class="k-label">Your name</span><input class="k-input s-well" value="Tim"></label><label class="k-field"><span class="k-label">Version</span><span class="k-select s-well"><select><option>v2 · Isometric</option></select></span></label>${seg(['Initial', 'Combat'])}${range('Music', 70)}</div>`, 'Text input, select, segmented switch and slider', 'plain')}
       ${card('Cursors', `<div class="pg-cursors">${CURSOR_NAMES.map(([k, n]) => `<div><span class="cv" style="cursor:${CURSORS[k]}"><img data-cur="${k}" src="${cursorImg(CURSORS[k])}" alt=""></span><small>${n}</small></div>`).join('')}</div>`, 'The game’s own cursors, kept in every design. Hover the map in the mockups to try the move cursor', 'plain span2')}
       ${card('Icons', `<div class="pg-icons">${(['menu', 'select', 'home', 'build', 'group', 'all', 'clear', 'close', 'shuffle', 'units', 'check', 'deploy', 'gear', 'back', 'flag', 'bolt', 'play', 'users', 'bot'] as IconName[]).map((n) => I(n)).join('')}</div>`, `${ICON_SETS.find((x) => x.id === D.icons)!.name}: ${ICON_SETS.find((x) => x.id === D.icons)!.note.toLowerCase()}. Pick another set in the Tweak panel`, 'plain span2')}
@@ -434,11 +381,11 @@ function render() {
 
     <h3 class="pg-h3">Selecting and orders</h3>
     <div class="pg-grid">
-      ${card('Selection bar', selBar('full'), 'Colour groups, unit kinds (lit when selected, dashed when partly), Group and Clear', 'span2')}
+      ${card('Selection bar', selBar('full'), 'Color groups, unit kinds (lit when selected, dashed when partly), Group and Clear', 'span2')}
       ${card('Locked group', selBar('locked'), 'After an order the selection becomes one button')}
-      ${card('Colour groups', palette(), 'Pick a colour to make the selection a group')}
+      ${card('Color groups', palette(), 'Pick a color to make the selection a group')}
       ${card('Unit kind buttons', `<div class="pg-row">${utype('lancer', 4)}${utype('lancer', 4, true)}${utype('buggy', 3, false, true)}${grp(4, 'rifle', 8)}${grp(4, 'rifle', 8, true)}</div>`, 'Off, on, partly selected, group, group selected')}
-      ${card('Selection, health and rally', `<div class="pg-units">${selbox(10, 22, 56, 42, 1)}${selbox(90, 22, 56, 42, 0.5)}${selbox(170, 22, 56, 42, 0.2)}${selbox(250, 22, 56, 42, 0.8, GROUP_COLORS[1])}</div><div class="pg-units short">${rally(40, 44)}${moveLine(70, 34, 300, 20)}</div>`, 'Corners in the group colour when grouped; rally flag and the line to where units are headed')}
+      ${card('Selection, health and rally', `<div class="pg-units">${selbox(10, 22, 56, 42, 1)}${selbox(90, 22, 56, 42, 0.5)}${selbox(170, 22, 56, 42, 0.2)}${selbox(250, 22, 56, 42, 0.8, GROUP_COLORS[1])}</div><div class="pg-units short">${rally(40, 44)}${moveLine(70, 34, 300, 20)}</div>`, 'Corners in the group color when grouped; rally flag and the line to where units are headed')}
       ${card('Order confirm (phone)', `<div class="pg-row confs">${confirmCheck()}${confirmCheck('foe')}${confirmCheck('ore')}</div>`, 'Move, attack and harvest')}
       ${card('Deploy', `<div class="pg-row">${deploy()}${deploy(true)}</div>`, 'Over the Foundry vehicle; disabled where it can’t deploy')}
     </div>
@@ -487,7 +434,7 @@ function onClick(e: Event) {
   } else b.classList.toggle('on');
 }
 
-// ---------- Map previews: little noise maps, in the game's map colours ----------
+// ---------- Map previews: little noise maps, in the game's map colors ----------
 
 function noise(seed: number) {
   const h = (x: number, y: number) => {
@@ -575,7 +522,7 @@ function buildPanelUi() {
         <div class="tw-icons">${ICON_SETS.map((s) => `<button type="button" class="tw-iset" data-icons="${s.id}" title="${s.note}"><span class="tw-ipre">${SAMPLE_ICONS.map((n) => icon(n, s.id)).join('')}</span><span>${s.name}</span></button>`).join('')}</div>
       </section>
       <section class="tw-sec">
-        <h3>Colours</h3>
+        <h3>Colors</h3>
         <div class="tw-presets">${PRESETS.map((p) => `<button type="button" class="tw-preset" data-preset="${p.id}"><span class="dots">${(['panel', 'trim', 'accent', 'on', 'ink'] as const).map((k) => `<i style="background:${p.c[k]}"></i>`).join('')}</span><span>${p.name}</span></button>`).join('')}</div>
         <div class="tw-colors">${COLOR_KEYS.map((k) => `<label class="tw-color" title="${k.note}"><input type="color" data-color="${k.id}"><span>${k.name}</span></label>`).join('')}</div>
       </section>
@@ -630,7 +577,7 @@ function syncPanel() {
   for (const b of panel.querySelectorAll<HTMLElement>('[data-preset]')) b.classList.toggle('on', sameColors(PRESETS.find((p) => p.id === b.dataset.preset)!.c, D.colors));
 }
 
-// What's on the intro: the fonts and colours picked.
+// What's on the intro: the fonts and colors picked.
 function syncIntro() {
   for (const el of kit.querySelectorAll<HTMLElement>('[data-font]')) {
     const r = el.dataset.font as Role;
@@ -643,7 +590,7 @@ function syncIntro() {
     fontName('l') !== fontName('b') ? `${fontName('l')} labels` : '',
     `${fontName('n')} numbers`,
     `${ICON_SETS.find((x) => x.id === D.icons)!.name} icons`,
-    preset ? `${preset.name} colours` : 'Custom colours',
+    preset ? `${preset.name} colors` : 'Custom colors',
   ].filter(Boolean);
   const ul = kit.querySelector('[data-traits]');
   if (ul) ul.innerHTML = traits.map((t) => `<li>${t}</li>`).join('');
@@ -661,7 +608,7 @@ function save() {
 
 let rendered = false;
 function apply() {
-  const vars = colorVars(D.colors);
+  const vars = themeVars(D.colors);
   for (const el of [kit, document.documentElement]) for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
   const w = String(FONTS.find((f) => f.name === D.fonts.d)?.w ?? 400);
   for (const el of [kit, document.documentElement]) el.style.setProperty('--w-d', w);
