@@ -1949,6 +1949,55 @@ body.attract #menu {
   display: none !important;
 }
 
+/* The big Play button the landing page opens on (src/main.ts). */
+#playGate {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 4px),
+    radial-gradient(ellipse at 50% 50%, rgba(10, 16, 8, 0.1) 0%, rgba(10, 16, 8, 0.55) 80%);
+}
+#playGate .play {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 46px 22px 38px;
+  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-size: clamp(28px, 9vw, 44px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #10170d;
+  background: #9dff9d;
+  border: 3px solid #10170d;
+  box-shadow: inset 3px 3px 0 rgba(255, 255, 255, 0.45), inset -3px -3px 0 rgba(0, 0, 0, 0.25), 0 5px 0 rgba(0, 0, 0, 0.45);
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+  animation: playPulse 1.6s ease-in-out infinite;
+}
+#playGate .play svg {
+  width: 0.9em;
+  height: 0.9em;
+  fill: currentColor;
+}
+#playGate .play:focus-visible {
+  outline: 3px solid #f4f7ea;
+  outline-offset: 4px;
+}
+#playGate .play:active {
+  transform: translateY(2px);
+  box-shadow: inset 3px 3px 0 rgba(255, 255, 255, 0.45), inset -3px -3px 0 rgba(0, 0, 0, 0.25), 0 3px 0 rgba(0, 0, 0, 0.45);
+  animation: none;
+}
+@keyframes playPulse {
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
 #lobby .home .field {
   flex: none;
 }

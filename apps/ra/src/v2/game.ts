@@ -1893,7 +1893,7 @@ export class IsoGame implements GameLike {
   private surfT = -1;
   private surf = 0;
   private loopSounds(): void {
-    const sum: Record<Loop, number> = { tracks_loop: 0, engine_loop: 0, rotor_loop: 0, boat_loop: 0, footsteps: 0, ore_dig: 0, ambient_land: 0, surf_loop: 0, fire_loop: 0 };
+    const sum: Record<Loop, number> = { tracks_loop: 0, engine_loop: 0, rotor_loop: 0, boat_loop: 0, footsteps: 0, ore_dig: 0, surf_loop: 0, fire_loop: 0 };
     const at = (x: number, y: number, z = 0) => this.hear(...toScreen(x, y, z));
     for (const u of this.units) {
       if (u.dead) continue;
@@ -1930,8 +1930,7 @@ export class IsoGame implements GameLike {
     }
     const zoom = Math.max(0.35, Math.min(1, 600 / Math.max(1, this.view.x1 - this.view.x0)));
     sum.surf_loop = this.surf * (0.4 + 0.6 * zoom);
-    sum.ambient_land = (1 - this.surf * 0.5) * 0.6;
-    for (const n of Object.keys(sum) as Loop[]) level(n, n === 'surf_loop' || n === 'ambient_land' ? sum[n] : Math.min(1, sum[n] * 0.35 + (sum[n] > 0.02 ? 0.25 : 0)));
+    for (const n of Object.keys(sum) as Loop[]) level(n, n === 'surf_loop' ? sum[n] : Math.min(1, sum[n] * 0.35 + (sum[n] > 0.02 ? 0.25 : 0)));
   }
 
   // Paint one tile of ground and scatter its trees, bushes and rocks.
@@ -3994,7 +3993,13 @@ export class IsoGame implements GameLike {
     this.view = { x0, y0, x1, y1 };
     this.tiles.begin();
     drawTiles(this.ctx, this.tiles, this.ov, OV, x0, y0, x1, y1, this.time);
+    this.gaps = this.tiles.missing;
     this.tiles.pump(budget);
+  }
+  private gaps = false;
+  // Whether the last ground drawn had tiles in it still to be painted.
+  groundPending(): boolean {
+    return this.gaps;
   }
 
   private ov: HTMLCanvasElement | null = null;

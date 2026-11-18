@@ -11,7 +11,7 @@
 //   play():  a one-shot, at a volume the caller works out (how near the
 //            middle of the view it happened). Every play is pitched a few
 //            percent at random so a burst of gunfire isn't one sound repeated.
-//   level(): a loop (engines, rotors, fire, wind, surf) that is always
+//   level(): a loop (engines, rotors, fire, surf) that is always
 //            running once loaded; each frame the game says how loud it should
 //            be, and it glides there.
 
@@ -43,7 +43,10 @@ export type Sfx =
   | 'ui_ready'
   | 'whoosh_space';
 
-export type Loop = 'tracks_loop' | 'engine_loop' | 'rotor_loop' | 'boat_loop' | 'footsteps' | 'ore_dig' | 'ambient_land' | 'surf_loop' | 'fire_loop';
+// (There was an always-on wind loop, ambient_land, too. Most of it was a
+// thin hiss around 10 kHz that played under everything as a high whine, so
+// it is gone.)
+export type Loop = 'tracks_loop' | 'engine_loop' | 'rotor_loop' | 'boat_loop' | 'footsteps' | 'ore_dig' | 'surf_loop' | 'fire_loop';
 
 const SHOTS: Sfx[] = [
   'rifle_shot',
@@ -70,7 +73,7 @@ const SHOTS: Sfx[] = [
   'ui_ready',
   'whoosh_space',
 ];
-const LOOPS: Loop[] = ['tracks_loop', 'engine_loop', 'rotor_loop', 'boat_loop', 'footsteps', 'ore_dig', 'ambient_land', 'surf_loop', 'fire_loop'];
+const LOOPS: Loop[] = ['tracks_loop', 'engine_loop', 'rotor_loop', 'boat_loop', 'footsteps', 'ore_dig', 'surf_loop', 'fire_loop'];
 
 // How loud each clip is at full volume. The clips were all evened out to the
 // same peak; this balances them against each other and the voices.
@@ -104,7 +107,6 @@ const GAIN: Partial<Record<Sfx | Loop, number>> = {
   boat_loop: 0.3,
   footsteps: 0.3,
   ore_dig: 0.3,
-  ambient_land: 0.25,
   surf_loop: 0.3,
   fire_loop: 0.5,
 };

@@ -514,6 +514,9 @@ const GLOBE_K = 0.75;
 // The view's size in map pixels, and how many canvas pixels each one gets.
 const view = { w: 1, h: 1 };
 let dens = 1;
+// The landing page's drift draws one map pixel more each way than fits, so
+// the canvas can slide by part of a pixel (see drawAttract).
+let attractPad = 0;
 const camX = () => cen.x - view.w / 2;
 const camY = () => cen.y - view.h / 2;
 
@@ -533,8 +536,8 @@ function applyScale(): void {
   const wasPlanet = planet;
   planet = zoom < Z_SPACE - 1e-6;
   scale = planet ? base : base * zoom;
-  const w = Math.ceil(vw / scale);
-  const h = Math.ceil(vh / scale);
+  const w = Math.ceil(vw / scale) + attractPad;
+  const h = Math.ceil(vh / scale) + attractPad;
   view.w = w;
   view.h = h;
   // On the map the canvas holds ART pixels for each map pixel, so the art can
@@ -720,9 +723,12 @@ const ATTRACT_MAPS = ['pangaea', 'continents', 'lakes', 'high', 'atoll', 'crater
 function startAttract(): void {
   if (attract) return;
   attract = true;
+  attractAt = '';
   document.body.classList.add('attract');
   // still the one from before: carry on
   if (game instanceof IsoGame && game.noShroud && built.w) {
+    attractPad = 1;
+    applyScale();
     attractReady = true;
     document.body.classList.add('attract-on');
     return;
@@ -740,6 +746,7 @@ function startAttract(): void {
     build.reset();
     built = { w: 0, h: 0 };
     const bases = g.preload();
+    attractPad = 1;
     fit(true);
     const units = g.warmUp();
     // Everything it will show for the first minutes is ready before it fades
@@ -770,11 +777,25 @@ function startAttract(): void {
 // how fast the view drifts (map pixels a second), and how far it sways up and down
 const ATTRACT_SPEED = 7;
 const ATTRACT_SWAY = 140;
-// Just the world (none of the game's controls, the globe or the minimap), at
-// whole canvas pixels rather than whole map pixels, so the slow drift is smooth.
+// Just the world (none of the game's controls, the globe or the minimap).
+// The canvas only holds whole canvas pixels, and at this speed a step to the
+// next one comes every few frames and jumps a few screen pixels at once (the
+// stutter the drift had). So the world is drawn at the whole canvas pixel
+// just up and to the left of the camera, and the canvas itself is slid the
+// rest of the way by a CSS transform, which the compositor places on any
+// screen pixel. The picture only changes every few frames, so it is only
+// redrawn then: between, just the transform moves.
+let attractAt = '';
 function drawAttract(first: boolean): void {
-  const x0 = Math.round(camX() * dens) / dens;
-  const y0 = Math.round(camY() * dens) / dens;
+  const cx = camX();
+  const cy = camY();
+  const x0 = Math.floor(cx * dens) / dens;
+  const y0 = Math.floor(cy * dens) / dens;
+  const k = scale;
+  canvas.style.transform = `translate3d(${(-(cx - x0) * k).toFixed(3)}px, ${(-(cy - y0) * k).toFixed(3)}px, 0)`;
+  const at = `${x0},${y0},${view.w},${view.h}`;
+  if (!first && at === attractAt && !game.groundPending?.()) return;
+  attractAt = at;
   const x1 = x0 + view.w;
   const y1 = y0 + view.h;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -798,6 +819,11 @@ function stopAttract(): void {
   attractReady = false;
   attractN++;
   document.body.classList.remove('attract', 'attract-on');
+  canvas.style.transform = '';
+  if (attractPad) {
+    attractPad = 0;
+    applyScale();
+  }
 }
 const leaveBtn = document.querySelector<HTMLButtonElement>('#leaveBtn')!;
 const lobbyBtn = document.querySelector<HTMLButtonElement>('#lobbyBtn')!;
@@ -991,7 +1017,38 @@ const atPath = location.pathname.replace(/\/+$/, '');
 showMpMenu();
 if (atPath === '/test' || params.has('solo') || params.has('v')) start(version);
 else if (Lobby.pathCode()) void lobby.enter(Lobby.pathCode());
-else lobby.show();
+else showPlayGate();
+
+// The landing page opens on a big Play button over the drifting world.
+// Browsers keep a page silent until it is tapped, so this is that tap: it
+// starts the sound (src/voice.ts listens for it) and the music comes in as
+// the lobby appears.
+function showPlayGate(): void {
+  startAttract();
+  const gate = document.createElement('div');
+  gate.id = 'playGate';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'play';
+  btn.innerHTML =
+    '<svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="2" y="0" width="2" height="11"/><rect x="4" y="1" width="2" height="9"/><rect x="6" y="3" width="2" height="5"/><rect x="8" y="4" width="2" height="3"/></svg><span>Play</span>';
+  const go = (): void => {
+    if (!gate.isConnected) return;
+    gate.remove();
+    window.removeEventListener('keydown', key);
+    lobby.show();
+  };
+  // (Enter or Space works too, from the keyboard)
+  const key = (e: KeyboardEvent): void => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    go();
+  };
+  btn.addEventListener('click', go);
+  window.addEventListener('keydown', key);
+  gate.append(btn);
+  document.body.append(gate);
+}
 
 versionEl.addEventListener('change', () => {
   version = versionEl.value;
