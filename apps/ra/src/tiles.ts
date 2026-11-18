@@ -83,6 +83,11 @@ export class Tiles<P> {
   // The tile being painted, if it is taking more than one frame.
   private job: { k: number; steps: Generator<void, Tile<P>> } | null = null;
 
+  // Whether a tile asked for this frame wasn't painted yet.
+  get missing(): boolean {
+    return this.wanted.size > 0;
+  }
+
   // Paint queued tiles for up to `ms` milliseconds (always at least a step).
   pump(ms: number): void {
     const t0 = performance.now();

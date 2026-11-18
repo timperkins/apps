@@ -87,6 +87,8 @@ export interface GameLike {
   // Ground for a map rect in unwrapped map pixels; tiles not yet painted are
   // painted for up to `budget` milliseconds.
   renderGround(x0: number, y0: number, x1: number, y1: number, budget: number): void;
+  // Whether the last ground drawn had tiles in it still to be painted.
+  groundPending?(): boolean;
   // Objects of the copy of the map at the origin, within a rect in its coordinates.
   renderObjects(x0: number, y0: number, x1: number, y1: number): void;
   // Drawn once over all the copies, in unwrapped map pixels (the shroud and
