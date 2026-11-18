@@ -8,12 +8,24 @@
 // The edge is drawn by interpolating that into a soft fade to black (its
 // opacity eased so it blurs out smoothly), tile by tile: a tile all seen is skipped, one all unseen is a black
 // square, and only tiles on the edge get a little canvas of their own.
+//
+// Open sea is never drawn shrouded: the black covers the land, and the water
+// only near its coasts, thinning out a little way from shore. That is only
+// how it's drawn; what you have seen (an enemy boat out at sea, say) still
+// goes by where your units have been.
 import { CH } from '../tiles';
 
 const S = 8; // cell size, in map pixels
 const P = 2; // the edge's pixels, in map pixels (smoothed when drawn)
 const N = CH / P; // pixels across a tile
 const FADE = 0.4; // how much of a sight's radius the edge fades over
+// Over the sea the shroud reaches SEA_IN map pixels (on the ground) out from
+// the shore, and has faded away by SEA_OUT.
+const SEA_IN = 24;
+const SEA_OUT = 96;
+// Water smaller than this many cells (a pond or a small lake) is shrouded
+// like the land round it.
+const SEA_MIN = 3000;
 
 const BLACK = 0;
 const EDGE = 1;
@@ -22,7 +34,8 @@ const CLEAR = 2;
 export class Shroud {
   readonly gw: number;
   readonly gh: number;
-  private g: Uint8Array;
+  private g: Uint8Array; // seen
+  private v: Uint8Array; // as drawn: seen, or open sea
   private nx: number;
   private ny: number;
   private state: Uint8Array;
@@ -34,17 +47,24 @@ export class Shroud {
   // the screen rect seen since changed() was last asked (unwrapped)
   private box: [number, number, number, number] | null = null;
 
+  // water(sx, sy): is screen point (sx, sy) water?
   constructor(
     readonly w: number,
     readonly h: number,
+    water?: (sx: number, sy: number) => boolean,
   ) {
     this.gw = Math.ceil(w / S);
     this.gh = Math.ceil(h / S);
     this.g = new Uint8Array(this.gw * this.gh);
+    this.v = new Uint8Array(this.gw * this.gh);
     this.nx = Math.ceil(w / CH);
     this.ny = Math.ceil(h / CH);
     this.state = new Uint8Array(this.nx * this.ny);
     this.dirty = new Uint8Array(this.nx * this.ny);
+    if (water) {
+      this.v.set(seaFloor(this.gw, this.gh, water));
+      this.dirty.fill(1);
+    }
   }
 
   // Lift the shroud round screen point (sx, sy), out to r map pixels on the
@@ -52,7 +72,7 @@ export class Shroud {
   reveal(sx: number, sy: number, r: number): void {
     const a = r * Math.SQRT2;
     const b = r / Math.SQRT2;
-    const { gw, gh, g } = this;
+    const { gw, gh, g, v: shown } = this;
     const i0 = Math.floor((sx - a) / S);
     const i1 = Math.floor((sx + a) / S);
     const j0 = Math.floor((sy - b) / S);
@@ -69,6 +89,7 @@ export class Shroud {
         const k = row + (((i % gw) + gw) % gw);
         if (v > g[k]) {
           g[k] = v;
+          if (v > shown[k]) shown[k] = v;
           grew = true;
         }
       }
@@ -93,27 +114,33 @@ export class Shroud {
     return (((ty % ny) + ny) % ny) * nx + (((tx % nx) + nx) % nx);
   }
 
-  private cell(i: number, j: number): number {
+  // a cell's value: as drawn, or (seen) what has really been seen
+  private cell(i: number, j: number, seen = false): number {
     const { gw, gh } = this;
-    return this.g[(((j % gh) + gh) % gh) * gw + (((i % gw) + gw) % gw)];
+    return (seen ? this.g : this.v)[(((j % gh) + gh) % gh) * gw + (((i % gw) + gw) % gw)];
   }
 
-  // How much of screen point (x, y) has been seen, 0..255.
-  at(x: number, y: number): number {
+  // How much of screen point (x, y) is drawn clear (or with `seen`, has been
+  // seen), 0..255.
+  at(x: number, y: number, seen = false): number {
     const fx = x / S - 0.5;
     const fy = y / S - 0.5;
     const i = Math.floor(fx);
     const j = Math.floor(fy);
     const tx = fx - i;
     const ty = fy - j;
-    const a = this.cell(i, j) + (this.cell(i + 1, j) - this.cell(i, j)) * tx;
-    const b = this.cell(i, j + 1) + (this.cell(i + 1, j + 1) - this.cell(i, j + 1)) * tx;
+    const c00 = this.cell(i, j, seen);
+    const c10 = this.cell(i + 1, j, seen);
+    const c01 = this.cell(i, j + 1, seen);
+    const c11 = this.cell(i + 1, j + 1, seen);
+    const a = c00 + (c10 - c00) * tx;
+    const b = c01 + (c11 - c01) * tx;
     return a + (b - a) * ty;
   }
 
   // Has screen point (x, y) been seen (past the middle of the faded edge)?
   seen(x: number, y: number): boolean {
-    return this.at(x, y) >= 128;
+    return this.at(x, y, true) >= 128;
   }
 
   /** The screen rect where more has been seen since last asked, if any. */
@@ -230,4 +257,63 @@ export class Shroud {
     for (const [cv, x, y] of edges) c.drawImage(cv, x, y, CH, CH);
     c.imageSmoothingEnabled = smooth;
   }
+}
+
+// How clear the shroud is drawn over each cell before anything is seen
+// (0..255): clear over open sea, from a little way out from its shores.
+function seaFloor(gw: number, gh: number, water: (sx: number, sy: number) => boolean): Uint8Array {
+  const n = gw * gh;
+  const wet = new Uint8Array(n);
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) wet[j * gw + i] = water((i + 0.5) * S, (j + 0.5) * S) ? 1 : 0;
+  // only water in big bodies counts as sea (flood fill, wrapping round)
+  const sea = new Uint8Array(n);
+  const comp: number[] = [];
+  const stack: number[] = [];
+  const done = new Uint8Array(n);
+  for (let q0 = 0; q0 < n; q0++) {
+    if (!wet[q0] || done[q0]) continue;
+    comp.length = 0;
+    stack.push(q0);
+    done[q0] = 1;
+    while (stack.length) {
+      const q = stack.pop()!;
+      comp.push(q);
+      const i = q % gw;
+      const j = (q - i) / gw;
+      const nb = [j * gw + ((i + 1) % gw), j * gw + ((i + gw - 1) % gw), ((j + 1) % gh) * gw + i, ((j + gh - 1) % gh) * gw + i];
+      for (const k of nb)
+        if (wet[k] && !done[k]) {
+          done[k] = 1;
+          stack.push(k);
+        }
+    }
+    if (comp.length >= SEA_MIN) for (const q of comp) sea[q] = 1;
+  }
+  // distance on the ground (screen y counts double) from the nearest cell
+  // that isn't sea, as far as SEA_OUT: a chamfer pass each way, twice round
+  // so it carries over the map's edges
+  const BIG = 1e9;
+  const d = new Float32Array(n);
+  for (let q = 0; q < n; q++) d[q] = sea[q] ? BIG : 0;
+  const ax = S;
+  const ay = 2 * S;
+  const dg = Math.hypot(ax, ay);
+  const at = (i: number, j: number) => (((j % gh) + gh) % gh) * gw + (((i % gw) + gw) % gw);
+  for (let rep = 0; rep < 2; rep++) {
+    for (let j = 0; j < gh; j++)
+      for (let i = 0; i < gw; i++) {
+        const q = j * gw + i;
+        if (!d[q]) continue;
+        d[q] = Math.min(d[q], d[at(i - 1, j)] + ax, d[at(i, j - 1)] + ay, d[at(i - 1, j - 1)] + dg, d[at(i + 1, j - 1)] + dg);
+      }
+    for (let j = gh - 1; j >= 0; j--)
+      for (let i = gw - 1; i >= 0; i--) {
+        const q = j * gw + i;
+        if (!d[q]) continue;
+        d[q] = Math.min(d[q], d[at(i + 1, j)] + ax, d[at(i, j + 1)] + ay, d[at(i + 1, j + 1)] + dg, d[at(i - 1, j + 1)] + dg);
+      }
+  }
+  const out = new Uint8Array(n);
+  for (let q = 0; q < n; q++) out[q] = Math.round(Math.max(0, Math.min(1, (d[q] - SEA_IN) / (SEA_OUT - SEA_IN))) * 255);
+  return out;
 }

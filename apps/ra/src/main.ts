@@ -580,8 +580,9 @@ function fit(force = false): void {
   const vh = window.innerHeight;
   base = Math.max(2, Math.round(Math.min(vw, vh * 1.6) / 680));
   if (force || !built.w) {
-    game.generate(WORLD.w, WORLD.h);
-    built = { ...WORLD };
+    const ws = game.worldSize?.(WORLD.w, WORLD.h) ?? WORLD;
+    game.generate(ws.w, ws.h);
+    built = { w: ws.w, h: ws.h };
     globe.clear();
     zoom = 1;
     planet = false;

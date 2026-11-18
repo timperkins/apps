@@ -190,6 +190,11 @@ export class IsoTerrain {
     return this.mask ? this.lakeF.at(sx, sy) + this.mask.at(sx, sy) : this.lakeF.at(sx, sy);
   }
 
+  // Is screen point (sx, sy) under water?
+  isWater(sx: number, sy: number): boolean {
+    return this.wat(sx, sy) > this.wThr;
+  }
+
   // Seamless noise over the ground, like fbm(wx / cell, wy / cell).
   noise(wx: number, wy: number, cell: number, s: number, oct = 4): number {
     return this.na((wx - wy) / Math.SQRT2, (wx + wy) / Math.SQRT2, cell, s, oct);
