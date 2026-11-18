@@ -433,7 +433,7 @@ function shuffler(draw: Draw, turn: number): (s: Scene, t: number, dt: number) =
 }
 
 // The standard set for a vehicle or soldier: eight angles, driving round, and
-// the other side's colours; plus whatever else it does.
+// the other side's colors; plus whatever else it does.
 function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; speed: number; z?: number; more?: Cell[]; moveLabel?: string }): Cell[] {
   const z = o.z ?? 0;
   const still = boxOf(spr, 0, 0, z);

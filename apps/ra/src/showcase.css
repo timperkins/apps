@@ -31,7 +31,8 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: 'Silkscreen', ui-monospace, monospace;
+  font-family: 'DotGothic16', ui-monospace, monospace;
+  font-size-adjust: ex-height 0.63;
   -webkit-text-size-adjust: 100%;
 }
 

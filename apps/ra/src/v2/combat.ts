@@ -1,9 +1,9 @@
-// Combat for v2: what each unit and building is armed with and armoured in,
+// Combat for v2: what each unit and building is armed with and armored in,
 // the shots in flight, and the flashes, sparks, explosions, fire and smoke.
 //
 // The rules follow the classic RTS scheme: every weapon has a warhead, every
-// target an armour type, and a table says how much of the damage gets through
-// (small arms shred infantry and barely scratch tanks, armour-piercing rounds
+// target an armor type, and a table says how much of the damage gets through
+// (small arms shred infantry and barely scratch tanks, armor-piercing rounds
 // are the other way round, high explosive is good against buildings). Units
 // with nothing to do pick the nearest enemy in range and fire on it, and a
 // unit that is hit turns on whoever hit it. All the numbers are our own.
@@ -15,7 +15,7 @@ export type Armor = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 export type Warhead = 'SA' | 'AP' | 'HE';
 export type ShotKind = 'bullet' | 'shell' | 'rocket' | 'arc';
 
-// How much of each warhead's damage gets through each armour.
+// How much of each warhead's damage gets through each armor.
 export const VERSUS: Record<Warhead, Record<Armor, number>> = {
   SA: { none: 1, wood: 0.5, light: 0.6, heavy: 0.25, concrete: 0.25 },
   AP: { none: 0.3, wood: 0.75, light: 0.75, heavy: 1, concrete: 0.5 },
@@ -27,7 +27,7 @@ export const CELL = 16;
 
 export interface Weapon {
   name: string;
-  dmg: number; // per round, before armour
+  dmg: number; // per round, before armor
   rof: number; // seconds between shots
   range: number; // world units
   wh: Warhead;
@@ -90,7 +90,7 @@ export const HELI_ALT = 20;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
 export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, light: 9.5, heavy: 12, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
-// Tracked armour: these cook off in a string of explosions when destroyed.
+// Tracked armor: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'mcv', 'hauler']);
 
 // How long a destroyed vehicle's wreck burns, and a destroyed building's ruin (seconds).
@@ -260,7 +260,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 // How far round its middle a round may land on each kind of unit (world
-// units): rounds hit all over it, not just dead centre.
+// units): rounds hit all over it, not just dead center.
 export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1 };
 
 interface Flash {
@@ -335,7 +335,7 @@ export function drawFlame(c: CanvasRenderingContext2D, x: number, y: number, h: 
 
 // ---------- Soft puffs of smoke ----------
 // Smoke is drawn as soft, lumpy blobs rather than squares: a few textures of
-// a cloudy puff (soft edge, mottled middle), one set per colour, drawn
+// a cloudy puff (soft edge, mottled middle), one set per color, drawn
 // smoothly at whatever size the puff has grown to. Overlapping puffs blend
 // into a cloud.
 const PUFF_N = 4;
@@ -376,14 +376,14 @@ function puffs(col: RGB): HTMLCanvasElement[] {
   return out;
 }
 
-// Colours of smoke: pale, sooty (which greys as it rises and thins) and dust.
+// Colors of smoke: pale, sooty (which grays as it rises and thins) and dust.
 const SMOKE: RGB = [218, 216, 208];
 const SOOT: RGB = [44, 40, 37];
 const SOOT_OLD: RGB = [112, 108, 102];
 const DUST: RGB = [168, 148, 108];
 
 // A puff of smoke `d` map pixels across at (x, y), at strength a. kind picks
-// the colour; age (0..1) greys soot as it rises; v picks one of the puff
+// the color; age (0..1) grays soot as it rises; v picks one of the puff
 // textures (any whole number).
 export function drawPuff(c: CanvasRenderingContext2D, kind: 'smoke' | 'soot' | 'dust', x: number, y: number, d: number, a: number, age: number, v: number): void {
   if (a <= 0.01 || d <= 0) return;
@@ -392,7 +392,7 @@ export function drawPuff(c: CanvasRenderingContext2D, kind: 'smoke' | 'soot' | '
   c.imageSmoothingEnabled = true;
   const was = c.globalAlpha;
   if (kind === 'soot') {
-    // dark smoke greying with age: the dark puff fading into the grey one
+    // dark smoke graying with age: the dark puff fading into the gray one
     c.globalAlpha = was * a * (1 - age * 0.7);
     c.drawImage(puffs(SOOT)[i], x - d / 2, y - d / 2, d, d);
     c.globalAlpha = was * a * age * 0.6;
@@ -726,7 +726,7 @@ export class Fx {
     for (const t of this.tracers) {
       c.fillStyle = 'rgba(255,236,150,0.9)';
       const n = Math.ceil(Math.hypot(t.x1 - t.x0, t.y1 - t.y0) * 2);
-      // a short bright streak travelling down the line
+      // a short bright streak traveling down the line
       const k0 = t.t / 0.06;
       for (let i = 0; i <= n; i++) {
         const k = i / n;

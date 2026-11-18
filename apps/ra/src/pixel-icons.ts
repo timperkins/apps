@@ -1,6 +1,6 @@
 // Little pixel-art icons for the HUD, drawn as rows of characters so they are
-// easy to tweak: each character is a colour from the palette ('.' is clear).
-// They come out as inline SVG strings, one <rect> per run of a colour.
+// easy to tweak: each character is a color from the palette ('.' is clear).
+// They come out as inline SVG strings, one <rect> per run of a color.
 
 type Palette = Record<string, string>;
 

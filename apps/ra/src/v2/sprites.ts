@@ -141,7 +141,7 @@ function tankHull(f: Faction, L: number, W: number, heavy: boolean): Shape {
     }
     // the deck
     if (u > hl - 4) {
-      // glacis: the driver's hatch and vision block, spare links (or armour blocks)
+      // glacis: the driver's hatch and vision block, spare links (or armor blocks)
       if (Math.abs(u - (hl - 2.6)) < 0.9 && Math.abs(v + 1.6) < 1.1) return Math.abs(u - (hl - 2)) < 0.3 ? GLASS_D : shade(f.dark, 0.05);
       if (heavy && v > 0.4 && v < hw - tw - 0.6 && u < hl - 0.8) return mod(Math.floor(u * 2) + Math.floor(v * 1.4), 2) ? shade(f.main, -0.2) : f.main;
       if (!heavy && Math.abs(u - (hl - 2.4)) < 0.4 && v > 0.6 && v < 3) return mod(Math.floor(v * 2), 2) ? TREAD_L : TREAD;
@@ -637,7 +637,7 @@ export interface V2BuildingArt {
 // windows (some lit), a pale coping round the roof and streaks of grime.
 interface Wall {
   win?: [number, number]; // windows between these heights above z0
-  band?: RGB; // a stripe of the faction's colour under the coping
+  band?: RGB; // a stripe of the faction's color under the coping
   body?: RGB;
   pitch?: number; // spacing of the windows
 }
@@ -1371,7 +1371,7 @@ export function makeTrees(): StackSprite[] {
 // Ore: low mounds of rough golden nuggets, packed close so a field reads as a
 // lumpy carpet over the ground, [variant][size] with the size going down as it
 // is dug. Each clump also has a flat stain of ore-darkened earth under it,
-// drawn with the ground so neighbouring clumps run together.
+// drawn with the ground so neighboring clumps run together.
 export interface OreArt {
   lumps: StackSprite[][];
   stain: StackSprite[][];

@@ -27,7 +27,7 @@ const SLOPE_OUT = Math.ceil(HP * 0.7 + 1.2);
 // Map pixels per pixel of the overview used for the globe and unpainted tiles.
 export const OV = 4;
 // Margin of ground classified round a tile's footprint, for the painter's
-// neighbour tests, plateau shadows and props.
+// neighbor tests, plateau shadows and props.
 const M = 12;
 // Ground features keep a fixed size however big the planet is.
 export const LAKE_CELL = 234;
@@ -589,7 +589,7 @@ export class IsoTerrain {
           c = shade(c, Math.max(-0.22, Math.min(0.16, (lean - 0.55) * 0.25)));
           c = shade(c, (vnoise(along / 14, zz / 20, seed + 16) - 0.5) * 0.3); // broad weathering
           if (sid > 0.84) c = mix(c, hex('#8d7a5c'), 0.55); // a browner stone now and then
-          else if (sid < 0.14) c = mix(c, hex('#6e6f68'), 0.5); // or a greyer one
+          else if (sid < 0.14) c = mix(c, hex('#6e6f68'), 0.5); // or a grayer one
           // facets lit from up and to the left: each stone bulges, so its
           // upper side is bright and its foot falls into shadow
           const lit = soy * 0.9 + sox * (rightFace ? -0.3 : 0.4);

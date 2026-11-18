@@ -1,5 +1,5 @@
 // Soft Pixel, the design Tim picked, and the choices the tweak panel offers on
-// top of it: a font for each kind of text, an icon set and the colours. The
+// top of it: a font for each kind of text, an icon set and the colors. The
 // page starts on the defaults below; whatever is changed is kept in the
 // address (so a link brings the same tweaks back) and in this browser.
 import type { IconSet } from './icons';
@@ -61,10 +61,10 @@ export const ICON_SETS: { id: IconSet; name: string; note: string }[] = [
   { id: 'line', name: 'Smooth line', note: 'Thin vector strokes' },
 ];
 
-// ---------- Colours ----------
+// ---------- Colors ----------
 
-export type ColorKey = 'panel' | 'edge' | 'trim' | 'ink' | 'accent' | 'on' | 'good' | 'danger';
-export type Colors = Record<ColorKey, string>;
+import { NIGHT_OPS, type ColorKey, type Colors } from '../theme';
+export type { ColorKey, Colors };
 
 export const COLOR_KEYS: { id: ColorKey; name: string; note: string }[] = [
   { id: 'panel', name: 'Panels', note: 'Panels and buttons; the page is a darker shade' },
@@ -84,7 +84,7 @@ export const PRESETS: { id: string; name: string; c: Colors }[] = [
   { id: 'desert', name: 'Desert', c: { panel: '#4a3826', edge: '#1a1006', trim: '#e9c98c', ink: '#f7ebd3', accent: '#e07a3a', on: '#f0dca8', good: '#9fd4a4', danger: '#c0453a' } },
   { id: 'cobalt', name: 'Cobalt', c: { panel: '#1e2d4e', edge: '#070c18', trim: '#8fb2dc', ink: '#eaf0fa', accent: '#f0b43c', on: '#4f74a8', good: '#7fd6ff', danger: '#c0453a' } },
   { id: 'gunmetal', name: 'Gunmetal', c: { panel: '#2a2f36', edge: '#0b0d11', trim: '#8a96a6', ink: '#e8edf3', accent: '#ff9a3c', on: '#c8d2de', good: '#8fe0a0', danger: '#c8483a' } },
-  { id: 'night', name: 'Night ops', c: { panel: '#141c1c', edge: '#040707', trim: '#4fa070', ink: '#cfe8d4', accent: '#5fe08a', on: '#2f6a48', good: '#5fe08a', danger: '#e05a46' } },
+  { id: 'night', name: 'Night ops', c: { ...NIGHT_OPS } },
   { id: 'ember', name: 'Ember', c: { panel: '#3a1e1a', edge: '#120705', trim: '#e0a060', ink: '#f6e4d6', accent: '#ffb347', on: '#f0c8a0', good: '#a8e08a', danger: '#ff5a46' } },
 ];
 
@@ -97,9 +97,9 @@ export interface Design {
 }
 
 export const DEFAULT: Design = {
-  fonts: { d: 'VT323', b: 'Pixelify Sans', l: 'Pixelify Sans', n: 'VT323' },
-  icons: 'pixel',
-  colors: { ...PRESETS[0].c },
+  fonts: { d: 'Jersey 15', b: 'DotGothic16', l: 'DotGothic16', n: 'DotGothic16' },
+  icons: 'line',
+  colors: { ...NIGHT_OPS },
 };
 
 // In the address: #d=VT323&b=Pixelify+Sans&l=…&n=…&i=pixel&c=1a3640-07141a-…
@@ -129,21 +129,3 @@ export function fromHash(h: string): Design | null {
   return d;
 }
 
-// ---------- Colour maths ----------
-
-const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const hex = (c: number[]) => `#${c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('')}`;
-export const mix = (a: string, b: string, t: number) => {
-  const x = rgb(a), y = rgb(b);
-  return hex(x.map((v, i) => v + (y[i] - v) * t));
-};
-const lum = (h: string) => {
-  const [r, g, b] = rgb(h).map((v) => {
-    const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-};
-// Dark text on a light colour, light text on a dark one.
-export const inkOn = (bg: string, dark: string, light = '#ffffff') => (lum(bg) > 0.3 ? dark : light);
-export const rgba = (h: string, a: number) => `rgba(${rgb(h).join(', ')}, ${a})`;

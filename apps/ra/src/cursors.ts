@@ -195,7 +195,7 @@ const FALLBACK: Record<CursorKind, string> = {
 
 const SCALE = 2;
 
-// A size x size grid of colour letters (as in COLORS) drawn on a canvas,
+// A size x size grid of color letters (as in COLORS) drawn on a canvas,
 // scale pixels to a letter.
 function gridCanvas(rows: string[], scale: number): HTMLCanvasElement {
   const n = rows.length;
@@ -219,7 +219,7 @@ function gridCss(rows: string[], hot: [number, number], fallback: string): strin
   return `url(${c.toDataURL('image/png')}) ${hot[0] * SCALE} ${hot[1] * SCALE}, ${fallback}`;
 }
 
-// Draw on a size x size grid with put(x, y, colour letter); every drawn pixel
+// Draw on a size x size grid with put(x, y, color letter); every drawn pixel
 // gets a dark outline.
 function drawn(size: number, draw: (put: (x: number, y: number, col: string) => void) => void): string[] {
   const g = Array.from({ length: size }, () => Array<string>(size).fill('.'));
@@ -265,7 +265,7 @@ const MOVE_CLICK: MoveFrame[] = [
 ];
 export const MOVE_CLICK_FRAMES = MOVE_CLICK.length;
 
-// red: the attack cursor's colours instead of green
+// red: the attack cursor's colors instead of green
 function moveRows(a: number, f: MoveFrame, red = false): string[] {
   const [dark, light] = red ? ['r', 'R'] : ['g', 'G'];
   return drawn(MS, (put) => {
@@ -451,7 +451,7 @@ export function harvestRingFrames(): string[] {
 
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
-// on the map where you tapped: one grid pixel to a map pixel, centred on the
+// on the map where you tapped: one grid pixel to a map pixel, centered on the
 // tap (BURST_CENTER). BURST_FRAME is how long each frame shows, in seconds.
 
 export const BURST_CENTER = MC;

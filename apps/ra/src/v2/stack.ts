@@ -3,7 +3,7 @@
 // World axes: +x runs to the screen's lower right, +y to the lower left, +z up.
 //   screen x = wx - wy,  screen y = (wx + wy) / 2 - z
 // A shape is a function of local coordinates (u forward, v right, z up) that
-// returns a colour or null. Each sprite pixel casts a ray down through the
+// returns a color or null. Each sprite pixel casts a ray down through the
 // volume; the first solid sample is shaded as a top, left or right face.
 import { ART, Pix, RGB, shade } from '../gfx';
 
@@ -111,7 +111,7 @@ export function renderStack(shape: Shape, o: StackOpts): StackSprite {
           p.set(x, y, shade(c, top));
           break;
         }
-        // The surface normal, from which of the neighbouring cells are solid:
+        // The surface normal, from which of the neighboring cells are solid:
         // flat faces come out as one of three tones, round ones in bands.
         let nx = solid(wx - 0.7, wy, z) - solid(wx + 0.7, wy, z);
         let ny = solid(wx, wy - 0.7, z) - solid(wx, wy + 0.7, z);
