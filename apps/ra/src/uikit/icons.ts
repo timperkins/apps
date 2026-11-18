@@ -1,7 +1,7 @@
-// Two icon sets for the UI kit. The pixel set is the game's own 11x11 HUD
+// The icon sets for the UI kit. The pixel set is the game's own 11x11 HUD
 // icons (from index.html); the line set draws the same things as thin vector
-// strokes, for the designs that move away from chunky pixels. Both use
-// currentColor, so each design colours them.
+// strokes, and the solid set as filled shapes. The other sets are made from
+// these (see prepareIcons). All use currentColor, so the design colours them.
 
 export type IconName =
   | 'menu' | 'select' | 'home' | 'build' | 'group' | 'all' | 'clear' | 'close'
@@ -65,13 +65,43 @@ const LINE: Record<IconName, string> = {
   bot: '<rect x="4" y="7" width="16" height="12" rx="2.5"/><path d="M12 3.5V7M2 12v3M22 12v3"/><circle cx="9" cy="13" r="1.4"/><circle cx="15" cy="13" r="1.4"/>',
 };
 
-// pixel: the game's own chunky 11x11 icons. line: thin vector strokes.
-// duo: the line icons with a soft see-through fill (two-tone).
-// fine: the line icons redrawn as small pixel art (16x16, one-pixel lines
-// with a faint fill), made by rasterizing them once at start-up (prepareIcons).
-export type IconSet = 'pixel' | 'line' | 'duo' | 'fine';
+// Smooth solid: the same drawings as filled shapes. Lines that have nothing
+// to fill (menu, close, check…) stay as heavier strokes.
+const SOLID: Record<IconName, { f?: string; s?: string }> = {
+  menu: { s: LINE.menu },
+  select: { f: LINE.select },
+  home: { f: '<path d="M12 3L2.5 11.2H5.5V20.5h5v-5.5h3v5.5h5V11.2h3z"/>' },
+  build: { f: LINE.build },
+  group: { f: '<circle cx="12" cy="7" r="3"/><path d="M7 20.5v-4a5 5 0 0 1 10 0v4z"/><circle cx="4.8" cy="9.6" r="2.2"/><circle cx="19.2" cy="9.6" r="2.2"/><path d="M1.5 19.5v-2a3.6 3.6 0 0 1 4.6-3.4 6.5 6.5 0 0 0-.1 1.4v4zM22.5 19.5v-2a3.6 3.6 0 0 0-4.6-3.4 6.5 6.5 0 0 1 .1 1.4v4z"/>' },
+  all: { s: '<path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/>', f: '<rect x="8" y="8" width="8" height="8" rx="1.2"/>' },
+  clear: { s: LINE.clear },
+  close: { s: LINE.close },
+  shuffle: { s: LINE.shuffle },
+  units: { f: '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.5"/>' },
+  check: { s: LINE.check },
+  deploy: { f: '<path d="M10.3 2.5h3.4v6.8h3.8L12 15 6.5 9.3h3.8z"/>', s: '<path d="M4 15v5h16v-5"/>' },
+  gear: { f: '<path fill-rule="evenodd" d="M10.3 2h3.4l.5 2.7 1.7.7 2.3-1.6 2.4 2.4-1.6 2.3.7 1.7 2.3.5v3.4l-2.7.5-.7 1.7 1.6 2.3-2.4 2.4-2.3-1.6-1.7.7-.5 2.7h-3.4l-.5-2.7-1.7-.7-2.3 1.6-2.4-2.4 1.6-2.3-.7-1.7L2 13.7v-3.4l2.7-.5.7-1.7-1.6-2.3 2.4-2.4 2.3 1.6 1.7-.7zM12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4z"/>' },
+  back: { s: LINE.back },
+  flag: { s: '<path d="M6 21V3.5"/>', f: '<path d="M6 3h12.5l-3 4.8 3 4.7H6z"/>' },
+  bolt: { f: LINE.bolt },
+  coin: { f: '<circle cx="12" cy="12" r="9"/>' },
+  play: { f: '<path d="M6.5 3.5v17l14-8.5z"/>' },
+  users: { f: '<circle cx="8.5" cy="7.5" r="3.5"/><path d="M1.5 20.5v-2.5a7 7 0 0 1 14 0v2.5z"/><circle cx="17.5" cy="8.5" r="2.8"/><path d="M16.8 20.5V18a8.4 8.4 0 0 0-1.6-4.8 5.2 5.2 0 0 1 7.3 4.8v2.5z"/>' },
+  bot: { s: '<path d="M12 3v4M2.5 11.5v4M21.5 11.5v4"/>', f: '<path fill-rule="evenodd" d="M6.5 6.5h11a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-11a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3zM9 11.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zm6 0a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6z"/>' },
+};
+
+const solidInner = (name: IconName) => `${SOLID[name].f ? `<g stroke="none">${SOLID[name].f}</g>` : ''}${SOLID[name].s ? `<g fill="none">${SOLID[name].s}</g>` : ''}`;
+
+// pixel: the game's own chunky 11x11 icons. outline: those with a dark edge.
+// glyph: the solid drawings as pixel art on a 12-pixel grid. fine: the line
+// drawings as one-pixel lines on a 16-pixel grid. solid and line: smooth
+// vectors. The pixel versions of the drawings are made once at start-up by
+// rasterizing them (prepareIcons).
+export type IconSet = 'pixel' | 'outline' | 'glyph' | 'fine' | 'solid' | 'line';
 
 const fine = new Map<IconName, string>();
+const glyph = new Map<IconName, string>();
+const outline = new Map<IconName, string>();
 
 function rasterize(svg: string, n: number): Promise<Uint8ClampedArray> {
   return new Promise((res, rej) => {
@@ -88,46 +118,75 @@ function rasterize(svg: string, n: number): Promise<Uint8ClampedArray> {
   });
 }
 
-export async function prepareIcons(): Promise<void> {
-  const N = 16;
-  await Promise.all(
-    (Object.keys(LINE) as IconName[]).map(async (name) => {
-      const wrap = (attrs: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${N}" height="${N}" ${attrs}>${LINE[name]}</svg>`;
-      const [stroke, fill] = await Promise.all([
-        rasterize(wrap('fill="none" stroke="#000" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"'), N),
-        rasterize(wrap('fill="#000" stroke="none"'), N),
-      ]);
-      let solid = '';
-      let soft = '';
-      for (let y = 0; y < N; y++) {
-        let x = 0;
-        while (x < N) {
-          const kind = (i: number) => (stroke[(y * N + i) * 4 + 3] > 110 ? 2 : fill[(y * N + i) * 4 + 3] > 128 ? 1 : 0);
-          const k = kind(x);
-          let w = 1;
-          while (x + w < N && kind(x + w) === k) w++;
-          if (k === 2) solid += R(x, y, w, 1);
-          else if (k === 1) soft += R(x, y, w, 1);
-          x += w;
-        }
+// A grid of on/off pixels as rects, one run per row.
+function runs(n: number, on: (x: number, y: number) => boolean, off = 0): string {
+  let r = '';
+  for (let y = 0; y < n; y++) {
+    let x = 0;
+    while (x < n) {
+      if (!on(x, y)) {
+        x++;
+        continue;
       }
-      fine.set(name, `<g opacity=".3">${soft}</g>${solid}`);
+      let w = 1;
+      while (x + w < n && on(x + w, y)) w++;
+      r += R(x + off, y + off, w, 1);
+      x += w;
+    }
+  }
+  return r;
+}
+
+// The game's pixel icons as a grid, holes cut out.
+function pixelGrid(name: IconName): boolean[][] {
+  const g = Array.from({ length: 11 }, () => Array<boolean>(11).fill(false));
+  const paint = (rects: string, v: boolean) => {
+    for (const m of rects.matchAll(/x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)) {
+      const [x, y, w, h] = m.slice(1).map(Number);
+      for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) if (j < 11 && i < 11) g[j][i] = v;
+    }
+  };
+  paint(PIXEL[name], true);
+  const cut = PIXEL_CUT[name];
+  if (cut) paint(cut, false);
+  return g;
+}
+
+export async function prepareIcons(): Promise<void> {
+  const names = Object.keys(LINE) as IconName[];
+  await Promise.all(
+    names.map(async (name) => {
+      const N = 16;
+      const line = await rasterize(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${N}" height="${N}" fill="none" stroke="#000" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${LINE[name]}</svg>`, N);
+      fine.set(name, runs(N, (x, y) => line[(y * N + x) * 4 + 3] > 110));
+      const G = 12;
+      const sol = await rasterize(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${G}" height="${G}" fill="#000" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${solidInner(name)}</svg>`, G);
+      glyph.set(name, runs(G, (x, y) => sol[(y * G + x) * 4 + 3] > 120));
     }),
   );
+  for (const name of names) {
+    const g = pixelGrid(name);
+    const at = (x: number, y: number) => g[y]?.[x] ?? false;
+    // the edge: every pixel touching the icon (sideways or diagonally) that isn't in it
+    const edge = runs(13, (x, y) => !at(x - 1, y - 1) && [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => at(x - 1 + dx, y - 1 + dy))));
+    outline.set(name, `<g class="edge">${edge}</g>${runs(11, at, 1)}`);
+  }
 }
 
 export function icon(name: IconName, set: IconSet, cls = 'ic'): string {
-  if (set === 'fine' && fine.has(name))
-    return `<svg class="${cls} fine" viewBox="0 0 16 16" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${fine.get(name)}</svg>`;
-  if (set === 'duo')
-    return `<svg class="${cls} duo" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g fill="currentColor" fill-opacity=".28" stroke="none">${LINE[name]}</g><g fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)">${LINE[name]}</g></svg>`;
+  const px = (kind: string, n: number, body: string) => `<svg class="${cls} ${kind}" viewBox="0 0 ${n} ${n}" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
+  if (set === 'fine' && fine.has(name)) return px('fine', 16, fine.get(name)!);
+  if (set === 'glyph' && glyph.has(name)) return px('glyph', 12, glyph.get(name)!);
+  if (set === 'outline' && outline.has(name)) return px('outline', 13, outline.get(name)!);
+  if (set === 'solid')
+    return `<svg class="${cls} solid" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${solidInner(name)}</svg>`;
   if (set === 'line')
     return `<svg class="${cls} line" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="var(--icon-stroke, 2)" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LINE[name]}</svg>`;
   const cut = PIXEL_CUT[name];
   const body = cut
     ? `<mask id="m-${name}"><rect width="11" height="11" fill="#fff"/><g fill="#000">${cut}</g></mask><g mask="url(#m-${name})">${PIXEL[name]}</g>`
     : PIXEL[name];
-  return `<svg class="${cls} pixel" viewBox="0 0 11 11" fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">${body}</svg>`;
+  return px('pixel', 11, body);
 }
 
 // The game's own gold coin, used by every design for credits and prices
