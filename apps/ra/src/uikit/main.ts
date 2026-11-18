@@ -1,81 +1,69 @@
 // The UI kit page (/ui/): every piece of the game's interface, on its own and
-// in the game, in each design on the table (today's look, Refined Pixel and
-// variations on it), which the tabs at the top switch between. Nothing here
-// is used by the game yet: it is for choosing a design. Each design is a set of CSS variables and rules in
-// kit.css under [data-theme='<id>'], so every component below is the same
-// markup in every design.
+// in the game, in Soft Pixel, with a panel for trying other fonts, icons and
+// colours on it. Nothing here is used by the game yet: it is for settling the
+// design. The look is in kit.css under [data-theme='soft']; the panel sets
+// CSS variables (and the frames drawn from the colours), so every component
+// below is the same markup whatever is picked.
 import './kit.css';
 import { COIN_ART, IconName, IconSet, icon, prepareIcons } from './icons';
 import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, CursorKind, HARVEST_FRAMES, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames } from '../cursors';
-import { GROUP_COLORS, PLAYER_COLORS, THEMES, Theme } from './themes';
+import { GROUP_COLORS, PLAYER_COLORS } from './colors';
+import { COLOR_KEYS, Colors, DEFAULT, Design, FONTS, ICON_SETS, PRESETS, ROLES, Role, fromHash, inkOn, mix, rgba, toHash } from './design';
+import { useFont } from './fonts';
 import { pixelFrame } from './frames';
 
-// Frames and textures some designs draw with (see frames.ts), as CSS variables.
-const FRAMES: Record<string, Record<string, string>> = {
-  now: {
-    '--fr-wood': pixelFrame({ fill: '#2a1e13', line: '#24170b', hi: '#c98a4b', lo: '#6a3f1d', trim: '#9b6232' }),
-  },
-  pixel: {
-    '--fr-panel': pixelFrame({ fill: '#1b2440', line: '#060912', hi: '#36457a', lo: '#111833', trim: '#a8873c' }),
-    '--fr-btn': pixelFrame({ fill: '#29345a', line: '#060912', hi: '#4a5b96', lo: '#18203d' }),
-    '--fr-hover': pixelFrame({ fill: '#323f6c', line: '#060912', hi: '#5a6cab', lo: '#18203d' }),
-    '--fr-on': pixelFrame({ fill: '#3f82d6', line: '#06142a', hi: '#a4ceff', lo: '#24569a' }),
-    '--fr-primary': pixelFrame({ fill: '#e0b04a', line: '#2a1a04', hi: '#fff0b0', lo: '#9a6e1c' }),
-    '--fr-danger': pixelFrame({ fill: '#b8432f', line: '#2a0a04', hi: '#ff9a80', lo: '#78241a' }),
-    '--fr-well': pixelFrame({ fill: '#0d1326', line: '#060912', hi: '#090d1b', lo: '#2a3558' }),
-    '--fr-toast': pixelFrame({ fill: '#f2d27a', line: '#2a1a04', hi: '#fff6cc', lo: '#b88a2a' }),
-  },
-  fine: {
-    '--fr-panel': pixelFrame({ fill: '#1b2440', line: '#0a0f1e', hi: '#2f3c68', lo: '#141b33', trim: '#8d7234' }),
-    '--fr-btn': pixelFrame({ fill: '#26314f', line: '#0a0f1e', hi: '#3c4a7c', lo: '#1a2240' }),
-    '--fr-hover': pixelFrame({ fill: '#2e3a60', line: '#0a0f1e', hi: '#4a5a92', lo: '#1a2240' }),
-    '--fr-on': pixelFrame({ fill: '#3a78c8', line: '#0a1a33', hi: '#8fbcf5', lo: '#285a9c' }),
-    '--fr-primary': pixelFrame({ fill: '#dcae4c', line: '#2a1a04', hi: '#f8e2a0', lo: '#a37a26' }),
-    '--fr-danger': pixelFrame({ fill: '#b0442f', line: '#2a0a04', hi: '#f08a70', lo: '#7a261a' }),
-    '--fr-well': pixelFrame({ fill: '#10162b', line: '#0a0f1e', hi: '#0c1122', lo: '#26314f' }),
-    '--fr-toast': pixelFrame({ fill: '#f0d488', line: '#2a1a04', hi: '#fff4cc', lo: '#b88f36' }),
-  },
-  steel: {
-    '--fr-panel': pixelFrame({ fill: '#262b33', line: '#0b0d11', hi: '#434b57', lo: '#1a1e24', trim: '#3d6db0' }),
-    '--fr-btn': pixelFrame({ fill: '#333a45', line: '#0b0d11', hi: '#56606e', lo: '#22272f' }),
-    '--fr-hover': pixelFrame({ fill: '#3c4451', line: '#0b0d11', hi: '#66707f', lo: '#22272f' }),
-    '--fr-on': pixelFrame({ fill: '#4f74a8', line: '#0c1626', hi: '#8fb2dc', lo: '#2c446b' }),
-    '--fr-primary': pixelFrame({ fill: '#f0b43c', line: '#2a1804', hi: '#ffe39a', lo: '#b07a18' }),
-    '--fr-danger': pixelFrame({ fill: '#b8432f', line: '#2a0a04', hi: '#ff9a80', lo: '#78241a' }),
-    '--fr-well': pixelFrame({ fill: '#15181d', line: '#0b0d11', hi: '#101318', lo: '#3a414c' }),
-    '--fr-toast': pixelFrame({ fill: '#e8edf3', line: '#0b0d11', hi: '#ffffff', lo: '#a9b4c2' }),
-  },
-  deck: {
-    '--fr-panel': pixelFrame({ fill: '#18213b', line: '#060912', hi: '#33416f', lo: '#10172d', trim: '#a8873c' }),
-    '--fr-btn': pixelFrame({ fill: '#26314f', line: '#060912', hi: '#46578e', lo: '#18203d' }),
-    '--fr-hover': pixelFrame({ fill: '#303c64', line: '#060912', hi: '#5668a6', lo: '#18203d' }),
-    '--fr-on': pixelFrame({ fill: '#3f82d6', line: '#06142a', hi: '#a4ceff', lo: '#24569a' }),
-    '--fr-primary': pixelFrame({ fill: '#e0b04a', line: '#2a1a04', hi: '#fff0b0', lo: '#9a6e1c' }),
-    '--fr-danger': pixelFrame({ fill: '#b8432f', line: '#2a0a04', hi: '#ff9a80', lo: '#78241a' }),
-    '--fr-well': pixelFrame({ fill: '#0d1326', line: '#060912', hi: '#090d1b', lo: '#2a3558' }),
-    '--fr-toast': pixelFrame({ fill: '#f2d27a', line: '#2a1a04', hi: '#fff6cc', lo: '#b88a2a' }),
-  },
-  signal: {
-    '--fr-panel': pixelFrame({ fill: '#0e1426', line: '#03060d', hi: '#24305a', lo: '#0a0f1d', trim: '#6e5a2a' }),
-    '--fr-btn': pixelFrame({ fill: '#18203a', line: '#03060d', hi: '#2f3d6c', lo: '#10162b' }),
-    '--fr-hover': pixelFrame({ fill: '#202a4a', line: '#03060d', hi: '#3c4c84', lo: '#10162b' }),
-    '--fr-on': pixelFrame({ fill: '#2a1c06', line: '#03060d', hi: '#ffb43c', lo: '#7a4a10' }),
-    '--fr-primary': pixelFrame({ fill: '#ffae2e', line: '#2a1804', hi: '#ffe0a0', lo: '#b06a10' }),
-    '--fr-danger': pixelFrame({ fill: '#a8392a', line: '#2a0a04', hi: '#ff8a70', lo: '#6e2016' }),
-    '--fr-well': pixelFrame({ fill: '#05080f', line: '#03060d', hi: '#04060c', lo: '#1c2440' }),
-    '--fr-toast': pixelFrame({ fill: '#120c02', line: '#03060d', hi: '#ffb43c', lo: '#7a4a10' }),
-  },
-  soft: {
-    '--fr-panel': pixelFrame({ fill: '#1a3640', line: '#07141a', hi: '#2f5866', lo: '#122830', trim: '#d9c08a', steps: [5, 3, 2, 1, 1] }),
-    '--fr-btn': pixelFrame({ fill: '#24485a', line: '#07141a', hi: '#3e6c80', lo: '#18343f', steps: [5, 3, 2, 1, 1] }),
-    '--fr-hover': pixelFrame({ fill: '#2b5468', line: '#07141a', hi: '#4b7c92', lo: '#18343f', steps: [5, 3, 2, 1, 1] }),
-    '--fr-on': pixelFrame({ fill: '#f2e3bc', line: '#2a2010', hi: '#ffffff', lo: '#c4b080', steps: [5, 3, 2, 1, 1] }),
-    '--fr-primary': pixelFrame({ fill: '#f08a5c', line: '#2a1006', hi: '#ffc8a8', lo: '#b25a30', steps: [5, 3, 2, 1, 1] }),
-    '--fr-danger': pixelFrame({ fill: '#c0453a', line: '#2a0a06', hi: '#ff9a8a', lo: '#80261e', steps: [5, 3, 2, 1, 1] }),
-    '--fr-well': pixelFrame({ fill: '#0f232b', line: '#07141a', hi: '#0b1b21', lo: '#2a4e5c', steps: [5, 3, 2, 1, 1] }),
-    '--fr-toast': pixelFrame({ fill: '#f2e3bc', line: '#2a2010', hi: '#ffffff', lo: '#c4b080', steps: [5, 3, 2, 1, 1] }),
-  },
-};
+// The panel frames (see frames.ts) and the colour variables, from the eight
+// colours picked.
+const STEPS = [5, 3, 2, 1, 1];
+function colorVars(c: Colors): Record<string, string> {
+  const W = '#ffffff', K = '#000000';
+  const f = (fill: string, line: string, trim?: string) => pixelFrame({ fill, line, hi: mix(fill, W, 0.18), lo: mix(fill, K, 0.3), trim, steps: STEPS });
+  const btn = mix(c.panel, c.ink, 0.1);
+  const hover = mix(c.panel, c.ink, 0.17);
+  const well = mix(c.panel, K, 0.42);
+  const dark = (x: string) => mix(x, K, 0.82);
+  return {
+    '--fr-panel': f(c.panel, c.edge, c.trim),
+    '--fr-btn': f(btn, c.edge),
+    '--fr-hover': f(hover, c.edge),
+    '--fr-on': f(c.on, dark(c.on)),
+    '--fr-primary': f(c.accent, dark(c.accent)),
+    '--fr-danger': f(c.danger, dark(c.danger)),
+    '--fr-well': pixelFrame({ fill: well, line: c.edge, hi: mix(well, K, 0.25), lo: mix(c.panel, W, 0.1), steps: STEPS }),
+    '--fr-toast': f(c.ink, dark(c.ink)),
+    '--page': mix(c.panel, K, 0.58),
+    '--page-2': mix(c.panel, K, 0.4),
+    '--card': mix(c.panel, K, 0.5),
+    '--card-line': rgba(c.ink, 0.1),
+    '--panel-solid': c.panel,
+    '--line': c.edge,
+    '--trim': c.trim,
+    '--ink': c.ink,
+    '--page-ink': c.ink,
+    '--dim': mix(c.ink, c.panel, 0.38),
+    '--page-dim': mix(c.ink, c.panel, 0.42),
+    '--accent': c.accent,
+    '--accent-ink': dark(c.accent),
+    '--bubble': c.accent,
+    '--bubble-ink': dark(c.accent),
+    '--thumb': c.accent,
+    '--thumb-line': dark(c.accent),
+    '--accent-2': c.good,
+    '--ok': c.good,
+    '--new-ink': dark(c.good),
+    '--danger': mix(c.danger, W, 0.25),
+    '--on': c.on,
+    '--on-ink': inkOn(c.on, mix(c.panel, K, 0.3)),
+    '--sel': mix(c.ink, W, 0.4),
+    '--mini-view': mix(c.ink, W, 0.4),
+    '--toast-ink': inkOn(c.ink, mix(c.panel, K, 0.3)),
+    '--move-line': rgba(mix(c.ink, W, 0.4), 0.85),
+    '--title-shadow': `0 3px 0 ${c.edge}`,
+    '--track': well,
+    '--track-shadow': `inset 0 0 0 2px ${c.edge}`,
+    '--pwr-track': c.edge,
+  };
+}
 
 const art = import.meta.glob('./art/*.{png,webp}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
 const A = (n: string) => art[`./art/${n}`];
@@ -83,10 +71,10 @@ const BG = A('bg.webp');
 const GLOBE = A('globe.png');
 
 const kit = document.querySelector<HTMLElement>('#kit')!;
-const tabsEl = document.querySelector<HTMLElement>('#themeTabs')!;
+const panel = document.querySelector<HTMLElement>('#tweak')!;
 
-let T: Theme = THEMES[1];
-let IS: IconSet = 'pixel';
+let D: Design = structuredClone(DEFAULT);
+let IS: IconSet = D.icons;
 const I = (n: IconName, cls?: string) => icon(n, IS, cls);
 
 // ---------- Data ----------
@@ -113,72 +101,6 @@ type ItemState = '' | 'building' | 'ready' | 'paused' | 'blocked' | 'locked';
 interface ItemOpts { state?: ItemState; prog?: number; fresh?: boolean; count?: number }
 
 const fmt = (n: number) => n.toLocaleString('en-US');
-
-// ---------- Command Deck: the bigger layout overhaul ----------
-
-// Menu, credits and power in one strip at the top.
-function resBar(phone = false) {
-  return `<div class="k-resbar s-panel${phone ? ' phone' : ''}"><button class="k-ibtn s-btn sm" aria-label="Menu">${I('menu')}</button><div class="k-res">${coin()}<span class="num">12,450</span>${phone ? '' : '<span class="cap">/ 15,000</span>'}</div><div class="k-res pwr" title="Power">${I('bolt')}<div class="k-hbar"><i style="--p:.72"></i><b style="--u:.55"></b></div>${phone ? '' : '<span class="cap">210 / 290</span>'}</div></div>`;
-}
-
-// What you have selected: a big portrait, health, stats and the kinds in it.
-function unitCard(compact = false) {
-  return `<div class="k-unitcard s-well${compact ? ' compact' : ''}"><div class="por"><img src="${A('c-lancer.webp')}" alt=""><b class="count">×4</b></div><div class="info"><b class="uname">Lancer tank</b><span class="k-label">Group 4 · 6 selected</span><div class="k-hp big hi"><i style="--hp:.8"></i></div>${compact ? '' : `<div class="stats"><span>Armour <b>Heavy</b></span><span>Range <b>5</b></span><span>Speed <b>Med</b></span></div>`}<div class="chips">${utype('lancer', 4, true)}${utype('bastion', 2, true)}${compact ? '' : utype('rifle', 6)}</div></div></div>`;
-}
-
-function cmd(icon: IconName, label: string, key: string, cls = '') {
-  return `<button class="k-cmd s-btn ${cls}">${I(icon)}<span>${label}</span><kbd>${key}</kbd></button>`;
-}
-
-function cmdGrid() {
-  return `<div class="k-cmds">${cmd('select', 'Select', 'Q', 'on')}${cmd('all', 'All', '^A')}${cmd('home', 'Home', 'H')}${cmd('group', 'Group', '⇧1')}${cmd('flag', 'Rally', 'R')}${cmd('clear', 'Clear', 'Esc')}</div>`;
-}
-
-function consoleDesk() {
-  const st: ItemOpts[] = [{ state: 'building', prog: 0.4 }, { state: 'ready' }, {}, { state: 'paused', prog: 0.7 }, { fresh: true }, { state: 'blocked' }];
-  return `<div class="k-console s-panel">${unitCard()}${cmdGrid()}<div class="k-console-build">${buildTabs(0)}<div class="k-row">${BUILD_BASE.slice(0, 6)
-    .map((x, i) => item(x.k, x.n, x.c, st[i]))
-    .join('')}</div></div></div>`;
-}
-
-function tabbar(on: 'select' | 'build' | 'home' | '' = '') {
-  const t = (k: string, ic: IconName, n: string, alert = false) => `<button class="k-tbtab${on === k ? ' on' : ''}${alert ? ' alert' : ''}">${I(ic)}<span>${n}</span></button>`;
-  return `<nav class="k-tabbar s-panel">${t('select', 'select', 'Select')}${t('group', 'group', 'Groups')}${t('home', 'home', 'Home')}${t('build', 'build', 'Build', on !== 'build')}</nav>`;
-}
-
-function deckDesk() {
-  return `
-    <div class="pos tl">${resBar()}</div>
-    <div class="pos tc deck">${toast('Lancer tank ready')}</div>
-    <div class="pos tr">${mini()}</div>
-    <div class="pos console">${consoleDesk()}</div>
-    <div class="pos tipat deck">${tip()}</div>`;
-}
-
-function deckPhones() {
-  return `${phone('Building', -1035, -445, `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos tray">${buildPanel('sheet', 0, 6)}</div><div class="pos dock">${tabbar('build')}</div>`)}
-      ${phone(
-        'Units selected',
-        -570,
-        -470,
-        `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos tc lower">${toast('Group 4 · 6 units')}</div><div class="pos conf" style="left:236px;top:400px">${confirmCheck()}</div><div class="pos tray">${unitCard(true)}</div><div class="pos dock">${tabbar('select')}</div>`,
-        `${selbox(414, 510, 44, 34, 0.9, GROUP_COLORS[3])}${selbox(452, 744, 40, 30, 0.6, GROUP_COLORS[3])}${moveLine(436, 527, 545, 590)}`,
-      )}
-      ${phone('Deploying', -330, -505, `<div class="pos topbar">${resBar(true)}</div><div class="pos tr low">${mini()}</div><div class="pos deployat">${deploy()}</div><div class="pos tc lower">${toast('Tap Deploy to set up your base')}</div><div class="pos dock">${tabbar('')}</div>`)}
-`;
-}
-
-function deckCards() {
-  return `<h3 class="pg-h3">Command Deck parts</h3>
-    <div class="pg-grid">
-      ${card('Console (desktop)', `<div class="pg-console">${consoleDesk()}</div>`, 'Selection, commands and the build row in one panel along the bottom', 'full')}
-      ${card('Resource strip', resBar(), 'Menu, credits and power together at the top', 'span2')}
-      ${card('Phone tab bar', `<div class="pg-tabbar">${tabbar('select')}</div>`, 'Full width along the bottom of a phone', 'span2')}
-      ${card('Selected-unit card', unitCard(), 'Portrait, group, health, stats and the kinds selected', 'span2')}
-      ${card('Commands', cmdGrid(), 'Each with its key on a computer', 'span2')}
-    </div>`;
-}
-
 
 // ---------- Components (the same markup for every design) ----------
 
@@ -381,12 +303,6 @@ const CURSOR_NAMES: [CursorKind, string][] = [
   ['corners', 'Pick unit'], ['rally', 'Rally'], ['build', 'Place'], ['blocked', 'Can’t'], ['grab', 'Drag'],
 ];
 const cursorImg = (css: string) => css.match(/url\(([^)]+)\)/)?.[1] ?? '';
-const ICON_NOTE: Record<IconSet, string> = {
-  pixel: 'Chunky pixel set (the game’s own)',
-  fine: 'Fine pixel set: one-pixel lines with a faint fill',
-  duo: 'Smooth two-tone set',
-  line: 'Line set',
-};
 
 // The move, attack and harvest cursors turn as they do in the game, and the
 // order checks' rings with them.
@@ -425,31 +341,22 @@ function card(title: string, body: string, note = '', cls = '') {
 }
 
 function render() {
-  IS = T.icons;
+  IS = D.icons;
   mapId = 0;
-  kit.style.cssText = '';
-  kit.dataset.theme = T.id;
-  document.documentElement.dataset.theme = T.id;
-  kit.dataset.family = document.documentElement.dataset.family = T.id === 'now' ? 'now' : 'pixel';
-  kit.style.setProperty('--bg-url', `url("${BG}")`);
-  for (const [k, v] of Object.entries(FRAMES[T.id] ?? {})) kit.style.setProperty(k, v);
-
-  const idx = THEMES.indexOf(T);
-  const deck = T.layout === 'deck';
   kit.innerHTML = `
   <section class="pg-intro">
     <div class="pg-intro-text">
-      <div class="pg-num">${idx === 0 ? 'Reference' : `Design ${idx} of ${THEMES.length - 1}`}</div>
-      <h1 class="pg-name">${T.name}</h1>
-      <p class="pg-tag">${T.tag}</p>
-      <p class="pg-blurb">${T.blurb}</p>
-      <ul class="pg-traits">${T.traits.map((t) => `<li>${t}</li>`).join('')}</ul>
+      <div class="pg-num">Your pick · now tweak it</div>
+      <h1 class="pg-name">Soft Pixel</h1>
+      <p class="pg-tag">Rounder and warmer</p>
+      <p class="pg-blurb">Bigger, rounder stepped corners, a warm palette and thin pixel fonts. Use the Tweak panel to try a different font for each kind of text, another icon set and other colours. Everything on the page changes as you pick, and the address keeps your picks, so sending the link shows exactly what you chose.</p>
+      <ul class="pg-traits" data-traits></ul>
     </div>
     <div class="pg-intro-side">
       <div class="pg-type">
-        <div class="pg-type-row"><span class="k-label">Display · ${T.type.display}</span><div class="pg-type-d">Victory 1234</div></div>
-        <div class="pg-type-row"><span class="k-label">Text · ${T.type.body}</span><div class="pg-type-b">Power plant ready. Ore hauler returning to refinery.</div></div>
-        <div class="pg-type-row"><span class="k-label">Labels and numbers</span><div class="pg-type-l"><span class="k-label">Vehicle works</span><span class="num">$12,450</span></div></div>
+        <div class="pg-type-row"><span class="k-label" data-font="d">Headings</span><div class="pg-type-d">Victory 1234</div></div>
+        <div class="pg-type-row"><span class="k-label" data-font="b">Body text</span><div class="pg-type-b">Power plant ready. Ore hauler returning to refinery.</div></div>
+        <div class="pg-type-row"><span class="k-label" data-font="l">Labels</span><div class="pg-type-l"><span class="k-label">Vehicle works</span><span class="num">$12,450</span></div></div>
       </div>
       ${swatches()}
     </div>
@@ -466,13 +373,13 @@ function render() {
           ${selbox(948, 560, 44, 34, 0.25)}
           ${rally(700, 520)}
         </div>
-        <div class="hud">${deck ? deckDesk() : `
+        <div class="hud">
           <div class="pos tl">${hudTop()}</div>
           <div class="pos tc">${toast('Lancer tank ready')}</div>
           <div class="pos tr">${mini()}</div>
           <div class="pos side">${buildPanel('side')}</div>
           <div class="pos bc">${selBar('full')}${toolbar('select')}</div>
-          <div class="pos tipat">${tip()}</div>`}
+          <div class="pos tipat">${tip()}</div>
         </div>
       </div>
     </div>
@@ -481,7 +388,7 @@ function render() {
   <section class="pg-sec">
     <h2 class="pg-h2">In the game <small>Phone</small></h2>
     <div class="phones">
-${deck ? deckPhones() : `      ${phone('Building', -1035, -445, `<div class="pos tl">${hudTop()}</div><div class="pos tr">${mini()}</div><div class="pos sheet">${buildPanel('sheet', 0, 6)}</div><div class="pos bc">${toolbar('build')}</div>`)}
+      ${phone('Building', -1035, -445, `<div class="pos tl">${hudTop()}</div><div class="pos tr">${mini()}</div><div class="pos sheet">${buildPanel('sheet', 0, 6)}</div><div class="pos bc">${toolbar('build')}</div>`)}
       ${phone(
         'Units selected',
         -570,
@@ -490,7 +397,6 @@ ${deck ? deckPhones() : `      ${phone('Building', -1035, -445, `<div class="pos
         `${selbox(414, 510, 44, 34, 0.9, GROUP_COLORS[3])}${selbox(452, 744, 40, 30, 0.6, GROUP_COLORS[3])}${selbox(400, 760, 40, 30, 0.35, GROUP_COLORS[3])}${moveLine(436, 527, 545, 610)}`,
       )}
       ${phone('Deploying', -330, -505, `<div class="pos tl">${hudTop(5000)}</div><div class="pos tr">${mini()}</div><div class="pos deployat">${deploy()}</div><div class="pos tc low">${toast('Tap Deploy to set up your base')}</div><div class="pos bc">${toolbar('')}</div>`)}
-`}
       ${phone('Lobby', -1035, -300, `<div class="pos center">${lobbyRoom()}</div>`, '', 'dim')}
     </div>
   </section>
@@ -503,10 +409,9 @@ ${deck ? deckPhones() : `      ${phone('Building', -1035, -445, `<div class="pos
       ${card('Type and colour', `<div class="pg-col"><div class="k-title">Choose a map</div><div class="k-label">Section label</div><p class="k-p">Body text for blurbs, tooltips and hints. Ore hauler returning to refinery.</p><div class="pg-row">${badge('New')}${badge('3', 'count')}${badge('Host', 'tag')}<span class="k-alertdot"></span></div></div>`, 'Title, label, body, badges, count bubble and alert dot', 'plain')}
       ${card('Fields', `<div class="pg-col"><label class="k-field"><span class="k-label">Your name</span><input class="k-input s-well" value="Tim"></label><label class="k-field"><span class="k-label">Version</span><span class="k-select s-well"><select><option>v2 · Isometric</option></select></span></label>${seg(['Initial', 'Combat'])}${range('Music', 70)}</div>`, 'Text input, select, segmented switch and slider', 'plain')}
       ${card('Cursors', `<div class="pg-cursors">${CURSOR_NAMES.map(([k, n]) => `<div><span class="cv" style="cursor:${CURSORS[k]}"><img data-cur="${k}" src="${cursorImg(CURSORS[k])}" alt=""></span><small>${n}</small></div>`).join('')}</div>`, 'The game’s own cursors, kept in every design. Hover the map in the mockups to try the move cursor', 'plain span2')}
-      ${card('Icons', `<div class="pg-icons">${(['menu', 'select', 'home', 'build', 'group', 'all', 'clear', 'close', 'shuffle', 'units', 'check', 'deploy', 'gear', 'back', 'flag', 'bolt', 'play', 'users', 'bot'] as IconName[]).map((n) => I(n)).join('')}</div>`, ICON_NOTE[T.icons], 'plain span2')}
+      ${card('Icons', `<div class="pg-icons">${(['menu', 'select', 'home', 'build', 'group', 'all', 'clear', 'close', 'shuffle', 'units', 'check', 'deploy', 'gear', 'back', 'flag', 'bolt', 'play', 'users', 'bot'] as IconName[]).map((n) => I(n)).join('')}</div>`, `${ICON_SETS.find((x) => x.id === D.icons)!.name}: ${ICON_SETS.find((x) => x.id === D.icons)!.note.toLowerCase()}. Pick another set in the Tweak panel`, 'plain span2')}
     </div>
 
-    ${deck ? deckCards() : ''}
     <h3 class="pg-h3">HUD</h3>
     <div class="pg-grid">
       ${card('Menu button and credits', hudTop(), 'Top left; credits turn red when power is short')}
@@ -647,49 +552,154 @@ new ResizeObserver(() => fitStages()).observe(document.body);
 // pressed states you can try
 kit.addEventListener('click', onClick);
 
-// ---------- Tabs ----------
+// ---------- The tweak panel ----------
 
-function pick(id: string, push = true) {
-  T = THEMES.find((t) => t.id === id) ?? THEMES[1];
-  for (const b of tabsEl.querySelectorAll<HTMLButtonElement>('button')) {
-    const on = b.dataset.id === T.id;
-    b.setAttribute('aria-selected', String(on));
-    if (on && push) b.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+const fontName = (r: Role) => D.fonts[r];
+const sameColors = (a: Colors, b: Colors) => COLOR_KEYS.every((k) => a[k.id].toLowerCase() === b[k.id].toLowerCase());
+const SAMPLE_ICONS: IconName[] = ['select', 'build', 'home', 'gear', 'flag', 'users'];
+
+function buildPanelUi() {
+  const groups = (['Pixel', 'Smooth'] as const)
+    .map((k) => `<optgroup label="${k === 'Pixel' ? 'Pixel fonts' : 'Smooth fonts'}">${FONTS.filter((f) => f.kind === k).map((f) => `<option>${f.name}</option>`).join('')}</optgroup>`)
+    .join('');
+  panel.innerHTML = `
+    <button class="tw-toggle" type="button" aria-expanded="false" aria-controls="twBody">Tweak</button>
+    <div class="tw-body" id="twBody">
+      <div class="tw-head"><b>Tweak Soft Pixel</b><button class="tw-close" type="button" aria-label="Close">×</button></div>
+      <section class="tw-sec">
+        <h3>Fonts</h3>
+        ${ROLES.map((r) => `<label class="tw-font"><span class="tw-l">${r.name}<small>${r.note}</small></span><select data-role="${r.id}">${groups}</select><span class="tw-sample" style="font-family:'ra-${r.id}'; font-weight:${r.id === 'd' ? 'var(--w-d)' : 400}">${r.sample}</span></label>`).join('')}
+      </section>
+      <section class="tw-sec">
+        <h3>Icons</h3>
+        <div class="tw-icons">${ICON_SETS.map((s) => `<button type="button" class="tw-iset" data-icons="${s.id}" title="${s.note}"><span class="tw-ipre">${SAMPLE_ICONS.map((n) => icon(n, s.id)).join('')}</span><span>${s.name}</span></button>`).join('')}</div>
+      </section>
+      <section class="tw-sec">
+        <h3>Colours</h3>
+        <div class="tw-presets">${PRESETS.map((p) => `<button type="button" class="tw-preset" data-preset="${p.id}"><span class="dots">${(['panel', 'trim', 'accent', 'on', 'ink'] as const).map((k) => `<i style="background:${p.c[k]}"></i>`).join('')}</span><span>${p.name}</span></button>`).join('')}</div>
+        <div class="tw-colors">${COLOR_KEYS.map((k) => `<label class="tw-color" title="${k.note}"><input type="color" data-color="${k.id}"><span>${k.name}</span></label>`).join('')}</div>
+      </section>
+      <div class="tw-foot"><button type="button" class="tw-btn" data-act="reset">Reset</button><button type="button" class="tw-btn main" data-act="copy">Copy link</button></div>
+    </div>`;
+
+  const open = (on: boolean) => {
+    panel.classList.toggle('open', on);
+    panel.querySelector('.tw-toggle')!.setAttribute('aria-expanded', String(on));
+  };
+  panel.querySelector('.tw-toggle')!.addEventListener('click', () => open(!panel.classList.contains('open')));
+  panel.querySelector('.tw-close')!.addEventListener('click', () => open(false));
+  for (const sel of panel.querySelectorAll<HTMLSelectElement>('select[data-role]'))
+    sel.addEventListener('change', () => {
+      D.fonts[sel.dataset.role as Role] = sel.value;
+      apply();
+    });
+  for (const inp of panel.querySelectorAll<HTMLInputElement>('input[data-color]'))
+    inp.addEventListener('input', () => {
+      D.colors[inp.dataset.color as keyof Colors] = inp.value;
+      apply();
+    });
+  panel.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('button');
+    if (!b) return;
+    if (b.dataset.icons) {
+      D.icons = b.dataset.icons as IconSet;
+      apply();
+    } else if (b.dataset.preset) {
+      D.colors = { ...PRESETS.find((p) => p.id === b.dataset.preset)!.c };
+      apply();
+    } else if (b.dataset.act === 'reset') {
+      D = structuredClone(DEFAULT);
+      apply();
+    } else if (b.dataset.act === 'copy') {
+      const done = () => {
+        b.textContent = 'Copied';
+        setTimeout(() => (b.textContent = 'Copy link'), 1500);
+      };
+      navigator.clipboard?.writeText(location.href).then(done, () => prompt('Copy this link', location.href));
+    }
+  });
+}
+
+function syncPanel() {
+  for (const sel of panel.querySelectorAll<HTMLSelectElement>('select[data-role]')) sel.value = fontName(sel.dataset.role as Role);
+  for (const inp of panel.querySelectorAll<HTMLInputElement>('input[data-color]')) {
+    const v = D.colors[inp.dataset.color as keyof Colors];
+    if (inp.value !== v) inp.value = v;
   }
-  if (push) history.replaceState(null, '', `#${T.id}`);
+  for (const b of panel.querySelectorAll<HTMLElement>('[data-icons]')) b.classList.toggle('on', b.dataset.icons === D.icons);
+  for (const b of panel.querySelectorAll<HTMLElement>('[data-preset]')) b.classList.toggle('on', sameColors(PRESETS.find((p) => p.id === b.dataset.preset)!.c, D.colors));
+}
+
+// What's on the intro: the fonts and colours picked.
+function syncIntro() {
+  for (const el of kit.querySelectorAll<HTMLElement>('[data-font]')) {
+    const r = el.dataset.font as Role;
+    el.textContent = `${ROLES.find((x) => x.id === r)!.name} · ${fontName(r)}`;
+  }
+  const preset = PRESETS.find((p) => sameColors(p.c, D.colors));
+  const traits = [
+    `${fontName('d')} headings`,
+    `${fontName('b')} text`,
+    fontName('l') !== fontName('b') ? `${fontName('l')} labels` : '',
+    `${fontName('n')} numbers`,
+    `${ICON_SETS.find((x) => x.id === D.icons)!.name} icons`,
+    preset ? `${preset.name} colours` : 'Custom colours',
+  ].filter(Boolean);
+  const ul = kit.querySelector('[data-traits]');
+  if (ul) ul.innerHTML = traits.map((t) => `<li>${t}</li>`).join('');
+}
+
+function save() {
+  const h = toHash(D);
+  history.replaceState(null, '', h ? `#${h}` : location.pathname + location.search);
   try {
-    localStorage.setItem('ra-uikit', T.id);
+    localStorage.setItem('ra-uikit-soft', h);
   } catch {
     /* private mode */
   }
-  render();
 }
 
-tabsEl.innerHTML = THEMES.map((t, i) => `<button role="tab" data-id="${t.id}" aria-selected="false"><span class="n">${i === 0 ? '·' : i}</span><span class="t">${t.name}</span></button>`).join('');
-tabsEl.addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
-  if (b) pick(b.dataset.id!);
-});
-document.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-  const i = THEMES.indexOf(T);
-  if (e.key === 'ArrowRight') pick(THEMES[(i + 1) % THEMES.length].id);
-  if (e.key === 'ArrowLeft') pick(THEMES[(i - 1 + THEMES.length) % THEMES.length].id);
-});
+let rendered = false;
+function apply() {
+  const vars = colorVars(D.colors);
+  for (const el of [kit, document.documentElement]) for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
+  const w = String(FONTS.find((f) => f.name === D.fonts.d)?.w ?? 400);
+  for (const el of [kit, document.documentElement]) el.style.setProperty('--w-d', w);
+  for (const r of ROLES) useFont(r.id, D.fonts[r.id]).then(fitStages, () => undefined);
+  if (!rendered || IS !== D.icons) {
+    render();
+    rendered = true;
+  }
+  syncIntro();
+  fillSwatchCodes();
+  syncPanel();
+  save();
+}
 
-let first = location.hash.slice(1);
-if (!THEMES.some((t) => t.id === first)) {
+kit.dataset.theme = document.documentElement.dataset.theme = 'soft';
+kit.dataset.family = document.documentElement.dataset.family = 'pixel';
+kit.style.setProperty('--bg-url', `url("${BG}")`);
+
+function stored(): Design | null {
   try {
-    first = localStorage.getItem('ra-uikit') ?? '';
+    return fromHash(localStorage.getItem('ra-uikit-soft') ?? '');
   } catch {
-    first = '';
+    return null;
   }
 }
+D = fromHash(location.hash) ?? stored() ?? structuredClone(DEFAULT);
+
 prepareIcons()
   .catch(() => undefined)
-  .then(() => pick(first || THEMES[1].id, false));
+  .then(() => {
+    buildPanelUi();
+    apply();
+  });
 document.fonts?.ready.then(fitStages);
 window.addEventListener('hashchange', () => {
-  const id = location.hash.slice(1);
-  if (id !== T.id && THEMES.some((t) => t.id === id)) pick(id, false);
+  const d = fromHash(location.hash);
+  if (d && toHash(d) !== toHash(D)) {
+    D = d;
+    apply();
+  }
 });
