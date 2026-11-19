@@ -32,6 +32,7 @@ export const SCENES: Record<string, Scene> = {
   tower: 'forest',
   inf: 'battle',
   rocket: 'dusk',
+  gren: 'ridge',
   buggy: 'dry',
   apc: 'meadow',
   light: 'meadow',
