@@ -27,6 +27,9 @@ const GLASS_L = hex('#d8f2f8');
 const HAZ = hex('#e0b83c');
 const RED = hex('#e2452c');
 const BROW = hex('#4a3322');
+const KHAKI = hex('#9a8a62');
+const GRENADE = hex('#4d5a36');
+const GRENADE_L = hex('#6f7f4f');
 
 const sq = (a: number) => a * a;
 
@@ -43,11 +46,13 @@ function seg(p: [number, number, number], a: [number, number, number], b: [numbe
 // these to renderStack as r and zmax.
 export const BUST = { zc: 22, r: 21, zmax: 44 };
 
-export function soldierBust(f: Faction, rocket: boolean): Shape {
-  const body = rocket ? mix(f.main, OLIVE, 0.45) : f.main;
+export function soldierBust(f: Faction, kind: 'gi' | 'rocket' | 'gren'): Shape {
+  const rocket = kind === 'rocket';
+  const gren = kind === 'gren';
+  const body = rocket ? mix(f.main, OLIVE, 0.45) : gren ? mix(f.main, KHAKI, 0.5) : f.main;
   const bodyD = shade(body, -0.28);
   const helmet = rocket ? OLIVE_D : shade(f.dark, 0.08);
-  const yaw = rocket ? 0.38 : -0.32; // turned a little, three-quarters on
+  const yaw = rocket ? 0.38 : gren ? 0.15 : -0.32; // turned a little, three-quarters on
   const cy = Math.cos(yaw);
   const sy = Math.sin(yaw);
   // the weapon
@@ -83,6 +88,23 @@ export function soldierBust(f: Faction, rocket: boolean): Shape {
       if (sq(X - 5.6) + sq(Y + 2.2) + sq(Z - 4.4) < 3.6) return SKIN;
       const [da] = seg(p, [-9, -12, 1], [4.6, -3.4, 3.4]);
       if (da < 2.4) return n(X, Y, Z, 4) > 0.9 ? bodyD : body; // forearm
+    } else if (gren) {
+      // a grenade held up by the shoulder, ready to throw: its body, the
+      // lever down its side and the ring of the pin
+      const gx = 8.6;
+      const gy = -5.4;
+      const gz = 6.5;
+      const gd = sq(X - gx) + sq((Y - gy) / 1.2) + sq(Z - gz);
+      if (gd < 7.3) {
+        if (Math.abs(X - gx + 0.2) < 0.55 && Y > gy && Z > gz) return STEEL; // lever
+        if (Math.abs(Y - gy) < 0.35 || Math.abs(X - gx) < 0.3) return shade(GRENADE, -0.25); // its segments
+        return Y > gy + 1 && X < gx ? GRENADE_L : GRENADE;
+      }
+      if (sq(X - gx + 1.6) + sq(Y - gy - 3.6) + sq(Z - gz - 1) < 1.3 && sq(X - gx + 1.6) + sq(Y - gy - 3.6) + sq(Z - gz - 1) > 0.4) return STEEL; // the pin's ring
+      // the hand round it, and the forearm up to it
+      if (sq(X - gx - 1.8) + sq(Y - gy + 2.2) + sq(Z - gz - 1.4) < 4.4) return SKIN;
+      const [da] = seg(p, [12, -22, 0], [10, -9, 5.4]);
+      if (da < 2.5) return n(X, Y, Z, 4) > 0.9 ? bodyD : body;
     } else {
       const [d, t] = seg(p, gunA, gunB);
       const r = t < 0.28 ? 1.5 : t > 0.74 ? 0.65 : 1.15;
@@ -147,6 +169,16 @@ export function soldierBust(f: Faction, rocket: boolean): Shape {
     if (Y < top && Y > -24 && Math.abs(Z) < depth && ax < 13.2) {
       // radio on the back pokes over the shoulder
       // webbing: two straps over the shoulders, a belt of pouches low down
+      if (gren && Z > 0) {
+        // a bandolier of grenades from the left shoulder down across the chest
+        const bd = Y - (-7.5 + (X + 11) * -0.62);
+        if (Math.abs(bd) < 1.8) {
+          const k = Math.floor((X + 13) / 2.6);
+          const cx = -13 + k * 2.6 + 1.3;
+          if (sq(X - cx) + sq(bd * 1.2) < 1.7 && Z > 2.2) return n(X, Y, Z, 11) > 0.6 ? GRENADE_L : GRENADE;
+          return OLIVE_D;
+        }
+      }
       const strap = Math.abs(ax - 4.6 - (Y + 6) * 0.06);
       if (strap < 0.9 && Z > 0) return strap > 0.6 ? shade(OLIVE_D, -0.2) : OLIVE_D;
       if (Y < -19.5 && Z > 1) return Math.abs(Math.floor(X / 3.2) * 3.2 - X + 1.6) < 1.2 ? OLIVE : OLIVE_D;
