@@ -39,7 +39,7 @@ const LEVELS: Record<BotLevel, Level> = {
     firstAttack: 300,
     every: 120,
     order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'refinery'],
-    units: ['inf', 'light', 'rocket', 'light', 'buggy', 'inf'],
+    units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'inf'],
   },
   hard: {
     think: 1.5,
@@ -47,7 +47,7 @@ const LEVELS: Record<BotLevel, Level> = {
     firstAttack: 210,
     every: 90,
     order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower'],
-    units: ['light', 'rocket', 'light', 'arty', 'light', 'inf'],
+    units: ['light', 'rocket', 'gren', 'light', 'arty', 'light', 'inf'],
   },
 };
 
