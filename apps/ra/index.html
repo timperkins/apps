@@ -24,6 +24,7 @@
       <span id="credits" hidden><i class="coinIco"></i><span class="num"></span></span>
     </div>
     <div id="menu" hidden>
+      <button id="pauseBtn" type="button" title="Pause the game (P)">Pause</button>
       <label class="ver">
         <span>Version</span>
         <select id="version">
@@ -49,14 +50,11 @@
     <canvas id="mini" aria-label="Minimap: drag to spin the world, tap to jump there"></canvas>
     <div id="selBar" hidden>
       <div id="acts"></div>
-      <div id="palette" role="group" aria-label="Give the selection a color" hidden></div>
       <div id="selMenu" role="toolbar" aria-label="Select units on screen" hidden>
         <div id="selScroll">
-          <span id="groups"></span>
           <span id="types"></span>
           <span id="noTypes" hidden>No units on screen</span>
         </div>
-        <button type="button" id="colorBtn" aria-expanded="false" aria-controls="palette" title="Make this selection a color group, to pick it again later (Shift+1-8)" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="2.6"/><path d="M7.5 20v-3.5a4.5 4.5 0 0 1 9 0V20"/><circle cx="5" cy="9.5" r="1.8"/><circle cx="19" cy="9.5" r="1.8"/><path d="M2.5 19v-2a3 3 0 0 1 3-3M21.5 19v-2a3 3 0 0 0-3-3"/></svg>Group</button>
         <button type="button" id="allBtn" title="Select every unit on screen (Ctrl+A)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><rect x="8.5" y="8.5" width="7" height="7" rx="1"/></svg>All</button>
         <button type="button" id="clearBtn" title="Clear selection (Esc)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>Clear</button>
       </div>
@@ -67,10 +65,12 @@
       <button type="button" id="okBtn" aria-label="Send them here (clear the selection to call it off)" title="Send them here"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7"/></svg></button>
     </div>
     <nav id="toolbar" aria-label="Controls">
-      <button type="button" id="selectBtn" aria-pressed="false" aria-controls="selMenu" title="Select units (Q)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l12 9-5.5 1.2L15.5 20l-2.6 1.1-3-6.6L6 18z"/></svg><span>Select</span></button>
-      <button type="button" id="homeBtn" title="Back to your base (H)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/></svg><span>Home</span></button>
+      <button type="button" id="selectBtn" aria-label="Select units" aria-pressed="false" aria-controls="selMenu" title="Select units (Q)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l12 9-5.5 1.2L15.5 20l-2.6 1.1-3-6.6L6 18z"/></svg></button>
+      <button type="button" id="homeBtn" aria-label="Back to your base" title="Back to your base (H)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/></svg></button>
+      <button type="button" class="grp" id="grp1" aria-pressed="false" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="2.6"/><path d="M7.5 20v-3.5a4.5 4.5 0 0 1 9 0V20"/><circle cx="5" cy="9.5" r="1.8"/><circle cx="19" cy="9.5" r="1.8"/><path d="M2.5 19v-2a3 3 0 0 1 3-3M21.5 19v-2a3 3 0 0 0-3-3"/></svg><b class="num" aria-hidden="true">1</b><span class="count" aria-hidden="true"></span></button>
+      <button type="button" class="grp" id="grp2" aria-pressed="false" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="7" r="2.6"/><path d="M7.5 20v-3.5a4.5 4.5 0 0 1 9 0V20"/><circle cx="5" cy="9.5" r="1.8"/><circle cx="19" cy="9.5" r="1.8"/><path d="M2.5 19v-2a3 3 0 0 1 3-3M21.5 19v-2a3 3 0 0 0-3-3"/></svg><b class="num" aria-hidden="true">2</b><span class="count" aria-hidden="true"></span></button>
       <i class="sep" id="buildSep" hidden></i>
-      <button type="button" id="buildBtn" aria-pressed="false" title="Build (B)" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 1 5-1.6l-2.6 2.6.4 2.2 2.2.4 2.6-2.6a4 4 0 0 1-5.4 4.8L9 20a2 2 0 0 1-3-3l7.7-7.7a4 4 0 0 1 .8-2.8z"/></svg><span>Build</span></button>
+      <button type="button" id="buildBtn" aria-label="Build" aria-pressed="false" title="Build (B)" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 1 5-1.6l-2.6 2.6.4 2.2 2.2.4 2.6-2.6a4 4 0 0 1-5.4 4.8L9 20a2 2 0 0 1-3-3l7.7-7.7a4 4 0 0 1 .8-2.8z"/></svg></button>
     </nav>
     <div id="build" hidden>
       <div class="head"><span class="credits" title="Credits"><i class="coinIco"></i><span class="num"></span></span><button type="button" class="close" aria-label="Close" title="Close (B)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></div>
@@ -97,6 +97,13 @@
     </div>
     <div id="build-no" aria-hidden="true" hidden></div>
     <div id="toast" hidden></div>
+    <div id="pauseScreen" hidden role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <div class="card">
+        <div class="t" id="pauseTitle">Paused</div>
+        <div class="s">The battle waits until you come back.</div>
+        <button type="button" id="resumeBtn" title="Resume (P or Esc)">Resume</button>
+      </div>
+    </div>
     <div id="banner" hidden role="status" aria-live="polite"></div>
     <div id="loading" hidden role="status" aria-live="polite">
       <div class="ld">

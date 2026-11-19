@@ -100,7 +100,10 @@ body {
 }
 
 #version,
+#pauseBtn,
 #regen,
+#leaveBtn,
+#lobbyBtn,
 #settingsBtn,
 #setBack,
 #setReset,
@@ -134,7 +137,10 @@ body {
   text-decoration: none;
 }
 
+#pauseBtn:active,
 #regen:active,
+#leaveBtn:active,
+#lobbyBtn:active,
 #settingsBtn:active,
 #setBack:active,
 #setReset:active {
@@ -411,10 +417,7 @@ body {
 
 #selBar[hidden],
 #selMenu[hidden],
-#palette[hidden],
-#groups[hidden],
 #types[hidden],
-#colorBtn[hidden],
 #acts[hidden],
 #noTypes[hidden],
 #confirm[hidden] {
@@ -465,43 +468,25 @@ body {
   display: none;
 }
 
-#types,
-#groups {
+#types {
+  --grp: #9dff9d;
   flex: none;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-/* the color groups in use, before the kinds of unit */
-#groups:has(+ #types:not([hidden])) {
-  padding-right: 4px;
-  border-right: 2px solid var(--edge);
-}
-
-#selBar button.type.grp {
-  border-color: var(--grp);
-  background: color-mix(in srgb, var(--grp) 14%, transparent);
-}
-
-#selBar button.type.grp .count,
-#selBar button.type.grp[aria-pressed='true'] .count,
-#selBar button.type.whole[aria-pressed='true'] .count {
-  background: var(--grp);
-}
-
-#selBar button.type.grp[aria-pressed='true'] {
-  border-color: var(--grp);
-  background: color-mix(in srgb, var(--grp) 38%, transparent);
-  box-shadow: 0 0 0 1px var(--grp), inset 1px 1px 0 rgba(255, 255, 255, 0.12);
-}
-
 /* a group you have given orders to: fixed until you clear it, shown as one
-   button with how many there are (in its color, if it has one) */
+   button with how many there are */
 #types.group {
   padding: 3px;
   border: 1px dashed var(--grp);
   background: color-mix(in srgb, var(--grp) 8%, transparent);
+}
+
+#selBar button.type.whole .count,
+#selBar button.type.whole[aria-pressed='true'] .count {
+  background: var(--grp);
 }
 
 #selBar button.type.whole,
@@ -510,53 +495,6 @@ body {
   background: color-mix(in srgb, var(--grp) 28%, transparent);
 }
 
-
-/* Group: opens the palette of colors above the menu */
-#selBar #colorBtn {
-  flex: none;
-  width: 56px;
-  min-width: 56px;
-}
-
-#selBar #selMenu #colorBtn svg {
-  fill: var(--grp, currentColor);
-}
-
-#selBar #colorBtn[aria-expanded='true'] {
-  border-color: #9dff9d;
-}
-
-/* the eight colors to give the selection */
-#palette {
-  display: flex;
-  gap: 4px;
-  padding: 5px;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow-x: auto;
-  touch-action: pan-x;
-  background: var(--panel);
-  border: 2px solid var(--edge);
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
-}
-
-#selBar #palette button.swatch {
-  flex: none;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  color: #10140c;
-  font-size: 11px;
-  background: var(--grp);
-  border: 2px solid #10140c;
-  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.45), inset -2px -2px 0 rgba(0, 0, 0, 0.3), 0 2px 0 rgba(0, 0, 0, 0.35);
-}
-
-#selBar #palette button.swatch[aria-pressed='true'] {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
-}
 
 #selBar button.type:disabled {
   cursor: var(--cur-arrow);
@@ -1879,8 +1817,9 @@ body.sheet-open #selBar {
   opacity: 1;
 }
 
-/* A game's end, or the host leaving. */
-#banner {
+/* A game's end, or the host leaving (and the pause screen, which looks the same). */
+#banner,
+#pauseScreen {
   position: fixed;
   inset: 0;
   z-index: 22;
@@ -1893,11 +1832,13 @@ body.sheet-open #selBar {
   color: var(--ink);
 }
 
-#banner[hidden] {
+#banner[hidden],
+#pauseScreen[hidden] {
   display: none;
 }
 
-#banner .card {
+#banner .card,
+#pauseScreen .card {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1908,18 +1849,21 @@ body.sheet-open #selBar {
   text-align: center;
 }
 
-#banner .t {
+#banner .t,
+#pauseScreen .t {
   font-size: 30px;
   color: #ffd75e;
   text-shadow: 3px 3px 0 #10170d;
 }
 
-#banner .s {
+#banner .s,
+#pauseScreen .s {
   font-size: 11px;
   opacity: 0.85;
 }
 
-#banner button {
+#banner button,
+#pauseScreen button {
   padding: 8px 12px;
   font: inherit;
   font-size: 12px;
