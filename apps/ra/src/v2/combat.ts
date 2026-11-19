@@ -41,7 +41,7 @@ export interface Weapon {
   big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
 }
 
-export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren';
+export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren';
 
 // The foot soldiers.
 export const FOOT: ReadonlySet<UnitKind> = new Set<UnitKind>(['inf', 'rocket', 'gren']);
@@ -52,6 +52,7 @@ export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
   gren: { name: 'Grenades', dmg: 45, rof: 2.4, range: 4.25 * CELL, wh: 'HE', shot: 'grenade', speed: 55, barrels: 1, air: false, ground: true, splash: 8, scatter: 3 },
   rocket: { name: 'Rocket launcher', dmg: 35, rof: 2.6, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 120, barrels: 1, air: true, ground: true },
   buggy: { name: 'Machine gun', dmg: 15, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
+  apc: { name: 'Pintle machine gun', dmg: 12, rof: 0.6, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
   light: { name: '75mm gun', dmg: 25, rof: 1.6, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 1, air: false, ground: true },
   heavy: { name: 'Twin 105mm', dmg: 30, rof: 2.2, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: true, ground: true, big: true },
   arty: { name: '155mm howitzer', dmg: 150, rof: 4.5, range: 6.5 * CELL, wh: 'HE', shot: 'arc', speed: 95, barrels: 1, air: false, ground: true, splash: 14, scatter: 8, big: true },
@@ -72,6 +73,7 @@ export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   gren: { strength: 55, armor: 'none' },
   rocket: { strength: 45, armor: 'none' },
   buggy: { strength: 150, armor: 'light' },
+  apc: { strength: 280, armor: 'heavy' },
   light: { strength: 300, armor: 'heavy' },
   heavy: { strength: 450, armor: 'heavy' },
   hauler: { strength: 600, armor: 'heavy' },
@@ -102,7 +104,7 @@ export const PIECE_S = 1.3;
 export const HELI_ALT = 20;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
-export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, light: 9.5, heavy: 12, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
 // Tracked armor: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'mcv', 'hauler']);
 
@@ -112,7 +114,7 @@ export const BURN_RUIN = 20;
 
 // How hard the screen shakes (in map pixels) when something big is
 // destroyed nearby: tanks and the like, and every building, by its size.
-export const QUAKE: Partial<Record<UnitKind, number>> = { light: 1.5, heavy: 2, mcv: 2, hauler: 1.6, boat: 1.2 };
+export const QUAKE: Partial<Record<UnitKind, number>> = { apc: 1.3, light: 1.5, heavy: 2, mcv: 2, hauler: 1.6, boat: 1.2 };
 export const buildingQuake = (rx: number, ry: number) => Math.min(3.5, 1.8 + (rx + ry) * 0.04);
 // How long a shake lasts, in seconds.
 export const QUAKE_S = 0.5;
@@ -150,6 +152,8 @@ export function muzzles(kind: UnitKind | 'tower', x: number, y: number, z: numbe
     }
     case 'buggy':
       return [at(x, y, a, 1.4, 0, 6.7)];
+    case 'apc':
+      return [at(x, y, a, 5.6, -1.4, 9.4)];
     case 'light':
       return [at(px, py, tur, 11.2, 0, 6.3)];
     case 'heavy':
@@ -276,7 +280,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1 };
 
 interface Flash {
   x: number;

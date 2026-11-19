@@ -44,6 +44,7 @@ type Kind = UnitKind;
 const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number; hp: number }> = {
   ...STATS,
   mcv: { name: 'MCU', speed: 10, turn: 1.3, r: 15, hp: 1 },
+  apc: { name: 'Mule APC', speed: 26, turn: 3, r: 9, hp: 1 },
   gren: { name: 'Grenadier', speed: 8.5, turn: 99, r: 4, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
@@ -77,6 +78,7 @@ const VOICE: Record<Kind, UnitVoice> = {
   mcv: 'tank',
   boat: 'tank',
   buggy: 'scout',
+  apc: 'tank',
   heli: 'copter',
   hauler: 'harvester',
 };
@@ -85,6 +87,11 @@ const BUILD_GAP = 30;
 const PACK_S = 1.2;
 const PACE_SPEED = 3.5; // a soldier pacing about, in map pixels a second
 const PACE_R = 6; // and how far from where it was left
+// Foot soldiers ride in a Mule APC, up to CARGO of them. They climb out of
+// the ramp at the back one every EXIT_S seconds.
+const CARGO = 5;
+const EXIT_S = 0.22;
+const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren']);
 
 interface Unit {
   id: number; // the same on every player's screen in a multiplayer game
@@ -166,6 +173,15 @@ interface Unit {
   // the enemy's guards (Combat stage): which post it holds, and its spot there
   post?: number;
   spot?: [number, number];
+  // a soldier on its way to get into one of its side's transports (its id),
+  // and how many times it has stopped short of it
+  board?: number;
+  boardTry?: number;
+  // a transport's passengers (out of play while they ride), and whether it
+  // is letting them out, and when the next one gets out
+  cargo?: Unit[];
+  unloading?: boolean;
+  exitT?: number;
 }
 
 type Target = Unit | Building;
@@ -275,10 +291,10 @@ function markKind(m: { foe?: boolean; ore?: boolean }): 'move' | 'attack' | 'har
   return m.foe ? 'attack' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -342,6 +358,8 @@ export type Command =
   | { c: 'move'; m: [number, number, number][]; dig?: number[]; n?: number } // [unit id, tx, ty]; haulers in dig go for ore n
   | { c: 'attack'; u: number[]; t: number }
   | { c: 'deploy'; u: number[] }
+  | { c: 'board'; u: number[]; t: number } // soldiers get into transport t
+  | { c: 'unload'; u: number[] } // transports let their soldiers out
   | { c: 'entrench'; u: number[]; on: boolean } // G.I.s dig in behind sandbags, or climb out
   | { c: 'pack'; b: number }
   | { c: 'primary'; b: number }
@@ -364,7 +382,7 @@ const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait'] as con
  * the ore now and then, messages for players and who is out of the game. */
 export interface Snapshot {
   t: number;
-  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state]
+  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state, passengers "id:kind:hp,..."]
   u: (number | string)[][];
   // [id, kind, side, x, y, hp, rise, flags, pad x, y, w, h, rally x, rally y, target id]
   b: (number | string)[][];
@@ -599,6 +617,8 @@ export class IsoGame implements GameLike {
         return art.haulerLoad.map((s): [StackSprite[], number] => [s, di]);
       case 'buggy':
         return [[art.buggy, di]];
+      case 'apc':
+        return [[art.apc, di]];
       default:
         return [[art.artillery, di]];
     }
@@ -634,7 +654,7 @@ export class IsoGame implements GameLike {
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
@@ -984,6 +1004,15 @@ export class IsoGame implements GameLike {
     return u;
   }
 
+  // A soldier riding in a transport, known only from a snapshot: it is not
+  // in play (not in this.units) until it gets out.
+  private rider(kind: Kind, f: number, id: number): Unit {
+    const u = this.newUnit(kind, f, 0, 0, 0);
+    this.units.splice(this.units.indexOf(u), 1);
+    u.id = id;
+    return u;
+  }
+
   private addBuilding(b: Building): Building {
     b.id = this.nextId++;
     this.buildings.push(b);
@@ -1179,7 +1208,7 @@ export class IsoGame implements GameLike {
         ? [art.lightTank[di], art.lightTurret[di]]
         : kind === 'heavy'
           ? [art.heavyTank[di], art.heavyTurret[di]]
-          : [{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+          : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -1791,6 +1820,11 @@ export class IsoGame implements GameLike {
       return [];
     }
     const acts: Action[] = [];
+    const loaded = this.loaded();
+    if (loaded.length) {
+      const n = loaded.reduce((s, u) => s + (u.cargo?.length ?? 0), 0);
+      acts.push({ id: 'unload', label: 'Unload', icon: 'unload', title: `Let ${n === 1 ? 'the soldier' : `all ${n} soldiers`} out (F)` });
+    }
     const gis = this.selected().filter((u) => u.kind === 'inf' && u.f === this.me);
     if (gis.length)
       acts.push(
@@ -1804,6 +1838,11 @@ export class IsoGame implements GameLike {
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
     acts.push({ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' });
     return acts;
+  }
+
+  // Selected transports of yours with soldiers in them.
+  private loaded(): Unit[] {
+    return this.selected().filter((u) => u.f === this.me && !!u.cargo?.length);
   }
 
   // The selected G.I.s dig in behind sandbags (on), or climb out.
@@ -1831,14 +1870,20 @@ export class IsoGame implements GameLike {
     if (id === 'unrally' && sb) this.command({ c: 'rally', b: sb.id });
     if (id === 'place') this.placeNow();
     else if (id === 'unplace') this.ghost = null;
-    else if (id === 'entrench' || id === 'unentrench') this.entrench(id === 'entrench');
+    else if (id === 'unload') {
+      const go = this.loaded().filter((u) => !u.unloading);
+      if (go.length) this.command({ c: 'unload', u: go.map((u) => u.id) });
+    } else if (id === 'entrench' || id === 'unentrench') this.entrench(id === 'entrench');
     else if (id === 'deploy') {
-      // (F: Foundry vehicles deploy, and G.I.s dig in or climb out)
+      // (F: Foundry vehicles deploy, G.I.s dig in or climb out, and
+      // transports let their soldiers out)
       const go = this.selected().filter((u) => u.kind === 'mcv' && u.f === this.me && !u.deploy && this.deployable(u));
       const gis = this.selected().filter((u) => u.kind === 'inf' && u.f === this.me);
       if (gis.length) this.entrench(gis.some((u) => !u.dug));
+      const out = this.loaded().filter((u) => !u.unloading);
+      if (out.length) this.command({ c: 'unload', u: out.map((u) => u.id) });
       if (go.length) this.command({ c: 'deploy', u: go.map((u) => u.id) });
-      else if (!gis.length) ui('ui_error');
+      else if (!gis.length && !out.length) ui('ui_error');
     } else if (id === 'pack' && sb && sb.f === this.me && sb.kind === 'yard' && sb.rise >= 1) this.command({ c: 'pack', b: sb.id });
   }
 
@@ -1947,7 +1992,7 @@ export class IsoGame implements GameLike {
       const h = at(u.x, u.y);
       if (isFoot(k)) sum.footsteps += h * 0.5;
       else if (k === 'boat') sum.boat_loop += h;
-      else if (k === 'buggy' || k === 'arty') sum.engine_loop += h;
+      else if (k === 'buggy' || k === 'arty' || k === 'apc') sum.engine_loop += h;
       else sum.tracks_loop += h;
     }
     for (const f of this.fires) if (f.t < BURN_WRECK) sum.fire_loop += at(f.x, f.y) * (1 - f.t / BURN_WRECK);
@@ -2130,6 +2175,7 @@ export class IsoGame implements GameLike {
   cursorAt(x: number, y: number): CursorAt {
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
+    if (this.rideAt(x, y)) return 'enter';
     const hit = this.unitAt(x, y);
     if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
@@ -2153,9 +2199,33 @@ export class IsoGame implements GameLike {
     return this.units.filter((u) => u.sel && u.f === this.me);
   }
 
+  // A transport of yours at (x, y) that the soldiers you have selected could
+  // get into (it has room).
+  private rideAt(x: number, y: number): Unit | null {
+    const hit = this.unitAt(x, y);
+    const t = hit?.u;
+    if (!t || t.f !== this.me || t.kind !== 'apc' || (t.cargo?.length ?? 0) >= CARGO) return null;
+    return this.mine().some((u) => RIDERS.has(u.kind)) ? t : null;
+  }
+
+  // Send the soldiers you have selected to get into transport t.
+  private boardOrder(t: Unit): void {
+    const go = this.mine().filter((u) => RIDERS.has(u.kind));
+    this.command({ c: 'board', u: go.map((u) => u.id), t: t.id });
+    if (this.moveMarks) {
+      const [mx, my] = this.fold(t.x, t.y);
+      this.markers.push({ x: mx, y: my, z: t.z, t: 0 });
+    }
+    ui('order_confirm');
+    this.speak(go, 'move');
+  }
+
   // You command your own side. Enemy units and buildings can be tapped to
   // look at them (their health), but not ordered about.
   click(x: number, y: number, add: boolean): void {
+    // soldiers selected and a tap on a transport of yours: they get in
+    const ride = add ? null : this.rideAt(x, y);
+    if (ride) return this.boardOrder(ride);
     const hitU = this.unitAt(x, y);
     const mine = this.mine();
     if (hitU && (hitU.u.f === this.me || !mine.length)) {
@@ -2171,6 +2241,8 @@ export class IsoGame implements GameLike {
       best.sel = add && !enemy ? !best.sel : true;
       [best.lap, best.lapY] = hitU.lap;
       if (again && best.f === this.me && this.deployable(best) && !best.deploy) this.command({ c: 'deploy', u: [best.id] });
+      // and on a transport with soldiers in it lets them out
+      if (again && best.f === this.me && best.cargo?.length && !best.unloading) this.command({ c: 'unload', u: [best.id] });
       this.emit();
       return;
     }
@@ -2237,6 +2309,8 @@ export class IsoGame implements GameLike {
   order(x: number, y: number, shortest = false): void {
     const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === this.me);
     if (!sel.length) return;
+    const ride = shortest ? null : this.rideAt(x, y);
+    if (ride) return this.boardOrder(ride);
     // onto an enemy: everyone who can, attacks it
     const foe = shortest ? null : this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
@@ -2520,6 +2594,11 @@ export class IsoGame implements GameLike {
     this.updateBuild(dt);
     this.enemyAI(dt);
     if (this.net !== 'client') for (const u of this.units) if (u.job) this.haul(u, dt);
+    if (this.net !== 'client')
+      for (const u of [...this.units]) {
+        if (u.board !== undefined && !u.dead) this.boarding(u);
+        if (u.unloading && !u.dead) this.letOut(u, dt);
+      }
     for (const u of [...this.units]) if (!u.dead) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
     for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
@@ -2909,6 +2988,8 @@ export class IsoGame implements GameLike {
           const u = unit(id);
           if (!u || u.deploy) continue;
           if (u.kind === 'hauler' && !dig.has(id)) u.job = undefined;
+          u.board = undefined;
+          u.unloading = false;
           // a dug-in G.I. climbs out of its sandbags, then goes
           u.dug = false;
           u.tx = tx;
@@ -2948,6 +3029,36 @@ export class IsoGame implements GameLike {
         for (const id of cmd.u) {
           const u = unit(id);
           if (u && u.kind === 'mcv' && !u.deploy && this.deployable(u)) this.startDeploy(u);
+        }
+        break;
+      case 'board': {
+        const t = unit(cmd.t);
+        if (!t || t.kind !== 'apc') break;
+        for (const id of cmd.u) {
+          const u = unit(id);
+          if (!u || !RIDERS.has(u.kind)) continue;
+          u.board = t.id;
+          u.boardTry = 0;
+          u.dug = false;
+          u.target = undefined;
+          u.forced = u.chase = false;
+          u.dest = u.aim = undefined;
+          [u.tx, u.ty] = this.nearPoint(u.x, u.y, t.x, t.y);
+          u.moving = true;
+        }
+        break;
+      }
+      case 'unload':
+        for (const id of cmd.u) {
+          const u = unit(id);
+          if (!u?.cargo?.length || u.unloading) continue;
+          u.unloading = true;
+          u.exitT = 0;
+          // it stops to let them out
+          u.moving = false;
+          u.tx = u.x;
+          u.ty = u.y;
+          u.dest = undefined;
         }
         break;
       case 'pack': {
@@ -3021,6 +3132,8 @@ export class IsoGame implements GameLike {
       tid(o.target),
       Math.round(o.load ?? 0),
       o.job ? JOB_STATES.indexOf(o.job.st) : -1,
+      (o.cargo ?? []).map((p) => `${p.id}:${p.kind}:${Math.round(p.hp * 1000) / 1000}`).join(','),
+      o.unloading ? 1 : 0,
     ]);
     const b = this.buildings.map((o) => [
       o.id,
@@ -3074,6 +3187,10 @@ export class IsoGame implements GameLike {
         else {
           this.units.splice(this.units.indexOf(u), 1);
           u.dead = true;
+          if (u.sel) {
+            u.sel = false;
+            this.emit();
+          }
         }
         continue;
       }
@@ -3125,7 +3242,7 @@ export class IsoGame implements GameLike {
       }
     const seenU = new Set<number>();
     for (const e of s.u) {
-      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number];
+      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job, riders, unloading] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number, string?, number?];
       seenU.add(id);
       let u = units.get(id);
       if (!u) {
@@ -3168,6 +3285,17 @@ export class IsoGame implements GameLike {
         u.target = target(tgt);
       }
       u.deploy = !!(flags & 2);
+      // who is riding in it
+      if (riders || u.cargo?.length) {
+        const had = new Map((u.cargo ?? []).map((p) => [p.id, p]));
+        u.cargo = (riders ? riders.split(',') : []).map((r) => {
+          const [pid, pk, php] = r.split(':');
+          const p = had.get(Number(pid)) ?? this.rider(pk as Kind, u.f, Number(pid));
+          p.hp = Number(php);
+          return p;
+        });
+      }
+      u.unloading = !!unloading;
       u.dug = !!(flags & 16);
       if (job >= 0) {
         const st = JOB_STATES[job];
@@ -3262,7 +3390,7 @@ export class IsoGame implements GameLike {
     this.me = me;
     this.gone = [];
     let top = 0;
-    for (const o of [...this.units, ...this.buildings]) top = Math.max(top, o.id);
+    for (const o of [...this.units, ...this.units.flatMap((u) => u.cargo ?? []), ...this.buildings]) top = Math.max(top, o.id);
     this.nextId = top + 1;
     // haulers start their round again (where they were going isn't saved)
     for (const u of this.units)
@@ -3472,6 +3600,7 @@ export class IsoGame implements GameLike {
     for (const u of sel) {
       if (!this.canHit(WEAPON[u.kind], t)) continue;
       u.target = t;
+      u.board = undefined;
       u.forced = true;
       u.chase = false;
       u.anchor = undefined;
@@ -3653,6 +3782,7 @@ export class IsoGame implements GameLike {
       case 'inf':
         return twin('rifle_shot', 1);
       case 'buggy':
+      case 'apc':
         // a machine gun: three quick rounds
         for (let i = 0; i < 3; i++) this.sound(x, y, 'rifle_shot', 0.7, { rate: 1.35, delay: i * 0.07 }, z);
         return;
@@ -3789,6 +3919,113 @@ export class IsoGame implements GameLike {
     u.repath = 0;
   }
 
+  // ---------- Transports ----------
+
+  // A soldier on its way to a transport: it follows it, and gets in when it
+  // is close (or gives up if the transport is gone or full, or it can't get there).
+  private boarding(u: Unit): void {
+    const t = this.units.find((o) => o.id === u.board && !o.dead);
+    if (!t || t.f !== u.f || (t.cargo?.length ?? 0) >= CARGO || t.unloading) {
+      u.board = undefined;
+      if (u.moving) {
+        u.moving = false;
+        u.tx = u.x;
+        u.ty = u.y;
+      }
+      return;
+    }
+    const [tx, ty] = this.nearPoint(u.x, u.y, t.x, t.y);
+    if (Math.hypot(tx - u.x, ty - u.y) < UNIT.apc.r + 4) return this.embark(u, t);
+    if (!u.moving) {
+      // it stopped short (a dead end): try again a few times, then give up
+      if ((u.boardTry = (u.boardTry ?? 0) + 1) > 3) {
+        u.board = undefined;
+        return;
+      }
+    }
+    if (!u.moving || Math.hypot(u.tx - tx, u.ty - ty) > 3) {
+      u.tx = tx;
+      u.ty = ty;
+      u.moving = true;
+    }
+  }
+
+  // u climbs into transport t: it is out of play until it is let out.
+  private embark(u: Unit, t: Unit): void {
+    this.units.splice(this.units.indexOf(u), 1);
+    this.gone.push([u.id, GONE_QUIET]);
+    const was = u.sel;
+    u.sel = false;
+    u.grp = undefined;
+    u.board = u.target = u.dest = u.aim = u.path = u.goal = u.knock = undefined;
+    u.home = u.pace = u.anchor = undefined;
+    u.moving = u.forced = u.chase = u.dug = false;
+    u.digK = undefined;
+    (t.cargo ??= []).push(u);
+    if (this.lastTap?.u === u) this.lastTap = null;
+    this.sound(t.x, t.y, 'build_place', 0.4, { rate: 1.5 }, t.z);
+    this.mapVersion++;
+    if (was) this.emit();
+  }
+
+  // A transport letting its soldiers out: one at a time down the ramp at
+  // the back, each walking a few steps clear of it, fanned out behind.
+  private letOut(t: Unit, dt: number): void {
+    const cargo = t.cargo ?? [];
+    if (!cargo.length) {
+      t.unloading = false;
+      return;
+    }
+    if ((t.exitT = (t.exitT ?? 0) - dt) > 0) return;
+    t.exitT = EXIT_S;
+    const s = cargo.shift()!;
+    const i = CARGO - 1 - cargo.length;
+    const back = t.a + Math.PI;
+    // the ramp, or the middle of it if the back is up against water or a cliff
+    let [rx, ry] = [t.x + Math.cos(back) * 9, t.y + Math.sin(back) * 9];
+    if (!this.okAt(s, rx, ry)) [rx, ry] = [t.x, t.y];
+    // where it walks to: a fan behind, or anywhere round it that is open
+    let spot: [number, number] = [rx, ry];
+    const fan = [0, -0.55, 0.55, -1.1, 1.1][i % 5];
+    for (const k of [0, 0.9, -0.9, 1.8, -1.8, 2.7, -2.7, Math.PI]) {
+      const a = back + fan + k;
+      const d = 18 + (i % 2) * 4;
+      const p: [number, number] = [t.x + Math.cos(a) * d, t.y + Math.sin(a) * d];
+      if (this.okAt(s, ...p) && clearLine((x, y) => this.okAt(s, x, y), rx, ry, ...p)) {
+        spot = p;
+        break;
+      }
+    }
+    Object.assign(s, { x: rx, y: ry, z: t.z, a: back + fan, lap: t.lap, lapY: t.lapY, dead: false, sel: false });
+    [s.tx, s.ty] = spot;
+    s.moving = true;
+    s.goal = s.path = s.best = s.slide = undefined;
+    s.stuck = s.slideT = 0;
+    this.units.push(s);
+    this.sound(t.x, t.y, 'unit_exit', 0.5, { rate: 1.3 }, t.z);
+    this.mapVersion++;
+    if (!cargo.length) t.unloading = false;
+  }
+
+  // A transport is destroyed: about half of its soldiers scramble out, hurt.
+  private bailOut(t: Unit): void {
+    for (const s of t.cargo ?? []) {
+      if (Math.random() < 0.5) continue;
+      const a = Math.random() * Math.PI * 2;
+      const [x, y] = this.fold(t.x + Math.cos(a) * 4, t.y + Math.sin(a) * 4);
+      if (!this.okAt(s, x, y)) continue;
+      Object.assign(s, { x, y, z: t.z, a, lap: t.lap, lapY: t.lapY, dead: false, sel: false });
+      s.hp = Math.max(0.08, s.hp * (0.2 + Math.random() * 0.25));
+      const go = 12 + Math.random() * 8;
+      [s.tx, s.ty] = this.nearPoint(x, y, x + Math.cos(a) * go, y + Math.sin(a) * go);
+      s.moving = true;
+      s.goal = s.path = undefined;
+      this.units.push(s);
+    }
+    t.cargo = [];
+    this.mapVersion++;
+  }
+
   // A unit is destroyed: it blows up and flies to pieces, which land round
   // where it was and fade away (a copter's rain down from the sky).
   private kill(u: Unit): void {
@@ -3818,6 +4055,7 @@ export class IsoGame implements GameLike {
       if (u.kind !== 'boat' && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
       // and a few of the crew crawl out, hurt
       if (u.kind !== 'heli' && u.kind !== 'boat' && this.net !== 'client') this.survivors(u);
+      if (u.cargo?.length && this.net !== 'client') this.bailOut(u);
     }
     if (u.sel) this.emit();
   }
@@ -3942,7 +4180,7 @@ export class IsoGame implements GameLike {
       case 'hauler':
         return [[art.haulerLoad[haulerFill(u.load)][di], u.x, u.y, u.z]];
       default:
-        return [[{ mcv: art.mcv, buggy: art.buggy, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
+        return [[{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
     }
   }
 
@@ -4486,7 +4724,7 @@ export class IsoGame implements GameLike {
         break;
       }
       default: {
-        const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'hauler' ? art.haulerLoad[haulerFill(u.load)] : art.artillery;
+        const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'apc' ? art.apc : u.kind === 'hauler' ? art.haulerLoad[haulerFill(u.load)] : art.artillery;
         const back = u.kind === 'arty' ? kick : 0;
         this.blit(spr[di], u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
         if (u.kind === 'buggy' && !u.moving) drawBuggyLights(this.ctx, u.x, u.y, u.z, u.a, u.anim);
@@ -4512,6 +4750,18 @@ export class IsoGame implements GameLike {
     healthBar(c, hx, y - ry - 4, bw, u.hp);
     // in a group: its number just left of the health bar
     if (u.f === this.me && u.grp !== undefined) groupDigit(c, hx - 5, y - ry - 6, u.grp + 1);
+    // a transport's seats under its health bar: lit for each soldier riding in it
+    if (u.kind === 'apc' && u.f === this.me) {
+      const n = u.cargo?.length ?? 0;
+      const px = Math.round(x - (CARGO * 3 - 1) / 2);
+      const py = y - ry - 9;
+      c.fillStyle = '#111';
+      c.fillRect(px - 1, py - 1, CARGO * 3 + 1, 4);
+      for (let i = 0; i < CARGO; i++) {
+        c.fillStyle = i < n ? '#ffd93b' : '#3a3d36';
+        c.fillRect(px + i * 3, py, 2, 2);
+      }
+    }
   }
 
   private drawBuilding(b: Building): void {

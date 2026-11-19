@@ -258,6 +258,85 @@ function buggy(f: Faction): Shape {
   };
 }
 
+// The Mule armored carrier: a six-wheeled box with a sloped nose, a
+// machine-gun cupola on the roof and a ramp door at the back for the five
+// soldiers it carries.
+function apc(f: Faction): Shape {
+  const roof = mix(f.main, f.light, 0.45);
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    // six big tyres with lugs, under arched wheel wells
+    for (const wu of [-5.6, 0, 5.6]) {
+      const d = (u - wu) ** 2 + (z - 2) ** 2;
+      if (av > 3 && av < 5 && d < 4.2) {
+        if (av > 4.4) return d < 0.6 ? HUB : d < 1.6 ? GUN : WHEEL;
+        return d > 3 && mod(Math.floor(Math.atan2(z - 2, u - wu) * 2.4), 2) ? TREAD : WHEEL;
+      }
+    }
+    // the cupola: a ring with a hatch and the gun on a pintle, its barrel forward
+    const cu = 1;
+    const cv = -1.4;
+    const cd = (u - cu) ** 2 + (v - cv) ** 2;
+    if (z > 7 && z <= 8.6 && cd < 2.6) {
+      if (z > 8) return cd < 1.1 ? shade(f.dark, -0.2) : shade(f.dark, 0.12);
+      return cd > 1.8 ? g(f.main, u, v, z) : shade(f.dark, -0.1);
+    }
+    if (z > 8.6 && z < 10 && Math.abs(v - cv) < 0.45) {
+      if (Math.abs(u - (cu + 0.8)) < 0.45) return GUN_D; // pintle
+      if (u > cu + 0.4 && u < cu + 1.8 && z > 9.2) return OLIVE; // ammo box
+      if (u > cu + 1.2 && u < cu + 4.6 && Math.abs(z - 9.4) < 0.45) return u > cu + 4 ? BLACK : GUN;
+    }
+    // whip aerial at the back corner
+    if (Math.abs(u + 7.6) < 0.35 && Math.abs(v - 3.2) < 0.35 && z > 7 && z < 13) return z > 12.4 ? RED : GUN_D;
+    if (Math.abs(u) > 9 || z < 1.6) return null;
+    // the hull narrows a little towards the roof; a sloped nose, a short slope at the back
+    const side = 4.4 - Math.max(0, z - 4.6) * 0.28;
+    if (av > side) return null;
+    let zt = 7;
+    if (u > 4) zt = 7 - (u - 4) * 0.62;
+    if (u < -8.2) zt = 7 - (-8.2 - u) * 1.2;
+    if (z > zt) {
+      // a jerry can rack on the roof at the back, and a rolled tarp
+      if (u > -7.6 && u < -5.4 && v > 0.6 && v < 3.4 && z <= 8.4) return z > 8 ? shade(OLIVE_D, 0.2) : Math.abs(v - 2) < 0.25 ? BLACK : OLIVE_D;
+      if (u > -4.8 && u < -1.6 && v > 1 && v < 2.6 && z <= 8) return (u < -4.4 || u > -2) ? GUN_D : shade(OLIVE, 0.08);
+      return null;
+    }
+    const skin = z > zt - 0.6;
+    const nose = u > 4;
+    // headlamps and the tow hook on the nose
+    if (u > 8.4 && z > 3.4 && z < 4.6 && av > 2.4 && av < 3.6) return LAMP;
+    if (u > 8.4 && z < 2.6 && av < 1) return GUN_D;
+    // the driver's vision slits in the glacis
+    if (nose && Math.abs(u - 5.4) < 0.5 && v < -0.4 && v > -3 && z > zt - 0.7) return GLASS_D;
+    // tail lamps and the ramp door at the back, with its hinge and handle
+    if (u < -8.6) {
+      if (av > 3.3 && z > 5.4 && z < 6.3) return TAIL;
+      if (av < 2.6 && z < 6.6) {
+        if (av > 2.2 || z > 6.2) return shade(f.dark, -0.22);
+        if (Math.abs(z - 2.4) < 0.3) return GUN_D;
+        if (Math.abs(z - 4.4) < 0.35 && Math.abs(v - 1.4) < 0.5) return METAL;
+        return g(shade(f.main, -0.12), u, v, z);
+      }
+    }
+    if (skin) {
+      // roof hatches for the troops, the engine grille beside the driver
+      if (u > -7.4 && u < -1.4 && Math.abs(av - 1.6) < 1.2 && v < 0) return Math.abs(u + 4.4) < 0.25 ? shade(f.dark, -0.2) : shade(f.dark, 0.06);
+      if (nose && v > 0.6 && v < 3.4 && u < 7.6) return mod(Math.floor(u * 2), 2) ? GUN_D : GUN;
+      if (Math.abs(u - 4) < 0.3) return shade(f.main, -0.22); // the seam where the nose starts
+      if (av > side - 0.5) return shade(f.dark, 0.1); // roof edge
+      return g(roof, u, v, z);
+    }
+    // the sides: firing ports with vision blocks, a faction stripe, a step
+    if (av > side - 0.6) {
+      if (z > 5 && z < 6 && u > -7 && u < 3 && mod(u + 7, 3.4) < 1) return mod(u + 7, 3.4) < 0.5 ? GLASS_D : GLASS;
+      if (z > 4 && z < 4.6 && u > -8.4 && u < 8) return WHITE;
+      if (z < 3.2 && Math.abs(u + 2.8) < 0.9) return GUN_D;
+    }
+    if (z < 3.4) return g(f.dark, u, v, z);
+    return g(f.main, u, v, z);
+  };
+}
+
 // A parked buggy: the red lamp on the tip of its whip aerial gives one short
 // flash every 8 seconds. Drawn over the buggy's sprite at (x, y, z) facing a,
 // at time t. The position matches the aerial in buggy() above.
@@ -721,6 +800,7 @@ export interface V2FactionArt {
   heavyTank: StackSprite[];
   heavyTurret: StackSprite[];
   buggy: StackSprite[];
+  apc: StackSprite[];
   hauler: StackSprite[]; // empty
   haulerLoad: StackSprite[][]; // [fill][dir]: empty, partly full, full
   artillery: StackSprite[];
@@ -748,6 +828,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     heavyTank: renderDirs(tankHull(f, 20, 15, true), DIRS, { r: 13, zmax: 8, bakeShadow: true }, k('heavyTank')),
     heavyTurret: renderDirs(turretShape(f, 4.8, 6, 2, 13), DIRS, { r: 13.5, zmax: 16 }, k('heavyTurret')),
     buggy: renderDirs(buggy(f), DIRS, { r: 8, zmax: 10, bakeShadow: true }, k('buggy')),
+    apc: renderDirs(apc(f), DIRS, { r: 11, zmax: 13, bakeShadow: true }, k('apc')),
     hauler: haulerLoad[0],
     haulerLoad,
     artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }, k('artillery')),
@@ -1850,6 +1931,8 @@ export function subjectModel(id: string, f: Faction): { shape: Shape; o: StackOp
       return { shape: both(tankHull(f, 20, 15, true), turretShape(f, 4.8, 6, 2, 13)), o: { r: 13.5, zmax: 16, bakeShadow: true } };
     case 'buggy':
       return { shape: buggy(f), o: { r: 8, zmax: 10, bakeShadow: true } };
+    case 'apc':
+      return { shape: apc(f), o: { r: 11, zmax: 13, bakeShadow: true } };
     case 'hauler':
       return { shape: hauler(f, 2), o: { r: 13, zmax: 11, bakeShadow: true } };
     case 'arty':
