@@ -160,6 +160,11 @@ export function buildingArt(kind: string, f: number, now = true): Promise<V2Buil
   });
 }
 
+/** Are sprites being drawn by workers (rather than on the main thread)? */
+export function pooled(): boolean {
+  return workers.length > 0;
+}
+
 /** The stages of a building going up, drawn by a worker (null if there are no workers). */
 export function constructionArt(kind: string, f: number, now = true): Promise<StackSprite[] | null> {
   return new Promise((res) => {

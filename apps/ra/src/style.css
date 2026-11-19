@@ -685,7 +685,7 @@ body {
   box-shadow: inset 2px 2px 0 #ff9c86, inset -2px -2px 0 #8a2414, 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
-/* sending ore haulers to dig: gold, inside the harvest cursor's diamond */
+/* sending ore haulers to dig: gold, under the harvest cursor's triangles */
 #confirm.ore #okBtn {
   color: #2a1e06;
   background: #f2c94c;

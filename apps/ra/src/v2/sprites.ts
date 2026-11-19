@@ -354,9 +354,44 @@ export function drawBuggyLights(c: CanvasRenderingContext2D, x: number, y: numbe
 }
 
 // fill: how much ore is in the bed, 0 empty, 1 partly full, 2 full.
-function hauler(f: Faction, fill = 2): Shape {
+// The ore hauler. fill: how full its bed is (0 empty, 1 partly, 2 full).
+// scoop: the digging scoop at the front, down on the ground (0), lifting (1)
+// or up and tipping its ore back into the bed (2). tilt: the bed tipped up
+// about its back edge by this angle (radians) to pour its load out behind,
+// with the tailgate swung open and a ram pushing it up.
+function hauler(f: Faction, fill = 2, scoop = 0, tilt = 0): Shape {
   const ore = hex('#c09443');
   const oreL = hex('#f2d06a');
+  const oreBit = (u: number, v: number, z: number) => {
+    const n = hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 77, 9);
+    return n > 0.9 ? oreL : shade(ore, (n - 0.5) * 0.55);
+  };
+  // the bed in its own frame (as it sits when it is down)
+  const bed = (u: number, v: number, z: number): RGB | null => {
+    const av = Math.abs(v);
+    if (av > 4.2 || z < 1.5 || u < -10.5 || u > 3.6) return null;
+    // ribbed steel walls with a hazard lip (the tailgate is open while it tips)
+    const gate = u < -9.6 && av <= 3.4;
+    const wall = av > 3.4 || u < -9.6 || u > 2.8;
+    if (wall && z <= 6.6 && !(gate && tilt > 0 && z > 2.6)) {
+      if (z > 6) return hazard(u, v);
+      const along = av > 3.4 ? u : v;
+      if (z < 2.2) return f.dark;
+      return g(mod(along, 3) < 0.6 ? METAL_D : z < 3 ? shade(METAL, -0.12) : METAL, u, v, z, 0.08);
+    }
+    // the floor of the bed, ribbed across, seen when it is empty
+    if (z <= 2.6) return mod(u, 2.4) < 0.5 ? METAL_D : g(shade(METAL, -0.22), u, v, z, 0.06);
+    if (!fill) return null;
+    const lumpy = (hash2(Math.floor(u * 1.2), Math.floor(v * 1.2), 3) - 0.5) * 1.2;
+    // partly full: a low heap slumped to the back of the bed (and, tipped, sliding out of it)
+    const heap = fill === 2 ? 5.6 + 2.2 * Math.cos((u + 3.5) / 7) * Math.cos(v / 4) + lumpy : 3.4 + 2.4 * Math.max(0, Math.cos((u + 6) / 5)) * Math.cos(v / 4.5) + lumpy * 0.8;
+    if (z <= heap) return oreBit(u, v, z);
+    return null;
+  };
+  const ct = Math.cos(tilt);
+  const st = Math.sin(tilt);
+  const lift = scoop * 2.4;
+  const ramU = -1;
   return (u, v, z) => {
     const t = tracks(u, v, z, 11, 6, 2.2, 3);
     if (t) return t;
@@ -364,10 +399,31 @@ function hauler(f: Faction, fill = 2): Shape {
     // exhaust stack behind the cab and an amber beacon on its roof
     if (cyl(u, v, 4, -3.2, 0.7) && z > 3 && z <= 11) return z > 10.3 ? BLACK : z > 9.6 ? STEEL : GUN_D;
     if (cyl(u, v, 7.6, 0, 0.75) && z > 9 && z <= 10.2) return HAZ;
-    // the scoop across the front, with teeth
-    if (u > 10.6 && u <= 12.4 && av < 5 && z < 3.4) {
-      if (z < 1.2 && u > 11.6) return mod(Math.floor(av * 1.4), 2) ? STEEL : GUN_D;
-      return z > 2.7 ? HAZ : g(METAL_D, u, v, z);
+    // the scoop across the front, with teeth: lifted, its lip tips up
+    // towards the cab, with a scoopful of ore in it
+    if (u > 10.6 && u <= 12.4 && av < 5) {
+      const sz = z - lift - (u - 10.6) * 0.75 * scoop;
+      if (sz >= 0 && sz < 3.4) {
+        if (scoop && sz > 2.1 && u < 12 && av < 4.4) return oreBit(u, v, z);
+        if (sz < 1.2 && u > 11.6) return mod(Math.floor(av * 1.4), 2) ? STEEL : GUN_D;
+        return sz > 2.7 ? HAZ : g(METAL_D, u, v, z);
+      }
+      // the arms it hangs from, out of the front of the cab
+      if (scoop && Math.abs(av - 4.4) < 0.5 && u < 11.6 && z < lift + 2.4 && z > 1.4) return z > lift + 1.6 ? GUN : GUN_D;
+    }
+    if (tilt) {
+      // the bed swings up about its back bottom edge
+      const du = u + 10.5;
+      const dz = z - 1.5;
+      const b = bed(du * ct + dz * st - 10.5, v, -du * st + dz * ct + 1.5);
+      if (b) return b;
+      // and the ram under it, from the chassis up to the front of the bed
+      if (av < 0.9) {
+        const bx = -10.5 + 11.5 * ct - ramU;
+        const bz = 1.5 + 11.5 * st - 1.6;
+        const k = Math.max(0, Math.min(1, ((u - ramU) * bx + (z - 1.6) * bz) / (bx * bx + bz * bz)));
+        if (Math.hypot(u - ramU - bx * k, z - 1.6 - bz * k) < (k > 0.5 ? 0.55 : 0.8)) return k > 0.5 ? STEEL : GUN_D;
+      }
     }
     if (av > 4.2 || z < 1.5 || Math.abs(u) > 11) return null;
     // mudguards
@@ -388,25 +444,9 @@ function hauler(f: Faction, fill = 2): Shape {
       return g(z < 3.4 ? f.dark : f.main, u, v, z);
     }
     if (u > 3.6) return z < 7 ? (z > 6.4 ? GUN : GUN_D) : null;
-    // the ore bed: ribbed steel walls with a hazard lip and a heap of ore
-    if (u < -10.5) return null;
-    const wall = av > 3.4 || u < -9.6 || u > 2.8;
-    if (wall && z <= 6.6) {
-      if (z > 6) return hazard(u, v);
-      const along = av > 3.4 ? u : v;
-      if (z < 2.2) return f.dark;
-      return g(mod(along, 3) < 0.6 ? METAL_D : z < 3 ? shade(METAL, -0.12) : METAL, u, v, z, 0.08);
-    }
-    // the floor of the bed, ribbed across, seen when it is empty
-    if (z <= 2.6) return mod(u, 2.4) < 0.5 ? METAL_D : g(shade(METAL, -0.22), u, v, z, 0.06);
-    if (!fill) return null;
-    const lumpy = (hash2(Math.floor(u * 1.2), Math.floor(v * 1.2), 3) - 0.5) * 1.2;
-    // partly full: a low heap slumped to the back of the bed
-    const heap = fill === 2 ? 5.6 + 2.2 * Math.cos((u + 3.5) / 7) * Math.cos(v / 4) + lumpy : 3.4 + 2.4 * Math.max(0, Math.cos((u + 6) / 5)) * Math.cos(v / 4.5) + lumpy * 0.8;
-    if (z <= heap) {
-      const n = hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 77, 9);
-      return n > 0.9 ? oreL : shade(ore, (n - 0.5) * 0.55);
-    }
+    if (!tilt) return bed(u, v, z);
+    // under the lifted bed: the chassis rails
+    if (z <= 2.2 && u > -10.5 && Math.abs(av - 2.4) < 0.8) return mod(u, 3) < 0.5 ? GUN : GUN_D;
     return null;
   };
 }
@@ -793,6 +833,9 @@ function foundryVehicle(f: Faction): Shape {
   };
 }
 
+// How far the hauler's bed tips up as it unloads, in steps (radians).
+export const HAULER_TILTS = [0.22, 0.44, 0.64];
+
 export interface V2FactionArt {
   mcv: StackSprite[];
   lightTank: StackSprite[];
@@ -803,6 +846,12 @@ export interface V2FactionArt {
   apc: StackSprite[];
   hauler: StackSprite[]; // empty
   haulerLoad: StackSprite[][]; // [fill][dir]: empty, partly full, full
+  // digging: [(scoop pose - 1) * 3 + fill][dir], the scoop lifting (pose 1)
+  // and up, tipping ore into the bed (pose 2)
+  haulerDig: StackSprite[][];
+  // unloading at a refinery: [(tilt step - 1) * 3 + fill][dir], the bed
+  // tipped up a little, more, and all the way (HAULER_TILTS)
+  haulerDump: StackSprite[][];
   artillery: StackSprite[];
   boat: StackSprite[];
   heli: StackSprite[];
@@ -819,6 +868,10 @@ export function makeFactionArt(f: Faction): V2FactionArt {
   const fi = FACTIONS.indexOf(f);
   const k = (name: string) => (fi >= 0 ? `fa:${fi}:${name}` : undefined);
   const haulerLoad = [0, 1, 2].map((fill) => renderDirs(hauler(f, fill), DIRS, { r: 13, zmax: 11, bakeShadow: true }, k(`haulerLoad:${fill}`)));
+  const haulerDig = [1, 2].flatMap((pose) => [0, 1, 2].map((fill) => renderDirs(hauler(f, fill, pose), DIRS, { r: 13, zmax: 11, bakeShadow: true }, k(`haulerDig:${(pose - 1) * 3 + fill}`))));
+  const haulerDump = HAULER_TILTS.flatMap((tilt, i) =>
+    [0, 1, 2].map((fill) => renderDirs(hauler(f, fill, 0, tilt), DIRS, { r: 15, zmax: 16, bakeShadow: true }, k(`haulerDump:${i * 3 + fill}`))),
+  );
   const inf = (kind: Trooper, name: string, frames: number[]) =>
     frames.map((fr) => renderDirs(soldier(f, kind, fr), 16, { r: 4.3, zmax: 12, step: 0.5, bakeShadow: true }, k(`${name}:${fr}`)));
   return {
@@ -831,6 +884,8 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     apc: renderDirs(apc(f), DIRS, { r: 11, zmax: 13, bakeShadow: true }, k('apc')),
     hauler: haulerLoad[0],
     haulerLoad,
+    haulerDig,
+    haulerDump,
     artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }, k('artillery')),
     boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }, k('boat')),
     heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }, k('heli')),
@@ -1260,26 +1315,51 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       return { shape, rx: 16, ry: 12, zmax: 22, fx: [{ x: 15.5, y: 9, z: 21 }] };
     }
     case 'refinery': {
+      // The processing hall (with its crusher tower and chimney) and, beside
+      // it, the receiving bay: a hauler backs onto the striped pad in front
+      // of the bay's intake and tips its load in, and a conveyor carries it
+      // up and over to the crusher. A furnace glows in the bay's end wall.
+      const EMB = hex('#ff8a3a');
+      const EMB_L = hex('#ffd27a');
       const shape: Shape = (u, v, z) => {
-        // big storage tank: plate courses, a domed lid, a spiral stair and a railing
-        const d = Math.hypot(u - 12, v + 4);
-        if (d <= 9 && z <= 20 + Math.sqrt(Math.max(0, 81 - d * d)) * 0.35) {
-          const a = Math.atan2(v + 4, u - 12);
-          if (z > 20) {
-            if (d < 1.3) return GUN_D;
-            if (Math.abs(d - 4.5) < 0.25 || mod(a * 4, Math.PI) < 0.1) return METAL_D;
-            return g(STEEL, u, v, z, 0.05);
+        // the receiving bay
+        if (inBox(u, v, z, 4, 20, -14, -2, 0, 15)) {
+          // the intake: a dark mouth in the wall facing the pad, framed in
+          // hazard stripes, with grimy chutes inside
+          if (v > -2.6 && u > 7.4 && u < 17.6 && z < 8) {
+            if (u < 8.3 || u > 16.7 || z > 7.1) return hazard(u, z);
+            if (v > -2.3) return null;
+            return z < 1.2 ? BLACK : mod(Math.floor(u * 1.3), 3) === 0 ? GUN : z > 5.6 ? GUN_D : BLACK;
           }
-          if (z > 12 && z < 15) return mod(a * 3, 2) < 0.25 ? f.dark : g(f.main, u, v, z);
-          if (z < 1.4) return CONC_D;
-          // the stair winds up the side facing the camera
-          const st = mod(a - 0.2, Math.PI * 2);
-          if (d > 8.3 && st < 1.9 && Math.abs(z - (2 + st * 9.4)) < 0.9) return Math.abs(z - (2 + st * 9.4)) < 0.4 ? GUN_D : mod(Math.floor(st * 14), 2) ? GUN_L : GUN;
-          if (mod(z, 3.6) < 0.35 || mod(a * 5 + Math.floor(z / 3.6) * 0.5, 1) < 0.07) return METAL_D;
-          return grime(g(METAL, u, v, z, 0.05), a * 9, z, 20, 12);
+          if (v > -2.6 && u > 7.4 && u < 17.6 && z < 8.6) return CONC_L;
+          if (z > 14.4) {
+            const e = Math.min(u - 4, 20 - u, v + 14, -2 - v);
+            if (e < 1) return CONC_L;
+            return g(mod(u, 3) < 0.4 ? shade(TAR, -0.14) : TAR, u, v, z, 0.07);
+          }
+          // the furnace in the end wall: glowing slits under a louvred vent
+          if (u > 19.4 && v > -12 && v < -4) {
+            if (z > 2.4 && z < 5.4) {
+              if (z < 2.9 || z > 4.9 || mod(v + 12, 2.7) < 0.6) return GUN_D;
+              return z > 4 ? EMB : EMB_L;
+            }
+            if (z > 7 && z < 11) return mod(Math.floor(z * 1.6), 2) ? GUN_D : METAL_D;
+          }
+          // a stripe of the faction's color, and the amber lamps either side of the intake
+          if (v > -2.6 && z > 9 && z < 10.6 && (Math.abs(u - 6) < 0.8 || Math.abs(u - 19) < 0.8)) return LAMP;
+          return wallSkin(u, v, z, 20, -2, 0, 15, 13, { band: f.main });
         }
-        if (d > 8.4 && d < 9.2 && z > 20 && z < 21.8 && (z > 21.4 || mod(Math.atan2(v + 4, u - 12) * 8, 2) < 0.4)) return STEEL;
-        // processing hall with a hopper over the unloading bay
+        // a hood over the intake, jutting out over the pad's back edge
+        if (u > 7 && u < 18 && v > -2 && v < 0.6 && z > 8 && z < 9.6 - (v + 2) * 0.35) return z > 9.2 - (v + 2) * 0.35 ? f.main : g(METAL_D, u, v, z);
+        // the crusher housing on the bay's roof, where the conveyor starts
+        if (inBox(u, v, z, 5, 13, -12, -4, 15, 20)) {
+          if (z > 19.4) return g(roofC, u, v, z);
+          if (z > 16.4 && z < 18.4 && (u > 12.4 || v > -4.6)) return mod(u > 12.4 ? v : u, 2) < 1 ? WIN_B : METAL_D;
+          return mod(Math.floor(z * 1.2), 2) ? METAL : shade(METAL, -0.1);
+        }
+        const bayAc = acUnit(u, v, z, 16.5, -6, 15) ?? acUnit(u, v, z, 16.5, -11, 15);
+        if (bayAc) return bayAc;
+        // processing hall
         if (inBox(u, v, z, -20, 3, -14, 14, 0, 12)) {
           const door = rollerDoor(u, v, z, -10, 6, 14, 8.6);
           if (door) return door;
@@ -1292,32 +1372,48 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
           if (u > 2.4 && Math.abs(v - 10) < 1.1 && z < 5) return z > 4 ? GLASS_D : GUN;
           return wallSkin(u, v, z, 3, 14, 0, 12, 11, { win: [7, 11], band: f.main });
         }
-        // crusher tower on the roof, with a conveyor running down to the hall's far end
+        // crusher tower on the hall's roof
         if (inBox(u, v, z, -17, -10, -11, -4, 12, 18)) {
           if (z > 17.4) return g(roofC, u, v, z);
           if (z > 14 && z < 16 && (u > -10.6 || v > -4.6)) return mod(u > -10.6 ? v : u, 2.4) < 1.2 ? WIN_B : METAL_D;
           return mod(u + v, 2) < 0.5 ? METAL_D : METAL;
         }
-        if (Math.abs(v + 7.5) < 1.4 && u > -10 && u < 2 && Math.abs(z - (17 - (u + 10) * 0.42)) < 0.9) return Math.abs(v + 7.5) > 1 ? HAZ : mod(Math.floor(u * 1.5), 2) ? BLACK : TREAD;
-        for (const cu of [-4, 1]) if (Math.abs(u - cu) < 0.4 && Math.abs(Math.abs(v + 7.5) - 1.2) < 0.4 && z >= 12 && z < 17 - (cu + 10) * 0.42) return GUN_D;
-        // chimney with bands and a soot-black lip, guyed vents beside it
+        // the covered conveyor from the bay's housing over to the crusher
+        if (Math.abs(v + 7.5) < 1.5 && u > -10 && u < 5 && z > 16.4 && z < 18.6) {
+          if (z > 18) return Math.abs(v + 7.5) > 1.1 ? HAZ : shade(METAL, -0.1);
+          return mod(u, 2.4) < 0.5 ? METAL_D : Math.abs(v + 7.5) > 1.1 ? METAL : TREAD;
+        }
+        for (const cu of [-4, 1]) if (Math.abs(u - cu) < 0.4 && Math.abs(Math.abs(v + 7.5) - 1.2) < 0.4 && z >= 12 && z <= 16.4) return GUN_D;
+        // chimney with bands and a soot-black lip
         if (cyl(u, v, -16, -10.4, 1.6) && z >= 18 && z < 27) return z > 26.2 ? BLACK : z > 24.6 ? f.main : mod(Math.floor(z / 2), 2) ? CONC_D : shade(CONC_D, 0.12);
         const ac = acUnit(u, v, z, -5, 8, 12) ?? acUnit(u, v, z, -15, 8, 12);
         if (ac) return ac;
-        // pipes between the hall and the tank, with a valve wheel
-        for (const pz of [4, 7, 10]) if (Math.abs(v + 4 - (pz - 7) * 0.9) < 0.7 && u > 2.4 && u < 4.4 && Math.abs(z - pz) < 0.7) return pz === 7 ? COPPER : STEEL;
-        if (Math.abs(u - 3.6) < 0.4 && (v + 1.6) ** 2 + (z - 5.5) ** 2 < 1.4) return RED;
-        // ore unloading pad with a grille over the pit, bollards at its corners
-        if (inBox(u, v, z, 5, 20, 7, 15, 0, 1)) {
-          if (u > 8 && u < 17 && v > 9 && v < 13) return mod(Math.floor(u * 1.2), 2) || mod(Math.floor(v * 1.2), 2) ? GUN : BLACK;
-          return hazard(u, v);
+        // the docking pad: hazard border, guide stripes for the tracks and a
+        // grille over the pit at the intake, bollards at its front corners
+        if (inBox(u, v, z, 4.5, 20.5, -2, 16, 0, 1)) {
+          if (u > 7.6 && u < 17.4 && v < 2) return mod(Math.floor(u * 1.2), 2) || mod(Math.floor(v * 1.2), 2) ? GUN : BLACK;
+          if (u < 5.6 || u > 19.4 || v > 14.9) return hazard(u, v);
+          if (Math.abs(u - 6.8) < 0.35 || Math.abs(u - 18.2) < 0.35) return mod(Math.floor(v / 2), 2) ? HAZ : shade(TAR, 0.1);
+          return g(hash2(Math.floor(u * 0.8), Math.floor(v * 0.8), 21) > 0.93 ? shade(TAR, -0.2) : shade(TAR, 0.12), u, v, z, 0.08);
         }
-        for (const [bu, bv] of [[5.6, 15.4], [19.6, 15.4], [19.6, 6.8]]) if (cyl(u, v, bu, bv, 0.7) && z < 3) return mod(Math.floor(z * 1.4), 2) ? HAZ : BLACK;
-        // spilt ore by the pad
-        if ((u - 18.4) ** 2 + (v - 3.6) ** 2 + (z * 1.6) ** 2 < 5 + hash2(Math.floor(u * 2), Math.floor(v * 2), 9)) return hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 7, 4) > 0.8 ? hex('#f2d06a') : hex('#c09443');
+        for (const [bu, bv] of [[4.9, 15.6], [20.1, 15.6]]) if (cyl(u, v, bu, bv, 0.7) && z < 3) return mod(Math.floor(z * 1.4), 2) ? HAZ : BLACK;
+        // spilt ore by the hall's corner
+        if ((u - 1.4) ** 2 + (v - 15) ** 2 + (z * 1.6) ** 2 < 4.5 + hash2(Math.floor(u * 2), Math.floor(v * 2), 9)) return hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 7, 4) > 0.8 ? hex('#f2d06a') : hex('#c09443');
         return null;
       };
-      return { shape, rx: 21, ry: 16, zmax: 28, fx: [{ x: -16, y: -10.4, z: 27 }] };
+      // fx: the chimney, the two intake lamps, and the intake itself
+      return {
+        shape,
+        rx: 21,
+        ry: 16,
+        zmax: 28,
+        fx: [
+          { x: -16, y: -10.4, z: 27 },
+          { x: 6, y: -1.6, z: 10 },
+          { x: 19, y: -1.6, z: 10 },
+          { x: 12.5, y: -1.5, z: 4 },
+        ],
+      };
     }
     case 'radar': {
       const shape: Shape = (u, v, z) => {

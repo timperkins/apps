@@ -7,10 +7,10 @@ import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
-import { buildingArt as workerBuilding, constructionArt, prefetch } from './art-pool';
+import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
-import { BURST_CENTER, BURST_FRAME, burstFrames } from '../cursors';
+import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
 import { Shroud } from './shroud';
@@ -63,8 +63,14 @@ const BNAME: Record<BuildingKind, string> = {
   helipad: 'Helipad',
   lab: 'Tech lab',
 };
-// Where a hauler unloads at a refinery (its striped pad), from its center.
-const DOCK: [number, number] = [12, 11];
+// Where a hauler unloads at a refinery, from its center: backed onto the
+// striped pad, facing out (DOCK_A) with its bed's tail at the intake. It
+// first pulls up DOCK_RUN in front of the pad, turns and backs on.
+const DOCK: [number, number] = [12.5, 10.5];
+const DOCK_A = Math.PI / 2;
+const DOCK_RUN = 14;
+// How long a hauler's bed takes to tip all the way up (or back down), in seconds.
+const TIP_S = 0.9;
 // Buildings that make units, and so have rally points.
 const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
 
@@ -128,8 +134,12 @@ interface Unit {
   digK?: number;
   // an ore hauler at work: looking for ore, driving to it, digging, taking
   // it home, unloading, or waiting for something to change
-  job?: { st: 'seek' | 'go' | 'dig' | 'home' | 'ret' | 'unload' | 'wait'; node?: OreNode; ref?: Building; t: number };
+  job?: { st: 'seek' | 'go' | 'dig' | 'home' | 'ret' | 'unload' | 'wait' | 'dock'; node?: OreNode; ref?: Building; t: number };
   load?: number;
+  // how far its bed is tipped up to unload (0 down, 1 all the way), and the
+  // step of its scoop's dig it was last on (both only for the look of it)
+  tilt?: number;
+  digStep?: number;
   noOre?: Set<OreNode>; // clumps it found it can't get to
   // getting round water: which way it is sliding along the shore, and how
   // long since it last got any closer to where it is going
@@ -264,6 +274,7 @@ interface Building {
   packing?: boolean;
   rally?: [number, number]; // where new units head (world, first copy)
   gift?: boolean; // a refinery's free hauler has been handed over
+  busyT?: number; // a refinery: when a hauler was last tipping ore into it
   primary?: boolean; // the one of its kind that makes the units
   // a gun tower's target and reload, and for any building when it was last hit
   target?: Target;
@@ -302,6 +313,21 @@ const BASE_B: BuildingKind[] = ['hq', 'power', 'factory', 'barracks', 'refinery'
 // full or full.
 function haulerFill(load = 0): number {
   return load < 1 ? 0 : load >= ORE.load * 0.9 ? 2 : 1;
+}
+
+// The hauler's scoop as it digs, step by step (0 down, 1 lifting, 2 up and
+// tipping), DIG_RATE steps a second.
+const DIG_POSES = [0, 1, 2, 2, 1];
+const DIG_RATE = 4;
+
+// Is heading d of this set of pictures drawn? If not it is asked for (and
+// false), so something else can stand in for it a frame or two. With no
+// workers to draw it, it is drawn here when wanted.
+function artReady(set: StackSprite[], d: number): boolean {
+  const s = dirSet(set);
+  if (!s || s.ready(d) || !pooled()) return true;
+  void prefetch(s.key, d, true);
+  return false;
 }
 
 // Which click burst an order marker plays.
@@ -393,7 +419,7 @@ const GONE_KILL = 0;
 const GONE_QUIET = 1;
 const GONE_RAZE = 2;
 const GONE_PACK = 3;
-const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait'] as const;
+const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait', 'dock'] as const;
 
 /** What the host sends everyone, several times a second: every unit and
  * building as it is, what has gone since last time, each player's purse,
@@ -467,7 +493,8 @@ export class IsoGame implements GameLike {
   // mouse, whose cursor plays the burst instead.
   moveMarks = true;
   sparkles: { x: number; y: number; life: number }[] = [];
-  sparks: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
+  // sparks, and lumps of ore (col: their color, max: how long they last)
+  sparks: { x: number; y: number; vx: number; vy: number; life: number; max?: number; col?: string }[] = [];
   art: V2FactionArt[];
   bArt = new Map<string, V2BuildingArt>();
   trees = makeTrees();
@@ -688,11 +715,17 @@ export class IsoGame implements GameLike {
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.haulerDig])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
       if (s) for (let d = 0; d < s.dirs; d++) if (!s.ready(d)) void prefetch(s.key, d);
+    }
+    // a hauler only ever tips its bed on a refinery's pad, facing out
+    for (const arr of mine.haulerDump) {
+      const s = dirSet(arr);
+      const d = dirIndex(DOCK_A, DIRS);
+      if (s && !s.ready(d)) void prefetch(s.key, d);
     }
     return waits;
   }
@@ -1827,14 +1860,58 @@ export class IsoGame implements GameLike {
           break;
         }
         j.ref = ref;
-        goTo(ref.x + DOCK[0], ref.y + DOCK[1]);
+        // pull up in front of the pad first
+        goTo(ref.x + DOCK[0] + Math.cos(DOCK_A) * DOCK_RUN, ref.y + DOCK[1] + Math.sin(DOCK_A) * DOCK_RUN);
         j.st = 'ret';
         break;
       }
       case 'ret':
         if (!j.ref || !this.buildings.includes(j.ref)) j.st = 'home';
-        else if (!u.moving) j.st = 'unload';
+        else if (!u.moving) {
+          // (one at a time: wait here while another hauler is on the pad)
+          const ref = j.ref;
+          const taken = this.units.some((o) => o !== u && o.job?.ref === ref && (o.job.st === 'dock' || o.job.st === 'unload' || (o.job.st === 'wait' && (o.tilt ?? 0) > 0)));
+          if (!taken) j.st = 'dock';
+        }
         break;
+      case 'dock': {
+        // turn to face out, then back onto the pad
+        const ref = j.ref;
+        if (!ref || !this.buildings.includes(ref)) {
+          j.st = 'home';
+          break;
+        }
+        const [px, py] = this.nearPoint(u.x, u.y, ref.x + DOCK[0], ref.y + DOCK[1]);
+        const diff = angDiff(DOCK_A, u.a);
+        const stepA = UNIT.hauler.turn * dt;
+        if (Math.abs(diff) > 0.02) {
+          u.a = Math.abs(diff) <= stepA ? DOCK_A : u.a + Math.sign(diff) * stepA;
+          break;
+        }
+        u.a = DOCK_A;
+        const dx = px - u.x;
+        const dy = py - u.y;
+        const d = Math.hypot(dx, dy);
+        const sp = UNIT.hauler.speed * 0.45 * dt;
+        // (if something is in the way, it unloads where it is)
+        const nx = u.x + (dx / Math.max(d, 1e-6)) * sp;
+        const ny = u.y + (dy / Math.max(d, 1e-6)) * sp;
+        if (d <= sp || d > DOCK_RUN + 10 || !this.okAt(u, nx, ny)) {
+          if (d <= sp) {
+            u.x = px;
+            u.y = py;
+          }
+          j.st = 'unload';
+          j.t = 0;
+          this.sound(u.x, u.y, 'ore_unload');
+        } else {
+          u.x = nx;
+          u.y = ny;
+        }
+        u.tx = u.x;
+        u.ty = u.y;
+        break;
+      }
       case 'unload': {
         const e = this.eco[u.f];
         const room = this.store(u.f) - e.credits;
@@ -1842,8 +1919,9 @@ export class IsoGame implements GameLike {
           this.tell(u.f, 'Credits full: build an ore silo');
           break;
         }
+        // (the ore pours out once the bed is tipped up)
+        if ((u.tilt ?? 0) < 0.6) break;
         const give = Math.min(ORE.unloadRate * dt, u.load, room);
-        if (u.load >= ORE.load * 0.95) this.sound(u.x, u.y, 'ore_unload');
         u.load -= give;
         e.credits += give;
         if (u.f === this.me && this.time - this.tickT > 0.12) {
@@ -1851,12 +1929,82 @@ export class IsoGame implements GameLike {
           ui('credits_tick', 1.4);
         }
         if (u.load <= 0.5) {
+          // empty: let the bed down, then off for more
           u.load = 0;
-          j.st = 'seek';
+          j.st = 'wait';
+          j.t = TIP_S;
         }
         break;
       }
     }
+  }
+
+  // How a hauler looks at work, on every screen: its bed tips up on the pad
+  // and pours out its ore into the intake, and digging, its scoop lifts and
+  // tips ore back into the bed, kicking up dust.
+  private haulerLooks(u: Unit, dt: number): void {
+    const st = u.job?.st;
+    const want = st === 'unload' && (u.load ?? 0) > 0.5 ? 1 : 0;
+    const was = u.tilt ?? 0;
+    u.tilt = want > was ? Math.min(1, was + dt / TIP_S) : Math.max(0, was - dt / TIP_S);
+    if (u.tilt === 0) u.tilt = undefined;
+    const ca = Math.cos(u.a);
+    const sa = Math.sin(u.a);
+    if ((u.tilt ?? 0) > 0.6 && want) {
+      // a stream of ore off the back of the bed, and dust from the intake
+      const [bx, by] = toScreen(u.x - ca * 12.5, u.y - sa * 12.5, u.z + 2.5 + u.tilt! * 2);
+      for (let i = 0; i < 2; i++)
+        if (Math.random() < dt * 22)
+          this.sparks.push({ x: bx + (Math.random() - 0.5) * 6, y: by + Math.random() * 2, vx: (Math.random() - 0.5) * 5, vy: 4 + Math.random() * 6, life: 0, max: 0.28, col: Math.random() < 0.25 ? '#f2d06a' : '#b08638' });
+      if (Math.random() < dt * 5) {
+        const [dx, dy] = toScreen(u.x - ca * 13.5, u.y - sa * 13.5, u.z + 1);
+        this.particles.push({ x: dx + (Math.random() - 0.5) * 8, y: dy, vx: (Math.random() - 0.5) * 6, vy: -5, life: 0, max: 1, kind: 'dust', size: 1.4 });
+      }
+      // the refinery it is unloading into works its lamps
+      for (const b of this.buildings)
+        if (b.kind === 'refinery' && b.f === u.f) {
+          const [px, py] = this.nearPoint(u.x, u.y, b.x + DOCK[0], b.y + DOCK[1]);
+          if (Math.hypot(px - u.x, py - u.y) < 4) b.busyT = this.time;
+        }
+    }
+    if (st === 'dig') {
+      const step = Math.floor(u.anim * DIG_RATE) % DIG_POSES.length;
+      if (step !== u.digStep) {
+        const pose = DIG_POSES[step];
+        const [fx, fy] = toScreen(u.x + ca * 13, u.y + sa * 13, u.z + 1);
+        if (pose === 0) {
+          // the scoop bites into the ground
+          for (let i = 0; i < 2; i++) this.particles.push({ x: fx + (Math.random() - 0.5) * 8, y: fy, vx: (Math.random() - 0.5) * 7, vy: -4 - Math.random() * 2, life: 0, max: 0.9, kind: 'dust', size: 1.2 });
+        } else if (pose === 2 && DIG_POSES[u.digStep ?? 0] !== 2) {
+          // up: lumps of ore tumble back into the bed
+          const [tx, ty] = toScreen(u.x + ca * 11, u.y + sa * 11, u.z + 7);
+          for (let i = 0; i < 4; i++) this.sparks.push({ x: tx + (Math.random() - 0.5) * 5, y: ty, vx: -ca * 8 + sa * 8 * (Math.random() - 0.5) + (Math.random() - 0.5) * 4, vy: -8 - Math.random() * 6, life: 0, max: 0.35, col: Math.random() < 0.3 ? '#f2d06a' : '#c09443' });
+        }
+        u.digStep = step;
+      }
+    } else u.digStep = undefined;
+  }
+
+  // The hauler's picture at heading di: tipping its bed, its scoop lifting
+  // as it digs, or just its load (a picture not drawn yet is asked for, and
+  // the plain one stands in for it meanwhile).
+  private haulerSprite(u: Unit, di: number): StackSprite {
+    const art = this.art[u.f];
+    const fill = haulerFill(u.load);
+    const plain = art.haulerLoad[fill][di];
+    const tilt = u.tilt ?? 0;
+    if (tilt > 0.05) {
+      const k = tilt < 0.4 ? 0 : tilt < 0.75 ? 1 : 2;
+      const set = art.haulerDump[k * 3 + fill];
+      return artReady(set, di) ? set[di] : plain;
+    }
+    if (u.job?.st === 'dig') {
+      const pose = DIG_POSES[Math.floor(u.anim * DIG_RATE) % DIG_POSES.length];
+      if (!pose) return plain;
+      const set = art.haulerDig[(pose - 1) * 3 + fill];
+      return artReady(set, di) ? set[di] : plain;
+    }
+    return plain;
   }
 
   private deployable(u: Unit): boolean {
@@ -1946,9 +2094,19 @@ export class IsoGame implements GameLike {
       if (gis.length) this.entrench(gis.some((u) => !u.dug));
       const out = this.loaded().filter((u) => !u.unloading);
       if (out.length) this.command({ c: 'unload', u: out.map((u) => u.id) });
-      if (go.length) this.command({ c: 'deploy', u: go.map((u) => u.id) });
-      else if (!gis.length && !out.length) ui('ui_error');
+      if (go.length) {
+        this.command({ c: 'deploy', u: go.map((u) => u.id) });
+        this.deployMarks(go);
+      } else if (!gis.length && !out.length) ui('ui_error');
     } else if (id === 'pack' && sb && sb.f === this.me && sb.kind === 'yard' && sb.rise >= 1) this.command({ c: 'pack', b: sb.id });
+  }
+
+  // The harvest cursor's triangles drop onto Foundry vehicles told to deploy.
+  private deployMarks(us: Unit[]): void {
+    for (const u of us) {
+      const [mx, my] = this.fold(u.x, u.y);
+      this.markers.push({ x: mx, y: my, z: u.z, t: 0, ore: true });
+    }
   }
 
   private startDeploy(u: Unit): void {
@@ -2241,6 +2399,9 @@ export class IsoGame implements GameLike {
     const mine = this.mine();
     if (this.rideAt(x, y)) return 'enter';
     const hit = this.unitAt(x, y);
+    // over a Foundry vehicle of yours that is picked and can deploy: deploy it
+    const h = hit?.u;
+    if (h && h.kind === 'mcv' && h.sel && h.f === this.me && !h.deploy && mine.every((o) => o.kind === 'mcv') && this.deployable(h)) return 'deploy';
     if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
@@ -2304,7 +2465,10 @@ export class IsoGame implements GameLike {
       if (!add || enemy || this.units.some((o) => o.sel && o.f !== this.me)) for (const o of this.units) if (o !== best) o.sel = false;
       best.sel = add && !enemy ? !best.sel : true;
       [best.lap, best.lapY] = hitU.lap;
-      if (again && best.f === this.me && this.deployable(best) && !best.deploy) this.command({ c: 'deploy', u: [best.id] });
+      if (again && best.f === this.me && this.deployable(best) && !best.deploy) {
+        this.command({ c: 'deploy', u: [best.id] });
+        this.deployMarks([best]);
+      }
       // and on a transport with soldiers in it lets them out
       if (again && best.f === this.me && best.cargo?.length && !best.unloading) this.command({ c: 'unload', u: [best.id] });
       this.emit();
@@ -2669,6 +2833,7 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
+      if (u.kind === 'hauler') this.haulerLooks(u, dt);
       if (u.dug || u.digK) {
         u.digK = Math.max(0, Math.min(1, (u.digK ?? 0) + (u.dug ? dt : -dt) / DIG_S));
         if (!u.digK) u.digK = undefined;
@@ -2978,7 +3143,8 @@ export class IsoGame implements GameLike {
         emit(0, 'smoke', 3);
         emit(1, 'smoke', 3);
       }
-      if (b.kind === 'refinery') emit(0, 'soot', 2);
+      // (more while a hauler is tipping ore into it)
+      if (b.kind === 'refinery') emit(0, 'soot', this.time - (b.busyT ?? -9) < 0.3 ? 5 : 2);
       if (b.kind === 'factory') {
         emit(0, 'smoke', 0.8);
         emit(1, 'smoke', 0.8);
@@ -3015,7 +3181,7 @@ export class IsoGame implements GameLike {
       s.y += s.vy * dt;
       s.vy += 60 * dt;
     }
-    this.sparks = this.sparks.filter((s) => s.life < 0.5);
+    this.sparks = this.sparks.filter((s) => s.life < (s.max ?? 0.5));
     for (const m of this.markers) m.t += dt;
     this.markers = this.markers.filter((m) => m.t < BURST_FRAME * burstFrames(markKind(m)).length);
     for (const q of this.quakes) q.t += dt;
@@ -3502,7 +3668,7 @@ export class IsoGame implements GameLike {
     // haulers start their round again (where they were going isn't saved)
     for (const u of this.units)
       if (u.job) {
-        u.job = { st: u.job.st === 'ret' || u.job.st === 'unload' || u.job.st === 'home' ? 'home' : 'seek', t: 0 };
+        u.job = { st: u.job.st === 'ret' || u.job.st === 'unload' || u.job.st === 'home' || u.job.st === 'dock' ? 'home' : 'seek', t: 0 };
         u.moving = false;
       }
     for (const u of this.units) u.z = this.groundZ(u);
@@ -4284,7 +4450,7 @@ export class IsoGame implements GameLike {
       case 'boat':
         return [[art.boat[di], u.x, u.y, 0]];
       case 'hauler':
-        return [[art.haulerLoad[haulerFill(u.load)][di], u.x, u.y, u.z]];
+        return [[this.haulerSprite(u, di), u.x, u.y, u.z]];
       default:
         return [[{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
     }
@@ -4535,7 +4701,7 @@ export class IsoGame implements GameLike {
 
     for (const s of this.sparks) {
       if (!inView(s.x, s.y)) continue;
-      c.fillStyle = s.life < 0.2 ? '#fff6c8' : '#ffb347';
+      c.fillStyle = s.col ?? (s.life < 0.2 ? '#fff6c8' : '#ffb347');
       c.fillRect(Math.round(s.x), Math.round(s.y), 1, 1);
     }
 
@@ -4604,6 +4770,18 @@ export class IsoGame implements GameLike {
     for (const [bx, by] of ends) c.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 2, 2);
     c.restore();
 
+    // until your first Foundry is up, the harvest cursor's triangles float
+    // over a Foundry vehicle that could deploy where it is, pointing it out
+    if (!this.buildings.some((b) => b.f === this.me && b.kind === 'yard')) {
+      const frames = chevronFrames();
+      const img = frames[Math.floor(this.time * 4) % frames.length];
+      for (const u of this.units) {
+        if (u.kind !== 'mcv' || u.f !== this.me || u.sel || u.deploy || !this.deployable(u)) continue;
+        const [sx, sy] = toScreen(u.x, u.y, u.z + 22);
+        if (!inView(sx, sy)) continue;
+        c.drawImage(img, Math.round(sx) - CHEV_TIP[0], Math.round(sy) - CHEV_TIP[1]);
+      }
+    }
     // order markers: the cursor's click burst, on top of everything
     for (const m of this.markers) {
       const frames = burstFrames(markKind(m));
@@ -4840,9 +5018,9 @@ export class IsoGame implements GameLike {
         break;
       }
       default: {
-        const spr = u.kind === 'buggy' ? art.buggy : u.kind === 'apc' ? art.apc : u.kind === 'hauler' ? art.haulerLoad[haulerFill(u.load)] : art.artillery;
         const back = u.kind === 'arty' ? kick : 0;
-        this.blit(spr[di], u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
+        const spr = u.kind === 'hauler' ? this.haulerSprite(u, di) : (u.kind === 'buggy' ? art.buggy : u.kind === 'apc' ? art.apc : art.artillery)[di];
+        this.blit(spr, u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
         if (u.kind === 'buggy' && !u.moving) drawBuggyLights(this.ctx, u.x, u.y, u.z, u.a, u.anim);
       }
     }
@@ -4945,6 +5123,17 @@ export class IsoGame implements GameLike {
           c.fillStyle = css(i < 2 ? f.light : i === 6 ? f.dark : f.main);
           c.fillRect(x - 1 - i, y + dy, 1, 4);
         }
+        break;
+      }
+      case 'refinery': {
+        // a hauler unloading: the amber lamps by the intake flash in turn
+        if (this.time - (b.busyT ?? -9) >= 0.3 || b.art.fx.length < 3) break;
+        const on = Math.floor(this.time * 3) % 2;
+        const [x, y] = fx(1 + on);
+        c.fillStyle = 'rgba(255,190,60,0.4)';
+        c.fillRect(x - 2, y - 2, 5, 5);
+        c.fillStyle = '#fff1a8';
+        c.fillRect(x - 1, y - 1, 3, 2);
         break;
       }
       case 'radar': {
