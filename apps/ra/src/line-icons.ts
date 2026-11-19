@@ -4,7 +4,7 @@
 
 export type IconName =
   | 'menu' | 'select' | 'home' | 'build' | 'group' | 'all' | 'clear' | 'close'
-  | 'shuffle' | 'units' | 'check' | 'deploy' | 'gear' | 'back' | 'flag' | 'bolt' | 'coin' | 'play' | 'users' | 'bot' | 'star' | 'pack';
+  | 'shuffle' | 'units' | 'check' | 'deploy' | 'gear' | 'back' | 'flag' | 'bolt' | 'coin' | 'play' | 'users' | 'bot' | 'star' | 'pack' | 'unload';
 
 export const LINE: Record<IconName, string> = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
@@ -28,6 +28,8 @@ export const LINE: Record<IconName, string> = {
   users: '<circle cx="8.5" cy="8" r="3"/><path d="M2.5 20v-2a6 6 0 0 1 12 0v2"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14a5 5 0 0 1 5.5 5v1"/>',
   bot: '<rect x="4" y="7" width="16" height="12" rx="2.5"/><path d="M12 3.5V7M2 12v3M22 12v3"/><circle cx="9" cy="13" r="1.4"/><circle cx="15" cy="13" r="1.4"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  // soldiers out of the back: an open door and an arrow walking out of it
+  unload: '<path d="M4 20V4h8v16"/><path d="M4 20h16"/><path d="M10.5 12H20M16.5 8.5L20 12l-3.5 3.5"/>',
   pack: '<path d="M12 3v6M9.5 6.5L12 9l2.5-2.5M12 21v-6M9.5 17.5L12 15l2.5 2.5M3 12h6M6.5 9.5L9 12l-2.5 2.5M21 12h-6M17.5 9.5L15 12l2.5 2.5"/>',
 };
 
