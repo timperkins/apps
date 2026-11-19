@@ -110,7 +110,7 @@ function buildPanel(mode: 'side' | 'sheet', tab = 0, n = 8) {
 }
 
 const UNITS = ['rifle', 'rocket', 'buggy', 'lancer', 'hauler', 'howler', 'bastion', 'kestrel'];
-const UNIT_N: Record<string, string> = { rifle: 'Rifleman', rocket: 'Rocketeer', buggy: 'Scout buggy', lancer: 'Lancer tank', hauler: 'Ore hauler', howler: 'Howler artillery', bastion: 'Bastion tank', kestrel: 'Kestrel copter' };
+const UNIT_N: Record<string, string> = { rifle: 'G.I.', rocket: 'Rocketeer', buggy: 'Scout buggy', lancer: 'Lancer tank', hauler: 'Ore hauler', howler: 'Howler artillery', bastion: 'Bastion tank', kestrel: 'Kestrel copter' };
 
 function utype(k: string, count: number, on = false, part = false) {
   return `<button class="k-utype s-btn${on ? ' on' : ''}${part ? ' part' : ''}" title="${UNIT_N[k]}"><img src="${A(`s-${k}.png`)}" alt="${UNIT_N[k]}"><b class="count">${count}</b></button>`;

@@ -25,7 +25,7 @@ const STATS: Record<UnitKind, { name: string; speed: number; turn: number; r: nu
   arty: { name: 'Howler artillery', speed: 13, turn: 2, r: 8, hp: 0.7 },
   boat: { name: 'Patrol boat', speed: 20, turn: 1.6, r: 10, hp: 0.85 },
   heli: { name: 'Kestrel copter', speed: 34, turn: 3, r: 9, hp: 0.75 },
-  inf: { name: 'Rifleman', speed: 9, turn: 99, r: 4, hp: 1 },
+  inf: { name: 'G.I.', speed: 9, turn: 99, r: 4, hp: 1 },
   rocket: { name: 'Rocketeer', speed: 8, turn: 99, r: 4, hp: 0.9 },
 };
 

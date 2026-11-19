@@ -461,41 +461,185 @@ function heli(f: Faction): Shape {
   };
 }
 
-function soldier(f: Faction, rocket: boolean, frame: number): Shape {
-  const body = rocket ? mix(f.main, OLIVE, 0.4) : f.main;
-  const step = frame === 0 ? 0 : frame === 1 ? 0.9 : -0.9;
-  const helmet = rocket ? OLIVE_D : shade(f.dark, 0.05);
+// ---------- Foot soldiers ----------
+// Each one is built from capsules (limbs, weapons) on a slim torso, about
+// eleven units tall: a little over half a tank's height and a third as wide
+// as it is tall. frame: 0 standing at the ready, 1 and 2 the two strides of a
+// walk, 3 a grenadier's throw, 4 kneeling (a G.I. dug in).
+export type Trooper = 'gi' | 'rocket' | 'gren';
+type P3 = [number, number, number];
+
+// Distance from (u, v, z) to the segment a-b.
+function segD(u: number, v: number, z: number, a: P3, b: P3): number {
+  const bx = b[0] - a[0];
+  const by = b[1] - a[1];
+  const bz = b[2] - a[2];
+  const px = u - a[0];
+  const py = v - a[1];
+  const pz = z - a[2];
+  const t = Math.max(0, Math.min(1, (px * bx + py * by + pz * bz) / (bx * bx + by * by + bz * bz || 1)));
+  return Math.hypot(px - bx * t, py - by * t, pz - bz * t);
+}
+const limb = (u: number, v: number, z: number, a: P3, b: P3, c: P3, r: number) => Math.min(segD(u, v, z, a, b), segD(u, v, z, b, c)) < r;
+
+const KHAKI = hex('#9a8a62');
+const BRASS = hex('#c9a24a');
+const GRENADE = hex('#4d5a36');
+
+// Where each kind holds its weapon (standing; kneeling drops it KNEEL_DROP),
+// for the muzzle flash in combat.ts.
+export const KNEEL_DROP = 1.8;
+const BAG_H = 3.45;
+export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4] };
+
+// bags: how far up the sandbags round a dug-in G.I. have been stacked (0 to 1).
+export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Shape {
+  const body = kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : f.main;
+  const bodyD = shade(body, -0.2);
+  const trouser = shade(f.dark, -0.08);
+  const helmet = kind === 'rocket' ? OLIVE_D : shade(f.dark, 0.05);
+  const vest = mix(OLIVE_D, body, 0.25);
+  const kneel = frame === 4;
+  const dz = kneel ? -KNEEL_DROP : 0;
+  // the stride: how far forward each foot is (+ for the left, - for the right)
+  const s = frame === 1 ? 1.1 : frame === 2 || frame === 3 ? -1.1 : 0;
+  const swing = frame === 1 ? 1 : frame === 2 ? -1 : 0;
+  // the legs: hip, knee and ankle of each
+  const legs: [P3, P3, P3, number][] = kneel
+    ? [
+        [[0, -0.5, 3.2], [1.7, -0.5, 3.1], [1.6, -0.5, 0.7], -1],
+        [[0, 0.5, 3.2], [0.5, 0.5, 0.5], [-1.4, 0.5, 0.5], 1],
+      ]
+    : [
+        [[0, -0.5, 5], [s * 0.55 + 0.2 * Math.abs(s), -0.5, 2.7], [s, -0.5, 0.8], -1],
+        [[0, 0.5, 5], [-s * 0.55 + 0.2 * Math.abs(s), 0.5, 2.7], [-s, 0.5, 0.8], 1],
+      ];
+  const sh = (side: number): P3 => [0, side * 1.2, 7.9 + dz];
+  // arms: shoulder, elbow, hand
+  let armL: [P3, P3, P3];
+  let armR: [P3, P3, P3];
+  if (kind === 'gi') {
+    armR = [sh(1), [-0.3, 1.45, 6.6 + dz], [0.6, 0.85, 6.9 + dz]];
+    armL = [sh(-1), [0.9, -1.15, 6.6 + dz], [2.1, 0.35, 7 + dz]];
+  } else if (kind === 'rocket') {
+    armR = [sh(1), [0.2, 1.55, 6.9], [0.9, 1.05, 7.7]];
+    armL = [sh(-1), [0.9, -1.2, 7], [1.9, 0.6, 7.9]];
+  } else if (frame === 3) {
+    armR = [sh(1), [-0.9, 1.5, 8.8], [-0.4, 1.3, 10.1]];
+    armL = [sh(-1), [0.9, -1.4, 8.2], [1.9, -1, 8.6]];
+  } else {
+    armR = [sh(1), [0.1 + swing * 0.3, 1.45, 6.6], [0.5 + swing * 0.7, 1.35, 5.6]];
+    armL = [sh(-1), [-0.1 - swing * 0.3, -1.45, 6.6], [0.2 - swing * 0.7, -1.35, 5.5]];
+  }
+  const grenadeAt: P3 | null = kind !== 'gren' ? null : frame === 3 ? [-0.35, 1.3, 10.5] : [armR[2][0] + 0.15, 1.35, 5.3];
+
   return (u, v, z) => {
-    const av = Math.abs(v);
-    // legs, with boots and knee pads
-    if (z < 3.2) {
-      const legU = v > 0 ? step : -step;
-      if (Math.abs(u - legU * (z < 1.6 ? 1 : 0.5)) < 0.6 && av > 0.2 && av < 1.3) return z < 0.9 ? BLACK : Math.abs(z - 1.9) < 0.3 ? shade(f.dark, 0.15) : shade(f.dark, -0.15);
-      return null;
+    // ----- the sandbag ring (dug in), open at the back
+    if (bags > 0 && z < BAG_H * bags) {
+      const d = Math.hypot(u, v);
+      const lean = z * 0.18;
+      if (d > 2.9 + lean && d < 4.4 - lean && !(u < -1.5 && Math.abs(v) < 1.6)) {
+        const course = Math.floor(z / 1.15);
+        const a = Math.atan2(v, u) * 2.6 + course * 0.5;
+        if (mod(a, 1) < 0.14 || z - course * 1.15 < 0.22) return shade(SAND_BAG, -0.32);
+        if (z - course * 1.15 > 0.9) return shade(SAND_BAG, 0.08);
+        return shade(SAND_BAG, (hash2(Math.floor(a), course, 5) - 0.5) * 0.22);
+      }
     }
-    // weapons first, so they aren't hidden in the body
-    if (rocket) {
-      if (u > -2.8 && u < 3.2 && (v - 1.5) ** 2 + (z - 7) ** 2 < 0.55) return u > 2.5 ? RED : u < -2.2 ? BLACK : Math.abs(u) < 0.3 ? OLIVE_D : OLIVE;
+    return soldierBody(u, v, z, Math.abs(v));
+  };
+
+  function soldierBody(u: number, v: number, z: number, av: number): RGB | null {
+    // ----- weapons first, so they stand out of the body
+    if (kind === 'gi') {
+      const y = 0.65;
+      const h = 7.1 + dz;
+      if (segD(u, v, z, [-0.5, y, h + 0.35], [0.4, y, h + 0.05]) < 0.36) return mod(Math.floor(u * 2), 3) === 0 ? WOOD_L : WOOD; // stock
+      if (segD(u, v, z, [0.4, y, h], [1.6, y, h]) < 0.38) return z > h + 0.2 ? GUN_L : GUN_D; // receiver
+      if (segD(u, v, z, [1.1, y, h - 0.2], [1.35, y, h - 1]) < 0.3) return BLACK; // magazine
+      if (segD(u, v, z, [1.6, y, h], [2.6, y, h]) < 0.34) return WOOD; // handguard
+      if (segD(u, v, z, [2.6, y, h], [3.8, y, h]) < 0.28) return u > 3.5 ? BLACK : GUN; // barrel
+    } else if (kind === 'rocket') {
+      const y = 1.05;
+      const h = 8.5;
+      if (u > 2.7 && u < 3.7 && (v - y) ** 2 + (z - h) ** 2 < (0.6 - (u - 2.7) * 0.45) ** 2) return RED; // the warhead
+      if (u > -2.3 && u <= 2.7 && (v - y) ** 2 + (z - h) ** 2 < 0.36) {
+        if (u < -2) return BLACK;
+        if (Math.abs(u - 1.6) < 0.25 || Math.abs(u + 1.2) < 0.25) return OLIVE_D;
+        return z > h + 0.3 ? shade(OLIVE, 0.12) : OLIVE;
+      }
+      if (inBox(u, v, z, 0.6, 1.4, y - 0.95, y - 0.45, h - 0.2, h + 0.45)) return u > 1.2 ? GLASS : GUN_D; // the sight
+      if (segD(u, v, z, [0.9, y, h - 0.4], [0.8, y, h - 1]) < 0.25) return GUN_D; // grip
+    }
+    if (grenadeAt && (u - grenadeAt[0]) ** 2 + (v - grenadeAt[1]) ** 2 + (z - grenadeAt[2]) ** 2 < 0.3) return z > grenadeAt[2] + 0.2 ? shade(GRENADE, 0.2) : GRENADE;
+    // ----- hands and arms
+    for (const arm of [armL, armR]) {
+      const hd = (u - arm[2][0]) ** 2 + (v - arm[2][1]) ** 2 + (z - arm[2][2]) ** 2;
+      if (hd < 0.2) return SKIN;
+      if (limb(u, v, z, arm[0], arm[1], arm[2], 0.42)) return segD(u, v, z, arm[0], arm[0]) < 0.5 ? shade(body, 0.08) : body;
+    }
+    // ----- the head: face, and a helmet (a grenadier's cap) over it
+    const hz = 9.55 + dz;
+    const hr2 = (u - 0.1) ** 2 + v * v + (z - hz) ** 2;
+    if (z > hz + 0.05) {
+      if (kind === 'gren') {
+        if (z < hz + 0.8 && (u - 0.05) ** 2 + v * v < 0.95) return z > hz + 0.55 ? shade(helmet, 0.12) : helmet;
+        if (z < hz + 0.3 && u > 0.5 && u < 1.25 && av < 0.6) return shade(helmet, -0.2); // its peak
+      } else {
+        const r2 = u * u + v * v + (z - hz + 0.15) ** 2;
+        if (r2 < 1.2 && z < hz + 0.3 && r2 > 0.7) return shade(helmet, -0.22); // the brim
+        if (r2 < 1.12) return z > hz + 0.75 ? shade(helmet, 0.14) : Math.abs(z - hz - 0.35) < 0.12 ? shade(helmet, -0.15) : helmet;
+      }
+    }
+    if (hr2 < 0.74) {
+      if (u < -0.2) return kind === 'gren' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
+      if (u > 0.45 && z > hz && z < hz + 0.3 && av > 0.15 && av < 0.45) return BLACK; // eyes
+      return z < hz - 0.45 ? shade(SKIN, -0.12) : SKIN;
+    }
+    if (u * u + v * v < 0.2 && z > 8.3 + dz && z <= hz) return shade(SKIN, -0.15); // neck
+    // ----- packs on the back
+    if (kind === 'rocket') {
+      for (const pv of [-0.45, 0.45]) if ((u + 1.25) ** 2 + (v - pv) ** 2 < 0.13 && z > 6.2 && z < 9.2) return z > 8.8 ? RED : OLIVE_D; // spare rockets
+      if (inBox(u, v, z, -1.6, -0.6, -0.8, 0.8, 5.8, 8)) return z > 7.7 ? shade(OLIVE_D, 0.1) : OLIVE_D;
+    } else if (kind === 'gi') {
+      if (inBox(u, v, z, -1.45, -0.6, -0.75, 0.75, 6.1 + dz, 8 + dz)) return z > 7.7 + dz ? shade(OLIVE, 0.12) : Math.abs(z - 7 - dz) < 0.15 ? OLIVE_D : OLIVE;
+      if ((u + 1.05) ** 2 + (z - 8.3 - dz) ** 2 < 0.2 && av < 0.85) return SAND_BAG; // bedroll
     } else {
-      if (u > 0.4 && u < 4 && Math.abs(v - 1) < 0.45 && Math.abs(z - 5.2) < 0.45) return u > 3 ? BLACK : u < 1.2 ? WOOD : GUN_D;
+      if (inBox(u, v, z, -1.3, -0.6, -0.65, 0.65, 6.4, 7.9)) return OLIVE;
+      if (inBox(u, v, z, -0.5, 0.6, -1.6, -0.95, 4.7, 6.1)) return z > 5.8 ? shade(OLIVE_D, 0.15) : Math.abs(u) < 0.15 ? BLACK : OLIVE_D; // satchel of grenades
     }
-    // pack on the back
-    if (u < -0.8 && u > -1.9 && av < 1.1 && z > 3.8 && z < 6) return rocket ? OLIVE_D : z > 5.4 ? SAND_BAG : OLIVE;
-    // torso with a belt and webbing
-    if (z < 6.3 && Math.abs(u) < 0.9 && av < 1.4) {
-      if (z < 3.8) return BLACK;
-      if (Math.abs(av - 0.7) < 0.25 && z > 4.4) return shade(body, -0.25);
-      return z > 5.7 ? shade(body, 0.12) : body;
+    // ----- the torso: a jacket under a chest rig, with a belt
+    if (z >= 5 + dz && z < 8.4 + dz) {
+      const zz = z - dz;
+      const w = zz > 7 ? 1.2 : 1.02 + (zz - 5) * 0.09;
+      const dd = (u / 0.72) ** 2 + (v / w) ** 2;
+      if (dd < 1) {
+        if (zz < 5.5) return u > 0.5 && av < 0.25 ? BRASS : BLACK; // belt and buckle
+        if (zz > 8.1) return bodyD; // collar
+        if (kind === 'gren' && u > 0 && Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.3) {
+          // a bandolier of grenades across the chest
+          return mod(Math.floor(v * 2), 2) ? GRENADE : OLIVE_D;
+        }
+        if (Math.abs(av - 0.6) < 0.18 && zz > 6.6) return shade(OLIVE_D, -0.15); // shoulder straps
+        if (u > 0.3 && zz > 5.6 && zz < 6.7 && kind !== 'gren') return mod(Math.floor(v * 2 + 0.5), 2) ? shade(vest, 0.1) : vest; // pouches
+        if (zz > 7.6 && av > 0.8) return shade(body, 0.1); // the lit tops of the shoulders
+        return g(body, u, v, z, 0.05);
+      }
     }
-    // arms: the sleeve, then a hand
-    if (z < 6 && z > 4 && Math.abs(u - 0.4 - (frame ? step * 0.4 * Math.sign(v) : 0)) < 0.6 && av >= 1.4 && av < 2) return z < 4.6 ? SKIN : body;
-    // head: a helmet with a band over the face
-    if (z >= 6.3 && z < 8.5 && u * u + v * v < 1.15) {
-      if (z > 7.4) return z < 7.8 ? shade(helmet, -0.25) : helmet;
-      return u < -0.3 ? helmet : SKIN;
+    // ----- legs and boots
+    for (const [hip, knee, ankle, side] of legs) {
+      // the boot, toe forward
+      const fu = ankle[0];
+      if (z < 0.95 && Math.abs(v - side * 0.5) < 0.42 && u > fu - 0.45 && u < fu + 0.75) return z > 0.7 ? hex('#3a2e24') : BLACK;
+      if (limb(u, v, z, hip, knee, ankle, 0.48)) {
+        const kd = Math.hypot(u - knee[0], v - knee[1], z - knee[2]);
+        if (kd < 0.5 && u > knee[0]) return shade(trouser, -0.25); // knee pad
+        if (z < 1.6 && !kneel) return shade(trouser, -0.12); // tucked into the boot
+        return g(trouser, u, v, z, 0.05);
+      }
     }
     return null;
-  };
+  }
 }
 
 // The Mobile Foundry: a long tracked carrier with a cab, a boxy works module
@@ -583,8 +727,10 @@ export interface V2FactionArt {
   boat: StackSprite[];
   heli: StackSprite[];
   towerGun: StackSprite[];
-  infantry: StackSprite[][]; // [frame][dir]
+  infantry: StackSprite[][]; // [frame][dir]: standing, two strides
   rocket: StackSprite[][];
+  gren: StackSprite[][]; // and a throw
+  infantryDug: StackSprite[][]; // [how far dug in][dir]: a G.I. kneeling in a ring of sandbags
 }
 
 // Each set of headings is keyed fa:<faction>:<name>[:<frame>], so a worker can
@@ -593,8 +739,8 @@ export function makeFactionArt(f: Faction): V2FactionArt {
   const fi = FACTIONS.indexOf(f);
   const k = (name: string) => (fi >= 0 ? `fa:${fi}:${name}` : undefined);
   const haulerLoad = [0, 1, 2].map((fill) => renderDirs(hauler(f, fill), DIRS, { r: 13, zmax: 11, bakeShadow: true }, k(`haulerLoad:${fill}`)));
-  const inf = (rocket: boolean) =>
-    [0, 1, 2].map((fr) => renderDirs(soldier(f, rocket, fr), 16, { r: 4, zmax: 9, step: 0.5, bakeShadow: true }, k(`${rocket ? 'rocket' : 'infantry'}:${fr}`)));
+  const inf = (kind: Trooper, name: string, frames: number[]) =>
+    frames.map((fr) => renderDirs(soldier(f, kind, fr), 16, { r: 4.3, zmax: 12, step: 0.5, bakeShadow: true }, k(`${name}:${fr}`)));
   return {
     mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }, k('mcv')),
     lightTank: renderDirs(tankHull(f, 16, 12, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lightTank')),
@@ -608,8 +754,10 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }, k('boat')),
     heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }, k('heli')),
     towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }, k('towerGun')),
-    infantry: inf(false),
-    rocket: inf(true),
+    infantry: inf('gi', 'infantry', [0, 1, 2]),
+    rocket: inf('rocket', 'rocket', [0, 1, 2]),
+    gren: inf('gren', 'gren', [0, 1, 2, 3]),
+    infantryDug: [1, 2, 3].map((n, i) => renderDirs(soldier(f, 'gi', 4, n / 3), 16, { r: 4.8, zmax: 10, step: 0.5, bakeShadow: true }, k(`infantryDug:${i}`))),
   };
 }
 
@@ -1702,7 +1850,8 @@ export function subjectModel(id: string, f: Faction): { shape: Shape; o: StackOp
   switch (id) {
     case 'inf':
     case 'rocket':
-      return { shape: soldierBust(f, id === 'rocket'), o: { r: BUST.r, zmax: BUST.zmax, noGroundShadow: true, outline: [14, 12, 10] } };
+    case 'gren':
+      return { shape: soldierBust(f, id === 'inf' ? 'gi' : id), o: { r: BUST.r, zmax: BUST.zmax, noGroundShadow: true, outline: [14, 12, 10] } };
     case 'light':
       return { shape: both(tankHull(f, 16, 12, false), turretShape(f, 3.6, 5, 1, 11)), o: { r: 11.5, zmax: 14, bakeShadow: true } };
     case 'heavy':

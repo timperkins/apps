@@ -8,12 +8,12 @@
 // with nothing to do pick the nearest enemy in range and fire on it, and a
 // unit that is hit turns on whoever hit it. All the numbers are our own.
 import { ART, RGB, hash2, vnoise } from '../gfx';
-import type { BuildingKind } from './sprites';
+import { TROOPER_MUZZLE, type BuildingKind } from './sprites';
 import { StackSprite, toScreen } from './stack';
 
 export type Armor = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 export type Warhead = 'SA' | 'AP' | 'HE';
-export type ShotKind = 'bullet' | 'shell' | 'rocket' | 'arc';
+export type ShotKind = 'bullet' | 'shell' | 'rocket' | 'arc' | 'grenade';
 
 // How much of each warhead's damage gets through each armor.
 export const VERSUS: Record<Warhead, Record<Armor, number>> = {
@@ -41,10 +41,15 @@ export interface Weapon {
   big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
 }
 
-export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket';
+export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren';
+
+// The foot soldiers.
+export const FOOT: ReadonlySet<UnitKind> = new Set<UnitKind>(['inf', 'rocket', 'gren']);
+export const isFoot = (k: string): boolean => FOOT.has(k as UnitKind);
 
 export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
   inf: { name: 'Rifle', dmg: 15, rof: 1.1, range: 3.5 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
+  gren: { name: 'Grenades', dmg: 45, rof: 2.4, range: 4.25 * CELL, wh: 'HE', shot: 'grenade', speed: 55, barrels: 1, air: false, ground: true, splash: 8, scatter: 3 },
   rocket: { name: 'Rocket launcher', dmg: 35, rof: 2.6, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 120, barrels: 1, air: true, ground: true },
   buggy: { name: 'Machine gun', dmg: 15, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
   light: { name: '75mm gun', dmg: 25, rof: 1.6, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 1, air: false, ground: true },
@@ -55,8 +60,16 @@ export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
   tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
 };
 
+// A G.I. dug in behind sandbags: a steadier, longer and harder-hitting
+// stream of fire, and it takes half the damage (see DUG_ARMOR).
+export const DUG_WEAPON: Weapon = { name: 'Rifle, dug in', dmg: 22, rof: 0.7, range: 4.5 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true };
+export const DUG_ARMOR = 0.5;
+// Seconds to dig in (or to climb out and pick up the bags).
+export const DIG_S = 1.2;
+
 export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   inf: { strength: 50, armor: 'none' },
+  gren: { strength: 55, armor: 'none' },
   rocket: { strength: 45, armor: 'none' },
   buggy: { strength: 150, armor: 'light' },
   light: { strength: 300, armor: 'heavy' },
@@ -108,7 +121,7 @@ export const QUAKE_S = 0.5;
 // from: soldiers are knocked back by anything, tanks only by heavy rounds.
 // k is how much of the round's force reaches it (less further from a burst).
 export function knockback(w: Weapon, kind: UnitKind, k = 1): number {
-  if (kind === 'inf' || kind === 'rocket') return k * (w.shot === 'bullet' ? 1.6 : w.shot === 'arc' ? 6 : w.shot === 'rocket' ? 3.5 : 3);
+  if (FOOT.has(kind)) return k * (w.shot === 'bullet' ? 1.6 : w.shot === 'arc' ? 6 : w.shot === 'rocket' ? 3.5 : w.shot === 'grenade' ? 4.5 : 3);
   if ((kind === 'light' || kind === 'heavy') && w.big) return k * (w.shot === 'arc' ? 2.8 : 1.6);
   return 0;
 }
@@ -130,9 +143,11 @@ export function muzzles(kind: UnitKind | 'tower', x: number, y: number, z: numbe
   const py = y - Math.sin(a) * 1.2;
   switch (kind) {
     case 'inf':
-      return [at(x, y, a, 4.2, 1, 5.2)];
     case 'rocket':
-      return [at(x, y, a, 3.4, 1.5, 7)];
+    case 'gren': {
+      const [mu, mv, mz] = TROOPER_MUZZLE[kind === 'inf' ? 'gi' : kind];
+      return [at(x, y, a, mu, mv, mz)];
+    }
     case 'buggy':
       return [at(x, y, a, 1.4, 0, 6.7)];
     case 'light':
@@ -186,7 +201,7 @@ export function makeShot(kind: ShotKind, from: [number, number, number], to: [nu
     z1: to[2],
     t: 0,
     dur: Math.max(0.04, dur),
-    peak: kind === 'arc' ? 10 + d * 0.32 : kind === 'rocket' ? 2 : 0,
+    peak: kind === 'arc' ? 10 + d * 0.32 : kind === 'grenade' ? 5 + d * 0.2 : kind === 'rocket' ? 2 : 0,
     x: from[0],
     y: from[1],
     z: from[2],
@@ -261,7 +276,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1 };
 
 interface Flash {
   x: number;
@@ -547,7 +562,7 @@ export class Fx {
   // thrown high). parts are the sprites it is drawn with and the screen
   // points they are drawn at, (ox, oy) is its middle and gy the ground under it.
   wreck(kind: UnitKind, parts: [StackSprite, number, number][], ox: number, oy: number, gy: number): void {
-    const foot = kind === 'inf' || kind === 'rocket';
+    const foot = FOOT.has(kind);
     const tank = TANKS.has(kind);
     const r = BOOM[kind] ?? 3;
     parts.forEach(([spr, px, py], i) => {
@@ -751,6 +766,15 @@ export class Fx {
         c.fillStyle = Math.floor(s.t * 30) % 2 ? '#ffd65a' : '#ff8a3a';
         const [px, py] = toScreen(s.x - (s.x1 - s.x0) * 0.03, s.y - (s.y1 - s.y0) * 0.03, s.z);
         c.fillRect(Math.round(px * 2) / 2, Math.round(py * 2) / 2, 0.5, 0.5);
+      } else if (s.kind === 'grenade') {
+        // a grenade tumbling through the air, its shadow on the ground
+        const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * (s.t / s.dur));
+        c.fillStyle = 'rgba(0,0,0,0.25)';
+        c.fillRect(Math.round(gx * 2) / 2, Math.round(gy * 2) / 2, 0.5, 0.5);
+        c.fillStyle = '#2f3524';
+        c.fillRect(X, Y, 1, 1);
+        c.fillStyle = Math.floor(s.t * 16) % 2 ? '#7d8a5a' : '#4d5a36';
+        c.fillRect(X, Y, 0.5, 0.5);
       } else if (s.kind === 'arc') {
         // the shell high up, and its shadow sliding along the ground
         const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * (s.t / s.dur));
