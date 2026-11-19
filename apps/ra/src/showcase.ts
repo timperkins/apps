@@ -2,14 +2,14 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
-import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
+import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
+import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
 
 const TAU = Math.PI * 2;
 const HELI_ALT = 20; // as in the game (see combat.ts)
-const RISE_S = 1.8;
 
 // ---------- The ground: plain grass, in the game's greens ----------
 
@@ -669,7 +669,7 @@ function combatCells(o: Fighter): Cell[] {
   return cells;
 }
 
-function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, yard: V2BuildingArt): void {
+function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, yard: V2BuildingArt, yardStages: StackSprite[]): void {
   const di = (a: number) => dirIndex(a, DIRS);
 
   // soldiers: 16 headings, a four-beat walk (a grenadier throws, too)
@@ -969,9 +969,9 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         s.blit(me.mcv[di(a)], 0, 0, 0);
         return;
       }
-      const rise = Math.min(1, (k - 1.2) / RISE_S);
+      const rise = Math.min(1, (k - 1.2) / riseTime('yard', yard.rx, yard.ry));
       if (rise < 1) {
-        drawRising(s, yard, rise);
+        drawRising(s, yard, rise, yardStages);
         if (Math.random() < dt * 14) puffSite(s, yard);
       } else s.blit(yard.spr, 0, 0, 0);
     },
@@ -1057,16 +1057,10 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
 
 // ---------- Buildings ----------
 
-function drawRising(s: Scene, b: V2BuildingArt, rise: number): void {
-  const spr = b.spr;
+function drawRising(s: Scene, b: V2BuildingArt, rise: number, stages: StackSprite[] | null): void {
   const [sx, sy] = toScreen(0, 0, 0);
-  const x = Math.round(sx - spr.cx);
-  const y = Math.round(sy - spr.cy);
-  const W = spr.img.width;
-  const H = spr.img.height;
-  const top = Math.round(H * (1 - rise));
   s.foot(b.rx, b.ry, '#ffe08a', 0.8);
-  if (H - top > 0) s.c.drawImage(spr.img, 0, top, W, H - top, x, y + top / ART, spr.w, (H - top) / ART);
+  drawGoingUp(s.c, stages, b.spr, rise, sx, sy);
 }
 
 function puffSite(s: Scene, b: V2BuildingArt): void {
@@ -1167,6 +1161,7 @@ const cssOf = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts: V2FactionArt[], dish: StackSprite[]): void {
   const me = makeBuilding(def.kind, FACTIONS[0]);
   const foe = makeBuilding(def.kind, FACTIONS[1]);
+  const stages = makeConstruction(def.kind, FACTIONS[0]);
   // room for smoke drifting up off the roof
   const smoky = def.kind === 'power' || def.kind === 'refinery' || def.kind === 'factory';
   const box = union(boxOf(me.spr), smoky ? { ...boxOf(me.spr), u: boxOf(me.spr).u + 12, r: boxOf(me.spr).r + 8 } : boxOf(me.spr));
@@ -1194,11 +1189,11 @@ function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts:
     box,
     anim: true,
     draw: (s, t, dt) => {
-      const dur = def.kind === 'yard' ? RISE_S : 1 + (me.rx + me.ry) / 30;
+      const dur = riseTime(def.kind, me.rx, me.ry);
       const k = t % (dur + 2);
       const rise = Math.min(1, k / dur);
       if (rise < 1) {
-        drawRising(s, me, rise);
+        drawRising(s, me, rise, stages);
         if (Math.random() < dt * 14) puffSite(s, me);
       } else still(me, 0, Math.PI / 4)(s);
     },
@@ -1213,16 +1208,72 @@ function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts:
         if (k < 1) return s.blit(me.spr, 0, 0, 0);
         const rise = 1 - Math.min(1, (k - 1) / 1.2);
         if (rise > 0) {
-          drawRising(s, me, rise);
+          drawRising(s, me, rise, stages);
           if (Math.random() < dt * 12) puffSite(s, me);
         } else s.blit(arts[0].mcv[0], 0, 0, 0);
       },
     });
   }
+  const door = doorOf(def.kind);
+  if (door) cells.push(comingOut(def.kind === 'factory', me, box, arts[0], still(me, 0, A)));
   cells.push(...buildingFight(def.kind, me, makeBuildingStates(def.kind, FACTIONS[0]), box, still(me, 0, A), arts[0], dish));
   cells.push({ label: 'Enemy', box, draw: still(foe, 1, Math.PI / 4) });
   const t = TECH.find((x) => x.building === def.kind);
   addRow(parent, def.name, def.blurb ?? (t ? `${t.blurb} ${t.cost} credits.` : ''), cells, true);
+}
+
+// A new unit coming out of the door, as in the game: the Vehicle works' door
+// rolls up and a Lancer tank drives out; the Barracks' doors swing open and
+// soldiers walk out one after another.
+function comingOut(vehicle: boolean, b: V2BuildingArt, box: Box, art: V2FactionArt, draw: (s: Scene) => void): Cell {
+  const d = doorOf(vehicle ? 'factory' : 'barracks')!;
+  const a = Math.atan2(d.ny, d.nx);
+  // each comes out from just inside the door to where it stops, starting at `at`
+  const who = vehicle ? [{ at: 0, side: 0, r: 7, go: 24, speed: 12 }] : [0, 1, 2].map((i) => ({ at: i * 0.7, side: [0, -1.4, 1.4][i], r: 1.5, go: 9 + i * 3, speed: 9 }));
+  const L = 6;
+  const sprOf = (t: number) => (vehicle ? art.lightTank[dirIndex(a, DIRS)] : art.infantry[1 + (Math.floor(t * 7) % 2)][dirIndex(a, 16)]);
+  const out = Math.max(...who.map((w) => w.go));
+  return {
+    label: vehicle ? 'Vehicle out' : 'Troops out',
+    box: union(box, boxOf(sprOf(0), d.x + d.nx * out, d.y + d.ny * out)),
+    anim: true,
+    draw: (s, t) => {
+      const k = t % L;
+      draw(s);
+      // where each one is along the way out, from the door (negative: still inside)
+      const along = who.map((w) => {
+        const u = k - w.at - DOOR_S;
+        return u < 0 ? null : Math.min(w.go, -(w.r + 1) + u * w.speed);
+      });
+      // the door is open while anyone is coming through it
+      const through = who.map((w, i) => along[i] !== null && along[i]! <= w.r + 2);
+      const opens = who.map((w) => k - w.at);
+      const lastOut = who.map((w, i) => (through[i] ? 0 : k - w.at - DOOR_S - (w.r + 3 + w.r) / w.speed));
+      let open = 0;
+      for (let i = 0; i < who.length; i++) {
+        if (opens[i] < 0) continue;
+        open = Math.max(open, through[i] || along[i] === null ? Math.min(1, opens[i] / DOOR_S) : Math.max(0, 1 - lastOut[i] / (DOOR_S * 1.5)));
+      }
+      drawDoor(s.c, d, 0, 0, open);
+      for (const [i, w] of who.entries()) {
+        const p = along[i];
+        if (p === null) continue;
+        const x = d.x + d.nx * p - d.ny * w.side;
+        const y = d.y + d.ny * p + d.nx * w.side;
+        const spr = vehicle ? sprOf(t) : p >= w.go ? art.infantry[0][dirIndex(a, 16)] : sprOf(t);
+        const paint = () => {
+          s.blit(spr, x, y, 0);
+          if (vehicle) s.blit(art.lightTurret[dirIndex(a, DIRS)], x - d.nx * 1.2, y - d.ny * 1.2, 0);
+        };
+        if (through[i]) {
+          s.c.save();
+          clipDoorway(s.c, d, d.x - d.ny * w.side, d.y + d.nx * w.side, open);
+          paint();
+          s.c.restore();
+        } else paint();
+      }
+    },
+  };
 }
 
 // A building's fighting cells: a gun tower firing; being hit (shells
@@ -1361,7 +1412,7 @@ async function main(): Promise<void> {
   const arts = FACTIONS.slice(0, 2).map(makeFactionArt);
   const dish = makeDish();
   const yard = makeBuilding('yard', FACTIONS[0]);
-  buildUnits(document.querySelector('#unitRows')!, arts[0], arts[1], yard);
+  buildUnits(document.querySelector('#unitRows')!, arts[0], arts[1], yard, makeConstruction('yard', FACTIONS[0]));
   const rows = document.querySelector<HTMLDivElement>('#buildingRows')!;
   for (const def of BUILDINGS) {
     await later();

@@ -6,8 +6,9 @@ import { STATS } from '../v1/game';
 import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
-import { StackSprite, dirSet, drawSprite, renderStack, toScreen, toWorld } from './stack';
-import { buildingArt as workerBuilding, pooled, prefetch } from './art-pool';
+import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
+import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
+import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
@@ -36,6 +37,8 @@ import {
   makeRocks,
   makeTrees,
   subjectModel,
+  makeConstruction,
+  riseTime,
   KNEEL_DROP,
 } from './sprites';
 
@@ -60,8 +63,6 @@ const BNAME: Record<BuildingKind, string> = {
   helipad: 'Helipad',
   lab: 'Tech lab',
 };
-// Deploying: the Foundry vehicle turns to line up, then the yard rises.
-const RISE_S = 1.8;
 // Where a hauler unloads at a refinery, from its center: backed onto the
 // striped pad, facing out (DOCK_A) with its bed's tail at the intake. It
 // first pulls up DOCK_RUN in front of the pad, turns and backs on.
@@ -125,6 +126,8 @@ interface Unit {
   lap: number;
   lapY: number;
   deploy?: boolean; // a Foundry on its way to deploying
+  // coming out of the door of the building that made it (see outOf)
+  exit?: Exit;
   // a G.I. dug in behind sandbags (or told to), and how far it has got:
   // 0 standing, 1 dug in
   dug?: boolean;
@@ -239,6 +242,20 @@ interface OreNode {
   v: number; // art variant
 }
 
+// A unit coming out of a door: the building, the door's middle on the
+// ground (in the unit's copy of the map) and the door, the depth to draw at (just in front of the building),
+// how long since it was made, and on the host what to do once it is out.
+interface Exit {
+  b: Building;
+  x: number;
+  y: number;
+  d: Door;
+  k: number;
+  t: number;
+  go?: boolean;
+  then?: (u: Unit) => void;
+}
+
 interface Building {
   id: number;
   kind: BuildingKind;
@@ -252,6 +269,7 @@ interface Building {
   pad: Rect;
   sel: boolean;
   rise: number; // 0..1, how far it has gone up (1 when standing)
+  door?: number; // 0..1, how far open its door is (a unit coming out)
   hp: number; // 0..1
   packing?: boolean;
   rally?: [number, number]; // where new units head (world, first copy)
@@ -579,6 +597,22 @@ export class IsoGame implements GameLike {
       this.bArt.set(key, a);
     }
     return a;
+  }
+
+  // The stages of a building going up (see makeConstruction), drawn by a
+  // worker when first wanted (null until they arrive: it is just revealed
+  // from the ground up until then). Without workers they are drawn here, a
+  // frame after they are first wanted.
+  private stageArt = new Map<string, StackSprite[] | null>();
+  riseArt(kind: BuildingKind, f: number, urgent = true): StackSprite[] | null {
+    const key = `${kind}-${f}`;
+    if (this.stageArt.has(key)) return this.stageArt.get(key)!;
+    this.stageArt.set(key, null);
+    void constructionArt(kind, f, urgent).then((st) => {
+      if (st) this.stageArt.set(key, st);
+      else setTimeout(() => this.stageArt.set(key, makeConstruction(kind, FACTIONS[f])), 0);
+    });
+    return null;
   }
 
   // A building's art, drawn by a worker: its footprint is there at once, so
@@ -1402,26 +1436,53 @@ export class IsoGame implements GameLike {
     if (!makers.length) return false;
     const b = makers.find((m) => m.primary) ?? makers[makers.length - 1];
     const kind = t.unit as Kind;
-    const air = kind === 'heli';
-    // out of the door on the near (+y) side, or up off the helipad
-    const x = air ? b.x : b.x + (Math.random() - 0.5) * 6;
-    const y = air ? b.y : b.y + b.art.ry - 2;
-    const [fx, fy] = this.fold(x, y);
-    const u = this.newUnit(kind, f, fx, fy, Math.PI / 2);
     if (b.kind === 'factory') this.sound(b.x, b.y, 'unit_exit');
-    if (kind === 'hauler') {
-      u.job = { st: 'seek', t: 0 };
-      u.load = 0;
-      return true;
+    // out of the door, or up off the helipad
+    this.outOf(b, kind, f, (u) => {
+      if (kind === 'hauler') {
+        u.job = { st: 'seek', t: 0 };
+        u.load = 0;
+      } else this.toRally(u, b);
+    });
+    return true;
+  }
+
+  // A new unit of side f comes out of building b: made just inside its door,
+  // it waits for the door to open, comes out and then does `then` (the host
+  // and a single-player game only). Without a door (a helipad) it is made on
+  // the spot.
+  private outOf(b: Building, kind: Kind, f: number, then: (u: Unit) => void): Unit {
+    const d = kind === 'heli' ? null : doorOf(b.kind);
+    if (!d) {
+      const [fx, fy] = this.fold(b.x, b.y);
+      const u = this.newUnit(kind, f, fx, fy, Math.PI / 2);
+      then(u);
+      return u;
     }
-    const [rx, ry] = b.rally ?? [b.x + (Math.random() - 0.5) * 30, b.y + b.art.ry + 22 + Math.random() * 14];
+    const foot = isFoot(kind);
+    const r = foot ? 1.5 : UNIT[kind].r;
+    // soldiers come out one beside another
+    const side = foot ? (Math.random() - 0.5) * d.hw : 0;
+    const dx = b.x + d.x - d.ny * side;
+    const dy = b.y + d.y + d.nx * side;
+    const [fx, fy] = this.fold(dx - d.nx * (r + 1), dy - d.ny * (r + 1));
+    const ox = fx - (dx - d.nx * (r + 1));
+    const oy = fy - (dy - d.ny * (r + 1));
+    const u = this.newUnit(kind, f, fx, fy, Math.atan2(d.ny, d.nx));
+    u.exit = { b, x: dx + ox, y: dy + oy, d, k: b.x + ox + b.y + oy + Math.min(b.art.rx, b.art.ry) + 0.01, t: 0, then };
+    return u;
+  }
+
+  // A new unit heads for its building's rally point (or near its door).
+  private toRally(u: Unit, b: Building): void {
+    const d = doorOf(b.kind);
+    const [rx, ry] = b.rally ?? (d ? [b.x + d.x + d.nx * 22 + (Math.random() - 0.5) * 24, b.y + d.y + d.ny * 22 + (Math.random() - 0.5) * 24] : [b.x + (Math.random() - 0.5) * 30, b.y + b.art.ry + 22 + Math.random() * 14]);
     u.tx = rx + (b.rally ? (Math.random() - 0.5) * 16 : 0);
     u.ty = ry + (b.rally ? (Math.random() - 0.5) * 16 : 0);
     // the rally point is near the building, so go the short way round
     [u.tx, u.ty] = this.nearPoint(u.x, u.y, u.tx, u.ty);
     u.moving = true;
     this.mapVersion++;
-    return true;
   }
 
   // The copy of world point (x, y) nearest (ax, ay).
@@ -1456,6 +1517,8 @@ export class IsoGame implements GameLike {
       announce('low_power');
     } else if (!low && this.lowWarned) announce('power_restored');
     this.lowWarned = low;
+    // get the pictures of a building going up drawn while it is being paid for
+    for (const f of this.net === 'client' ? [this.me] : this.sides()) for (const j of this.eco[f].jobs.values()) if (j.tech.building) this.riseArt(j.tech.building, f, j.ready);
     if (this.net === 'client') return;
     for (const f of this.sides()) this.payJobs(f, dt);
   }
@@ -1710,6 +1773,7 @@ export class IsoGame implements GameLike {
 
   // Ore haulers dig ore, carry it home to a refinery and unload it for credits.
   private haul(u: Unit, dt: number): void {
+    if (u.exit) return;
     const j = u.job!;
     u.load ??= 0;
     j.t -= dt;
@@ -2763,7 +2827,7 @@ export class IsoGame implements GameLike {
         if (u.board !== undefined && !u.dead) this.boarding(u);
         if (u.unloading && !u.dead) this.letOut(u, dt);
       }
-    for (const u of [...this.units]) if (!u.dead) this.fight(u, dt);
+    for (const u of [...this.units]) if (!u.dead && !u.exit) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
     for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
     for (const u of [...this.units]) {
@@ -2774,7 +2838,29 @@ export class IsoGame implements GameLike {
         u.digK = Math.max(0, Math.min(1, (u.digK ?? 0) + (u.dug ? dt : -dt) / DIG_S));
         if (!u.digK) u.digK = undefined;
       }
+      if (u.exit && this.net !== 'client') {
+        // coming out of a door: wait for it to open, drive out, then go on
+        const e = u.exit;
+        e.t += dt;
+        if (e.b.dead) u.exit = undefined;
+        else if (e.t < DOOR_S) continue;
+        else {
+          const foot = isFoot(u.kind);
+          const r = foot ? 1.5 : st.r;
+          if (!e.go) {
+            e.go = true;
+            u.tx = e.x + e.d.nx * (r + 5);
+            u.ty = e.y + e.d.ny * (r + 5);
+            u.moving = true;
+          }
+          if ((u.x - e.x) * e.d.nx + (u.y - e.y) * e.d.ny > r + 2 || !u.moving) {
+            u.exit = undefined;
+            e.then?.(u);
+          }
+        }
+      }
       if (u.deploy) {
+        this.riseArt('yard', u.f);
         // line up square with the map, then unfold
         const diff = angDiff(0, u.a);
         const stepA = st.turn * 2.5 * dt;
@@ -3011,6 +3097,10 @@ export class IsoGame implements GameLike {
       }
     }
 
+    // doors open while a unit is coming out of them, and close behind it
+    const exiting = new Set<Building>();
+    for (const u of this.units) if (u.exit) exiting.add(u.exit.b);
+    for (const b of this.buildings) if (b.door || exiting.has(b)) b.door = exiting.has(b) ? Math.min(1, (b.door ?? 0) + dt / DOOR_S) : Math.max(0, (b.door ?? 0) - dt / (DOOR_S * 1.5));
     for (const b of [...this.buildings]) {
       b.phase += dt;
       if (b.packing) {
@@ -3020,7 +3110,7 @@ export class IsoGame implements GameLike {
         continue;
       }
       if (b.rise < 1) {
-        b.rise = Math.min(1, b.rise + dt / (b.kind === 'yard' ? RISE_S : 1 + (b.art.rx + b.art.ry) / 30));
+        b.rise = Math.min(1, b.rise + dt / riseTime(b.kind, b.art.rx, b.art.ry));
         if (Math.random() < dt * 14) this.puff(b, 1);
         if (b.rise === 1) {
           this.mapVersion++;
@@ -3292,7 +3382,7 @@ export class IsoGame implements GameLike {
       r2(o.a),
       r2(o.turret),
       Math.round(o.hp * 1000) / 1000,
-      (o.moving ? 1 : 0) | (o.deploy ? 2 : 0) | (o.forced ? 4 : 0) | (o.chase ? 8 : 0) | (o.dug ? 16 : 0),
+      (o.moving ? 1 : 0) | (o.deploy ? 2 : 0) | (o.forced ? 4 : 0) | (o.chase ? 8 : 0) | (o.dug ? 16 : 0) | (o.exit ? 32 : 0),
       r1(o.tx),
       r1(o.ty),
       tid(o.target),
@@ -3463,6 +3553,23 @@ export class IsoGame implements GameLike {
       }
       u.unloading = !!unloading;
       u.dug = !!(flags & 16);
+      // coming out of a door: of the nearest building of its side that makes it
+      if (!(flags & 32)) u.exit = undefined;
+      else if (!u.exit) {
+        let best: Building | null = null;
+        let bd = 60;
+        for (const b of this.buildings) {
+          if (b.f !== f || !doorOf(b.kind) || (b.kind === 'barracks') !== isFoot(kind)) continue;
+          const [nx, ny] = this.nearPoint(u.x, u.y, b.x, b.y);
+          const dd = Math.hypot(nx - u.x, ny - u.y);
+          if (dd < bd) [best, bd] = [b, dd];
+        }
+        const d = best && doorOf(best.kind);
+        if (best && d) {
+          const [bx, by] = this.nearPoint(u.x, u.y, best.x, best.y);
+          u.exit = { b: best, x: bx + d.x, y: by + d.y, d, k: bx + by + Math.min(best.art.rx, best.art.ry) + 0.01, t: 0, go: true };
+        }
+      }
       if (job >= 0) {
         const st = JOB_STATES[job];
         if (u.job) u.job.st = st;
@@ -3693,13 +3800,12 @@ export class IsoGame implements GameLike {
 
   // A new enemy unit comes out of b and goes to the muster point.
   private enemyUnit(b: Building, kind: Kind): void {
-    const air = kind === 'heli';
-    const [fx, fy] = this.fold(air ? b.x : b.x + (Math.random() - 0.5) * 6, air ? b.y : b.y + b.art.ry - 2);
-    const u = this.newUnit(kind, ENEMY, fx, fy, Math.PI / 2);
-    const m = this.posts[this.posts.length - 1];
-    u.post = this.posts.length - 1;
-    u.spot = [m[0] + (Math.random() - 0.5) * 30, m[1] + (Math.random() - 0.5) * 30];
-    this.sendTo(u, u.spot);
+    this.outOf(b, kind, ENEMY, (u) => {
+      const m = this.posts[this.posts.length - 1];
+      u.post = this.posts.length - 1;
+      u.spot = [m[0] + (Math.random() - 0.5) * 30, m[1] + (Math.random() - 0.5) * 30];
+      this.sendTo(u, u.spot);
+    });
     this.mapVersion++;
   }
 
@@ -4578,7 +4684,7 @@ export class IsoGame implements GameLike {
       const spr = this.oreArt.lumps[n.v][oreSize(n)];
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
-    for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.x + u.y + u.z * 2, draw: () => this.drawUnit(u) });
+    for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
 
@@ -4837,6 +4943,16 @@ export class IsoGame implements GameLike {
     });
   }
 
+  // A unit coming out of a door: only what is through the open doorway shows.
+  private drawExiting(u: Unit, e: Exit): void {
+    const open = e.b.door ?? 0;
+    if (open <= 0) return;
+    this.ctx.save();
+    clipDoorway(this.ctx, e.d, e.x, e.y, open);
+    this.drawUnit(u);
+    this.ctx.restore();
+  }
+
   private drawUnit(u: Unit): void {
     if (!this.shown(u)) return;
     this.lit = this.justHit(u) ? 0.45 : 0;
@@ -4947,15 +5063,11 @@ export class IsoGame implements GameLike {
     if (b.rise < 1) {
       // going up (or coming down): revealed from the ground up, inside the
       // site's outline
-      const spr = b.art.spr;
+      // going up (or coming down): the footing, then built up stage by
+      // stage, inside the site's outline
       const [sx, sy] = toScreen(b.x, b.y, 0);
-      const x = Math.round(sx - spr.cx);
-      const y = Math.round(sy - spr.cy);
-      const W = spr.img.width;
-      const H = spr.img.height;
-      const top = Math.round(H * (1 - b.rise));
       this.drawFoot(b.pad, '#ffe08a', 0.8);
-      if (H - top > 0) c.drawImage(spr.img, 0, top, W, H - top, x, y + top / ART, spr.w, (H - top) / ART);
+      drawGoingUp(c, this.riseArt(b.kind, b.f), b.art.spr, b.rise, sx, sy);
       return;
     }
     const hurt = b.hp <= DAMAGED ? this.states(b.kind, b.f).damaged : null;
@@ -4964,6 +5076,8 @@ export class IsoGame implements GameLike {
     this.blit(hurt ? hurt.spr : b.art.spr, b.x, b.y, 0);
     this.lit = 0;
     this.aimed = 0;
+    const door = b.door ? doorOf(b.kind) : null;
+    if (door) drawDoor(c, door, b.x, b.y, b.door!);
     if (hurt)
       for (const [i, p] of hurt.fx.entries()) {
         const [x, y] = toScreen(b.x + p.x, b.y + p.y, p.z);
@@ -5093,3 +5207,4 @@ function pxLine(c: CanvasRenderingContext2D, x0: number, y0: number, x1: number,
   const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)));
   for (let i = 0; i <= n; i++) c.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), Math.round(y0 + ((y1 - y0) * i) / n), 1, 1);
 }
+

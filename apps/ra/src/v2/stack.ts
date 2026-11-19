@@ -50,6 +50,35 @@ export function drawSprite(c: CanvasRenderingContext2D, img: HTMLCanvasElement, 
   c.drawImage(img, Math.round((x - spr.cx) * ART) / ART, Math.round((y - spr.cy) * ART) / ART, spr.w, spr.h);
 }
 
+// Part of a sprite, from the bottom up: the lowest share k of its rows.
+function drawFromBottom(c: CanvasRenderingContext2D, spr: StackSprite, x: number, y: number, k: number): void {
+  const W = spr.img.width;
+  const H = spr.img.height;
+  const top = Math.round(H * (1 - Math.min(1, k)));
+  if (H - top <= 0) return;
+  const x0 = Math.round((x - spr.cx) * ART) / ART;
+  const y0 = Math.round((y - spr.cy) * ART) / ART;
+  c.drawImage(spr.img, 0, top, W, H - top, x0, y0 + top / ART, spr.w, (H - top) / ART);
+}
+
+/** How much of going up (0..1) the footing takes before the walls start. */
+export const FOOTING = 0.12;
+
+/**
+ * A building going up (rise 0..1) with its ground origin at (x, y): the
+ * footing is laid, then each stage of it (sprites.ts, makeConstruction) is
+ * built over the last from the bottom up, the last giving way to the finished
+ * building. Without the stages it is just revealed from the ground up.
+ */
+export function drawGoingUp(c: CanvasRenderingContext2D, stages: StackSprite[] | null, full: StackSprite, rise: number, x: number, y: number): void {
+  if (!stages?.length) return drawFromBottom(c, full, x, y, rise);
+  if (rise < FOOTING) return drawFromBottom(c, stages[0], x, y, rise / FOOTING);
+  const s = ((rise - FOOTING) / (1 - FOOTING)) * stages.length;
+  const k = Math.min(stages.length - 1, Math.floor(s));
+  drawSprite(c, stages[k].img, stages[k], x, y);
+  drawFromBottom(c, k + 1 < stages.length ? stages[k + 1] : full, x, y, s - k);
+}
+
 export function renderStack(shape: Shape, o: StackOpts): StackSprite {
   const rx = o.rx ?? o.r;
   const ry = o.ry ?? o.r;

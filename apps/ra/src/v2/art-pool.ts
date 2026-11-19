@@ -165,6 +165,15 @@ export function pooled(): boolean {
   return workers.length > 0;
 }
 
+/** The stages of a building going up, drawn by a worker (null if there are no workers). */
+export function constructionArt(kind: string, f: number, now = true): Promise<StackSprite[] | null> {
+  return new Promise((res) => {
+    if (!workers.length) return res(null);
+    (now ? urgent : later).push({ key: `bc:${kind}:${f}`, d: 0, resolve: (r) => res(r?.stages ? r.stages.map(unpack) : null) });
+    pump();
+  });
+}
+
 /** Jobs still queued or in flight. */
 export function artBacklog(): number {
   return urgent.length + later.length + waiting.size;
