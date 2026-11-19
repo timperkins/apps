@@ -38,6 +38,7 @@ export const TECH: Tech[] = [
   { id: 'rocket', name: 'Rocketeer', tab: 'inf', cost: 300, needs: ['barracks'], unit: 'rocket', from: 'barracks', blurb: 'Foot soldier with a rocket launcher.' },
 
   { id: 'buggy', name: 'Scout buggy', tab: 'veh', cost: 400, needs: ['factory'], unit: 'buggy', from: 'factory', blurb: 'Fast and light.' },
+  { id: 'apc', name: 'Mule APC', tab: 'veh', cost: 600, needs: ['factory', 'barracks'], unit: 'apc', from: 'factory', blurb: 'Armored carrier for five foot soldiers.' },
   { id: 'light', name: 'Lancer tank', tab: 'veh', cost: 700, needs: ['factory'], unit: 'light', from: 'factory', blurb: 'The workhorse tank.' },
   { id: 'hauler', name: 'Ore hauler', tab: 'veh', cost: 1400, needs: ['factory', 'refinery'], unit: 'hauler', from: 'factory', blurb: 'Gathers ore for the refinery.' },
   { id: 'arty', name: 'Howler artillery', tab: 'veh', cost: 800, needs: ['factory', 'radar'], unit: 'arty', from: 'factory', blurb: 'Long-range gun.' },

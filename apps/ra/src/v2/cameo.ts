@@ -33,6 +33,7 @@ export const SCENES: Record<string, Scene> = {
   inf: 'battle',
   rocket: 'dusk',
   buggy: 'dry',
+  apc: 'meadow',
   light: 'meadow',
   hauler: 'ore',
   arty: 'ridge',

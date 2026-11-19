@@ -11,7 +11,7 @@
 // ore with an ore hauler selected) is the attack cursor's cousin in gold: a
 // diamond closing in on a nugget, with a gold burst.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'enter' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -133,6 +133,28 @@ const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest'>
       'kkkkk...........',
     ],
   },
+  // get in: a green arrow down into an open hatch (soldiers onto a transport)
+  enter: {
+    hot: [7, 10],
+    rows: [
+      '.....kkkkk......',
+      '.....kGggk......',
+      '.....kGggk......',
+      '.....kGggk......',
+      '...kkkGggkkk....',
+      '..kGggggggggk...',
+      '...kGggggggk....',
+      '....kGggggk.....',
+      'kkkk.kGggk.kkkk.',
+      'kwwk..kGk..kwwk.',
+      'kwwk...k...kwwk.',
+      'kwwk.......kwwk.',
+      'kwwkkkkkkkkkwwk.',
+      'kwwwwwwwwwwwwwk.',
+      'kkkkkkkkkkkkkkk.',
+      '................',
+    ],
+  },
   // can't go (or can't build) there
   blocked: {
     hot: [7, 7],
@@ -188,6 +210,7 @@ const FALLBACK: Record<CursorKind, string> = {
   corners: 'pointer',
   attack: 'crosshair',
   harvest: 'crosshair',
+  enter: 'pointer',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
