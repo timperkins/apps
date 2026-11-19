@@ -3,7 +3,7 @@
 // ground) down to half a unit, which is the finest the renderer samples.
 import { RGB, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
-import { Shape, StackOpts, StackSprite, inBox, renderDirs, renderStack, toScreen } from './stack';
+import { Shape, StackOpts, StackSprite, columnMap, inBox, renderDirs, renderStack, toScreen } from './stack';
 import { BUST, soldierBust } from './portrait';
 
 export { FACTIONS };
@@ -623,6 +623,11 @@ export function factionSet(art: V2FactionArt, key: string): StackSprite[] | null
 
 // ---------- Buildings ----------
 
+/** The Vehicle works' garage door, on its front (+y) wall at v = 18: its middle along the wall, half width and height. */
+export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
+/** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
+export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
+
 export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
 
 export interface V2BuildingArt {
@@ -991,8 +996,10 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
         if (Math.abs(u) <= 14 && v * v + z * z <= R * R) {
           if (u > 13.4) {
             // end wall with a door, a window and a lamp over the door
-            if (Math.abs(v) < 2.4 && z < 6.2) return z > 5.5 ? hazard(v, 0) : Math.abs(v) > 1.9 ? CONC_L : Math.abs(v) < 0.2 ? GUN_D : z > 3.4 && z < 4.8 ? GLASS_D : shade(OLIVE, -0.1);
-            if (Math.abs(v) < 0.6 && z > 6.4 && z < 7.3) return LAMP;
+            // (a pair of doors the game draws opening when soldiers come out: BARRACKS_DOOR)
+            const [dv, dhw, dtop] = BARRACKS_DOOR;
+            if (Math.abs(v - dv) < dhw && z < dtop) return z > dtop - 0.7 ? hazard(v, 0) : Math.abs(v - dv) > dhw - 0.5 ? CONC_L : Math.abs(v - dv) < 0.2 ? GUN_D : z > 4 && z < 5.6 ? GLASS_D : shade(OLIVE, -0.1);
+            if (Math.abs(v - dv) < 0.6 && z > dtop + 0.2 && z < dtop + 1.1) return LAMP;
             if (Math.abs(Math.abs(v) - 5) < 1.4 && z > 2.6 && z < 5.2) return Math.abs(Math.abs(v) - 5) > 1 || z > 4.8 || z < 3 ? CONC_L : v > 0 ? WIN_LIT : WIN_B;
             return mod(z, 1.4) < 0.3 || mod(v + (Math.floor(z / 1.4) % 2) * 1.2, 2.4) < 0.3 ? shade(BRICK, -0.25) : g(BRICK, u, v, z, 0.1);
           }
@@ -1118,37 +1125,38 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       return { shape, rx: 11, ry: 9, zmax: 20, fx: [{ x: 0, y: 0, z: 21 }] };
     }
     case 'factory': {
-      // The Vehicle works: a long hall under a saw-tooth roof with a big door,
-      // an overhead gantry, stacks and vehicle parts outside.
+      // The Vehicle works: a long hall under a saw-tooth roof with one big
+      // garage door in the front (+y) wall, which finished vehicles drive out
+      // of (FACTORY_DOOR; the game draws it opening), and stacks on the roof.
+      const [dcu, dhw, dtop] = FACTORY_DOOR;
       const shape: Shape = (u, v, z) => {
-        if (inBox(u, v, z, -26, 26, -18, 18, 0, 22)) {
+        if (inBox(u, v, z, -26, 26, -18, 18, 0, 24)) {
           // saw-tooth roof: glazed on the steep side, ribbed sheet on the slope
           const s = mod(u + 26, 10) / 10;
-          const roof = 16 + s * 5;
+          const roof = 19 + s * 5;
           if (z > roof) return null;
-          if (z > 16) {
+          if (z > 19) {
             if (Math.abs(v) > 16.6) return z > roof - 0.7 ? CONC_L : g(CONC_D, u, v, z);
-            if (s > 0.86) return mod(v, 4) < 0.5 ? STEEL : z > 19 ? GLASS : GLASS_D;
+            if (s > 0.86) return mod(v, 4) < 0.5 ? STEEL : z > 22 ? GLASS : GLASS_D;
             if (z > roof - 0.7) return mod(v, 2) < 0.4 ? METAL_D : s < 0.1 ? GUN : shade(METAL, -0.1 + s * 0.16);
             return METAL_D;
           }
-          const door = rollerDoor(u, v, z, -2, 9, 18, 12.4);
+          const door = rollerDoor(u, v, z, dcu, dhw, 18, dtop);
           if (door) return door;
-          if (v > 17.4 && z > 13 && z < 15.5 && Math.abs(u + 2) < 5) return mod(Math.floor(u * 1.3), 2) && z > 13.5 && z < 15 ? WHITE : f.dark; // sign over the door
-          if (v > 17.4 && Math.abs(u - 14) < 1.1 && z < 5.2) return z > 4.2 ? GLASS_D : GUN; // side door
-          if (v > 17.4 && Math.abs(u - 14) < 1.3 && z > 5.6 && z < 6.5) return LAMP;
-          if (u > 25.4 && Math.abs(v) < 6 && z < 9) return Math.abs(v) > 5.2 || z > 8.2 ? hazard(v, z) : mod(Math.floor(z * 1.5), 2) ? METAL_D : METAL; // loading door on the end
-          if ((u > 25.4 && Math.abs(Math.abs(v) - 12) < 0.45) || (v > 17.4 && Math.abs(Math.abs(u + 2) - 20) < 0.45)) return z > 1 ? METAL_D : CONC_D; // downpipes
-          return wallSkin(u, v, z, 26, 18, 0, 16, 13, { win: [6.4, 11.4], band: f.main, pitch: 5.2 });
+          // a hazard-striped header over the door with the faction's sign on it
+          if (v > 17.4 && z > dtop && z < dtop + 1.6 && Math.abs(u - dcu) < dhw + 1.5) return mod(Math.floor(u * 1.3), 2) && z > dtop + 0.4 && z < dtop + 1.2 ? WHITE : f.dark;
+          if (v > 17.4 && Math.abs(Math.abs(u - dcu) - dhw - 2.2) < 0.7 && z > 13 && z < 14.2) return LAMP; // lamps either side
+          if ((u > 25.4 && Math.abs(Math.abs(v) - 12) < 0.45) || (v > 17.4 && Math.abs(Math.abs(u - dcu) - 21) < 0.45)) return z > 1 ? METAL_D : CONC_D; // downpipes
+          return wallSkin(u, v, z, 26, 18, 0, 19, 13, { win: [6.4, 11.4], band: f.main, pitch: 5.2 });
         }
-        // roof vents and a row of stacks
-        for (const cu of [-18, 12]) if (cyl(u, v, cu, -8, 1.7) && z < 25.4) return z > 24.6 ? BLACK : z > 23.4 ? f.main : mod(Math.floor(z), 3) === 0 ? METAL_D : STEEL;
-        for (const cu of [-13, -3, 7, 17]) if (cyl(u, v, cu, 6, 1) && z > 16 && z < 20 + mod(cu + 26, 10) * 0.5) return METAL_D;
-        // out front: a gantry crane over the door lane, a hull on blocks, tyres, crates
-        for (const gu of [-12.5, 8.5]) if (Math.abs(u - gu) < 0.5 && Math.abs(v - 18.6) < 0.5 && z < 14) return z > 13.2 || mod(Math.floor(z / 2), 2) ? HAZ : BLACK;
+        // roof stacks and vents
+        for (const cu of [-18, 12]) if (cyl(u, v, cu, -8, 1.7) && z < 28.4) return z > 27.6 ? BLACK : z > 26.4 ? f.main : mod(Math.floor(z), 3) === 0 ? METAL_D : STEEL;
+        for (const cu of [-13, -3, 7, 17]) if (cyl(u, v, cu, 6, 1) && z > 19 && z < 23 + mod(cu + 26, 10) * 0.5) return METAL_D;
+        // the apron in front of the door: concrete with guide stripes
+        if (v > 18 && v < 19 && Math.abs(u - dcu) < dhw && z < 0.5) return Math.abs(Math.abs(u - dcu) - dhw + 1.5) < 0.5 ? HAZ : CONC_L;
         return null;
       };
-      return { shape, rx: 27, ry: 19, zmax: 26, fx: [{ x: -18, y: -8, z: 25.4 }, { x: 12, y: -8, z: 25.4 }] };
+      return { shape, rx: 27, ry: 19, zmax: 29, fx: [{ x: -18, y: -8, z: 28.4 }, { x: 12, y: -8, z: 28.4 }] };
     }
     case 'tower': {
       // Gun tower: an eight-sided concrete emplacement with a sandbagged rim.
@@ -1730,4 +1738,73 @@ export function subjectModel(id: string, f: Faction): { shape: Shape; o: StackOp
     };
   }
   return { shape: b.shape, o };
+}
+
+// ---------- Going up ----------
+
+// How high each stage of a building going up stands, as a share of the height
+// of its main body (the first is the bare footing). The finished building,
+// with its masts and stacks, comes after.
+export const BUILD_STAGES = [0, 0.25, 0.5, 0.75, 1];
+const GIRDER = hex('#c98a2e');
+const GIRDER_D = hex('#8f5e1f');
+const SCAFFOLD = 6; // how far the steel frame runs ahead of the walls
+
+// A building part way up: built as far as height h, with a fresh concrete
+// deck where it is cut off (rebar showing) and a steel frame rising ahead
+// of it over where the rest will stand. h = 0 is the footing: a slab over
+// the building's footprint, marked out for the walls.
+function partShape(shape: Shape, top: (u: number, v: number) => number, rx: number, ry: number, h: number): Shape {
+  if (h <= 0)
+    return (u, v, z) => {
+      if (z > 1 || top(u, v) < 0) return null;
+      if (z > 0.5) {
+        // marked out: where the walls go (edges of what stands above), and a grid of rebar
+        const e = top(u - 1, v) < 0 || top(u + 1, v) < 0 || top(u, v - 1) < 0 || top(u, v + 1) < 0;
+        if (e) return mod(Math.floor((u + v) / 2), 2) ? HAZ : BLACK;
+        if (mod(u, 3) < 0.45 || mod(v, 3) < 0.45) return RUST;
+      }
+      return g(z > 0.5 ? CONC_L : CONC_D, u, v, z, 0.08, 9);
+    };
+  return (u, v, z) => {
+    if (z <= h) {
+      const c = shape(u, v, z);
+      if (!c) return null;
+      if (z <= h - 0.7) return c;
+      // the cut: a deck with the rebar showing through
+      return mod(u, 3) < 0.45 || mod(v, 3) < 0.45 ? RUST : g(CONC_L, u, v, z, 0.08, 9);
+    }
+    if (z > h + SCAFFOLD || top(u, v) < z) return null;
+    // the steel frame: columns on a grid and a ring of beams at the top
+    const cu = mod(u + 0.5, 6) < 1;
+    const cv = mod(v + 0.5, 6) < 1;
+    const ring = z > h + SCAFFOLD - 0.9;
+    if (cu && cv) return ring ? GIRDER : mod(z, 2) < 0.5 ? GIRDER_D : GIRDER;
+    if (ring && (cu || cv)) return GIRDER;
+    return null;
+  };
+}
+
+/** The stages of a building going up (BUILD_STAGES), before it is finished. */
+export function makeConstruction(kind: BuildingKind, f: Faction): StackSprite[] {
+  const { shape, rx, ry, zmax } = buildingShape(kind, f);
+  const o: StackOpts = { r: 0, rx, ry, zmax, step: 0.5 };
+  const hm = columnMap(shape, o);
+  // the top of each column of the finished building (-1: nothing there)
+  const top = (u: number, v: number) => (Math.abs(u) > rx || Math.abs(v) > ry ? -1 : hm.at(u, v));
+  // the height of the main body (what most of the roof reaches), which the
+  // stages are shares of: masts, stacks and flagpoles go up last
+  const tops: number[] = [];
+  for (let u = -rx; u <= rx; u++) for (let v = -ry; v <= ry; v++) if (top(u, v) >= 0) tops.push(top(u, v));
+  tops.sort((a, b) => a - b);
+  const body = Math.max(4, tops[Math.floor(tops.length * 0.8)] ?? zmax);
+  return BUILD_STAGES.map((k) => {
+    const h = Math.round(k * body);
+    return renderStack(partShape(shape, top, rx, ry, h), { r: 0, rx, ry, zmax: Math.min(zmax, h + SCAFFOLD) + 1, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 });
+  });
+}
+
+/** How long a building takes to go up, in seconds (the Foundry unfolding too). */
+export function riseTime(kind: BuildingKind, rx: number, ry: number): number {
+  return kind === 'yard' ? 2.6 : 1.4 + (rx + ry) / 25;
 }
