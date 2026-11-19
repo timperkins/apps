@@ -2,7 +2,7 @@
 // shapes as the game (makeFactionArt, makeBuilding, makeDish) and draws the
 // one asked for, sending it back as bitmaps.
 import { FACTIONS } from '../v1/sprites';
-import { BuildingKind, V2FactionArt, factionSet, makeBuilding, makeDish, makeFactionArt } from './sprites';
+import { BuildingKind, V2FactionArt, factionSet, makeBuilding, makeConstruction, makeDish, makeFactionArt } from './sprites';
 import { StackSprite } from './stack';
 
 export type Job = { id: number; key: string; d: number };
@@ -14,7 +14,7 @@ export interface SprMsg {
   w: number;
   h: number;
 }
-export type Reply = { id: number; key: string; d: number; spr?: SprMsg; rx?: number; ry?: number; fx?: { x: number; y: number; z: number }[]; err?: string };
+export type Reply = { id: number; key: string; d: number; spr?: SprMsg; rx?: number; ry?: number; fx?: { x: number; y: number; z: number }[]; stages?: SprMsg[]; err?: string };
 
 const arts: V2FactionArt[] = [];
 let dish: StackSprite[] | null = null;
@@ -30,7 +30,14 @@ function pack(s: StackSprite): [SprMsg, Transferable[]] {
 self.onmessage = (e: MessageEvent<Job>) => {
   const { id, key, d } = e.data;
   try {
-    // b:<kind>:<faction> is a building, fa:... a unit's heading, dish the radar's
+    // b:<kind>:<faction> is a building, bc:<kind>:<faction> the stages of it
+    // going up, fa:... a unit's heading, dish the radar's
+    if (key.startsWith('bc:')) {
+      const [, kind, f] = key.split(':');
+      const packed = makeConstruction(kind as BuildingKind, FACTIONS[Number(f)]).map(pack);
+      (self as unknown as Worker).postMessage({ id, key, d, stages: packed.map((p) => p[0]) } satisfies Reply, packed.flatMap((p) => p[1]));
+      return;
+    }
     if (key.startsWith('b:')) {
       const [, kind, f] = key.split(':');
       const a = makeBuilding(kind as BuildingKind, FACTIONS[Number(f)]);
