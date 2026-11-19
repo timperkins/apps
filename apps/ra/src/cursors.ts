@@ -6,12 +6,13 @@
 // a unit you can pick) breathes, and the attack cursor (over an enemy your
 // units can fire on) is the move cursor in red: the same four arrowheads,
 // turning the same way, with a red burst on click. The harvest cursor spins
-// as the move cursor does, breathing as it turns: main.ts steps through their
-// frames. The harvest cursor (over
-// ore with an ore hauler selected) is the attack cursor's cousin in gold: a
-// diamond closing in on a nugget, with a gold burst.
+// as the move cursor does: main.ts steps through their frames. The harvest
+// cursor (over ore with an ore hauler selected) and the deploy cursor (over a
+// Foundry vehicle that can deploy) are three yellow triangles stacked one over
+// another, pointing down at the spot, a light running down them, with a gold
+// burst when clicked.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -26,7 +27,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -188,6 +189,7 @@ const FALLBACK: Record<CursorKind, string> = {
   corners: 'pointer',
   attack: 'crosshair',
   harvest: 'crosshair',
+  deploy: 'pointer',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
@@ -316,62 +318,55 @@ function cornerRows(h: number): string[] {
   });
 }
 
-// Over ore an ore hauler can dig: a gold diamond of "radius" r (to its tips)
-// broken at the tips, closing in on a little nugget at (C, C). Its four sides
-// are turned by angle a round the nugget, so it spins as a steps round.
-function oreSight(put: (x: number, y: number, col: string) => void, size: number, C: number, r: number, a = 0): void {
-  const m = r / Math.SQRT2; // how far each side's middle is from the nugget
-  const half = (r - 3) / Math.SQRT2; // half of the part of a side that shows
-  for (let k = 0; k < 4; k++) {
-    const t = a + Math.PI / 4 + (k * Math.PI) / 2;
-    const nx = Math.cos(t);
-    const ny = Math.sin(t);
-    for (let y = 0; y < size; y++)
-      for (let x = 0; x < size; x++) {
-        const out = (x - C) * nx + (y - C) * ny - m; // across the side, + outwards
-        const along = -(x - C) * ny + (y - C) * nx;
-        if (Math.abs(out) < 0.62 && Math.abs(along) <= half + 0.3) put(x, y, out > 0 ? 'Y' : 'y');
-      }
+// Three yellow triangles, one over another, pointing down with the lowest
+// tip at (cx, tip). big: 7 pixels across and 4 down, 5 apart; otherwise 5
+// across and 3 down, 4 apart. lit: which one (0 the top) the light is on.
+function chevrons(put: (x: number, y: number, col: string) => void, cx: number, tip: number, big: boolean, lit = -1): void {
+  const h = big ? 4 : 3;
+  const gap = big ? 5 : 4;
+  for (let i = 0; i < 3; i++) {
+    const ty = tip - (2 - i) * gap; // this one's tip
+    for (let r = 0; r < h; r++) {
+      const half = h - 1 - r;
+      const y = ty - half;
+      for (let x = -half; x <= half; x++) put(cx + x, y, i === lit ? 'Y' : r === 0 || x === -half ? 'Y' : 'y');
+    }
   }
-  // the nugget
-  put(C, C - 1, 'Y');
-  put(C - 1, C, 'y');
-  put(C, C, 'Y');
-  put(C + 1, C, 'y');
 }
 
-function oreRows(r: number, a: number): string[] {
-  return drawn(17, (put) => oreSight(put, 17, 8, r, a));
-}
-
-// The harvest cursor spins through a quarter turn (they look the
-// same each quarter) in MOVE_STEPS frames, breathing in and out as they go:
-// the turn and the size of the sight at frame i.
+// The attack cursor turns through a quarter turn (it looks the same each
+// quarter) in MOVE_STEPS frames: the turn at frame i.
 const spin = (i: number) => (i / MOVE_STEPS) * (Math.PI / 2);
-const breath = (i: number, rs: number[]) => rs[i % rs.length];
 
-// A click on ore plays ATTACK_CLICK, the move burst in gold: the diamond
-// snaps in to a white flash, a gold ring bursts out from the spot, and the
-// diamond opens back up behind it. (r < 0: diamond hidden)
-interface AttackFrame {
-  r: number;
+// The harvest and deploy cursor, through one run of the light down the
+// triangles (and a beat with it off), bobbing a pixel as it goes.
+const CHEV_STEPS = 4;
+function chevronRows(i: number): string[] {
+  return drawn(17, (put) => chevrons(put, 8, 14 + (i >= 2 ? 1 : 0), true, i < 3 ? i : -1));
+}
+
+// A click plays CHEV_CLICK: the triangles drop onto the spot, snap in to a
+// white flash, a gold ring bursts out from it, and they come back above it.
+// (tip: where the lowest tip is, above the spot; none: hidden)
+interface ChevFrame {
+  tip?: number;
   flash?: number;
   ring?: number;
   dots?: boolean;
 }
-const ATTACK_CLICK: AttackFrame[] = [
-  { r: 4 },
-  { r: -1, flash: 1.5 },
-  { r: -1, flash: 2.5, ring: 3 },
-  { r: -1, ring: 5 },
-  { r: -1, ring: 7 },
-  { r: 3.5, ring: 9 },
-  { r: 4.5, ring: 11, dots: true },
-  { r: 5, ring: 12, dots: true },
+const CHEV_CLICK: ChevFrame[] = [
+  { tip: 4 },
+  { tip: 2 },
+  { tip: 0, flash: 1.5 },
+  { flash: 2.5, ring: 3 },
+  { ring: 5 },
+  { ring: 7 },
+  { tip: 3, ring: 9, dots: true },
+  { tip: 2, ring: 11, dots: true },
 ];
-export const ATTACK_CLICK_FRAMES = ATTACK_CLICK.length;
+export const ATTACK_CLICK_FRAMES = CHEV_CLICK.length;
 
-function oreClickRows(f: AttackFrame): string[] {
+function chevClickRows(f: ChevFrame): string[] {
   return drawn(MS, (put) => {
     for (let y = 0; y < MS; y++)
       for (let x = 0; x < MS; x++) {
@@ -383,7 +378,7 @@ function oreClickRows(f: AttackFrame): string[] {
           if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : 'Y');
         }
       }
-    if (f.r >= 0) oreSight(put, MS, MC, f.r * 1.4);
+    if (f.tip !== undefined) chevrons(put, MC, MC - f.tip, false);
     if (f.flash)
       for (let y = 0; y < MS; y++)
         for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, y - MC) <= f.flash) put(x, y, 'w');
@@ -392,7 +387,7 @@ function oreClickRows(f: AttackFrame): string[] {
 
 // The attack cursor's click burst, one CSS value per frame.
 export const ATTACK_CLICK_CSS: string[] = [];
-// The harvest cursor's (the same burst in gold).
+// The harvest and deploy cursor's (the triangles dropping onto the spot).
 export const HARVEST_CLICK_CSS: string[] = [];
 
 export const CURSORS = {} as Record<CursorKind, string>;
@@ -400,7 +395,7 @@ export const CURSORS = {} as Record<CursorKind, string>;
 export const ATTACK_FRAMES: string[] = [];
 // The corners cursor through one breath.
 export const CORNER_FRAMES: string[] = [];
-// The harvest cursor through one breath.
+// The harvest and deploy cursor through one run of its light.
 export const HARVEST_FRAMES: string[] = [];
 
 // Build every cursor and publish them as --cur-<kind> on the page.
@@ -408,14 +403,14 @@ export function initCursors(): void {
   for (const h of [4, 5, 6, 5]) CORNER_FRAMES.push(gridCss(cornerRows(h), [7, 7], FALLBACK.corners));
   for (let i = 0; i < MOVE_STEPS; i++) ATTACK_FRAMES.push(gridCss(moveRows(spin(i), { d: REST }, true), [MC, MC], FALLBACK.attack));
   for (const f of MOVE_CLICK) ATTACK_CLICK_CSS.push(gridCss(moveRows(0, f, true), [MC, MC], FALLBACK.attack));
-  for (let i = 0; i < MOVE_STEPS; i++) HARVEST_FRAMES.push(gridCss(oreRows(breath(i, [7, 7.5, 8, 7.5]), spin(i)), [8, 8], FALLBACK.harvest));
-  for (const f of ATTACK_CLICK) HARVEST_CLICK_CSS.push(gridCss(oreClickRows(f), [MC, MC], FALLBACK.harvest));
+  for (let i = 0; i < CHEV_STEPS; i++) HARVEST_FRAMES.push(gridCss(chevronRows(i), [8, 16], FALLBACK.harvest));
+  for (const f of CHEV_CLICK) HARVEST_CLICK_CSS.push(gridCss(chevClickRows(f), [MC, MC], FALLBACK.harvest));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);
     else if (kind === 'corners') CURSORS[kind] = CORNER_FRAMES[0];
     else if (kind === 'attack') CURSORS[kind] = ATTACK_FRAMES[0];
-    else if (kind === 'harvest') CURSORS[kind] = HARVEST_FRAMES[0];
+    else if (kind === 'harvest' || kind === 'deploy') CURSORS[kind] = HARVEST_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }
@@ -440,13 +435,30 @@ export function attackRingFrames(): string[] {
   return attackRing;
 }
 
-// The harvest cursor's diamond, opened wide round the confirm button for
-// sending haulers to dig, through one breath.
+// The harvest cursor's triangles, standing over the confirm button for
+// sending haulers to dig and pointing down at it, through one run of their
+// light. They need a taller picture than the arrowheads (HARVEST_RING_SIZE
+// across, centered on the button).
+export const HARVEST_RING_SIZE = 41;
 const oreRingFrames: string[] = [];
 export function harvestRingFrames(): string[] {
   if (!oreRingFrames.length)
-    for (let i = 0; i < MOVE_STEPS; i++) oreRingFrames.push(gridCanvas(drawn(MS, (put) => oreSight(put, MS, MC, breath(i, [13, 13.5, 14, 13.5]), spin(i))), 1).toDataURL('image/png'));
+    for (let i = 0; i < CHEV_STEPS; i++) {
+      const c = HARVEST_RING_SIZE >> 1;
+      oreRingFrames.push(gridCanvas(drawn(HARVEST_RING_SIZE, (put) => chevrons(put, c, c - 8 + (i >= 2 ? 1 : 0), true, i < 3 ? i : -1)), 1).toDataURL('image/png'));
+    }
   return oreRingFrames;
+}
+
+// The harvest cursor's triangles as pictures for the map (a grid pixel to a
+// map pixel), through one run of their light: the lowest tip is at
+// (CHEV_TIP[0], CHEV_TIP[1]) in them. They float over a Foundry vehicle that
+// has yet to deploy, pointing it out.
+const chevMap: HTMLCanvasElement[] = [];
+export const CHEV_TIP: [number, number] = [8, 14];
+export function chevronFrames(): HTMLCanvasElement[] {
+  if (!chevMap.length) for (let i = 0; i < CHEV_STEPS; i++) chevMap.push(gridCanvas(chevronRows(i), 1));
+  return chevMap;
 }
 
 // ---------- The click bursts, drawn on the map ----------
@@ -460,7 +472,7 @@ const bursts: Record<'move' | 'attack' | 'harvest', HTMLCanvasElement[]> = { mov
 export function burstFrames(kind: 'move' | 'attack' | 'harvest'): HTMLCanvasElement[] {
   const out = bursts[kind];
   if (!out.length) {
-    if (kind === 'harvest') for (const f of ATTACK_CLICK) out.push(gridCanvas(oreClickRows(f), 1));
+    if (kind === 'harvest') for (const f of CHEV_CLICK) out.push(gridCanvas(chevClickRows(f), 1));
     else for (const f of MOVE_CLICK) out.push(gridCanvas(moveRows(0, f, kind === 'attack'), 1));
   }
   return out;

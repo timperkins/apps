@@ -160,6 +160,11 @@ export function buildingArt(kind: string, f: number, now = true): Promise<V2Buil
   });
 }
 
+/** Are sprites being drawn by workers (rather than on the main thread)? */
+export function pooled(): boolean {
+  return workers.length > 0;
+}
+
 /** Jobs still queued or in flight. */
 export function artBacklog(): number {
   return urgent.length + later.length + waiting.size;

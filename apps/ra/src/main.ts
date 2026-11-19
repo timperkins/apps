@@ -15,7 +15,7 @@ import { initBuild } from './build-ui';
 import { Lobby, type Match } from './lobby';
 import { Bot } from './v2/bot';
 import { startArtPool } from './v2/art-pool';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, HARVEST_RING_SIZE, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -384,7 +384,7 @@ function showSelection(names: string[]): void {
 // cursor's arrowheads turning round it. The check sends them, another tap
 // moves it, and clearing the selection calls it off.
 // kind: attack is a tap on an enemy (red, with a gunsight), harvest a tap on
-// ore with an ore hauler selected (gold, inside the harvest cursor's diamond)
+// ore with an ore hauler selected (gold, under the harvest cursor's triangles)
 type Order = 'move' | 'attack' | 'harvest';
 let pending: { x: number; y: number; kind: Order } | null = null;
 let ringFrame = -1;
@@ -408,7 +408,7 @@ function placeConfirm(): void {
   const r = canvas.getBoundingClientRect();
   // the arrowheads at the game's pixel size, turning as the cursor does
   const px = Math.max(3, Math.round(base) + 1);
-  const size = `${MOVE_RING_SIZE * px}px`;
+  const size = `${(pending.kind === 'harvest' ? HARVEST_RING_SIZE : MOVE_RING_SIZE) * px}px`;
   if (okRing.style.width !== size) {
     okRing.style.width = okRing.style.height = size;
     okRing.style.backgroundSize = size;
@@ -1524,6 +1524,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
         clicked();
         const what = game.cursorAt?.(down.x, down.y);
         if (what === 'move' || what === 'attack' || what === 'harvest' || (locked && what === 'pick')) sendTo(down.x, down.y);
+        else if (what === 'deploy') game.act?.('deploy');
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);
     } else if (!down.pan && !locked) game.boxSelect(down.x, down.y, p.x, p.y, add);
@@ -1551,7 +1552,7 @@ let dugAt = -Infinity;
 function clicked(): void {
   if (cursorKind === 'move') movedAt = performance.now();
   else if (cursorKind === 'attack') attackedAt = performance.now();
-  else if (cursorKind === 'harvest') dugAt = performance.now();
+  else if (cursorKind === 'harvest' || cursorKind === 'deploy') dugAt = performance.now();
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
@@ -1573,13 +1574,13 @@ function hoverNow(now: number): void {
   if (shooting) k = 'attack';
   const dig = Math.floor((now - dugAt) / 55);
   const digging = dig >= 0 && dig < ATTACK_CLICK_FRAMES && k !== 'grabbing';
-  if (digging) k = 'harvest';
+  if (digging && k !== 'deploy') k = 'harvest';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
   else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 150) % ATTACK_FRAMES.length];
-  else if (k === 'harvest') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 150) % HARVEST_FRAMES.length];
+  else if (k === 'harvest' || k === 'deploy') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 150) % HARVEST_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;

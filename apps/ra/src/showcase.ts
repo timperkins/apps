@@ -68,6 +68,7 @@ interface Particle {
   kind: 'smoke' | 'soot' | 'dust' | 'spark';
   size: number;
   v?: number; // which puff texture
+  col?: string; // a spark's color (lumps of ore are gold)
 }
 
 // What a scene draws with, in map pixels, with the ground origin at (0, 0).
@@ -134,7 +135,7 @@ class Scene {
     for (const p of this.particles) {
       const k = p.life / p.max;
       if (p.kind === 'spark') {
-        c.fillStyle = p.life < 0.2 ? '#fff6c8' : '#ffb347';
+        c.fillStyle = p.col ?? (p.life < 0.2 ? '#fff6c8' : '#ffb347');
         c.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
         continue;
       }
@@ -787,8 +788,12 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
 
   plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13, idleShuffle(me.artillery, 2));
 
-  // the hauler also digs ore, and its bed shows how full it is
+  // the hauler also digs ore, and its bed shows how full it is; at a
+  // refinery it backs onto the pad and tips its load into the intake
   const ore = makeOre();
+  const refinery = makeBuilding('refinery', FACTIONS[0]);
+  const digPoses = [0, 1, 2, 2, 1];
+  const haulerAt = (fill: number, pose: number, a: number) => (pose ? me.haulerDig[(pose - 1) * 3 + fill] : me.haulerLoad[fill])[di(a)];
   plain('Ore hauler', 'hauler', (a) => a.hauler, 18, 13, () => [
     ...['Empty', 'Partly full', 'Full'].map((label, fill) => ({
       label,
@@ -805,11 +810,64 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         const size = k < 0.33 ? 2 : k < 0.66 ? 1 : 0;
         s.blit(ore.stain[0][size], 8, 8, 0);
         s.blit(ore.lumps[0][size], 8, 8, 0);
-        // and the hauler fills up as it goes
-        s.blit(me.haulerLoad[2 - size][di(Math.PI / 4)], -6, -6, 0);
+        // and the hauler fills up as it goes, its scoop lifting ore into the bed
+        const pose = digPoses[Math.floor(t * 4) % digPoses.length];
+        s.blit(haulerAt(2 - size, pose, Math.PI / 4), -6, -6, 0);
         if (Math.random() < dt * 6) {
           const [sx, sy] = toScreen(8, 8, 2);
           s.puff(sx + (Math.random() - 0.5) * 6, sy, 'dust', { vx: (Math.random() - 0.5) * 6, vy: -4, max: 0.8 });
+        }
+      },
+    },
+    {
+      label: 'Unload',
+      box: union(boxOf(refinery.spr), boxOf(me.haulerDump[8][di(Math.PI / 2)], 12.5, 10.5), boxOf(me.hauler[0], 12.5, 24.5)),
+      anim: true,
+      draw: (s, t, dt) => {
+        // pull up, turn, back onto the pad, tip the bed up and pour, let it
+        // down and drive off (10s round)
+        const k = t % 10;
+        const [dx, dy] = [12.5, 10.5];
+        let x = dx;
+        let y = dy + 14;
+        let a = 0;
+        let fill = 2;
+        let tilt = 0;
+        if (k < 1.5) {
+          // driving in from the right, onto the spot in front of the pad
+          x = dx + 30 * (1 - k / 1.5);
+          a = Math.PI;
+        } else if (k < 2.5) a = Math.PI - (Math.PI / 2) * ((k - 1.5) / 1);
+        else if (k < 4) {
+          a = Math.PI / 2;
+          y = dy + 14 * (1 - (k - 2.5) / 1.5);
+        } else if (k < 8) {
+          a = Math.PI / 2;
+          y = dy;
+          tilt = Math.min(1, (k - 4) / 0.9, (8 - k) / 0.9);
+          fill = k < 5.5 ? 2 : k < 6.6 ? 1 : 0;
+        } else {
+          a = Math.PI / 2;
+          fill = 0;
+          y = dy + ((k - 8) / 2) * 24;
+        }
+        s.blit(refinery.spr, 0, 0, 0);
+        const busy = tilt > 0.6 && k < 7.2;
+        if (busy && Math.floor(t * 3) % 2 === 0) {
+          const p = refinery.fx[1 + (Math.floor(t * 6) % 2)];
+          const [lx, ly] = toScreen(p.x, p.y, p.z);
+          s.c.fillStyle = '#fff1a8';
+          s.c.fillRect(Math.round(lx) - 1, Math.round(ly) - 1, 3, 2);
+        }
+        const step = tilt < 0.05 ? -1 : tilt < 0.4 ? 0 : tilt < 0.75 ? 1 : 2;
+        s.blit(step < 0 ? me.haulerLoad[fill][di(a)] : me.haulerDump[step * 3 + fill][di(a)], x, y, 0);
+        if (busy && Math.random() < dt * 14) {
+          const [sx, sy] = toScreen(x, y - 13.5, 1);
+          s.puff(sx + (Math.random() - 0.5) * 8, sy, 'dust', { vx: (Math.random() - 0.5) * 6, vy: -5, max: 1, size: 1.4 });
+        }
+        if (busy && Math.random() < dt * 30) {
+          const [sx, sy] = toScreen(x, y - 12.5, 4);
+          s.puff(sx + (Math.random() - 0.5) * 6, sy, 'spark', { vx: (Math.random() - 0.5) * 5, vy: 4, max: 0.28, col: Math.random() < 0.25 ? '#f2d06a' : '#b08638' });
         }
       },
     },
