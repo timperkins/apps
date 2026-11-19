@@ -2,8 +2,8 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { BOOM, DAMAGED, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
+import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 
@@ -458,7 +458,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 4, rocket: 4 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -473,9 +473,9 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
 // What a round does where it lands.
 function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
   const [sx, sy] = toScreen(s.x, s.y, s.z);
-  if (kind === 'arc') {
-    fx.boom(sx, sy, 6);
-    fx.dust(sx, sy, 4);
+  if (kind === 'arc' || kind === 'grenade') {
+    fx.boom(sx, sy, kind === 'grenade' ? 4 : 6);
+    fx.dust(sx, sy, kind === 'grenade' ? 6 : 4);
   } else if (kind === 'bullet') {
     if (soft) fx.dust(sx, sy);
     else fx.sparks(sx, sy, 4);
@@ -487,13 +487,13 @@ function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
 
 // Firing at a spot on the ground in front of it, as fast as it reloads
 // (artillery a little faster, so there is something to see).
-function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: number, kick: boolean) => void, from: () => [number, number, number][], to: [number, number, number]): Cell {
-  const w = WEAPON[kind]!;
+function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: number, kick: boolean) => void, from: () => [number, number, number][], to: [number, number, number], weapon?: Weapon, label = 'Attack'): Cell {
+  const w = weapon ?? WEAPON[kind]!;
   let cool = 0.4;
   let clock = 0;
   let fired = -9;
   return {
-    label: 'Attack',
+    label,
     box,
     anim: true,
     draw: (s, t, dt) => {
@@ -503,13 +503,13 @@ function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: numb
         fired = clock;
         for (const m of from()) {
           const [sx, sy] = toScreen(...m);
-          s.fx.muzzle(sx, sy, w.shot !== 'bullet');
+          if (w.shot !== 'grenade') s.fx.muzzle(sx, sy, w.shot !== 'bullet');
           const sc = w.scatter ?? (w.shot === 'bullet' ? 2 : 0.5);
           const aim: [number, number, number] = [to[0] + (Math.random() - 0.5) * sc * 2, to[1] + (Math.random() - 0.5) * sc * 2, to[2]];
           s.fx.fire(makeShot(w.shot, m, aim, w.speed, (sh) => impactFx(s.fx, w.shot, sh, true)));
         }
       }
-      draw(s, t, clock - fired < 0.1);
+      draw(s, t, clock - fired < (w.shot === 'grenade' ? 0.35 : 0.1));
     },
   };
 }
@@ -672,19 +672,49 @@ function combatCells(o: Fighter): Cell[] {
 function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, yard: V2BuildingArt): void {
   const di = (a: number) => dirIndex(a, DIRS);
 
-  // soldiers: 16 headings, a two-step walk
-  for (const kind of ['inf', 'rocket'] as const) {
-    const frames = (art: V2FactionArt) => (kind === 'inf' ? art.infantry : art.rocket);
+  // soldiers: 16 headings, a four-beat walk (a grenadier throws, too)
+  const NAMES = { inf: 'G.I.', rocket: 'Rocketeer', gren: 'Grenadier' };
+  for (const kind of ['inf', 'rocket', 'gren'] as const) {
+    const frames = (art: V2FactionArt) => (kind === 'inf' ? art.infantry : kind === 'gren' ? art.gren : art.rocket);
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a, t, moving) => {
-        const fr = moving ? 1 + (Math.floor(t * (moving === 2 ? 4 : 7)) % 2) : 0;
+        const fr = moving ? [1, 0, 2, 0][Math.floor(t * (moving === 2 ? 5 : 9)) % 4] : 0;
         s.blit(frames(art)[fr][dirIndex(a, 16)], x, y, 0);
       };
     const spr = frames(me)[0][0];
+    const extra: Cell[] = [];
+    if (kind === 'inf') {
+      // deploying: it kneels and stacks sandbags round itself, stays dug in a
+      // while, then picks them up again
+      const dug = (art: V2FactionArt, k: number, a: number) => (k > 0 ? art.infantryDug[Math.min(2, Math.floor(k * 3))][dirIndex(a, 16)] : frames(art)[0][dirIndex(a, 16)]);
+      const dugBox = boxOf(me.infantryDug[2][0]);
+      extra.push(
+        { label: 'Dug in', box: dugBox, draw: (s) => s.blit(dug(me, 1, A), 0, 0, 0) },
+        {
+          label: 'Deploy',
+          box: dugBox,
+          anim: true,
+          draw: (s, t) => {
+            const k = t % 5;
+            const dig = k < DIG_S ? k / DIG_S : k < 3.5 ? 1 : k < 3.5 + DIG_S ? 1 - (k - 3.5) / DIG_S : 0;
+            s.blit(dug(me, dig, A), 0, 0, 0);
+          },
+        },
+        attackCell(
+          'inf',
+          union({ l: dugBox.l, r: dugBox.r, u: dugBox.u + 12, d: dugBox.d - 12 }, { l: 8, r: 8, u: 0, d: 18 }),
+          (s) => s.blit(dug(me, 1, A), -12, -12, 0),
+          () => muzzles('inf', -12, -12, -KNEEL_DROP, A, A),
+          [12, 12, 0],
+          DUG_WEAPON,
+          'Attack, dug in',
+        ),
+      );
+    }
     addRow(
       parent,
-      kind === 'inf' ? 'Rifleman' : 'Rocketeer',
+      NAMES[kind],
       blurbOf(kind),
       unitCells(spr, draw(me), draw(foe), {
         R: 9,
@@ -697,9 +727,11 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
             kind,
             spr,
             soft: true,
-            draw: (s, x, y, a, _tur, t) => draw(me)(s, x, y, a, t, 0),
+            // (a grenadier's arm goes back as it throws)
+            draw: (s, x, y, a, _tur, t, kick) => (kind === 'gren' && kick ? s.blit(frames(me)[3][dirIndex(a, 16)], x, y, 0) : draw(me)(s, x, y, a, t, 0)),
             parts: [[frames(me)[0][dirIndex(A, 16)], 0, 0, 0]],
           }),
+          ...extra,
         ],
       }),
     );
