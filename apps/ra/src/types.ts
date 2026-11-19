@@ -21,8 +21,9 @@ export interface Action {
 
 // A kind of unit you have on screen, for the selection bar.
 // What a tap at a map point would do, for the mouse cursor (harvest: send
-// the selected ore haulers to dig there).
-export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'rally' | 'build' | 'blocked' | null;
+// the selected ore haulers to dig there; deploy: the selected Foundry
+// vehicle deploys; enter: the selected soldiers get into the transport there).
+export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'build' | 'blocked' | null;
 
 export interface UnitType {
   kind: string;

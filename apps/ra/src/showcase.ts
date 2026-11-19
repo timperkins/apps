@@ -458,7 +458,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -738,7 +738,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   }
 
   // plain vehicles: one sprite each
-  const plain = (name: string, kind: 'buggy' | 'arty' | 'hauler' | 'mcv', pick: (a: V2FactionArt) => StackSprite[], R: number, speed: number, more: (draw: Draw) => Cell[] = () => []) => {
+  const plain = (name: string, kind: 'buggy' | 'apc' | 'arty' | 'hauler' | 'mcv', pick: (a: V2FactionArt) => StackSprite[], R: number, speed: number, more: (draw: Draw) => Cell[] = () => []) => {
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a) =>
@@ -769,6 +769,58 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       draw: (s, t) => {
         draw(s, 0, 0, Math.PI / 4, t);
         drawBuggyLights(s.c, 0, 0, 0, Math.PI / 4, t);
+      },
+    },
+  ]);
+
+  // the Mule APC: three riflemen walk up the ramp at the back and get in,
+  // then climb back out one at a time and walk clear (an 8 second loop)
+  plain('Mule APC', 'apc', (a) => a.apc, 18, 26, (draw) => [
+    {
+      label: 'Load and unload',
+      box: union(boxOf(me.apc[0]), { l: 26, r: 26, u: 18, d: 18 }),
+      anim: true,
+      draw: (s, t) => {
+        const a = Math.PI / 4;
+        const back = a + Math.PI;
+        const k = t % 8;
+        const men: [number, number, number, boolean][] = [];
+        for (let i = 0; i < 3; i++) {
+          const fan = [0, -0.55, 0.55][i];
+          // in: from out behind up to the ramp, one after another
+          const tin = (k - i * 0.5) / 2;
+          // out: down the ramp and off to its spot in a fan
+          const tout = (k - 4.5 - i * 0.3) / 1.4;
+          let d: number;
+          let ang = back;
+          let face: number;
+          let walking = true;
+          if (tin < 0) {
+            d = 24;
+            ang = back + fan;
+            face = a;
+            walking = false;
+          } else if (tin < 1) {
+            d = 24 - tin * 15;
+            ang = back + fan * (1 - tin);
+            face = a;
+          } else if (tout < 0) continue;
+          else if (tout < 1) {
+            d = 9 + tout * 13;
+            ang = back + fan * tout;
+            face = back + fan;
+          } else {
+            d = 22;
+            ang = back + fan;
+            face = back + fan;
+            walking = false;
+          }
+          men.push([Math.cos(ang) * d, Math.sin(ang) * d, face, walking]);
+        }
+        const all: [number, () => void][] = men.map(([x, y, f, w]) => [x + y, () => s.blit(me.infantry[w ? 1 + (Math.floor(t * 7) % 2) : 0][dirIndex(f, 16)], x, y, 0)]);
+        all.push([0, () => draw(s, 0, 0, a, t)]);
+        all.sort((p, q) => p[0] - q[0]);
+        for (const [, f] of all) f();
       },
     },
   ]);

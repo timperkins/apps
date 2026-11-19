@@ -241,7 +241,7 @@ clearBtn.addEventListener('click', () => game?.deselect());
 // More and Clear. They are refreshed every frame, but the buttons are only
 // rebuilt when something about them changes.
 // the icons on the selection's command buttons (types.ts Act.icon)
-const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack' };
+const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack', unload: 'unload' };
 let actsKey = '';
 let hasActs = false;
 // The bar above the toolbar: commands for the selection, and the selection menu.
@@ -384,8 +384,9 @@ function showSelection(names: string[]): void {
 // cursor's arrowheads turning round it. The check sends them, another tap
 // moves it, and clearing the selection calls it off.
 // kind: attack is a tap on an enemy (red, with a gunsight), harvest a tap on
-// ore with an ore hauler selected (gold, under the harvest cursor's triangles)
-type Order = 'move' | 'attack' | 'harvest';
+// ore with an ore hauler selected (gold, under the harvest cursor's triangles),
+// enter a tap on a transport of yours with soldiers selected (they get in)
+type Order = 'move' | 'attack' | 'harvest' | 'enter';
 let pending: { x: number; y: number; kind: Order } | null = null;
 let ringFrame = -1;
 function setPending(p: { x: number; y: number; kind: Order } | null): void {
@@ -393,7 +394,7 @@ function setPending(p: { x: number; y: number; kind: Order } | null): void {
   confirmEl.hidden = !p;
   confirmEl.classList.toggle('foe', p?.kind === 'attack');
   confirmEl.classList.toggle('ore', p?.kind === 'harvest');
-  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : 'Send them here';
+  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : p?.kind === 'enter' ? 'Get in' : 'Send them here';
   okBtn.setAttribute('aria-label', `${okBtn.title} (clear the selection to call it off)`);
   ringFrame = -1;
   if (p) placeConfirm();
@@ -1494,7 +1495,7 @@ function spaceTap(e: PointerEvent, orderOnly = false): void {
 // A tap on the map with a finger: orders wait for the check.
 function touchTap(x: number, y: number): void {
   const what = game.cursorAt?.(x, y);
-  if (what === 'move' || what === 'attack' || what === 'harvest' || (locked && what === 'pick')) setPending({ x, y, kind: what === 'pick' ? 'move' : what });
+  if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || (locked && what === 'pick')) setPending({ x, y, kind: what === 'pick' ? 'move' : what });
   else {
     setPending(null);
     game.click(x, y, false);
@@ -1523,7 +1524,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
       if (e.pointerType === 'mouse') {
         clicked();
         const what = game.cursorAt?.(down.x, down.y);
-        if (what === 'move' || what === 'attack' || what === 'harvest' || (locked && what === 'pick')) sendTo(down.x, down.y);
+        if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || (locked && what === 'pick')) sendTo(down.x, down.y);
         else if (what === 'deploy') game.act?.('deploy');
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);

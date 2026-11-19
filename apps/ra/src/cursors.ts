@@ -12,7 +12,7 @@
 // another, pointing down at the spot, a light running down them, with a gold
 // burst when clicked.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -134,6 +134,28 @@ const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' 
       'kkkkk...........',
     ],
   },
+  // get in: a green arrow down into an open hatch (soldiers onto a transport)
+  enter: {
+    hot: [7, 10],
+    rows: [
+      '.....kkkkk......',
+      '.....kGggk......',
+      '.....kGggk......',
+      '.....kGggk......',
+      '...kkkGggkkk....',
+      '..kGggggggggk...',
+      '...kGggggggk....',
+      '....kGggggk.....',
+      'kkkk.kGggk.kkkk.',
+      'kwwk..kGk..kwwk.',
+      'kwwk...k...kwwk.',
+      'kwwk.......kwwk.',
+      'kwwkkkkkkkkkwwk.',
+      'kwwwwwwwwwwwwwk.',
+      'kkkkkkkkkkkkkkk.',
+      '................',
+    ],
+  },
   // can't go (or can't build) there
   blocked: {
     hot: [7, 7],
@@ -190,6 +212,7 @@ const FALLBACK: Record<CursorKind, string> = {
   attack: 'crosshair',
   harvest: 'crosshair',
   deploy: 'pointer',
+  enter: 'pointer',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
