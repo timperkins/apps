@@ -177,8 +177,9 @@ export class Globe {
   }
 
   // Render into a canvas. With `space`, the background is a star field;
-  // otherwise it is left transparent.
-  draw(ctx: CanvasRenderingContext2D, v: View, space: boolean): void {
+  // otherwise it is left transparent. Clouds are drawn only in space (the
+  // minimap shows the ground plainly).
+  draw(ctx: CanvasRenderingContext2D, v: View, space: boolean, clouds = space): void {
     const W = ctx.canvas.width;
     const H = ctx.canvas.height;
     if (!this.img || this.img.width !== W || this.img.height !== H) this.img = ctx.createImageData(W, H);
@@ -192,7 +193,8 @@ export class Globe {
     }
     const { tw, th } = this;
     const halo = 1.14;
-    const clouds = this.clouds!;
+    const cloudy = clouds && this.clouds !== null;
+    const cover = this.clouds!;
     const { cw, ch } = this;
     const drift = this.time * 0.006 * cw; // clouds creep east
     const cku = cw / tw;
@@ -244,8 +246,9 @@ export class Globe {
         let r = (c & 255) * lit;
         let g = ((c >> 8) & 255) * lit;
         let b = ((c >> 16) & 255) * lit;
-        // clouds, lit by the same sun
-        // clouds, smoothly interpolated (they are coarser than the ground)
+        // clouds, lit by the same sun, smoothly interpolated (they are
+        // coarser than the ground)
+        if (cloudy) {
         let fu = (uf * cku + drift) % cw;
         if (fu < 0) fu += cw;
         let fv = tf * ckv - 0.5;
@@ -256,13 +259,14 @@ export class Globe {
         const cv1 = cv0 + 1 >= ch ? cv0 : cv0 + 1;
         const ax = fu - cu;
         const ay = fv - cv0;
-        const c0 = clouds[cv0 * cw + cu] + (clouds[cv0 * cw + cu1] - clouds[cv0 * cw + cu]) * ax;
-        const c1 = clouds[cv1 * cw + cu] + (clouds[cv1 * cw + cu1] - clouds[cv1 * cw + cu]) * ax;
+        const c0 = cover[cv0 * cw + cu] + (cover[cv0 * cw + cu1] - cover[cv0 * cw + cu]) * ax;
+        const c1 = cover[cv1 * cw + cu] + (cover[cv1 * cw + cu1] - cover[cv1 * cw + cu]) * ax;
         const cv = (c0 + (c1 - c0) * ay) * 0.8;
         const cl = 235 * (0.35 + 0.75 * (lit - 0.3));
         r += (cl - r) * cv;
         g += (cl - g) * cv;
         b += (cl + 10 - b) * cv;
+        }
         // haze over everything, thickening towards the rim
         const rim = 0.16 + (1 - nz) * (1 - nz) * 0.75;
         r = Math.min(255, r + (125 - r) * rim);
