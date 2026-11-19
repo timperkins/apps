@@ -32,15 +32,13 @@ export interface UnitType {
   sel: number; // how many of those are selected
 }
 
-// The colors you can give a selection, to pick it again later (1-8). Red
-// is left out: it is the enemy's.
-export const GROUP_COLORS = ['#4a9dff', '#3fe6e6', '#b4f03c', '#ffd93b', '#ff9a2e', '#ff6fb5', '#b07cff', '#f4f7ea'];
-export const GROUP_NAMES = ['Blue', 'Cyan', 'Lime', 'Yellow', 'Orange', 'Pink', 'Purple', 'White'];
+// How many groups you can put a selection into, to pick it again later
+// (Group 1 and Group 2 on the toolbar, or the 1 and 2 keys).
+export const GROUP_COUNT = 2;
 
-// A color group with units in it.
+// A group with units in it.
 export interface GroupInfo {
-  color: number; // index into GROUP_COLORS
-  hex: string;
+  n: number; // which group, from 0
   count: number;
   icon: string; // the picture of its most common kind
   sel: boolean; // the selection is exactly this group
@@ -120,7 +118,7 @@ export interface GameLike {
   selectKind?(kind: string, on: boolean, x0: number, y0: number, x1: number, y1: number): void;
   // The kinds of unit of yours that are selected, wherever they are.
   selectedTypes?(): UnitType[];
-  // Color groups: the ones in use, putting the selection into one, and
+  // Groups (Group 1 and Group 2): the ones in use, putting the selection into one, and
   // selecting one (false if it has no units left).
   groups?(): GroupInfo[];
   setGroup?(g: number): void;

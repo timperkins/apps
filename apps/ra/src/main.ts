@@ -2,7 +2,7 @@ import './style.css';
 import './theme.css';
 import { applyTheme } from './theme';
 import { lineIcon, type IconName } from './line-icons';
-import { GROUP_COLORS, GROUP_NAMES, type GameLike } from './types';
+import { GROUP_COUNT, type GameLike } from './types';
 import { Globe, View } from './planet';
 import { CH } from './tiles';
 import { ART } from './gfx';
@@ -42,9 +42,7 @@ const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
 const selMenu = document.querySelector<HTMLDivElement>('#selMenu')!;
 const typesEl = document.querySelector<HTMLSpanElement>('#types')!;
-const groupsEl = document.querySelector<HTMLSpanElement>('#groups')!;
-const colorBtn = document.querySelector<HTMLButtonElement>('#colorBtn')!;
-const paletteEl = document.querySelector<HTMLDivElement>('#palette')!;
+const groupBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar button.grp')];
 const noTypes = document.querySelector<HTMLSpanElement>('#noTypes')!;
 const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
 const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
@@ -108,7 +106,8 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 // ---------- Toolbar and the selection menu ----------
-// Select opens the selection menu above the toolbar (so does tapping a unit):
+// Select (touch screens only: with a mouse you drag a box) opens the
+// selection menu above the toolbar (so does tapping a unit):
 // a button for each kind of unit of yours on screen, with how many there are,
 // which adds them all to the selection or takes them out of it, then All and
 // Clear. A drag on a touch screen pans; with a mouse it draws a box.
@@ -139,46 +138,68 @@ function lockOnPan(): void {
   if (menuPick && !locked && Math.hypot(cen.x - menuPick.x, cen.y - menuPick.y) > 2) lockGroup();
 }
 
-// ---------- Color groups ----------
-// Group puts the selection into one of eight color groups (Shift+1-8); the
-// groups in use show at the front of the selection menu, and tapping one (or
-// 1-8) selects it again, wherever its units are. Tapping the one already
-// selected takes you to it.
-let paletteOn = false;
-function setPalette(on: boolean): void {
-  paletteOn = on && !!game?.setGroup;
-  paletteEl.hidden = !paletteOn;
-  colorBtn.setAttribute('aria-expanded', String(paletteOn));
-  typesKey = '';
-}
-paletteEl.replaceChildren(
-  ...GROUP_COLORS.map((hex, i) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'swatch';
-    b.style.setProperty('--grp', hex);
-    b.textContent = String(i + 1);
-    b.title = `${GROUP_NAMES[i]} (Shift+${i + 1})`;
-    b.setAttribute('aria-label', `Make the selection the ${GROUP_NAMES[i]} group`);
-    b.addEventListener('click', () => assignGroup(i));
-    return b;
-  }),
-);
-colorBtn.addEventListener('click', () => setPalette(!paletteOn));
+// ---------- Groups ----------
+// Group 1 and Group 2 show on the toolbar while units are selected (and
+// while a group has units in it). With the group empty, tapping it puts the
+// selection in it; once it has units, tapping it selects them again,
+// wherever they are, and tapping it again takes you to them. A long press
+// (or Shift+click, or Shift+1 and Shift+2) puts the selection in it instead.
 function assignGroup(g: number): void {
-  if (!game?.setGroup || !game.selectedTypes?.().length) return;
+  if (g >= GROUP_COUNT || !game?.setGroup || !game.selectedTypes?.().length) return;
   game.setGroup(g);
-  setPalette(false);
+  groupsKey = '';
+  play('order_confirm', 0.6, { ui: true });
   lockGroup();
 }
 function pickGroup(g: number): void {
-  if (!game?.selectGroup || !game.groups) return;
-  const was = game.groups().find((x) => x.color === g)?.sel;
+  if (g >= GROUP_COUNT || !game?.selectGroup || !game.groups) return;
+  const was = game.groups().find((x) => x.n === g)?.sel;
   setPending(null);
-  setPalette(false);
   if (!game.selectGroup(g)) return;
   lockGroup();
   if (was) goToSelection();
+}
+for (const [g, b] of groupBtns.entries()) {
+  let press = 0;
+  let held = false;
+  b.addEventListener('pointerdown', () => {
+    held = false;
+    clearTimeout(press);
+    press = window.setTimeout(() => {
+      held = true;
+      assignGroup(g);
+    }, 500);
+  });
+  const stop = () => clearTimeout(press);
+  b.addEventListener('pointerup', stop);
+  b.addEventListener('pointerleave', stop);
+  b.addEventListener('pointercancel', stop);
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+  b.addEventListener('click', (e) => {
+    if (held) return; // a long press already did it
+    const has = game?.groups?.().some((x) => x.n === g);
+    if (e.shiftKey || e.ctrlKey || e.metaKey || !has) assignGroup(g);
+    else pickGroup(g);
+  });
+}
+// Every frame: which group buttons show, and how many units are in each.
+let groupsKey = '';
+function refreshGroups(): void {
+  const groups = game?.groups ? game.groups() : [];
+  const canSet = !!game?.setGroup && (game.selectedTypes?.().length ?? 0) > 0;
+  const key = JSON.stringify([groups.map((g) => [g.n, g.count, g.sel]), canSet]);
+  if (key === groupsKey) return;
+  groupsKey = key;
+  for (const [i, b] of groupBtns.entries()) {
+    const g = groups.find((x) => x.n === i);
+    b.hidden = !g && !canSet;
+    b.setAttribute('aria-pressed', String(!!g?.sel));
+    b.querySelector('.count')!.textContent = g ? String(g.count) : '';
+    b.title = g
+      ? `Group ${i + 1}: ${g.count} unit${g.count === 1 ? '' : 's'} (${i + 1})${g.sel ? ', tap again to go to them' : ''}. Hold (or Shift+${i + 1}) to put the selection in it`
+      : `Put the selection in Group ${i + 1} (Shift+${i + 1})`;
+    b.setAttribute('aria-label', b.title);
+  }
 }
 
 // Center the view on the selection (the copy of it nearest the camera).
@@ -227,7 +248,6 @@ let hasActs = false;
 function updateSelBar(): void {
   const menuOn = selOpen && !placingNow();
   selMenu.hidden = !menuOn;
-  if (!menuOn && paletteOn) setPalette(false);
   actsEl.hidden = !hasActs;
   selBar.hidden = !menuOn && !hasActs;
 }
@@ -245,22 +265,9 @@ let typesKey = '';
 function refreshTypes(): void {
   if (!selOpen || selMenu.hidden || !game) return;
   const types = locked ? (game.selectedTypes?.() ?? []) : (game.unitTypes?.(...viewRect()) ?? []);
-  const groups = game.groups?.() ?? [];
-  const canColor = !!game.setGroup && (game.selectedTypes?.().length ?? 0) > 0;
-  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), groups.map((g) => [g.color, g.count, g.sel, g.icon]), lastNames.length, canColor, paletteOn]);
+  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), lastNames.length]);
   if (key === typesKey) return;
   typesKey = key;
-  if (!canColor && paletteOn) {
-    paletteOn = false;
-    paletteEl.hidden = true;
-    colorBtn.setAttribute('aria-expanded', 'false');
-  }
-  const inGroup = groups.find((g) => g.sel);
-  colorBtn.hidden = !canColor;
-  // in a color group: the Group icon takes its color
-  if (inGroup) colorBtn.style.setProperty('--grp', inGroup.hex);
-  else colorBtn.style.removeProperty('--grp');
-  for (const [i, b] of [...paletteEl.children].entries()) b.setAttribute('aria-pressed', String(inGroup?.color === i));
   noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
   // All and Clear share one slot, so the bar doesn't shift: All while nothing
   // is selected (grayed out with nothing on screen), Clear once something is
@@ -268,30 +275,7 @@ function refreshTypes(): void {
   allBtn.hidden = any;
   allBtn.disabled = !!game.unitTypes && types.length === 0;
   clearBtn.hidden = !any;
-  groupsEl.replaceChildren(
-    ...groups.map((g) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'type grp';
-      b.style.setProperty('--grp', g.hex);
-      b.setAttribute('aria-pressed', String(g.sel));
-      b.title = `${GROUP_NAMES[g.color]} group: ${g.count} (${g.color + 1})${g.sel ? ', tap again to go to them' : ''}`;
-      b.setAttribute('aria-label', b.title);
-      b.append(pictureOf(g.icon), countOf(String(g.count)));
-      b.addEventListener('click', () => pickGroup(g.color));
-      return b;
-    }),
-  );
-  groupsEl.hidden = !groups.length;
   typesEl.classList.toggle('group', locked);
-  typesEl.style.setProperty('--grp', inGroup?.hex ?? '#9dff9d');
-  // a color group already shows as its own button in front, pressed: no
-  // second button for it
-  if (locked && inGroup) {
-    typesEl.replaceChildren();
-    typesEl.hidden = true;
-    return;
-  }
   typesEl.hidden = false;
   if (locked) {
     // the group as one button: the picture of its most common kind and how
@@ -374,6 +358,8 @@ function selectView(add: boolean): void {
   else game.boxSelect(...viewRect(), add);
 }
 
+// A mouse (and no touch screen as the main pointer): no Select button.
+const mouseOnly = window.matchMedia('(hover: hover) and (pointer: fine)');
 function showSelection(names: string[]): void {
   // picking something opens the menu, so you can add other kinds to it
   if (names.length && !lastNames.length && !selOpen) setSelOpen(true);
@@ -383,7 +369,11 @@ function showSelection(names: string[]): void {
     setPending(null);
     locked = false;
     menuPick = null;
-    if (paletteOn) setPalette(false);
+    // with a mouse there is no Select button to close it: it goes with the selection
+    if (selOpen && mouseOnly.matches) {
+      selOpen = false;
+      selectBtn.setAttribute('aria-pressed', 'false');
+    }
   }
   updateSelBar();
 }
@@ -498,6 +488,8 @@ const ZOOM_MAX = 3;
 const Z_SPACE = 0.5;
 let zMin = 0.03;
 let planet = false;
+// paused from the menu (single player): see setPaused
+let userPaused = false;
 
 // The map is twice as wide as it is tall (it wraps round both ways), and
 // planet-sized: about fourteen screens across. Its sides are whole numbers of
@@ -546,7 +538,7 @@ function applyScale(): void {
   canvas.style.width = `${w * scale}px`;
   canvas.style.height = `${h * scale}px`;
   mini.hidden = planet;
-  setWorldLevel(planet ? 0.15 : 1);
+  setWorldLevel(userPaused ? 0 : planet ? 0.15 : 1);
   if (planet !== wasPlanet) {
     lastSnap = -Infinity; // refresh the globe straight away
     showSelection(lastNames);
@@ -831,6 +823,8 @@ const banner = document.querySelector<HTMLDivElement>('#banner')!;
 function showMpMenu(): void {
   const mp = !!match;
   regen.hidden = mp;
+  pauseBtn.hidden = mp;
+  if (mp) setPaused(false);
   versionEl.closest('label')!.hidden = mp;
   leaveBtn.hidden = !mp;
   lobbyBtn.hidden = mp;
@@ -877,6 +871,35 @@ function leaveGame(): void {
   else lobby.show();
 }
 leaveBtn.addEventListener('click', () => leaveGame());
+
+// ---------- Pause (single player) ----------
+// Everything stops: the battle, the computer players and the sounds of the
+// world (the music plays on). A screen over the game says so and takes any
+// taps, so nothing can be ordered while the clock is stopped.
+const pauseBtn = document.querySelector<HTMLButtonElement>('#pauseBtn')!;
+const pauseScreen = document.querySelector<HTMLDivElement>('#pauseScreen')!;
+const resumeBtn = document.querySelector<HTMLButtonElement>('#resumeBtn')!;
+function canPause(): boolean {
+  return !match && !!game && !!built.w && loading.hidden && !attract;
+}
+function setPaused(on: boolean): void {
+  if (on && !canPause()) return;
+  if (on === userPaused) return;
+  userPaused = on;
+  pauseScreen.hidden = !on;
+  keys.clear();
+  setWorldLevel(on ? 0 : planet ? 0.15 : 1);
+  if (on) {
+    setMenu(false);
+    play('ui_panel', 1, { ui: true });
+    resumeBtn.focus();
+  } else {
+    // (no catching up on the time spent paused)
+    last = performance.now();
+  }
+}
+pauseBtn.addEventListener('click', () => setPaused(true));
+resumeBtn.addEventListener('click', () => setPaused(false));
 lobbyBtn.addEventListener('click', () => goTo('/'));
 
 function startMatch(m: Match): void {
@@ -1584,6 +1607,13 @@ const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
   const tag = (e.target as HTMLElement).tagName;
   if (!game || tag === 'SELECT') return;
+  if (userPaused) {
+    if (e.key === 'Escape' || e.key.toLowerCase() === 'p') {
+      e.preventDefault();
+      setPaused(false);
+    }
+    return;
+  }
   // (a focused slider in Settings takes the arrow keys; Esc still goes back)
   if (tag === 'INPUT' && e.key !== 'Escape') return;
   if (!picker.hidden) {
@@ -1592,7 +1622,7 @@ window.addEventListener('keydown', (e) => {
   }
   // (with ctrl or cmd held, letters are the browser's: ctrl+S, ctrl+D...)
   if (!e.ctrlKey && !e.metaKey && !e.altKey) keys.add(e.key.toLowerCase());
-  const digit = /^Digit([1-8])$/.exec(e.code);
+  const digit = /^Digit([12])$/.exec(e.code);
   if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (e.shiftKey) assignGroup(+digit[1] - 1);
     else pickGroup(+digit[1] - 1);
@@ -1600,7 +1630,6 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (menu.classList.contains('settings-open')) menu.querySelector<HTMLButtonElement>('#setBack')!.click();
     else if (!menu.hidden) setMenu(false);
-    else if (paletteOn) setPalette(false);
     else if (placingNow()) game.act?.('unplace');
     else if (pending) setPending(null);
     else if (lastNames.length) game.deselect();
@@ -1610,6 +1639,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'q') setSelOpen(!selOpen);
   if (e.key === 'f') game.act?.('deploy');
   if (e.key === 'h') goHome();
+  if (e.key === 'p' || e.key === 'Pause') setPaused(true);
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '-' || e.key === '_') zoomTo(zoom / 1.25, window.innerWidth / 2, window.innerHeight / 2);
   if (e.key === '0') zoomTo(1, window.innerWidth / 2, window.innerHeight / 2);
@@ -1711,7 +1741,7 @@ function frame(now: number): void {
     if (keys.has('arrowup') || keys.has('w')) cen.y -= sp;
     if (keys.has('arrowdown') || keys.has('s')) cen.y += sp;
     clampCen();
-    if (!netPaused) {
+    if (!netPaused && !userPaused) {
       game.update(dt);
       if (match?.host) for (const b of bots) b.update(dt);
       sendNet(now);
@@ -1754,6 +1784,7 @@ function draw(now: number, first: boolean): void {
   syncGhost();
   lockOnPan();
   refreshTypes();
+  refreshGroups();
   placeConfirm();
   placeDeploy();
   build.update(now);
