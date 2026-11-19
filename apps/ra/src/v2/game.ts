@@ -3,7 +3,7 @@ import type { BotLevel } from './bot';
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS, UnitKind } from '../v1/game';
-import { GROUP_COLORS, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
+import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawSprite, renderStack, toScreen, toWorld } from './stack';
@@ -97,7 +97,7 @@ interface Unit {
   ty: number;
   moving: boolean;
   sel: boolean;
-  // the color group you put it in (an index into GROUP_COLORS), if any
+  // the group you put it in (0 or 1: Group 1 or Group 2), if any
   grp?: number;
   anim: number;
   hp: number;
@@ -2394,23 +2394,22 @@ export class IsoGame implements GameLike {
     return this.home;
   }
 
-  // ---------- Color groups ----------
-  // You can put the selection into one of GROUP_COLORS' groups, then pick the
-  // group again later from the selection menu (or 1-8), wherever its units
-  // have gone. A unit is in one group at most; putting it in another moves it.
+  // ---------- Groups ----------
+  // You can put the selection into Group 1 or Group 2, then pick the group
+  // again later from the toolbar (or 1 and 2), wherever its units have gone. A unit is in one group at most; putting it in another moves it.
 
   // The groups that have any units, with how many, the picture of their most
   // common kind, and whether the selection is exactly that group.
   groups(): GroupInfo[] {
     const out: GroupInfo[] = [];
-    for (let g = 0; g < GROUP_COLORS.length; g++) {
+    for (let g = 0; g < GROUP_COUNT; g++) {
       const us = this.units.filter((u) => u.grp === g && u.f === this.me && !u.dead);
       if (!us.length) continue;
       const kinds = new Map<Kind, number>();
       for (const u of us) kinds.set(u.kind, (kinds.get(u.kind) ?? 0) + 1);
       const top = [...kinds].sort((a, b) => b[1] - a[1])[0][0];
       const sel = us.every((u) => u.sel) && this.mine().length === us.length;
-      out.push({ color: g, hex: GROUP_COLORS[g], count: us.length, icon: this.unitIcon(top), sel });
+      out.push({ n: g, count: us.length, icon: this.unitIcon(top), sel });
     }
     return out;
   }
@@ -4420,12 +4419,13 @@ export class IsoGame implements GameLike {
   private drawSelection(u: Unit): void {
     const c = this.ctx;
     const { x, y, rx, ry } = this.unitBox(u);
-    const grp = u.f === this.me && u.grp !== undefined ? GROUP_COLORS[u.grp] : null;
-    // in a color group: its corners are in the group's color
-    c.fillStyle = grp ?? (u.f === this.me ? '#ffffff' : '#ff6a5a');
+    c.fillStyle = u.f === this.me ? '#ffffff' : '#ff6a5a';
     corners(c, x, y, rx, ry, 2);
     const bw = Math.max(8, rx * 2);
-    healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
+    const hx = Math.round(x - bw / 2);
+    healthBar(c, hx, y - ry - 4, bw, u.hp);
+    // in a group: its number just left of the health bar
+    if (u.f === this.me && u.grp !== undefined) groupDigit(c, hx - 5, y - ry - 6, u.grp + 1);
   }
 
   private drawBuilding(b: Building): void {
@@ -4535,6 +4535,21 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
   c.fillRect(bx, by, Math.round(bw * hp), 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
   for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
+}
+
+// A group's number (1 or 2) as a tiny 3 x 5 pixel digit with a dark edge,
+// top left at (x, y).
+const DIGITS: Record<number, string[]> = {
+  1: ['.#.', '##.', '.#.', '.#.', '###'],
+  2: ['##.', '..#', '.#.', '#..', '###'],
+};
+function groupDigit(c: CanvasRenderingContext2D, x: number, y: number, n: number): void {
+  const rows = DIGITS[n];
+  if (!rows) return;
+  c.fillStyle = '#111';
+  c.fillRect(x - 1, y - 1, 5, 7);
+  c.fillStyle = '#ffe08a';
+  for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (rows[j][i] === '#') c.fillRect(x + i, y + j, 1, 1);
 }
 
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {

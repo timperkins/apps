@@ -212,14 +212,30 @@ export class Shroud {
       this.canvases.delete(k);
       return;
     }
-    this.state[k] = EDGE;
     let cv = this.canvases.get(k);
     if (!cv) {
       cv = document.createElement('canvas');
       cv.width = cv.height = N;
-      this.canvases.set(k, cv);
     }
-    cv.getContext('2d')!.putImageData(img, 0, 0);
+    const cx = cv.getContext('2d');
+    if (!cx) throw new Error('no canvas for the shroud');
+    cx.putImageData(img, 0, 0);
+    this.canvases.set(k, cv);
+    this.state[k] = EDGE;
+  }
+
+  // Refresh a tile, and if that fails (a browser short of canvas memory can
+  // refuse a new canvas), draw it black for now and try again next frame.
+  // An error here used to stop the whole shroud being drawn that frame, so
+  // the map showed through it.
+  private safeRefresh(k: number): void {
+    try {
+      this.refresh(k);
+    } catch {
+      this.state[k] = BLACK;
+      this.canvases.delete(k);
+      this.dirty[k] = 1;
+    }
   }
 
   // Draw it over screen rect (x0, y0)-(x1, y1), in unwrapped map pixels.
@@ -238,9 +254,11 @@ export class Shroud {
         let st = CLEAR;
         if (tx <= tx1) {
           const k = this.tile(tx, ty);
-          if (this.dirty[k]) this.refresh(k);
+          if (this.dirty[k]) this.safeRefresh(k);
           st = this.state[k];
-          if (st === EDGE) edges.push([this.canvases.get(k)!, tx * CH, ty * CH]);
+          const cv = st === EDGE ? this.canvases.get(k) : undefined;
+          if (cv) edges.push([cv, tx * CH, ty * CH]);
+          else if (st === EDGE) st = BLACK; // (no picture for it: err on the side of dark)
         }
         if (st === BLACK) {
           if (run < 0) run = tx;

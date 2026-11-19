@@ -32,11 +32,11 @@ body {
 #menu,
 #toolbar,
 #selMenu,
-#palette,
 #build,
 #picker .box,
 #lobby .box,
-#banner .card {
+#banner .card,
+#pauseScreen .card {
   background: none;
   border: 12px solid transparent;
   border-image: var(--fr-panel) 6 fill / 12px stretch;
@@ -53,8 +53,7 @@ body {
   padding: 4px;
 }
 #toolbar,
-#selMenu,
-#palette {
+#selMenu {
   padding: 0;
 }
 #build {
@@ -66,19 +65,17 @@ body {
 #lobby .box {
   padding: 8px;
 }
-#banner .card {
+#banner .card,
+#pauseScreen .card {
   padding: 10px 16px;
 }
 #toolbar .sep {
   background: var(--line);
 }
-#groups:has(+ #types:not([hidden])) {
-  border-right-color: var(--line);
-}
-
 /* Buttons */
 #menuBtn,
 #version,
+#pauseBtn,
 #regen,
 #leaveBtn,
 #lobbyBtn,
@@ -98,7 +95,8 @@ body {
 #lobby .map,
 #lobby .botCtl .rm,
 #lobby .testMode,
-#banner button {
+#banner button,
+#pauseScreen button {
   color: var(--ink);
   background-color: transparent;
   border: 6px solid transparent;
@@ -108,6 +106,7 @@ body {
 }
 @media (hover: hover) {
   #menuBtn:hover,
+  #pauseBtn:hover,
   #regen:hover,
   #leaveBtn:hover,
   #lobbyBtn:hover,
@@ -125,7 +124,8 @@ body {
   #picker .stages .seg button:hover,
   #lobby button.small:hover,
   #lobby .map:hover:not(:disabled),
-  #banner button:hover {
+  #banner button:hover,
+  #pauseScreen button:hover {
     border-color: transparent;
     border-image-source: var(--fr-hover);
   }
@@ -141,7 +141,6 @@ body {
 #toolbar button.on,
 #toolbar button[aria-pressed='true'],
 #selBar button.type[aria-pressed='true'],
-#selBar #colorBtn[aria-expanded='true'],
 #build .tabs button[aria-selected='true'],
 #picker .stages .seg button[aria-checked='true'],
 #lobby .map[aria-pressed='true'] {
@@ -203,6 +202,7 @@ body {
 #loading .ld-title,
 #picker .title,
 #banner .t,
+#pauseScreen .t,
 #playGate .play {
   font-family: var(--f-head);
   font-size-adjust: none;
@@ -219,7 +219,8 @@ body {
   font-size: 30px;
   line-height: 1;
 }
-#banner .t {
+#banner .t,
+#pauseScreen .t {
   font-size: 64px;
   line-height: 0.9;
   color: var(--gold);
@@ -279,6 +280,48 @@ body {
   width: 26px;
   height: 26px;
 }
+/* Icon-only square tools, the names in their tooltips. Group 1 and Group 2
+   show their number in the corner, and how many units are in them. */
+#toolbar button {
+  position: relative;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  padding: 0;
+}
+#toolbar button[hidden] {
+  display: none;
+}
+#toolbar button.grp svg {
+  width: 24px;
+  height: 24px;
+}
+#toolbar button.grp .num {
+  position: absolute;
+  left: 3px;
+  top: 0;
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: normal;
+  line-height: 1;
+  color: var(--gold);
+}
+#toolbar button.grp[aria-pressed='true'] .num {
+  color: inherit;
+}
+#toolbar button.grp .count {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 11px;
+  line-height: 1;
+}
+/* With a mouse you drag a box to select, so no Select button */
+@media (hover: hover) and (pointer: fine) {
+  #toolbar #selectBtn {
+    display: none;
+  }
+}
 #buildBtn.alert:not([aria-pressed='true'])::after {
   background: var(--accent);
   box-shadow: 0 0 0 1px var(--line);
@@ -318,33 +361,17 @@ body {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
 }
-#selBar button.type.grp {
-  border-color: transparent;
-  background: none;
-  box-shadow: inset 0 -3px 0 var(--grp);
-}
-#selBar button.type.grp[aria-pressed='true'] {
-  border-color: transparent;
-  background: none;
-  box-shadow: inset 0 -3px 0 var(--grp);
-}
 #selBar button.type.whole,
 #selBar button.type.whole[aria-pressed='true'] {
   border-color: transparent;
   background: none;
   box-shadow: inset 0 -3px 0 var(--grp, var(--accent));
 }
+#types {
+  --grp: var(--accent);
+}
 #types.group {
-  border-color: var(--grp, var(--accent));
-}
-#selBar #palette button.swatch {
-  border: 2px solid var(--line);
-  border-radius: 6px;
-  color: var(--line);
-  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.4), inset -2px -2px 0 rgba(0, 0, 0, 0.3);
-}
-#selBar #palette button.swatch[aria-pressed='true'] {
-  outline-color: var(--ink);
+  border-color: var(--grp);
 }
 #noTypes {
   color: var(--dim);
@@ -373,6 +400,7 @@ body {
 /* ---------- Menu and settings ---------- */
 
 #version,
+#pauseBtn,
 #regen,
 #leaveBtn,
 #lobbyBtn,
@@ -541,10 +569,12 @@ body {
   image-rendering: pixelated;
   padding: 2px 10px;
 }
-#banner {
+#banner,
+#pauseScreen {
   background: rgba(4, 7, 7, 0.55);
 }
-#banner .s {
+#banner .s,
+#pauseScreen .s {
   color: var(--dim);
   opacity: 1;
 }
