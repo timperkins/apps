@@ -10,7 +10,7 @@ import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, to
 import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
-import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames } from '../cursors';
+import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
 import { Shroud } from './shroud';
@@ -331,8 +331,8 @@ function artReady(set: StackSprite[], d: number): boolean {
 }
 
 // Which click burst an order marker plays.
-function markKind(m: { foe?: boolean; ore?: boolean }): 'move' | 'attack' | 'harvest' {
-  return m.foe ? 'attack' : m.ore ? 'harvest' : 'move';
+function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean }): BurstKind {
+  return m.foe ? 'attack' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
@@ -403,6 +403,7 @@ export type Command =
   | { c: 'attack'; u: number[]; t: number }
   | { c: 'deploy'; u: number[] }
   | { c: 'board'; u: number[]; t: number } // soldiers get into transport t
+  | { c: 'dock'; u: number[]; b: number } // ore haulers go and unload at refinery b
   | { c: 'unload'; u: number[] } // transports let their soldiers out
   | { c: 'entrench'; u: number[]; on: boolean } // G.I.s dig in behind sandbags, or climb out
   | { c: 'pack'; b: number }
@@ -484,7 +485,7 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   // where you tapped an order: the move (or attack, foe) burst plays there
-  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean }[] = [];
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean; enter?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private fires: Fire[] = [];
@@ -1913,6 +1914,13 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'unload': {
+        // (sent to unload with nothing on: straight off again)
+        if (u.load <= 0.5) {
+          u.load = 0;
+          j.st = 'wait';
+          j.t = TIP_S;
+          break;
+        }
         const e = this.eco[u.f];
         const room = this.store(u.f) - e.credits;
         if (room <= 0) {
@@ -2035,20 +2043,20 @@ export class IsoGame implements GameLike {
     const loaded = this.loaded();
     if (loaded.length) {
       const n = loaded.reduce((s, u) => s + (u.cargo?.length ?? 0), 0);
-      acts.push({ id: 'unload', label: 'Unload', icon: 'unload', title: `Let ${n === 1 ? 'the soldier' : `all ${n} soldiers`} out (F)` });
+      acts.push({ id: 'unload', label: 'Unload', icon: 'unload', title: `Let ${n === 1 ? 'the soldier' : `all ${n} soldiers`} out (F or Space)` });
     }
     const gis = this.selected().filter((u) => u.kind === 'inf' && u.f === this.me);
     if (gis.length)
       acts.push(
         gis.some((u) => !u.dug)
-          ? { id: 'entrench', label: 'Deploy', icon: 'deploy', title: 'Dig in behind sandbags: stronger, longer-range fire, but they stay put (F)' }
-          : { id: 'unentrench', label: 'Undeploy', icon: 'pack', title: 'Pick up the sandbags and get moving (F)' },
+          ? { id: 'entrench', label: 'Deploy', icon: 'deploy', title: 'Dig in behind sandbags: stronger, longer-range fire, but they stay put (F or Space)' }
+          : { id: 'unentrench', label: 'Undeploy', icon: 'pack', title: 'Pick up the sandbags and get moving (F or Space)' },
       );
     const mcvs = this.selected().filter((u) => u.kind === 'mcv' && u.f === this.me);
     // a lone MCU has its Deploy button floating over it instead (deployAt)
     if (!mcvs.length || this.deployAt()) return acts;
     const ok = mcvs.some((u) => !u.deploy && this.deployable(u));
-    acts.push({ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear' });
+    acts.push({ id: 'deploy', label: 'Deploy', icon: 'deploy', disabled: !ok, title: ok ? 'Deploy into a Foundry (F or Space)' : 'Needs open, level ground: move somewhere clear' });
     return acts;
   }
 
@@ -2399,9 +2407,11 @@ export class IsoGame implements GameLike {
     const mine = this.mine();
     if (this.rideAt(x, y)) return 'enter';
     const hit = this.unitAt(x, y);
-    // over a Foundry vehicle of yours that is picked and can deploy: deploy it
+    // over a picked unit of yours that can deploy (a Foundry vehicle that
+    // can unfold here, a G.I. to dig in or climb out, a transport with
+    // soldiers in it): deploy it
     const h = hit?.u;
-    if (h && h.kind === 'mcv' && h.sel && h.f === this.me && !h.deploy && mine.every((o) => o.kind === 'mcv') && this.deployable(h)) return 'deploy';
+    if (h && h.sel && h.f === this.me && this.deploysNow(h)) return 'deploy';
     if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
@@ -2413,6 +2423,8 @@ export class IsoGame implements GameLike {
     // over an enemy that one of them can shoot at: attack it
     const foe = this.enemyAt(x, y);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) return 'attack';
+    // over your refinery with a hauler selected: go and unload there
+    if (sel.some((u) => u.kind === 'hauler') && this.myRefineryAt(x, y)) return 'enter';
     // over ore with a hauler selected: dig it (haulers only ever go after ore)
     const [gx, gy] = this.fold(...this.groundAt(x, y));
     if (sel.some((u) => u.kind === 'hauler') && this.oreNear(gx, gy, 16).some((n) => n.amt > 20)) return 'harvest';
@@ -2422,6 +2434,20 @@ export class IsoGame implements GameLike {
 
   private mine(): Unit[] {
     return this.units.filter((u) => u.sel && u.f === this.me);
+  }
+
+  // Whether act('deploy') (F, Space or the deploy cursor) would do anything
+  // for unit u of yours.
+  private deploysNow(u: Unit): boolean {
+    if (u.kind === 'mcv') return !u.deploy && this.deployable(u);
+    if (u.kind === 'inf') return true;
+    return !!u.cargo?.length && !u.unloading;
+  }
+
+  // A refinery of yours at (x, y) that ore haulers can unload at.
+  private myRefineryAt(x: number, y: number): Building | null {
+    const b = this.buildingAt(x, y);
+    return b && b.f === this.me && b.kind === 'refinery' && b.rise >= 1 && !b.packing ? b : null;
   }
 
   // A transport of yours at (x, y) that the soldiers you have selected could
@@ -2439,7 +2465,7 @@ export class IsoGame implements GameLike {
     this.command({ c: 'board', u: go.map((u) => u.id), t: t.id });
     if (this.moveMarks) {
       const [mx, my] = this.fold(t.x, t.y);
-      this.markers.push({ x: mx, y: my, z: t.z, t: 0 });
+      this.markers.push({ x: mx, y: my, z: t.z, t: 0, enter: true });
     }
     ui('order_confirm');
     this.speak(go, 'move');
@@ -2535,7 +2561,7 @@ export class IsoGame implements GameLike {
   }
 
   order(x: number, y: number, shortest = false): void {
-    const sel = this.units.filter((u) => u.sel && !u.deploy && u.f === this.me);
+    let sel = this.units.filter((u) => u.sel && !u.deploy && u.f === this.me);
     if (!sel.length) return;
     const ride = shortest ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
@@ -2551,6 +2577,20 @@ export class IsoGame implements GameLike {
       ui('order_confirm', 0.8);
       this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
       return;
+    }
+    // onto your refinery: the haulers go and unload there (the rest go to it)
+    const ref = shortest ? null : this.myRefineryAt(x, y);
+    const haulers = sel.filter((u) => u.kind === 'hauler');
+    if (ref && haulers.length) {
+      this.command({ c: 'dock', u: haulers.map((u) => u.id), b: ref.id });
+      if (this.moveMarks) {
+        const [mx, my] = this.fold(ref.x + DOCK[0], ref.y + DOCK[1]);
+        this.markers.push({ x: mx, y: my, z: 0, t: 0, enter: true });
+      }
+      ui('order_confirm', 1.3);
+      this.speak(haulers, 'move');
+      sel = sel.filter((u) => u.kind !== 'hauler');
+      if (!sel.length) return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
     let dig: number[] | undefined;
@@ -3300,6 +3340,22 @@ export class IsoGame implements GameLike {
           u.forced = u.chase = false;
           u.dest = u.aim = undefined;
           [u.tx, u.ty] = this.nearPoint(u.x, u.y, t.x, t.y);
+          u.moving = true;
+        }
+        break;
+      }
+      case 'dock': {
+        const ref = bldg(cmd.b);
+        if (!ref || ref.kind !== 'refinery' || ref.rise < 1 || ref.packing) break;
+        for (const id of cmd.u) {
+          const u = unit(id);
+          if (!u || u.kind !== 'hauler') continue;
+          // it pulls up in front of the pad, then backs on and unloads
+          // (and after that, goes back to the ore it was on)
+          u.job = { st: 'ret', ref, node: u.job?.node, t: 0 };
+          u.load ??= 0;
+          [u.tx, u.ty] = this.nearPoint(u.x, u.y, ref.x + DOCK[0] + Math.cos(DOCK_A) * DOCK_RUN, ref.y + DOCK[1] + Math.sin(DOCK_A) * DOCK_RUN);
+          u.dest = undefined;
           u.moving = true;
         }
         break;

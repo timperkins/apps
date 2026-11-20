@@ -107,6 +107,8 @@ body {
 #settingsBtn,
 #setBack,
 #setReset,
+#keysBtn,
+#keysBack,
 #unitsLink {
   font: inherit;
   font-size: 12px;
@@ -143,14 +145,80 @@ body {
 #lobbyBtn:active,
 #settingsBtn:active,
 #setBack:active,
+#keysBtn:active,
+#keysBack:active,
 #setReset:active {
   transform: translateY(1px);
 }
 
 /* Settings: shown in the menu in place of its buttons */
 #menu.settings-open > :not(#settings),
-#menu:not(.settings-open) > #settings {
+#menu:not(.settings-open) > #settings,
+#menu.keys-open > :not(#keys),
+#menu:not(.keys-open) > #keys {
   display: none;
+}
+
+/* Hotkeys: a list of keys, shown in the menu in place of its buttons */
+#keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 230px;
+  max-height: calc(100dvh - 90px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+#keysBack {
+  border-color: transparent;
+  background-color: transparent;
+  padding-left: 2px;
+}
+
+#keys h3 {
+  margin: 4px 0 0;
+  font-size: 10px;
+  font-weight: normal;
+  color: #9dff9d;
+}
+
+#keys dl {
+  display: grid;
+  grid-template-columns: 116px 1fr;
+  align-items: center;
+  gap: 5px 10px;
+  margin: 0;
+  font-size: 10px;
+}
+
+#keys dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+#keys dd {
+  margin: 0;
+  opacity: 0.9;
+}
+
+#keys kbd {
+  font: inherit;
+  font-size: 9px;
+  min-width: 10px;
+  padding: 2px 4px;
+  text-align: center;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-color: rgba(0, 0, 0, 0.6);
+  border-right-color: rgba(0, 0, 0, 0.6);
+}
+
+#keys dt span {
+  opacity: 0.6;
 }
 
 #settings {
