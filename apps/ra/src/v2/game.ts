@@ -171,7 +171,8 @@ interface Unit {
   fired?: number;
   hitT?: number;
   flashT?: number;
-  // when you last ordered an attack on it: it blinks white so you can see which
+  // when you last ordered an attack on it (or sent units into it): it blinks
+  // white so you can see which
   aimT?: number;
   dead?: boolean;
   // where you last sent it (its own coordinates): while it is still on its
@@ -282,7 +283,8 @@ interface Building {
   cool?: number;
   hitT?: number;
   flashT?: number;
-  // when you last ordered an attack on it: it blinks white so you can see which
+  // when you last ordered an attack on it (or sent units into it): it blinks
+  // white so you can see which
   aimT?: number;
   dead?: boolean;
 }
@@ -2465,6 +2467,7 @@ export class IsoGame implements GameLike {
   private boardOrder(t: Unit): void {
     const go = this.mine().filter((u) => RIDERS.has(u.kind));
     this.command({ c: 'board', u: go.map((u) => u.id), t: t.id });
+    t.aimT = this.time;
     if (this.moveMarks) {
       const [mx, my] = this.fold(t.x, t.y);
       this.markers.push({ x: mx, y: my, z: t.z, t: 0, enter: true });
@@ -2585,6 +2588,7 @@ export class IsoGame implements GameLike {
     const haulers = sel.filter((u) => u.kind === 'hauler');
     if (ref && haulers.length) {
       this.command({ c: 'dock', u: haulers.map((u) => u.id), b: ref.id });
+      ref.aimT = this.time;
       if (this.moveMarks) {
         const [mx, my] = this.fold(ref.x + DOCK[0], ref.y + DOCK[1]);
         this.markers.push({ x: mx, y: my, z: 0, t: 0, enter: true });
