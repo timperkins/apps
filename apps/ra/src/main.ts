@@ -609,10 +609,10 @@ function showLoading(p: number, text: string): void {
 }
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 // Wait for a batch of work, moving the bar from p0 to p1 as it finishes.
-async function track(work: Promise<unknown>[], p0: number, p1: number, text: string): Promise<void> {
+async function track(work: Promise<unknown>[], p0: number, p1: number, text: string, live = () => true): Promise<void> {
   let done = 0;
-  showLoading(p0, text);
-  await Promise.all(work.map((w) => w.then(() => showLoading(p0 + ((p1 - p0) * ++done) / work.length, text))));
+  if (live()) showLoading(p0, text);
+  await Promise.all(work.map((w) => w.then(() => live() && showLoading(p0 + ((p1 - p0) * ++done) / work.length, text))));
 }
 
 // Versions with a choice of maps ask which one first.
@@ -641,6 +641,8 @@ async function makeWorld(): Promise<void> {
   build.reset();
   game.seed = seed;
   const g = game;
+  // (not if the game was left, by the Back button, while it was being made)
+  const live = () => me === making && g === game;
   showLoading(0.02, 'Shaping the land');
   await nextFrame();
   if (me !== making || g !== game) return;
@@ -660,16 +662,17 @@ async function makeWorld(): Promise<void> {
   showLoading(p, 'Mapping the planet');
   await nextFrame();
   while (!g.mapStep(30)) {
+    if (!live()) return;
     p += (0.5 - p) * 0.15;
     showLoading(p, 'Mapping the planet');
     await nextFrame();
   }
-  await track(bases, 0.5, 0.75, 'Raising the bases');
+  await track(bases, 0.5, 0.75, 'Raising the bases', live);
   if (me !== making || g !== game) return;
   globe.setMap(built.w, built.h, g.mapImage(), g.shroudMap?.());
   g.shroudMap?.()?.changed();
   mapVersion = g.mapVersion ?? 0;
-  await track(units, 0.75, 0.98, 'Rolling out');
+  await track(units, 0.75, 0.98, 'Rolling out', live);
   if (me !== making || g !== game) return;
   // one step and a frame drawn behind the screen, so the first one you see
   // isn't the one that looks up the ground under everyone and sends every
@@ -703,6 +706,7 @@ const lobby = new Lobby({
   solo: () => goTo('/test'),
   start: (m) => startMatch(m),
   showing: (on) => (on ? startAttract() : stopAttract()),
+  quit: () => leaveGame(),
 });
 // Another page of the game (test mode at /test, the lobby at /), keeping ?localnet and the like.
 function goTo(path: string): void {
@@ -868,6 +872,8 @@ function leaveGame(): void {
   setMenu(false);
   const m = match;
   match = null;
+  // (stops a world still being made)
+  making++;
   bots = [];
   built = { w: 0, h: 0 };
   loading.hidden = true;
