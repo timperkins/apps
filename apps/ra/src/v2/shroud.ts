@@ -26,6 +26,12 @@ const SEA_OUT = 96;
 // Water smaller than this many cells (a pond or a small lake) is shrouded
 // like the land round it.
 const SEA_MIN = 3000;
+// At the start, shroud left in strips or pockets narrower than about twice
+// this (measured like SEA_IN) between what you can see is lifted: a sliver of
+// sea between the base's sight and the open water, say. What's lifted fades
+// in from the shroud that stays over THIN_FADE.
+const THIN = 96;
+const THIN_FADE = 128;
 
 const BLACK = 0;
 const EDGE = 1;
@@ -107,6 +113,61 @@ export class Shroud {
     const u1 = Math.floor(((j1 + 2) * S) / CH);
     for (let ty = u0; ty <= u1; ty++)
       for (let tx = t0; tx <= t1; tx++) this.dirty[this.tile(tx, ty)] = 1;
+  }
+
+  // Lift the shroud wherever it is only a thin strip or a small pocket next
+  // to what you have seen: none of it more than about r from its edge (on the ground, as the sea's
+  // edge is measured). What stays is the shroud within r of a spot at least r
+  // from its edge (a morphological opening); round it, the cleared cells fade
+  // in from it over THIN_FADE, and the edges it already had are kept as they
+  // were.
+  clearThin(r = THIN): void {
+    const { gw, gh, g, v } = this;
+    const n = gw * gh;
+    // the shroud: drawn past the middle of its edge
+    const d = new Float32Array(n);
+    for (let q = 0; q < n; q++) d[q] = v[q] < 128 ? BIG : 0;
+    chamfer(d, gw, gh);
+    // its core: at least r in from its edge, and what is within r of that
+    const keep = new Float32Array(n);
+    for (let q = 0; q < n; q++) keep[q] = d[q] > r ? 0 : BIG;
+    chamfer(keep, gw, gh);
+    // (a little slack, for the chamfer's corners)
+    const reach = r + S * 1.5;
+    // what would go: only the bits that touch what you have seen (not an
+    // islet out at sea you've never been near)
+    const go = new Uint8Array(n);
+    const stack: number[] = [];
+    for (let q = 0; q < n; q++) if (v[q] < 128 && keep[q] > reach) go[q] = 1;
+    const nbs = (q: number) => {
+      const i = q % gw;
+      const j = (q - i) / gw;
+      return [j * gw + ((i + 1) % gw), j * gw + ((i + gw - 1) % gw), ((j + 1) % gh) * gw + i, ((j + gh - 1) % gh) * gw + i];
+    };
+    for (let q = 0; q < n; q++)
+      if (go[q] === 1 && nbs(q).some((k) => g[k] >= 128)) {
+        go[q] = 2;
+        stack.push(q);
+      }
+    if (!stack.length) return;
+    while (stack.length)
+      for (const k of nbs(stack.pop()!))
+        if (go[k] === 1) {
+          go[k] = 2;
+          stack.push(k);
+        }
+    for (let q = 0; q < n; q++) keep[q] = v[q] < 128 && go[q] !== 2 ? 0 : BIG;
+    // how far each cell is from the shroud that stays: the cleared cells
+    // fade in from it
+    chamfer(keep, gw, gh);
+    for (let q = 0; q < n; q++) {
+      const f = Math.round(Math.min(1, keep[q] / THIN_FADE) * 255);
+      if (f > v[q]) v[q] = f;
+      if (f > g[q]) g[q] = f;
+    }
+    this.version++;
+    this.box = [0, 0, this.w, this.h];
+    this.dirty.fill(1);
   }
 
   private tile(tx: number, ty: number): number {
@@ -307,12 +368,21 @@ function seaFloor(gw: number, gh: number, water: (sx: number, sy: number) => boo
     }
     if (comp.length >= SEA_MIN) for (const q of comp) sea[q] = 1;
   }
-  // distance on the ground (screen y counts double) from the nearest cell
-  // that isn't sea, as far as SEA_OUT: a chamfer pass each way, twice round
-  // so it carries over the map's edges
-  const BIG = 1e9;
+  // distance on the ground from the nearest cell that isn't sea
   const d = new Float32Array(n);
   for (let q = 0; q < n; q++) d[q] = sea[q] ? BIG : 0;
+  chamfer(d, gw, gh);
+  const out = new Uint8Array(n);
+  for (let q = 0; q < n; q++) out[q] = Math.round(Math.max(0, Math.min(1, (d[q] - SEA_IN) / (SEA_OUT - SEA_IN))) * 255);
+  return out;
+}
+
+const BIG = 1e9;
+
+// Turn d (0 at the cells to measure from, BIG elsewhere) into each cell's
+// distance on the ground (screen y counts double) from the nearest of them: a
+// chamfer pass each way, twice round so it carries over the map's edges.
+function chamfer(d: Float32Array, gw: number, gh: number): void {
   const ax = S;
   const ay = 2 * S;
   const dg = Math.hypot(ax, ay);
@@ -331,7 +401,4 @@ function seaFloor(gw: number, gh: number, water: (sx: number, sy: number) => boo
         d[q] = Math.min(d[q], d[at(i + 1, j)] + ax, d[at(i, j + 1)] + ay, d[at(i + 1, j + 1)] + dg, d[at(i - 1, j + 1)] + dg);
       }
   }
-  const out = new Uint8Array(n);
-  for (let q = 0; q < n; q++) out[q] = Math.round(Math.max(0, Math.min(1, (d[q] - SEA_IN) / (SEA_OUT - SEA_IN))) * 255);
-  return out;
 }
