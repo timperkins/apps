@@ -1028,6 +1028,8 @@ export class IsoGame implements GameLike {
     this.looked = new WeakMap();
     this.lookedB = new WeakSet();
     this.lookAround();
+    // (no slivers of shroud left between what you can see at the start)
+    this.shroud?.clearThin();
     this.emit();
   }
 
