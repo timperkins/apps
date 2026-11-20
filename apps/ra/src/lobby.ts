@@ -95,6 +95,8 @@ export interface LobbyHooks {
   start(m: Match): void;
   /** The landing page shows (true) or goes (false): main.ts shows a world behind it. */
   showing(on: boolean): void;
+  /** The browser's Back button during a game: main.ts ends it (and calls Match.leave). */
+  quit(): void;
 }
 
 function load(key: string): string | null {
@@ -138,13 +140,20 @@ function tidySaves(): void {
 }
 
 // The page's address: /CODE in a room, / otherwise (keeping ?localnet and the like).
+// Going into a room from the landing page is a new page in the browser's
+// history, so Back goes home again; leaving the room goes back to that page.
 function setPath(path: string): void {
   const q = new URLSearchParams(location.search);
   q.delete('join');
   // (?localnet, not ?localnet=)
   const s = q.toString().replace(/=(?=&|$)/g, '');
   const url = path + (s ? `?${s}` : '') + location.hash;
-  if (url !== location.pathname + location.search + location.hash) history.replaceState(null, '', url);
+  if (url === location.pathname + location.search + location.hash) return;
+  const room = path.replace(/\//g, '');
+  const inRoom = !!Lobby.pathCode();
+  if (room && !inRoom) history.pushState({ raRoom: room }, '', url);
+  else if (!room && inRoom && (history.state as { raRoom?: string } | null)?.raRoom) history.back();
+  else history.replaceState(null, '', url);
 }
 
 const hexOf = (f: number) => {
@@ -190,12 +199,22 @@ export class Lobby {
     // a link with ?join=CODE fills in the code
     this.joinCode = normalizeCode(new URLSearchParams(location.search).get('join') ?? '');
     window.addEventListener('pagehide', () => this.saveNow());
+    window.addEventListener('popstate', () => this.onPopState());
   }
 
   /** The room code in the page's address, if there is one. */
   static pathCode(): string {
     const c = normalizeCode(location.pathname.replace(/\//g, ''));
     return location.pathname.replace(/\//g, '').length === 4 && isValidCode(c) ? c : '';
+  }
+
+  // The browser's Back (or Forward) button: home from a room, or into the room again.
+  private onPopState(): void {
+    const code = Lobby.pathCode();
+    if (!code && this.mode !== 'home') {
+      if (this.match) this.hooks.quit();
+      else this.leave();
+    } else if (code && this.mode === 'home' && !this.busy) void this.enter(code);
   }
 
   show(): void {
