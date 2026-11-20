@@ -1576,6 +1576,103 @@ export function buildingFoot(kind: BuildingKind, f: Faction): Omit<V2BuildingArt
   return { rx: b.rx, ry: b.ry, fx: b.fx };
 }
 
+/**
+ * Where a building stands solid on the ground, for keeping units out: the
+ * cells of a grid (BLOCK_CELL world units a side) over its footprint, row
+ * by row from (-rx, -ry), that its walls fill somewhere between knee and
+ * head height. Flat aprons and pads at ground level, and booms and cables
+ * high overhead, don't count, so units can still drive onto a refinery's
+ * pad or pass under a crane.
+ */
+export const BLOCK_CELL = 1;
+export interface BuildingBlock {
+  nx: number;
+  ny: number;
+  rx: number;
+  ry: number;
+  solid: Uint8Array;
+}
+const blockCache = new Map<BuildingKind, BuildingBlock>();
+export function buildingBlock(kind: BuildingKind): BuildingBlock {
+  let b = blockCache.get(kind);
+  if (b) return b;
+  const { shape, rx, ry } = buildingShape(kind, FACTIONS[0]);
+  const nx = Math.ceil((2 * rx) / BLOCK_CELL);
+  const ny = Math.ceil((2 * ry) / BLOCK_CELL);
+  const solid = new Uint8Array(nx * ny);
+  const ZS = [1.5, 2.5, 3.5, 5, 6.5, 8];
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++) {
+      hit: for (const [a, c] of [
+        [0.25, 0.25],
+        [0.75, 0.25],
+        [0.25, 0.75],
+        [0.75, 0.75],
+      ]) {
+        const u = -rx + (i + a) * BLOCK_CELL;
+        const v = -ry + (j + c) * BLOCK_CELL;
+        for (const z of ZS)
+          if (shape(u, v, z)) {
+            solid[j * nx + i] = 1;
+            break hit;
+          }
+      }
+    }
+  // the helipad is all flat pad: the whole of its round deck is solid
+  if (kind === 'helipad')
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) solid[j * nx + i] = Math.hypot(-rx + (i + 0.5) * BLOCK_CELL, -ry + (j + 0.5) * BLOCK_CELL) <= 11 ? 1 : 0;
+  // lone specks (a crate, a lamp post) would only snag units: drop them
+  const seen = new Uint8Array(nx * ny);
+  for (let s = 0; s < nx * ny; s++) {
+    if (!solid[s] || seen[s]) continue;
+    const blob = [s];
+    seen[s] = 1;
+    for (let q = 0; q < blob.length; q++) {
+      const c = blob[q];
+      const ci = c % nx;
+      const cj = (c - ci) / nx;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ii = ci + di;
+        const jj = cj + dj;
+        const n = jj * nx + ii;
+        if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && solid[n] && !seen[n]) {
+          seen[n] = 1;
+          blob.push(n);
+        }
+      }
+    }
+    if (blob.length < 4) for (const c of blob) solid[c] = 0;
+  }
+  // and fill in anywhere walled in all round (inside a cooling tower), that
+  // no one could get to anyway
+  const out = new Uint8Array(nx * ny);
+  const q: number[] = [];
+  for (let j = 0; j < ny; j++)
+    for (let i = 0; i < nx; i++)
+      if ((i === 0 || j === 0 || i === nx - 1 || j === ny - 1) && !solid[j * nx + i]) {
+        out[j * nx + i] = 1;
+        q.push(j * nx + i);
+      }
+  while (q.length) {
+    const c = q.pop()!;
+    const ci = c % nx;
+    const cj = (c - ci) / nx;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ii = ci + di;
+      const jj = cj + dj;
+      const n = jj * nx + ii;
+      if (ii >= 0 && jj >= 0 && ii < nx && jj < ny && !solid[n] && !out[n]) {
+        out[n] = 1;
+        q.push(n);
+      }
+    }
+  }
+  for (let c = 0; c < nx * ny; c++) if (!out[c]) solid[c] = 1;
+  blockCache.set(kind, (b = { nx, ny, rx, ry, solid }));
+  return b;
+}
+
 export function makeBuilding(kind: BuildingKind, f: Faction): V2BuildingArt {
   const b = buildingShape(kind, f);
   const spr = renderStack(b.shape, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 });
