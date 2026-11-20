@@ -8,7 +8,7 @@ import { CH } from './tiles';
 import { ART } from './gfx';
 import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
-import { setMood } from './music';
+import { setMood, setMusicPaused } from './music';
 import { play, setWorldLevel, ui } from './sfx';
 import { onSettings, resetSettings, setSetting, settings, type Settings } from './settings';
 import { initBuild } from './build-ui';
@@ -887,7 +887,7 @@ leaveBtn.addEventListener('click', () => leaveGame());
 
 // ---------- Pause (single player) ----------
 // Everything stops: the battle, the computer players and the sounds of the
-// world (the music plays on). A screen over the game says so and takes any
+// world, and the music fades out. A screen over the game says so and takes any
 // taps, so nothing can be ordered while the clock is stopped.
 const pauseBtn = document.querySelector<HTMLButtonElement>('#pauseBtn')!;
 const pauseScreen = document.querySelector<HTMLDivElement>('#pauseScreen')!;
@@ -902,6 +902,7 @@ function setPaused(on: boolean): void {
   pauseScreen.hidden = !on;
   keys.clear();
   setWorldLevel(on ? 0 : planet ? 0.15 : 1);
+  setMusicPaused(on);
   if (on) {
     setMenu(false);
     play('ui_panel', 1, { ui: true });
