@@ -462,12 +462,13 @@ const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, ap
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
+  const t = 1 / ART;
   c.fillStyle = '#111';
-  c.fillRect(bx - 1, by - 1, bw + 2, 4);
+  c.fillRect(bx - t, by - t, bw + 2 * t, 2 + 2 * t);
   c.fillStyle = hp > 0.66 ? '#5ee05e' : hp > 0.33 ? '#e8d24a' : '#e85a4a';
-  c.fillRect(bx, by, Math.round(bw * hp), 2);
+  c.fillRect(bx, by, Math.round(bw * hp * ART) / ART, 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
-  for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
+  for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, t, 2);
 }
 
 // What a round does where it lands.
