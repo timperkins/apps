@@ -23,8 +23,10 @@ const buffers = new Map<Mood, AudioBuffer>();
 const playing = new Map<Mood, { src: AudioBufferSourceNode; gain: GainNode }>();
 let want: Mood = 'base';
 let on: Mood | null = null;
+// the game is paused: the music fades out until it goes on again
+let hushed = false;
 // the Music volume in Settings (squared, so the slider sounds even)
-const level = () => settings().music ** 2;
+const level = () => (hushed ? 0 : settings().music ** 2);
 
 // mp3 decoding pads a little silence at each end, which would tick at the
 // loop point: loop just the part with sound in it.
@@ -96,10 +98,19 @@ export function setMood(m: Mood): void {
   if (on !== m && buffers.has(m)) play(m);
 }
 
-onSettings(() => {
+function rampMaster(s: number): void {
   if (!ctx || !master) return;
   const t = ctx.currentTime;
   master.gain.cancelScheduledValues(t);
   master.gain.setValueAtTime(master.gain.value, t);
-  master.gain.linearRampToValueAtTime(level(), t + 0.15);
-});
+  master.gain.linearRampToValueAtTime(level(), t + s);
+}
+
+onSettings(() => rampMaster(0.15));
+
+/** Pausing the game fades the music out; going on again fades it back in. */
+export function setMusicPaused(p: boolean): void {
+  if (p === hushed) return;
+  hushed = p;
+  rampMaster(p ? 0.4 : 1);
+}
