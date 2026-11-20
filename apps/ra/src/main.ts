@@ -15,7 +15,7 @@ import { initBuild } from './build-ui';
 import { Lobby, type Match } from './lobby';
 import { Bot } from './v2/bot';
 import { startArtPool } from './v2/art-pool';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, HARVEST_CLICK_CSS, HARVEST_FRAMES, HARVEST_RING_SIZE, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, DEPLOY_CLICK_CSS, DEPLOY_FRAMES, ENTER_CLICK_CSS, ENTER_CLICK_FRAMES, ENTER_FRAMES, ENTER_RING_SIZE, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, enterRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -97,7 +97,7 @@ const globe = new Globe();
 
 function setMenu(open: boolean): void {
   menu.hidden = !open;
-  if (!open) menu.classList.remove('settings-open');
+  if (!open) menu.classList.remove('settings-open', 'keys-open');
   menuBtn.setAttribute('aria-expanded', String(open));
 }
 menuBtn.addEventListener('click', () => setMenu(menu.hidden));
@@ -106,8 +106,8 @@ document.addEventListener('pointerdown', (e) => {
 });
 
 // ---------- Toolbar and the selection menu ----------
-// Select (touch screens only: with a mouse you drag a box) opens the
-// selection menu above the toolbar (so does tapping a unit):
+// Select (touch screens only: with a mouse you drag a box, and the menu never
+// shows) opens the selection menu above the toolbar (so does tapping a unit):
 // a button for each kind of unit of yours on screen, with how many there are,
 // which adds them all to the selection or takes them out of it, then All and
 // Clear. A drag on a touch screen pans; with a mouse it draws a box.
@@ -120,6 +120,9 @@ let selOpen = false;
 // with the menu's buttons is locked too as soon as you pan away or tap the
 // map, so it doesn't drop the units that go off screen.
 let locked = false;
+// A mouse (and no touch screen as the main pointer): no Select button, and no
+// selection menu either (you drag a box, Shift+click and Ctrl+A instead).
+const mouseOnly = window.matchMedia('(hover: hover) and (pointer: fine)');
 // the selection was made with the menu, at this camera position
 let menuPick: { x: number; y: number } | null = null;
 function lockGroup(): void {
@@ -225,7 +228,7 @@ function goToSelection(): void {
 }
 
 function setSelOpen(open: boolean): void {
-  selOpen = open;
+  selOpen = open && !mouseOnly.matches;
   selectBtn.setAttribute('aria-pressed', String(open));
   typesKey = '';
   updateSelBar();
@@ -358,8 +361,6 @@ function selectView(add: boolean): void {
   else game.boxSelect(...viewRect(), add);
 }
 
-// A mouse (and no touch screen as the main pointer): no Select button.
-const mouseOnly = window.matchMedia('(hover: hover) and (pointer: fine)');
 function showSelection(names: string[]): void {
   // picking something opens the menu, so you can add other kinds to it
   if (names.length && !lastNames.length && !selOpen) setSelOpen(true);
@@ -384,8 +385,10 @@ function showSelection(names: string[]): void {
 // cursor's arrowheads turning round it. The check sends them, another tap
 // moves it, and clearing the selection calls it off.
 // kind: attack is a tap on an enemy (red, with a gunsight), harvest a tap on
-// ore with an ore hauler selected (gold, under the harvest cursor's triangles),
-// enter a tap on a transport of yours with soldiers selected (they get in)
+// ore with an ore hauler selected (gold, inside the harvest cursor's gold
+// arrowheads), enter a tap on a transport of yours with soldiers selected
+// (they get in) or on your refinery with an ore hauler selected (it unloads
+// there), gold under the enter cursor's triangles
 type Order = 'move' | 'attack' | 'harvest' | 'enter';
 let pending: { x: number; y: number; kind: Order } | null = null;
 let ringFrame = -1;
@@ -393,8 +396,8 @@ function setPending(p: { x: number; y: number; kind: Order } | null): void {
   pending = p;
   confirmEl.hidden = !p;
   confirmEl.classList.toggle('foe', p?.kind === 'attack');
-  confirmEl.classList.toggle('ore', p?.kind === 'harvest');
-  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : p?.kind === 'enter' ? 'Get in' : 'Send them here';
+  confirmEl.classList.toggle('ore', p?.kind === 'harvest' || p?.kind === 'enter');
+  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : p?.kind === 'enter' ? 'Go in' : 'Send them here';
   okBtn.setAttribute('aria-label', `${okBtn.title} (clear the selection to call it off)`);
   ringFrame = -1;
   if (p) placeConfirm();
@@ -409,12 +412,12 @@ function placeConfirm(): void {
   const r = canvas.getBoundingClientRect();
   // the arrowheads at the game's pixel size, turning as the cursor does
   const px = Math.max(3, Math.round(base) + 1);
-  const size = `${(pending.kind === 'harvest' ? HARVEST_RING_SIZE : MOVE_RING_SIZE) * px}px`;
+  const size = `${(pending.kind === 'enter' ? ENTER_RING_SIZE : MOVE_RING_SIZE) * px}px`;
   if (okRing.style.width !== size) {
     okRing.style.width = okRing.style.height = size;
     okRing.style.backgroundSize = size;
   }
-  const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : moveRingFrames();
+  const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : pending.kind === 'enter' ? enterRingFrames() : moveRingFrames();
   const i = Math.floor(performance.now() / 150) % frames.length;
   if (i !== ringFrame) {
     ringFrame = i;
@@ -422,12 +425,15 @@ function placeConfirm(): void {
   }
   confirmEl.style.transform = `translate(${Math.round(r.left + (pending.x - camX()) * scale)}px, ${Math.round(r.top + (pending.y - camY()) * scale)}px)`;
 }
-// A lone selected MCU gets a Deploy button floating just above it.
+// A lone selected MCU gets a Deploy button floating just above it. With a
+// mouse the deploy cursor over it does that job (and F or Space), so the
+// button only shows there to say why it can't deploy where it is.
 deployBtn.innerHTML = `${lineIcon('deploy')}Deploy`;
 deployBtn.addEventListener('click', () => game?.act?.('deploy'));
 let deployKey = '';
 function placeDeploy(): void {
-  const d = (!planet && game?.deployAt?.()) || null;
+  let d = (!planet && game?.deployAt?.()) || null;
+  if (d?.ok && mouseOnly.matches) d = null;
   deployBtn.hidden = !d;
   if (!d) {
     deployKey = '';
@@ -437,7 +443,7 @@ function placeDeploy(): void {
   if (key !== deployKey) {
     deployKey = key;
     deployBtn.disabled = !d.ok;
-    deployBtn.title = d.ok ? 'Deploy into a Foundry (F)' : 'Needs open, level ground: move somewhere clear';
+    deployBtn.title = d.ok ? 'Deploy into a Foundry (F or Space)' : 'Needs open, level ground: move somewhere clear';
   }
   const r = canvas.getBoundingClientRect();
   const lift = 22 * scale;
@@ -1103,6 +1109,17 @@ function setSettingsOpen(open: boolean): void {
 settingsBtn.addEventListener('click', () => setSettingsOpen(true));
 settingsEl.querySelector('#setBack')!.addEventListener('click', () => setSettingsOpen(false));
 settingsEl.querySelector('#setReset')!.addEventListener('click', () => resetSettings());
+
+// Hotkeys: every key the game listens to, in place of the menu's buttons too.
+const keysBtn = document.querySelector<HTMLButtonElement>('#keysBtn')!;
+const keysEl = document.querySelector<HTMLDivElement>('#keys')!;
+function setKeysOpen(open: boolean): void {
+  menu.classList.toggle('keys-open', open);
+  keysBtn.setAttribute('aria-expanded', String(open));
+  if (open) keysEl.querySelector<HTMLButtonElement>('#keysBack')!.focus({ preventScroll: true });
+}
+keysBtn.addEventListener('click', () => setKeysOpen(true));
+keysEl.querySelector('#keysBack')!.addEventListener('click', () => setKeysOpen(false));
 const sliders = [...settingsEl.querySelectorAll<HTMLInputElement>('input[type=range]')];
 const VOLUMES = new Set(['music', 'sfx', 'voice']);
 function showSettings(): void {
@@ -1549,11 +1566,13 @@ let cursorKind: CursorKind = 'arrow';
 let movedAt = -Infinity;
 let attackedAt = -Infinity;
 let dugAt = -Infinity;
-// A click with the move, attack or harvest cursor showing: play its burst.
+let enteredAt = -Infinity;
+// A click with the move, attack, harvest, deploy or enter cursor showing: play its burst.
 function clicked(): void {
   if (cursorKind === 'move') movedAt = performance.now();
   else if (cursorKind === 'attack') attackedAt = performance.now();
   else if (cursorKind === 'harvest' || cursorKind === 'deploy') dugAt = performance.now();
+  else if (cursorKind === 'enter') enteredAt = performance.now();
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
@@ -1574,14 +1593,18 @@ function hoverNow(now: number): void {
   const shooting = shot >= 0 && shot < ATTACK_CLICK_FRAMES && k !== 'grabbing';
   if (shooting) k = 'attack';
   const dig = Math.floor((now - dugAt) / 55);
-  const digging = dig >= 0 && dig < ATTACK_CLICK_FRAMES && k !== 'grabbing';
+  const digging = dig >= 0 && dig < MOVE_CLICK_FRAMES && k !== 'grabbing';
   if (digging && k !== 'deploy') k = 'harvest';
+  const ent = Math.floor((now - enteredAt) / 55);
+  const entering = ent >= 0 && ent < ENTER_CLICK_FRAMES && k !== 'grabbing';
+  if (entering) k = 'enter';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
   if (k === 'corners') css = CORNER_FRAMES[Math.floor(now / 140) % CORNER_FRAMES.length];
   else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 150) % ATTACK_FRAMES.length];
-  else if (k === 'harvest' || k === 'deploy') css = digging ? HARVEST_CLICK_CSS[dig] : HARVEST_FRAMES[Math.floor(now / 150) % HARVEST_FRAMES.length];
+  else if (k === 'harvest' || k === 'deploy') css = digging ? DEPLOY_CLICK_CSS[dig] : DEPLOY_FRAMES[Math.floor(now / 150) % DEPLOY_FRAMES.length];
+  else if (k === 'enter') css = entering ? ENTER_CLICK_CSS[ent] : ENTER_FRAMES[Math.floor(now / 150) % ENTER_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;
@@ -1603,7 +1626,7 @@ canvas.addEventListener(
 // Stop Safari's own page pinch from fighting ours.
 for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
-// ---------- Keyboard: WASD or the arrow keys pan, Q opens the selection menu, +/- zoom, Esc clears ----------
+// ---------- Keyboard: WASD or the arrow keys pan, +/- zoom, F or Space deploys, Esc clears (all listed in the menu's Hotkeys) ----------
 
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
@@ -1631,6 +1654,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (menu.classList.contains('settings-open')) menu.querySelector<HTMLButtonElement>('#setBack')!.click();
+    else if (menu.classList.contains('keys-open')) setKeysOpen(false);
     else if (!menu.hidden) setMenu(false);
     else if (placingNow()) game.act?.('unplace');
     else if (pending) setPending(null);
@@ -1640,6 +1664,11 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
   if (e.key === 'q') setSelOpen(!selOpen);
   if (e.key === 'f') game.act?.('deploy');
+  // Space deploys too (and doesn't scroll the page or press a focused button)
+  if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    if (!e.repeat) game.act?.('deploy');
+  }
   if (e.key === 'h') goHome();
   if (e.key === 'p' || e.key === 'Pause') setPaused(true);
   if (e.key === '+' || e.key === '=') zoomTo(zoom * 1.25, window.innerWidth / 2, window.innerHeight / 2);

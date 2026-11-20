@@ -6,7 +6,7 @@
 // below is the same markup whatever is picked.
 import './kit.css';
 import { COIN_ART, IconName, IconSet, icon, prepareIcons } from './icons';
-import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, CursorKind, HARVEST_FRAMES, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames } from '../cursors';
+import { ATTACK_FRAMES, CORNER_FRAMES, CURSORS, CursorKind, DEPLOY_FRAMES, ENTER_FRAMES, MOVE_STEPS, attackRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames } from '../cursors';
 import { GROUP_COLORS, PLAYER_COLORS } from './colors';
 import { COLOR_KEYS, Colors, DEFAULT, Design, FONTS, ICON_SETS, PRESETS, ROLES, Role, fromHash, toHash } from './design';
 import { useFont } from './fonts';
@@ -246,7 +246,7 @@ function moveLine(x1: number, y1: number, x2: number, y2: number) {
 initCursors();
 const RINGS: Record<string, string[]> = { move: moveRingFrames(), foe: attackRingFrames(), ore: harvestRingFrames() };
 const CURSOR_NAMES: [CursorKind, string][] = [
-  ['arrow', 'Pointer'], ['hand', 'Button'], ['move', 'Move'], ['attack', 'Attack'], ['harvest', 'Harvest'],
+  ['arrow', 'Pointer'], ['hand', 'Button'], ['move', 'Move'], ['attack', 'Attack'], ['harvest', 'Harvest'], ['deploy', 'Deploy'], ['enter', 'Go in'],
   ['corners', 'Pick unit'], ['rally', 'Rally'], ['build', 'Place'], ['blocked', 'Can’t'], ['grab', 'Drag'],
 ];
 const cursorImg = (css: string) => css.match(/url\(([^)]+)\)/)?.[1] ?? '';
@@ -257,7 +257,7 @@ let step = 0;
 setInterval(() => {
   step = (step + 1) % MOVE_STEPS;
   const corner = CORNER_FRAMES[Math.floor(step / 3) % CORNER_FRAMES.length];
-  const frame: Partial<Record<CursorKind, string>> = { move: moveCursor(step), attack: ATTACK_FRAMES[step], harvest: HARVEST_FRAMES[step], corners: corner };
+  const frame: Partial<Record<CursorKind, string>> = { move: moveCursor(step), attack: ATTACK_FRAMES[step], harvest: DEPLOY_FRAMES[step], deploy: DEPLOY_FRAMES[step], enter: ENTER_FRAMES[step % ENTER_FRAMES.length], corners: corner };
   const root = document.documentElement.style;
   for (const [k, v] of Object.entries(frame)) root.setProperty(`--cur-${k}`, v);
   for (const img of document.querySelectorAll<HTMLImageElement>('img[data-ring]')) img.src = RINGS[img.dataset.ring!][step];
