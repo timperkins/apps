@@ -26,6 +26,8 @@ import {
   V2FactionArt,
   drawBuggyLights,
   buildingFoot,
+  buildingBlock,
+  BLOCK_CELL,
   makeBuilding,
   makeBushes,
   makeClutter,
@@ -330,6 +332,9 @@ function artReady(set: StackSprite[], d: number): boolean {
   return false;
 }
 
+// The key of the BLOCK_CELL square of the map that (x, y) is in.
+const blockKey = (x: number, y: number) => (Math.floor(x / BLOCK_CELL) + 32768) * 65536 + (Math.floor(y / BLOCK_CELL) + 32768);
+
 // Which click burst an order marker plays.
 function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean }): BurstKind {
   return m.foe ? 'attack' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
@@ -342,6 +347,8 @@ const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc:
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
+// Show where buildings keep units out, for testing: ?blocks in the URL.
+const SHOW_BLOCKS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('blocks');
 const NO_SHROUD = typeof location !== 'undefined' && new URLSearchParams(location.search).has('noshroud');
 
 // Stages to start a game in, for testing: the real start, or straight into a
@@ -768,6 +775,7 @@ export class IsoGame implements GameLike {
     this.oreGrid = new Map();
     this.seaCells = new Map();
     this.landCells = new Map();
+    this.blocksKey = '';
     this.lowWarned = false;
     this.known = new Set();
     this.fresh = new Set();
@@ -2294,16 +2302,66 @@ export class IsoGame implements GameLike {
   }
 
   // Can unit u be at (x, y)? Boats need water, everyone else dry land off
-  // the cliffs (helicopters fly over it all).
+  // the cliffs and out of the buildings (helicopters fly over it all).
   private okAt(u: Unit, x: number, y: number): boolean {
     const w = this.terrain.k(x, y) === K.Water;
-    return u.kind === 'boat' ? w : !w && (u.kind === 'heli' || !this.terrain.cliff(x, y));
+    if (u.kind === 'boat') return w;
+    if (u.kind === 'heli') return !w;
+    if (w || this.terrain.cliff(x, y)) return false;
+    if (!this.blocks.size) return true;
+    // (its body clear of them too, not just its middle; but the building it
+    // is coming out of, or a hauler backing onto its refinery's pad, lets it in)
+    const m = isFoot(u.kind) ? 1.5 : u.kind === 'mcv' ? 6 : 4;
+    const let1 = u.exit?.b.id ?? 0;
+    const let2 = u.job?.st === 'dock' ? (u.job.ref?.id ?? 0) : 0;
+    const free = (bx: number, by: number) => {
+      const b = this.blockAt(bx, by);
+      return b === 0 || b === let1 || b === let2;
+    };
+    return free(x, y) && free(x + m, y) && free(x - m, y) && free(x, y + m) && free(x, y - m);
+  }
+
+  // Where the buildings stand solid (see buildingBlock), as the id of the
+  // building on each BLOCK_CELL square of the first copy of the map (0 for
+  // none). Made again whenever buildings come or go.
+  private blocks = new Map<number, number>();
+  private blocksKey = '';
+
+  private refreshBlocks(): void {
+    const key = this.buildings.map((b) => b.id).join(',');
+    if (key === this.blocksKey) return;
+    this.blocksKey = key;
+    this.blocks.clear();
+    for (const b of this.buildings) {
+      const k = buildingBlock(b.kind);
+      for (let j = 0; j < k.ny; j++)
+        for (let i = 0; i < k.nx; i++) {
+          if (!k.solid[j * k.nx + i]) continue;
+          const [fx, fy] = this.fold(b.x - k.rx + (i + 0.5) * BLOCK_CELL, b.y - k.ry + (j + 0.5) * BLOCK_CELL);
+          this.blocks.set(blockKey(fx, fy), b.id);
+        }
+    }
+    // the way-finding grid's open cells have changed
+    this.landCells.clear();
+  }
+
+  // The id of the building standing at ground point (x, y), or 0.
+  private blockAt(x: number, y: number): number {
+    if (!this.blocks.size) return 0;
+    const [fx, fy] = this.fold(x, y);
+    return this.blocks.get(blockKey(fx, fy)) ?? 0;
   }
 
   // which grid cells of the way-finding grid are open, for boats and for the rest
   private seaCells = new Map<number, boolean>();
-  private landCells = new Map<number, boolean>();
+  private landCells = new Map<Kind, Map<number, boolean>>(); // (each kind of unit by its size)
   private routeMs = 0; // spent finding ways this frame
+
+  private landFor(k: Kind): Map<number, boolean> {
+    let m = this.landCells.get(k);
+    if (!m) this.landCells.set(k, (m = new Map()));
+    return m;
+  }
 
   // The way for unit u to its destination round cliffs and water (see path.ts).
   private route(u: Unit): void {
@@ -2312,7 +2370,9 @@ export class IsoGame implements GameLike {
     const boat = u.kind === 'boat';
     const okFn = (x: number, y: number) => this.okAt(u, x, y);
     const t0 = performance.now();
-    const p = findPath(okFn, u.x, u.y, u.tx, u.ty, boat ? this.seaCells : this.landCells);
+    // (a unit let through a building finds its own way: the shared grid is for everyone else)
+    const own = !!u.exit || u.job?.st === 'dock';
+    const p = findPath(okFn, u.x, u.y, u.tx, u.ty, boat ? this.seaCells : own ? new Map() : this.landFor(u.kind));
     this.routeMs += performance.now() - t0;
     if (p === null) u.moving = false;
     else if (p.length) u.path = p;
@@ -2860,6 +2920,7 @@ export class IsoGame implements GameLike {
 
   update(dt: number): void {
     this.time += dt;
+    this.refreshBlocks();
     this.routeMs = 0;
     this.updateBuild(dt);
     this.enemyAI(dt);
@@ -4765,6 +4826,22 @@ export class IsoGame implements GameLike {
 
     for (const u of this.units) if (u.sel && seen(u.x, u.y, u.z)) this.drawSelection(u);
     for (const b of this.buildings) if (b.sel && seen(b.x, b.y, 10)) this.drawBuildingSel(b);
+    // (for testing, ?blocks in the URL: where each building keeps units out)
+    if (SHOW_BLOCKS)
+      for (const b of this.buildings) {
+        if (!seen(b.x, b.y, 10)) continue;
+        const k = buildingBlock(b.kind);
+        c.fillStyle = 'rgba(255,60,60,0.35)';
+        for (let j = 0; j < k.ny; j++)
+          for (let i = 0; i < k.nx; i++) {
+            if (!k.solid[j * k.nx + i]) continue;
+            const x0 = b.x - k.rx + i * BLOCK_CELL;
+            const y0 = b.y - k.ry + j * BLOCK_CELL;
+            c.beginPath();
+            for (const [px, py] of [[x0, y0], [x0 + BLOCK_CELL, y0], [x0 + BLOCK_CELL, y0 + BLOCK_CELL], [x0, y0 + BLOCK_CELL]]) c.lineTo(...toScreen(px, py));
+            c.fill();
+          }
+      }
     // anything hit lately shows its health for a moment
     for (const u of this.units)
       if (!u.sel && this.time - (u.hitT ?? -9) < 2.5 && seen(u.x, u.y, u.z)) {
