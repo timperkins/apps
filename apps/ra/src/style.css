@@ -1107,6 +1107,18 @@ body.sheet-open #selBar {
   scrollbar-color: var(--wood) var(--well);
 }
 
+/* Cards keep their natural size: when they don't all fit (a short window),
+   the grid scrolls instead of squeezing the pictures into thin strips. */
+#build .grid {
+  flex: 1;
+  min-height: 0;
+  grid-auto-rows: max-content;
+}
+
+#build .item > * {
+  flex: none;
+}
+
 #build .item {
   position: relative;
   display: flex;
