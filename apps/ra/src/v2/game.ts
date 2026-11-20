@@ -4904,18 +4904,22 @@ export class IsoGame implements GameLike {
     }
     const { rx, ry } = b.art;
     c.fillStyle = b.f === this.me ? '#ffffff' : '#ff6a5a';
+    // dots one art pixel across, stepped along each edge at the art grid
     const L = 7;
+    const t = 1 / ART;
+    const dot = (wx: number, wy: number) => {
+      const [sx, sy] = toScreen(wx, wy);
+      c.fillRect(Math.round(sx * ART) / ART, Math.round(sy * ART) / ART, t, t);
+    };
     for (const [cx, cy, dx, dy] of [
       [-rx, -ry, 1, 1],
       [rx, -ry, -1, 1],
       [rx, ry, -1, -1],
       [-rx, ry, 1, -1],
     ]) {
-      for (let k = 0; k <= L; k++) {
-        const [ax, ay] = toScreen(b.x + cx + dx * k, b.y + cy);
-        c.fillRect(Math.round(ax), Math.round(ay), 1, 1);
-        const [bx, by] = toScreen(b.x + cx, b.y + cy + dy * k);
-        c.fillRect(Math.round(bx), Math.round(by), 1, 1);
+      for (let k = 0; k <= L * ART; k++) {
+        dot(b.x + cx + (dx * k) / ART, b.y + cy);
+        dot(b.x + cx, b.y + cy + (dy * k) / ART);
       }
     }
     this.buildingBar(b);
@@ -5223,13 +5227,16 @@ function inside(x: number, y: number, r: Rect, m: number): boolean {
 }
 
 // A health bar: a dark frame, green to red by how much is left, in segments.
+// The frame and the gaps between segments are one art pixel (1 / ART of a map
+// pixel), the same fine grain as the sprites.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
+  const t = 1 / ART;
   c.fillStyle = '#111';
-  c.fillRect(bx - 1, by - 1, bw + 2, 4);
+  c.fillRect(bx - t, by - t, bw + 2 * t, 2 + 2 * t);
   c.fillStyle = hp > 0.66 ? '#5ee05e' : hp > 0.33 ? '#e8d24a' : '#e85a4a';
-  c.fillRect(bx, by, Math.round(bw * hp), 2);
+  c.fillRect(bx, by, Math.round(bw * hp * ART) / ART, 2);
   c.fillStyle = 'rgba(0,0,0,0.35)';
-  for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, 1, 2);
+  for (let i = 3; i < bw; i += 3) c.fillRect(bx + i, by, t, 2);
 }
 
 // A group's number (1 or 2) as a tiny 3 x 5 pixel digit with a dark edge,
@@ -5247,16 +5254,23 @@ function groupDigit(c: CanvasRenderingContext2D, x: number, y: number, n: number
   for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (rows[j][i] === '#') c.fillRect(x + i, y + j, 1, 1);
 }
 
+// Selection brackets, one art pixel thick (1 / ART of a map pixel) to match
+// the grain of the sprites, with arms len + 1 map pixels long.
 function corners(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, len: number): void {
+  const t = 1 / ART;
   const L = len + 1;
-  c.fillRect(x - rx, y - ry, L, 1);
-  c.fillRect(x - rx, y - ry, 1, L);
-  c.fillRect(x + rx - L + 1, y - ry, L, 1);
-  c.fillRect(x + rx, y - ry, 1, L);
-  c.fillRect(x - rx, y + ry, L, 1);
-  c.fillRect(x - rx, y + ry - L + 1, 1, L);
-  c.fillRect(x + rx - L + 1, y + ry, L, 1);
-  c.fillRect(x + rx, y + ry - L + 1, 1, L);
+  const x0 = x - rx;
+  const y0 = y - ry;
+  const x1 = x + rx + 1 - t;
+  const y1 = y + ry + 1 - t;
+  c.fillRect(x0, y0, L, t);
+  c.fillRect(x0, y0, t, L);
+  c.fillRect(x1 - L + t, y0, L, t);
+  c.fillRect(x1, y0, t, L);
+  c.fillRect(x0, y1, L, t);
+  c.fillRect(x0, y1 - L + t, t, L);
+  c.fillRect(x1 - L + t, y1, L, t);
+  c.fillRect(x1, y1 - L + t, t, L);
 }
 
 function pxLine(c: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {
