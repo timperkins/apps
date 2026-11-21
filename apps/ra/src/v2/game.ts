@@ -9,7 +9,7 @@ import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
 import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
-import { cameoUrl, trimBox } from './cameo';
+import { cameoUrl, tabIconUrl } from './cameo';
 import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
@@ -38,7 +38,6 @@ import {
   OreArt,
   makeRocks,
   makeTrees,
-  subjectModel,
   makeConstruction,
   riseTime,
   KNEEL_DROP,
@@ -1157,33 +1156,11 @@ export class IsoGame implements GameLike {
     return cameoUrl(t.id);
   }
 
-  // The model of a building or unit drawn at `scale` times its size on the map.
-  private subjectSprite(id: string, scale: number): StackSprite | null {
-    const m = subjectModel(id, FACTIONS[this.me]);
-    if (!m) return null;
-    const unit = !TECH.some((x) => x.building === id) && !isFoot(id);
-    const angle = unit ? (dirIndex(Math.PI * 0.62, DIRS) / DIRS) * Math.PI * 2 : 0;
-    return renderStack(m.shape, { ...m.o, angle, scale });
-  }
-
   // A small picture of a tab's kind of thing for its button: a Power plant,
-  // a Gun tower, a soldier's head and shoulders and a tank.
+  // a Gun tower, a soldier's head and shoulders and a tank, cut out of the
+  // build menu's renders (src/v2/cameo.ts).
   private tabIcon(tab: Tab): string {
-    const key = `tab:${tab}`;
-    let url = this.icons.get(key);
-    if (url) return url;
-    const id = { base: 'power', defense: 'tower', inf: 'inf', veh: 'light' }[tab];
-    const base = this.subjectSprite(id, 1)!;
-    const [, , tw, th] = trimBox(base.img);
-    const spr = this.subjectSprite(id, Math.min(60 / tw, 52 / th))!;
-    const [x, y, w, h] = trimBox(spr.img);
-    const cv = document.createElement('canvas');
-    cv.width = w;
-    cv.height = h;
-    cv.getContext('2d')!.drawImage(spr.img, x, y, w, h, 0, 0, w, h);
-    url = cv.toDataURL();
-    this.icons.set(key, url);
-    return url;
+    return tabIconUrl(tab);
   }
 
   // The sprites a unit is drawn from, facing down and to the left.
