@@ -35,9 +35,12 @@ export const TECH: Tech[] = [
   { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
 
   { id: 'inf', name: 'G.I.', tab: 'inf', cost: 100, needs: ['barracks'], unit: 'inf', from: 'barracks', blurb: 'Cheap foot soldier. Deploys behind sandbags to hold ground.' },
+  { id: 'dog', name: 'Attack dog', tab: 'inf', cost: 200, needs: ['barracks'], unit: 'dog', from: 'barracks', blurb: 'Fast and sharp-eyed. Kills a soldier in one bite, but cannot hurt vehicles or buildings.' },
   { id: 'gren', name: 'Grenadier', tab: 'inf', cost: 160, needs: ['barracks'], unit: 'gren', from: 'barracks', blurb: 'Lobs grenades: good against soldiers and buildings.' },
+  { id: 'flamer', name: 'Flame trooper', tab: 'inf', cost: 300, needs: ['barracks'], unit: 'flamer', from: 'barracks', blurb: 'Short-range flamethrower: burns soldiers in groups and sets buildings alight.' },
   { id: 'eng', name: 'Engineer', tab: 'inf', cost: 500, needs: ['barracks'], unit: 'eng', from: 'barracks', blurb: 'Unarmed. Repairs a bridge from its blockhouse, or one of your buildings, and is used up doing it.' },
   { id: 'rocket', name: 'Rocketeer', tab: 'inf', cost: 300, needs: ['barracks'], unit: 'rocket', from: 'barracks', blurb: 'Foot soldier with a rocket launcher.' },
+  { id: 'cmdo', name: 'Commando', tab: 'inf', cost: 1000, needs: ['barracks', 'lab'], unit: 'cmdo', from: 'barracks', blurb: 'One at a time. Picks off soldiers from range, swims, and blows up buildings and bridges with timed charges.' },
 
   { id: 'buggy', name: 'Scout buggy', tab: 'veh', cost: 400, needs: ['factory'], unit: 'buggy', from: 'factory', blurb: 'Fast and light.' },
   { id: 'apc', name: 'Mule APC', tab: 'veh', cost: 600, needs: ['factory', 'barracks'], unit: 'apc', from: 'factory', blurb: 'Armored carrier for five foot soldiers.' },
