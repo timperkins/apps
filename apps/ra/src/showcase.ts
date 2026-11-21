@@ -482,6 +482,8 @@ function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
   } else if (kind === 'bullet') {
     if (soft) fx.dust(sx, sy);
     else fx.sparks(sx, sy, 4);
+  } else if (kind === 'flame') {
+    fx.scorch(sx, sy, 4.2);
   } else {
     fx.boom(sx, sy, kind === 'rocket' ? 3.5 : 3);
     fx.sparks(sx, sy, 6);
