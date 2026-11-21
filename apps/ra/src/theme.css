@@ -684,3 +684,68 @@ body {
     font-size: 26px;
   }
 }
+
+/* ---------- Round home button, bare menu button ---------- */
+
+/* Back to your base: a smaller round button instead of a square pixel frame. */
+#toolbar #homeBtn {
+  align-self: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  margin: 0 6px;
+  border: 2px solid var(--line);
+  border-image: none;
+  border-radius: 50%;
+  background: var(--panel-solid);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.06);
+}
+#toolbar #homeBtn svg {
+  width: 22px;
+  height: 22px;
+}
+@media (hover: hover) {
+  #toolbar #homeBtn:hover {
+    border-color: var(--accent);
+    border-image: none;
+  }
+}
+
+/* The menu button is just its icon over the map, still a full-size tap target.
+   The HUD drops its panel too; the credits keep their own well. */
+#hud {
+  padding: 4px;
+  border: 0;
+  border-image: none;
+  background: none;
+  filter: none;
+}
+#hud #credits {
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45));
+}
+#menuBtn,
+#menuBtn[aria-expanded='true'] {
+  width: 44px;
+  height: 44px;
+  background: none;
+  border: 0;
+  border-image: none;
+  box-shadow: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.7));
+}
+#menuBtn {
+  color: var(--ink);
+}
+#menuBtn[aria-expanded='true'] {
+  color: var(--accent);
+}
+#menuBtn svg {
+  width: 28px;
+  height: 28px;
+}
+@media (hover: hover) {
+  #menuBtn:hover {
+    color: var(--accent);
+    border-image: none;
+  }
+}
