@@ -36,6 +36,7 @@ export const TECH: Tech[] = [
 
   { id: 'inf', name: 'G.I.', tab: 'inf', cost: 100, needs: ['barracks'], unit: 'inf', from: 'barracks', blurb: 'Cheap foot soldier. Deploys behind sandbags to hold ground.' },
   { id: 'gren', name: 'Grenadier', tab: 'inf', cost: 160, needs: ['barracks'], unit: 'gren', from: 'barracks', blurb: 'Lobs grenades: good against soldiers and buildings.' },
+  { id: 'eng', name: 'Engineer', tab: 'inf', cost: 500, needs: ['barracks'], unit: 'eng', from: 'barracks', blurb: 'Unarmed. Repairs a bridge from its blockhouse, or one of your buildings, and is used up doing it.' },
   { id: 'rocket', name: 'Rocketeer', tab: 'inf', cost: 300, needs: ['barracks'], unit: 'rocket', from: 'barracks', blurb: 'Foot soldier with a rocket launcher.' },
 
   { id: 'buggy', name: 'Scout buggy', tab: 'veh', cost: 400, needs: ['factory'], unit: 'buggy', from: 'factory', blurb: 'Fast and light.' },

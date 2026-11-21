@@ -54,6 +54,7 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   mcv: { name: 'MCU', speed: 10, turn: 1.3, r: 15, hp: 1 },
   apc: { name: 'Mule APC', speed: 26, turn: 3, r: 9, hp: 1 },
   gren: { name: 'Grenadier', speed: 8.5, turn: 99, r: 4, hp: 1 },
+  eng: { name: 'Engineer', speed: 9, turn: 99, r: 4, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
   yard: 'Foundry',
@@ -84,6 +85,7 @@ const VOICE: Record<Kind, UnitVoice> = {
   inf: 'soldier',
   rocket: 'soldier',
   gren: 'soldier',
+  eng: 'engineer',
   light: 'tank',
   heavy: 'tank',
   arty: 'tank',
@@ -103,7 +105,7 @@ const PACE_R = 6; // and how far from where it was left
 // the ramp at the back one every EXIT_S seconds.
 const CARGO = 5;
 const EXIT_S = 0.22;
-const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren']);
+const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren', 'eng']);
 
 interface Unit {
   id: number; // the same on every player's screen in a multiplayer game
@@ -196,6 +198,10 @@ interface Unit {
   // and how many times it has stopped short of it
   board?: number;
   boardTry?: number;
+  // an Engineer on its way to mend a bridge (at one of its huts) or a
+  // building of its side's (the id), and how many times it has stopped short
+  fix?: number;
+  fixTry?: number;
   // a transport's passengers (out of play while they ride), and whether it
   // is letting them out, and when the next one gets out
   cargo?: Unit[];
@@ -380,14 +386,14 @@ const DECK_CELL = 3;
 const deckKey = (x: number, y: number) => (Math.floor(x / DECK_CELL) + 32768) * 65536 + (Math.floor(y / DECK_CELL) + 32768);
 
 // Which click burst an order marker plays.
-function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean }): BurstKind {
-  return m.foe ? 'attack' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
+function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }): BurstKind {
+  return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -415,8 +421,8 @@ const GARRISON: [Kind, number][] = [
   ['gren', 3],
 ];
 // The walk and stand frames of each kind of foot soldier.
-const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] => (k === 'rocket' ? art.rocket : k === 'gren' ? art.gren : art.infantry);
-const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', light: 'factory', heavy: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
+const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] => (k === 'rocket' ? art.rocket : k === 'gren' ? art.gren : k === 'eng' ? art.eng : art.infantry);
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', light: 'factory', heavy: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
 // ...and it waits in groups of this many at each of its posts round its base.
 const SQUAD = 4;
 const POSTS = 6;
@@ -454,6 +460,7 @@ export type Command =
   | { c: 'attack'; u: number[]; t: number }
   | { c: 'deploy'; u: number[] }
   | { c: 'board'; u: number[]; t: number } // soldiers get into transport t
+  | { c: 'fix'; u: number[]; t: number } // engineers go and mend bridge or building t
   | { c: 'dock'; u: number[]; b: number } // ore haulers go and unload at refinery b
   | { c: 'unload'; u: number[] } // transports let their soldiers out
   | { c: 'entrench'; u: number[]; on: boolean } // G.I.s dig in behind sandbags, or climb out
@@ -537,7 +544,7 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   // where you tapped an order: the move (or attack, foe) burst plays there
-  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean; enter?: boolean }[] = [];
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private fires: Fire[] = [];
@@ -722,6 +729,7 @@ export class IsoGame implements GameLike {
       case 'inf':
       case 'rocket':
       case 'gren':
+      case 'eng':
         return [...footFrames(art, u.kind), ...(u.kind === 'inf' ? art.infantryDug : [])].map((s): [StackSprite[], number] => [s, dirIndex(u.a, 16)]);
       case 'light':
         return [[art.lightTank, di], [art.lightTurret, dirIndex(u.turret, DIRS)]];
@@ -2587,6 +2595,12 @@ export class IsoGame implements GameLike {
       return 'attack';
     }
     if (this.rideAt(x, y)) return 'enter';
+    // Engineers selected, over a damaged bridge (or its hut) or building of yours: mend it
+    const fix = this.fixAt(x, y);
+    if (fix) {
+      if (isBridge(fix)) this.hoverBridge = fix;
+      return 'repair';
+    }
     const hit = this.unitAt(x, y);
     // over a picked unit of yours that can deploy (a Foundry vehicle that
     // can unfold here, a G.I. to dig in or climb out, a transport with
@@ -2628,6 +2642,70 @@ export class IsoGame implements GameLike {
     return b && !b.dead && sel.some((u) => this.canHit(WEAPON[u.kind], b)) ? b : null;
   }
 
+  // What the Engineers you have selected would mend at screen point (x, y):
+  // a damaged or destroyed bridge (a tap on it or on one of its huts), or a
+  // damaged building of yours.
+  private fixAt(x: number, y: number): Bridge | Building | null {
+    if (this.force) return null;
+    if (!this.mine().some((u) => u.kind === 'eng')) return null;
+    const b = this.hutAt(x, y) ?? this.bridgeAt(x, y);
+    if (b) return b.dead || b.hp < 1 ? b : null;
+    const h = this.buildingAt(x, y);
+    return h && h.f === this.me && h.hp < 1 && h.rise >= 1 && !h.packing ? h : null;
+  }
+
+  // The bridge one of whose huts is under screen point (x, y).
+  private hutAt(x: number, y: number): Bridge | null {
+    if (this.shroud && !this.shroud.seen(x, y)) return null;
+    for (const b of this.bridges)
+      for (const [hx, hy] of b.huts) {
+        const [sx, sy] = toScreen(hx, hy, 4);
+        const lx = Math.round((x - sx) / this.w) * this.w;
+        const ly = Math.round((y - sy) / this.h) * this.h;
+        if (Math.hypot(x - lx - sx, (y - ly - sy) * 1.4) < 9) return b;
+      }
+    return null;
+  }
+
+  // Send the Engineers you have selected to mend t.
+  private fixOrder(t: Bridge | Building): void {
+    const go = this.mine().filter((u) => u.kind === 'eng' && !u.deploy);
+    this.command({ c: 'fix', u: go.map((u) => u.id), t: t.id });
+    t.aimT = this.time;
+    if (this.moveMarks && go.length) {
+      const [px, py] = this.fixPoint(go[0], t);
+      const [mx, my] = this.fold(px, py);
+      this.markers.push({ x: mx, y: my, z: 0, t: 0, fix: true });
+    }
+    ui('order_confirm', 1.2);
+    this.speak(go, 'repair');
+  }
+
+  // Where Engineer u goes to mend t: just outside the nearest of a bridge's
+  // huts, or the edge of a building nearest it (in u's coordinates).
+  private fixPoint(u: Unit, t: Bridge | Building): [number, number] {
+    if (isBridge(t)) {
+      let best: [number, number] = t.huts[0];
+      let bd = 1e9;
+      for (const [hx, hy] of t.huts) {
+        const [nx, ny] = this.nearPoint(u.x, u.y, hx, hy);
+        const d = Math.hypot(nx - u.x, ny - u.y);
+        if (d < bd) {
+          bd = d;
+          best = [nx, ny];
+        }
+      }
+      const [hx, hy] = best;
+      const d = Math.hypot(u.x - hx, u.y - hy) || 1;
+      const r = HUT_R + 4;
+      return [hx + ((u.x - hx) / d) * r, hy + ((u.y - hy) / d) * r];
+    }
+    const [cx, cy] = this.nearPoint(u.x, u.y, t.x, t.y);
+    const rx = t.art.rx + 3;
+    const ry = t.art.ry + 3;
+    return [Math.max(cx - rx, Math.min(cx + rx, u.x)), Math.max(cy - ry, Math.min(cy + ry, u.y))];
+  }
+
   // Whether act('deploy') (F, Space or the deploy cursor) would do anything
   // for unit u of yours.
   private deploysNow(u: Unit): boolean {
@@ -2667,7 +2745,7 @@ export class IsoGame implements GameLike {
   // You command your own side. Enemy units and buildings can be tapped to
   // look at them (their health), but not ordered about.
   click(x: number, y: number, add: boolean): void {
-    if (this.forceBridge(x, y)) return this.order(x, y);
+    if (this.forceBridge(x, y) || this.fixAt(x, y)) return this.order(x, y);
     // soldiers selected and a tap on a transport of yours: they get in
     const ride = add ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
@@ -2763,6 +2841,9 @@ export class IsoGame implements GameLike {
     const foe = fb ?? (shortest ? null : this.enemyAt(x, y));
     const ride = shortest || fb ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
+    // Engineers onto something to mend: they go and mend it (the rest stay put)
+    const fix = shortest || fb ? null : this.fixAt(x, y);
+    if (fix) return this.fixOrder(fix);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
       this.command({ c: 'attack', u: sel.map((u) => u.id), t: foe.id });
       foe.aimT = this.time;
@@ -3063,6 +3144,7 @@ export class IsoGame implements GameLike {
     if (this.net !== 'client')
       for (const u of [...this.units]) {
         if (u.board !== undefined && !u.dead) this.boarding(u);
+        if (u.fix !== undefined && !u.dead) this.fixing(u);
         if (u.unloading && !u.dead) this.letOut(u, dt);
       }
     for (const u of [...this.units]) if (!u.dead && !u.exit) this.fight(u, dt);
@@ -3501,7 +3583,7 @@ export class IsoGame implements GameLike {
           const u = unit(id);
           if (!u || u.deploy) continue;
           if (u.kind === 'hauler' && !dig.has(id)) u.job = undefined;
-          u.board = undefined;
+          u.board = u.fix = undefined;
           u.unloading = false;
           // a dug-in G.I. climbs out of its sandbags, then goes
           u.dug = false;
@@ -3557,6 +3639,24 @@ export class IsoGame implements GameLike {
           u.forced = u.chase = false;
           u.dest = u.aim = undefined;
           [u.tx, u.ty] = this.nearPoint(u.x, u.y, t.x, t.y);
+          u.moving = true;
+        }
+        break;
+      }
+      case 'fix': {
+        const t = this.bridges.find((o) => o.id === cmd.t) ?? bldg(cmd.t);
+        if (!t || (!isBridge(t) && (t.rise < 1 || t.packing))) break;
+        for (const id of cmd.u) {
+          const u = unit(id);
+          if (!u || u.kind !== 'eng') continue;
+          u.fix = t.id;
+          u.fixTry = 0;
+          u.board = undefined;
+          u.target = undefined;
+          u.forced = u.chase = false;
+          u.dest = u.aim = undefined;
+          u.home = u.pace = undefined;
+          [u.tx, u.ty] = this.fixPoint(u, t);
           u.moving = true;
         }
         break;
@@ -4481,6 +4581,68 @@ export class IsoGame implements GameLike {
     u.repath = 0;
   }
 
+  // ---------- Engineers ----------
+
+  // An Engineer on its way to mend something: when it gets there it goes in
+  // and mends it, and is used up. It gives up if the thing is gone or no
+  // longer needs it, or after stopping short of it a few times.
+  private fixing(u: Unit): void {
+    const t: Bridge | Building | undefined = this.bridges.find((o) => o.id === u.fix) ?? this.buildings.find((o) => o.id === u.fix && o.f === u.f && !o.dead);
+    const stop = () => {
+      u.fix = undefined;
+      if (u.moving) {
+        u.moving = false;
+        u.tx = u.x;
+        u.ty = u.y;
+      }
+    };
+    if (!t || (!t.dead && t.hp >= 1) || (!isBridge(t) && t.packing)) return stop();
+    const [px, py] = this.fixPoint(u, t);
+    let there: boolean;
+    if (isBridge(t)) there = t.huts.some(([hx, hy]) => {
+      const [nx, ny] = this.nearPoint(u.x, u.y, hx, hy);
+      return Math.hypot(nx - u.x, ny - u.y) < HUT_R + 7;
+    });
+    else {
+      const [cx, cy] = this.nearPoint(u.x, u.y, t.x, t.y);
+      there = Math.abs(u.x - cx) <= t.art.rx + 6 && Math.abs(u.y - cy) <= t.art.ry + 6;
+    }
+    if (there) return this.mend(u, t);
+    if (!u.moving) {
+      if ((u.fixTry = (u.fixTry ?? 0) + 1) > 3) return stop();
+    }
+    if (!u.moving || Math.hypot(u.tx - px, u.ty - py) > 3) {
+      u.tx = px;
+      u.ty = py;
+      u.moving = true;
+    }
+  }
+
+  // Engineer u goes into t and mends it: a bridge stands again whole, a
+  // building is back to full strength. The Engineer is used up.
+  private mend(u: Unit, t: Bridge | Building): void {
+    this.units.splice(this.units.indexOf(u), 1);
+    this.gone.push([u.id, GONE_QUIET]);
+    const was = u.sel;
+    u.sel = false;
+    u.grp = undefined;
+    u.fix = undefined;
+    if (this.lastTap?.u === u) this.lastTap = null;
+    if (isBridge(t)) {
+      this.mendBridge(t);
+      if (u.f === this.me) this.notice('Bridge repaired');
+    } else {
+      t.hp = 1;
+      const [sx, sy] = toScreen(t.x, t.y, 8);
+      for (let i = 0; i < 5; i++) this.fx.dust(sx + (Math.random() - 0.5) * t.art.rx * 1.6, sy + (Math.random() - 0.5) * 8, 4);
+      this.sound(t.x, t.y, 'build_place', 0.8, { rate: 1.2 });
+      if (u.f === this.me) this.notice('Building repaired');
+    }
+    this.sound(u.x, u.y, 'build_place', 0.4, { rate: 1.6 }, u.z);
+    this.mapVersion++;
+    if (was) this.emit();
+  }
+
   // ---------- Transports ----------
 
   // A soldier on its way to a transport: it follows it, and gets in when it
@@ -4729,6 +4891,7 @@ export class IsoGame implements GameLike {
       case 'inf':
       case 'rocket':
       case 'gren':
+      case 'eng':
         return [[this.footSprite(u), u.x, u.y, u.z]];
       case 'light':
       case 'heavy':
@@ -5316,6 +5479,7 @@ export class IsoGame implements GameLike {
       case 'inf':
       case 'rocket':
       case 'gren':
+      case 'eng':
         this.blit(this.footSprite(u), u.x, u.y, u.z);
         break;
       case 'light':
