@@ -10,6 +10,8 @@ import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
 
 const TAU = Math.PI * 2;
 const HELI_ALT = 20; // as in the game (see combat.ts)
+const JET_ALT = 30;
+const PLANE_ALT = 48;
 
 // ---------- The ground: plain grass, in the game's greens ----------
 
@@ -458,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -1036,6 +1038,78 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     addRow(parent, 'Kestrel copter', blurbOf('heli'), cells);
   }
 
+  // the Heron, the Swift jet and the cargo plane, as the game draws them
+  const flyerDraw =
+    (art: V2FactionArt, kind: 'heron' | 'jet' | 'plane'): Draw =>
+    (s, x, y, a, t) => {
+      const spr = art[kind][di(a)];
+      const alt = kind === 'heron' ? HELI_ALT : kind === 'jet' ? JET_ALT : PLANE_ALT;
+      const z = alt + (kind === 'heron' ? Math.sin(t * 2) * 1.2 : kind === 'jet' ? Math.sin(t * 2.6) * 0.6 : 0);
+      const k = alt / HELI_ALT;
+      s.shadow(spr, x + 4 * k, y - 2 * k, 0);
+      s.blit(spr, x, y, z);
+      const c = s.c;
+      if (kind === 'heron') {
+        c.fillStyle = 'rgba(28,28,28,0.5)';
+        for (const [ru, rz, sg] of [[6, 8.4, 1], [-8.6, 10.2, -1]]) {
+          const hx = x + Math.cos(a) * ru;
+          const hy = y + Math.sin(a) * ru;
+          for (let b = 0; b < 3; b++) {
+            const ang = sg * t * 24 + (b * Math.PI * 2) / 3;
+            const [x0, y0] = toScreen(hx, hy, z + rz);
+            const [x1, y1] = toScreen(hx + Math.cos(ang) * 9.5, hy + Math.sin(ang) * 9.5, z + rz);
+            pxLine(c, x0, y0, x1, y1);
+          }
+        }
+      } else if (kind === 'jet') {
+        const [ex, ey] = toScreen(x - Math.cos(a) * 9.6, y - Math.sin(a) * 9.6, z + 3.4);
+        c.fillStyle = Math.floor(t * 30) % 2 ? '#ffd65a' : '#ff8a3a';
+        c.fillRect(Math.round(ex * 2) / 2, Math.round(ey * 2) / 2, 1, 0.5);
+      } else {
+        c.fillStyle = 'rgba(28,28,28,0.45)';
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        for (const side of [-12.5, -6.5, 6.5, 12.5]) {
+          const [px, py] = toScreen(x + ca * 2.4 - sa * side, y + sa * 2.4 + ca * side, z + 3.2);
+          const sz = Math.floor(t * 24 + side) % 2 ? 2 : 1;
+          c.fillRect(Math.round(px) - sz, Math.round(py), sz * 2 + 1, 1);
+        }
+      }
+    };
+  for (const [kind, name, blurb, R] of [
+    ['heron', 'Heron transport', blurbOf('heron'), 22],
+    ['jet', 'Swift jet', blurbOf('jet'), 26],
+    ['plane', 'Cargo plane', 'Flies in from the Air command to drop eight paratroopers wherever you pick, every few minutes. It can be shot down on the way.', 34],
+  ] as const) {
+    const spr = me[kind][0];
+    const alt = kind === 'heron' ? HELI_ALT : kind === 'jet' ? JET_ALT : PLANE_ALT;
+    const k = alt / HELI_ALT;
+    const air = union(boxOf(spr, 0, 0, alt + 1.5), boxOf(spr, 4 * k, -2 * k, 0), { l: 18, r: 18, u: alt + 14, d: 10 });
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box: air, anim: true, draw: (s, t) => flyerDraw(me, kind)(s, 0, 0, a, t) }));
+    cells.push({
+      label: 'Fly',
+      box: union(circleBox(spr, R + 4 * k + 4, alt + 1.5), { l: R * 1.42 + 22, r: R * 1.42 + 22, u: alt + 26, d: R * 0.71 + 10 }),
+      anim: true,
+      draw: (s, t) => {
+        const [x, y, a] = round(t, R, kind === 'heron' ? 30 : 50);
+        flyerDraw(me, kind)(s, x, y, a, t);
+      },
+    });
+    if (kind !== 'plane')
+      cells.push(
+        ...combatCells({
+          kind,
+          spr,
+          still: air,
+          air: alt,
+          draw: (s, x, y, a, _tur, t) => flyerDraw(me, kind)(s, x, y, a, t),
+          parts: [[me[kind][di(A)], 0, 0, alt]],
+        }),
+      );
+    cells.push({ label: 'Enemy', box: air, anim: true, draw: (s, t) => flyerDraw(foe, kind)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, name, blurb, cells);
+  }
+
   // the boat bobs (it only goes on water in the game)
   const boatDraw =
     (art: V2FactionArt): Draw =>
@@ -1083,9 +1157,10 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'refinery', name: 'Ore refinery' },
   { kind: 'silo', name: 'Ore silo' },
   { kind: 'factory', name: 'Vehicle works' },
-  { kind: 'radar', name: 'Radar mast' },
+  { kind: 'radar', name: 'Air command' },
   { kind: 'helipad', name: 'Helipad' },
   { kind: 'lab', name: 'Tech lab' },
+  { kind: 'uplink', name: 'Satellite uplink' },
   { kind: 'depot', name: 'Service depot' },
   { kind: 'wall', name: 'Wall' },
   { kind: 'tower', name: 'Gun tower' },
