@@ -20,6 +20,15 @@ function walk(ok: (x: number, y: number) => boolean, sx: number, sy: number, pat
 }
 
 describe('findPath', () => {
+  it('reaches a goal just behind a wall whose cell middle is blocked', () => {
+    // a thin wall at x = 10..14; the goal is open ground right behind it
+    // (x = 14.5), but the grid cell it falls in has its middle in the wall
+    const thin = (x: number, y: number) => !(x >= 10 && x <= 14 && Math.abs(y) <= 60);
+    const p = findPath(thin, -30, 0, 14.5, 0)!;
+    expect(p[p.length - 1]).toEqual([14.5, 0]);
+    expect(walk(thin, -30, 0, p)).toBe(true);
+  });
+
   it('goes straight when nothing is in the way', () => {
     expect(findPath(wall, -50, 100, 50, 100)).toEqual([]);
   });

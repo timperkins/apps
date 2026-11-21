@@ -2209,6 +2209,12 @@ export class IsoGame implements GameLike {
     return free(x, y) && free(x + m, y) && free(x - m, y) && free(x, y + m) && free(x, y - m);
   }
 
+  // Is (x, y) inside a building that unit u isn't let into?
+  private inBuilding(u: Unit, x: number, y: number): boolean {
+    const b = this.blockAt(x, y);
+    return b !== 0 && b !== u.exit?.b.id && !(u.job?.st === 'dock' && b === u.job.ref?.id);
+  }
+
   // Where the buildings stand solid (see buildingBlock), as the id of the
   // building on each BLOCK_CELL square of the first copy of the map (0 for
   // none). Made again whenever buildings come or go.
@@ -2942,8 +2948,16 @@ export class IsoGame implements GameLike {
           }
           // a long slide along the shore means it is trying to get somewhere
           // across the water: give up
+          // (as long as a slow soldier takes to slide some 80 units, and
+          // first, on a way round a building, look for the way again from here)
           u.slideT = slideA === null ? Math.max(0, (u.slideT ?? 0) - dt * 0.5) : (u.slideT ?? 0) + dt;
-          if (u.slideT > 8) u.moving = false;
+          if (u.slideT > Math.max(8, 80 / st.speed)) {
+            u.slideT = 0;
+            if (!u.rerouted) {
+              u.rerouted = true;
+              this.route(u);
+            } else u.moving = false;
+          }
           const diff = angDiff(face, u.a);
           const stepA = st.turn * dt;
           u.a = Math.abs(diff) <= stepA ? face : u.a + Math.sign(diff) * stepA;
@@ -2972,7 +2986,8 @@ export class IsoGame implements GameLike {
           // never step from dry land into the water (or a boat onto land)
           const nx = u.x + Math.cos(ang) * sp;
           const ny = u.y + Math.sin(ang) * sp;
-          if (u.kind === 'heli' || this.okAt(u, nx, ny) || !this.okAt(u, u.x, u.y)) {
+          // (somewhere it shouldn't be, it can drive out, but not on into a building)
+          if (u.kind === 'heli' || this.okAt(u, nx, ny) || (!this.okAt(u, u.x, u.y) && (!this.inBuilding(u, nx, ny) || this.inBuilding(u, u.x, u.y)))) {
             u.x = nx;
             u.y = ny;
           } else if (sp > 0) {

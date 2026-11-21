@@ -108,16 +108,21 @@ export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number,
   let exact = goalOk;
   if (!cellOk(gi, gj)) {
     exact = false;
-    let found = false;
-    for (let r = 1; r <= 12 && !found; r++)
-      for (let dj = -r; dj <= r && !found; dj++)
-        for (let di = -r; di <= r; di++) {
-          if (Math.max(Math.abs(di), Math.abs(dj)) !== r || !cellOk(gi + di, gj + dj)) continue;
-          gi += di;
-          gj += dj;
-          found = true;
-          break;
-        }
+    // (when the goal itself is open, just its cell's middle isn't, as beside
+    // a wall: the nearest open cell it can be seen from, so the way ends on
+    // its side of the wall)
+    const look = (see: boolean) => {
+      for (let r = 1; r <= 12; r++)
+        for (let dj = -r; dj <= r; dj++)
+          for (let di = -r; di <= r; di++) {
+            if (Math.max(Math.abs(di), Math.abs(dj)) !== r || !cellOk(gi + di, gj + dj)) continue;
+            if (see && !clearLine(ok, (gi + di) * STEP, (gj + dj) * STEP, gx, gy)) continue;
+            return [gi + di, gj + dj];
+          }
+      return null;
+    };
+    const c = (goalOk && look(true)) || look(false);
+    if (c) [gi, gj] = c;
   }
   const sk = key(si, sj);
   const gk = key(gi, gj);
