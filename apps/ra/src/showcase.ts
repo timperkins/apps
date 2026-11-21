@@ -2,7 +2,7 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
@@ -1201,6 +1201,7 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
 ];
 
 // The building's moving parts and smoke, as the game draws them.
+const labGlow: (StackSprite | null)[] = [];
 function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art: V2FactionArt, dish: StackSprite[], phase: number, dt: number, gun: number): void {
   const c = s.c;
   const f = FACTIONS[fi];
@@ -1230,9 +1231,14 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
       blink(1.5);
       break;
     case 'lab': {
-      const [x, y] = fx(0);
-      c.fillStyle = `rgba(160,240,255,${0.25 + 0.2 * Math.sin(phase * 3)})`;
-      c.fillRect(x - 3, y - 5, 7, 9);
+      // the dome's panes brighten and dim with the light inside
+      const glow = (labGlow[fi] ??= makeBuildingGlow('lab', f));
+      if (!glow) break;
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = 0.18 + 0.14 * Math.sin(phase * 2.4);
+      s.blit(glow, 0, 0, 0);
+      c.restore();
       break;
     }
     case 'barracks': {

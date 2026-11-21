@@ -505,19 +505,43 @@ function crystal(u: number, v: number, z: number, cu: number, cv: number, cz: nu
   return LENS_D;
 }
 
-// The Lumen tank's turret: a crystal held up in a cradle on a turntable.
+// The Lumen tank's turret: a turntable carrying a tall emitter mast, braced
+// by two fins of the side's color, with a big crystal held up high in a
+// cradle at its top (which the beam leaves from: LUMEN_Z).
+export const LUMEN_Z = 15.6;
 function lumenTurret(f: Faction): Shape {
+  const glow = glowOf(f);
   return (u, v, z) => {
     if (z < 5) return null;
-    const c = crystal(u, v, z, 0, 0, 10.4, 2.3, 3);
+    const c = crystal(u, v, z, 0, 0, LUMEN_Z, 2.8, 3.8);
     if (c) return c;
     const d = Math.hypot(u + 0.3, v);
-    // the turntable, an emitter collar and two cradle arms
-    if (d < 3.8 && z < 6.4) return z > 5.8 ? (d > 3.2 ? shade(f.dark, 0.1) : mix(f.main, f.light, 0.4)) : f.dark;
-    if (d < 1.1 && z < 7.6) return z > 7 ? GUN_L : GUN;
-    if (Math.abs(Math.abs(v) - 2.3) < 0.45 && Math.abs(u) < 0.6 && z < 10.6) return z > 9.6 ? GUN_L : z > 6.4 ? GUN : GUN_D;
+    const av = Math.abs(v);
+    // the turntable, with a ring of glowing ports
+    if (d < 4.4 && z < 6.8) {
+      if (z > 6.2) return d > 3.8 ? shade(f.dark, 0.1) : mix(f.main, f.light, 0.4);
+      if (z > 5.5 && mod(Math.atan2(v, u + 0.3) * 6 / Math.PI, 1) < 0.35) return glow;
+      return f.dark;
+    }
+    // the mast: four-sided, narrowing up to the cradle, a glowing slit up its front
+    const mr = 1.9 - (z - 6.8) * 0.08;
+    if (z < 12 && Math.max(Math.abs(u), av) < mr) {
+      if (u > mr - 0.5 && av < 0.4 && z > 7.4) return glow;
+      return z > 11.4 ? GUN_L : g(mod(Math.floor(z * 1.2), 3) ? GUN : GUN_D, u, v, z);
+    }
+    // the two fins either side, sweeping up from the turntable to the cradle
+    const fo = 3.6 - (z - 6.8) * 0.42;
+    if (z < 12.4 && Math.abs(av - Math.max(1.2, fo)) < 0.45 && Math.abs(u + (z - 6.8) * 0.15) < 1.8 - (z - 6.8) * 0.18) return z > 11.6 ? f.light : g(f.main, u, v, z);
+    // the cradle: a collar and four prongs round the crystal
+    if (z >= 12 && z < 13 && Math.hypot(u, v) < 2.2) return z > 12.6 ? f.light : GUN_D;
+    if (z >= 13 && z < 17.4) {
+      const pr = 1.8 + (z - 13) * 0.5 - Math.max(0, z - 15.8) * 1.2;
+      const ph = mod(Math.atan2(v, u) / (Math.PI / 2) + 0.5, 1);
+      const r = Math.hypot(u, v);
+      if (Math.abs(r - pr) < 0.45 && Math.min(ph, 1 - ph) * (Math.PI / 2) * r < 0.5) return GUN_L;
+    }
     // a counterweight box behind
-    if (u < -2.4 && u > -4.6 && Math.abs(v) < 1.8 && z < 7.6) return z > 7.1 ? mix(f.main, f.light, 0.4) : f.main;
+    if (u < -2.4 && u > -5 && av < 2 && z < 8) return z > 7.5 ? mix(f.main, f.light, 0.4) : f.main;
     return null;
   };
 }
@@ -1519,8 +1543,8 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }, k('towerGun')),
     scorchTank: renderDirs(tankHull(f, 17, 12.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('scorchTank')),
     scorchTurret: renderDirs(scorchTurret(f), DIRS, { r: 10, zmax: 10 }, k('scorchTurret')),
-    lumenTank: renderDirs(tankHull(f, 16, 13, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lumenTank')),
-    lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 14 }, k('lumenTurret')),
+    lumenTank: renderDirs(tankHull(f, 17, 13.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('lumenTank')),
+    lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 20 }, k('lumenTurret')),
     aaGun: renderDirs(aaLauncher(f), DIRS, { r: 7.5, zmax: 10 }, k('aaGun')),
     heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
     jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
@@ -1661,390 +1685,427 @@ function lattice(u: number, v: number, z: number, cu: number, cv: number, hw: nu
   return null;
 }
 
-function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
+// ---- Round forms, for the buildings ----
+// The buildings follow one look: tall rounded blocks, drums and domes in a
+// pale rendered concrete, with the side's color in bands and in glowing glass.
+
+const PLAS = hex('#cfcbbf');
+const PLAS_D = hex('#a29e92');
+const PLAS_L = hex('#e6e3d8');
+
+/** Signed distance (negative inside) from (u, v) to a rounded rectangle in plan. */
+function rrect(u: number, v: number, cu: number, cv: number, hx: number, hy: number, r: number): number {
+  const qx = Math.abs(u - cu) - hx + r;
+  const qy = Math.abs(v - cv) - hy + r;
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+}
+/** The top of a block h high whose roof edge is rounded over (radius fr), e in from its edge. */
+function shoulder(e: number, h: number, fr: number): number {
+  return e >= fr ? h : h - fr + Math.sqrt(Math.max(0, fr * fr - (fr - e) ** 2));
+}
+/** How high a dome of radius r and height hz stands at d from its middle (-1 outside it). */
+function capH(d: number, r: number, hz: number): number {
+  return d >= r ? -1 : hz * Math.sqrt(1 - (d / r) ** 2);
+}
+/** A glowing glass in the side's color. */
+function glowOf(f: Faction): RGB {
+  return mix(f.light, WHITE, 0.3);
+}
+
+// The face of a rounded wall: a dark footing, joints between the courses,
+// an optional band of the side's color and a row of windows (some lit).
+interface RSkin {
+  seed: number;
+  body?: RGB;
+  band?: [number, number, RGB];
+  win?: [number, number];
+  pitch?: number;
+  lit?: RGB;
+}
+function rskin(along: number, z: number, h: number, o: RSkin): RGB {
+  const body = o.body ?? PLAS;
+  if (z < 1.1) return grime(CONC_D, along, z, h, o.seed);
+  if (o.band && z > o.band[0] && z < o.band[1]) return g(o.band[2], along, z, 0, 0.05);
+  if (o.win && z > o.win[0] && z < o.win[1]) {
+    const p = o.pitch ?? 5;
+    const a = mod(along, p);
+    if (a < 2.4) {
+      if (a < 0.4 || a > 2 || z < o.win[0] + 0.45 || z > o.win[1] - 0.45) return WIN;
+      const lit = hash2(Math.floor(along / p), Math.floor(o.win[0]), o.seed) < 0.4;
+      if (lit) return o.lit ?? WIN_LIT;
+      return z > (o.win[0] + o.win[1]) / 2 ? WIN_B : WIN;
+    }
+  }
+  if (Math.abs(mod(z, 4.5) - 0.3) < 0.22) return shade(body, -0.1);
+  return grime(g(body, along, z, h, 0.05), along, z, h, o.seed);
+}
+
+// A drum standing at (cu, cv): radius r, walls h high, under a dome hz high.
+// Returns the angle round it and how far up its wall or dome the point is,
+// or null when the point is outside it.
+function drum(u: number, v: number, z: number, cu: number, cv: number, r: number, h: number, hz: number): { a: number; d: number; roof: boolean } | null {
+  const d = Math.hypot(u - cu, v - cv);
+  if (d > r) return null;
+  if (z > h + Math.max(0, capH(d, r, hz))) return null;
+  return { a: Math.atan2(v - cv, u - cu), d, roof: z > h - 0.2 && d < r - 0.5 };
+}
+
+function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
   const roofC = mix(f.main, f.light, 0.35);
+  const glow = glowOf(f);
   switch (kind) {
     case 'yard': {
-      // The Foundry: a works hall with a big door, a tower crane over the
-      // apron and stacks of parts waiting to be put together.
+      // The Foundry: a tall round-cornered works hall with a big door, a
+      // crane turret on its roof whose jib reaches out over the assembly
+      // ring, a side shop and two gas tanks. fx[0] is the light on the mast,
+      // fx[1] the hook.
+      const [mu, mv] = [-6, -4];
+      const HU = 17.5; // where the hook hangs
       const shape: Shape = (u, v, z) => {
-        // tower crane: lattice mast, cab, boom with a trolley, counterweight, cable and hook
-        if (z < 29) {
-          const m = lattice(u, v, z, 13, -13, 1.6, HAZ);
-          if (m) return m;
-        }
-        if (inBox(u, v, z, 11, 15.5, -15, -11, 26, 29.5)) {
-          if (z > 29) return roofC;
-          if (u > 15 && z > 27) return Math.abs(v + 13) < 0.3 ? f.dark : z > 28.4 ? GLASS_L : GLASS;
-          if (v > -11.6 && z > 27.2) return u > 13.4 ? GLASS : f.main;
-          return g(f.main, u, v, z);
-        }
-        if (Math.abs(v + 13) < 0.9 && u > 3 && u < 24 && z > 29.5 && z < 31.2) {
-          if (z > 30.7 || z < 30) return mod(Math.floor(u), 2) ? HAZ : shade(HAZ, -0.2);
-          return mod(u, 2.5) < 0.6 || Math.abs(v + 13) > 0.5 ? GUN_D : null;
-        }
-        if (inBox(u, v, z, 3, 7, -14.6, -11.4, 26.8, 29.6)) return z > 29 ? CONC_L : mod(Math.floor(u * 1.2), 2) ? CONC_D : shade(CONC_D, -0.15);
-        if (Math.abs(u - 13) < 0.35 && Math.abs(v + 13) < 0.35 && z >= 31.2 && z < 33.6) return z > 33 ? RED : GUN_D;
-        if (inBox(u, v, z, 19.8, 22.2, -13.9, -12.1, 28.6, 29.6)) return GUN; // trolley
-        if (Math.abs(u - 21) < 0.5 && Math.abs(v + 13) < 0.5 && z > 17 && z < 29) return GUN_D;
-        if (inBox(u, v, z, 20, 22, -14, -12, 15.4, 17)) return z > 16.4 ? hazard(u, v) : HAZ;
-        if (Math.abs(u - 21) < 0.4 && Math.abs(v + 13) < 0.7 && z > 13.8 && z <= 15.4) return GUN_D; // hook
-        // roof gear on the hall
-        if (z > 15) {
-          const ac = acUnit(u, v, z, -17, 0.4, 15);
-          if (ac) return ac;
-          for (const [cu, cv] of [[-17, -15], [2, -15]]) {
-            if (cyl(u, v, cu, cv, 1.5) && z <= 18.6) return z > 18 ? GUN_D : z > 17.2 ? STEEL : METAL_D;
+        // the crane: mast, jib and counter-jib, counterweight, cab, trolley, cable, hook
+        if (z >= 22) {
+          if (cyl(u, v, mu, mv, 1.4) && z < 36) return z > 35.3 ? GUN_D : mod(Math.floor(z / 1.6), 2) ? HAZ : shade(HAZ, -0.25);
+          if (Math.abs(v - mv) < 1 && u > mu - 9 && u < HU + 3.5 && z > 33 && z < 35) {
+            if (z > 34.4 || z < 33.6) return mod(Math.floor(u), 2) ? HAZ : shade(HAZ, -0.2);
+            return mod(u, 2.2) < 0.6 || Math.abs(v - mv) > 0.6 ? GUN_D : null;
           }
-          if (cyl(u, v, 2.6, 0.6, 0.8) && z <= 21) return z > 20.4 ? BLACK : mod(Math.floor(z), 3) === 0 ? STEEL : RUST; // flue
-          // ridge skylight
-          if (Math.abs(u + 7) < 9.5 && Math.abs(v + 7.5) < 5 && z <= 16.6 + (5 - Math.abs(v + 7.5)) * 0.25) {
-            if (Math.abs(u + 7) > 9 || Math.abs(v + 7.5) > 4.5 || mod(u + 7, 3.2) < 0.45 || Math.abs(v + 7.5) < 0.3) return STEEL;
-            return hash2(Math.floor((u + 7) / 3.2), v > -7.5 ? 1 : 0, 5) > 0.75 ? GLASS : GLASS_D;
+          if (inBox(u, v, z, mu - 10, mu - 6, mv - 1.7, mv + 1.7, 30.6, 33.4)) return z > 32.9 ? CONC_L : mod(Math.floor(u * 1.2), 2) ? CONC_D : shade(CONC_D, -0.15);
+          if (inBox(u, v, z, mu + 1.4, mu + 4.6, mv - 1.8, mv + 1.8, 29.4, 33)) {
+            if (z > 32.5) return roofC;
+            if (u > mu + 4 && z > 30.4) return z > 31.8 ? GLASS_L : GLASS;
+            return g(f.main, u, v, z);
           }
-          return null;
+          if (Math.abs(u - mu) < 0.35 && Math.abs(v - mv) < 0.35 && z >= 36 && z < 37.6) return z > 37 ? RED : GUN_D;
+          if (inBox(u, v, z, HU - 1.4, HU + 1.4, mv - 1, mv + 1, 32, 33)) return GUN;
         }
-        // office lean-to on the side of the hall
-        if (inBox(u, v, z, 6, 10.5, -17, -5, 0, 8.5)) {
-          if (z > 7.9) return roofSkin(u, v, z, 6, 10.5, -17, -5);
-          if (v > -5.6 && Math.abs(u - 8.2) < 1.1 && z < 5.4) return z > 4.4 ? GLASS_D : shade(f.dark, 0.1); // door
-          return wallSkin(u, v, z, 10.5, -5, 0, 8.5, 22, { win: [2, 7], pitch: 4 });
+        if (Math.abs(u - HU) < 0.35 && Math.abs(v - mv) < 0.35 && z > 20 && z < 32) return GUN_D;
+        if (inBox(u, v, z, HU - 1, HU + 1, mv - 1, mv + 1, 18.4, 20)) return z > 19.4 ? hazard(u, v) : HAZ;
+        // the turret on the roof: a drum with a band of windows under a shallow dome
+        const t = drum(u, v, z, mu, mv, 5.6, 22, 2.4);
+        if (t && z >= 16) {
+          if (t.roof) return mod(t.a * 6 / Math.PI, 1) < 0.1 ? METAL_D : g(roofC, u, v, z);
+          if (z > 18.4 && z < 20.6) return mod(t.a * 9 / Math.PI, 1) < 0.18 ? f.dark : z > 19.8 ? GLASS_L : GLASS;
+          return z > 21.4 ? f.main : g(PLAS, u, v, z);
         }
-        if (inBox(u, v, z, 6.9, 9.6, -5, -3.4, 0, 0.8)) return CONC_L; // step
-        // works hall
-        if (inBox(u, v, z, -21, 6, -19, 4, 0, 15)) {
-          const door = rollerDoor(u, v, z, -7, 7.5, 4, 10.5);
+        // the hall
+        const e = -rrect(u, v, mu, mv, 15, 14, 7);
+        if (e >= 0 && z <= shoulder(e, 16, 4)) {
+          if (e > 0.6 && z > shoulder(e, 16, 4) - 0.7) {
+            if (e < 4.2) return PLAS_L;
+            const d = Math.hypot(u - mu, v - mv);
+            if (d < 7.4) return mod(Math.atan2(v - mv, u - mu) * 8 / Math.PI, 1) < 0.15 ? STEEL : GLASS_D; // skylight ring
+            return g(mod(u + v, 4) < 0.4 ? shade(TAR, -0.14) : TAR, u, v, z, 0.07);
+          }
+          const door = rollerDoor(u, v, z, mu, 7, 10, 11);
           if (door) return door;
-          if (z > 14.4) return roofSkin(u, v, z, -21, 6, -19, 4);
-          if (v > 3.4 && z > 11 && z < 12.6 && Math.abs(u + 7) < 3) return mod(Math.floor(u * 1.4), 2) ? WHITE : f.dark; // sign
-          if (v > 3.4 && Math.abs(u - 3.2) < 1 && z < 5) return z > 4 ? GLASS_D : GUN; // side door
-          if (v > 3.4 && Math.abs(u - 3.2) < 1.2 && z > 5.4 && z < 6.4) return LAMP;
-          if (u > 5.4 && Math.abs(v + 1.4) < 0.45 && z > 1) return METAL_D; // downpipe
-          return wallSkin(u, v, z, 6, 4, 0, 15, 21, { win: [8.6, 13.2], band: f.main });
+          if (v > 9.4 && z > 11 && z < 12.4 && Math.abs(u - mu) < 7.6) return hazard(u, z);
+          if (u > 8.4 && Math.abs(v + 6) < 1.1 && z < 5) return z > 4 ? LAMP : GUN; // side door
+          return rskin(u + v, z, 16, { seed: 21, win: [12.8, 15], band: [7, 8.2, f.main], pitch: 4.4, lit: glow });
         }
-        // on the apron: parts, a pallet of plate, crates, drums and gas bottles
-        if (inBox(u, v, z, 10, 16, 7, 13, 0, 4)) return z > 3.4 ? (mod(u, 3) < 0.4 || mod(v, 3) < 0.4 ? f.dark : g(shade(f.main, 0.1), u, v, z)) : mod(Math.floor(z * 1.4), 2) ? f.dark : shade(f.dark, 0.15);
-        if (inBox(u, v, z, 11, 15, 8, 12, 4, 7)) {
-          if (z > 6.4) return (u - 13) ** 2 + (v - 10) ** 2 < 1.6 ? GUN_D : STEEL;
-          return mod(Math.floor(u + v), 2) ? GUN : GUN_L;
+        // the side shop: a lower rounded block with a barrel roof in the side's color
+        const s = -rrect(u, v, 15.5, 12, 7, 7, 4);
+        if (s >= 0 && z <= shoulder(s, 10, 3.4)) {
+          if (s > 0.6 && z > shoulder(s, 10, 3.4) - 0.7) return s < 3.4 ? PLAS_L : mod(u, 3) < 0.4 ? f.dark : g(roofC, u, v, z);
+          if (v > 18.4 && Math.abs(u - 15.5) < 3.2 && z < 6.4) return z > 5.6 ? hazard(u, 0) : mod(Math.floor(z * 1.5), 2) ? METAL_D : METAL;
+          return rskin(u + v, z, 10, { seed: 22, win: [4, 7.6], pitch: 4, lit: glow });
         }
-        if (inBox(u, v, z, 17, 22.4, 8.6, 13.4, 0, 3.2)) {
-          if (z < 0.7) return mod(Math.floor(u * 0.9), 2) ? WOOD : null;
-          return z > 2.7 ? (mod(u, 2.7) < 0.4 ? shade(WOOD, -0.3) : WOOD_L) : Math.abs(mod(u, 2.7) - 1.3) < 0.3 ? shade(WOOD, -0.3) : WOOD;
+        // gas tanks behind
+        for (const cu of [12, 17.6]) {
+          const k = drum(u, v, z, cu, -16, 2.6, 10, 1.8);
+          if (k) return k.roof ? STEEL : Math.abs(z - 6) < 0.6 ? f.main : mod(k.a * 4 / Math.PI, 1) < 0.08 ? METAL_D : g(METAL, u, v, z);
         }
-        if (inBox(u, v, z, 18, 21, 9.6, 12.4, 3.2, 5.4)) return z > 4.9 ? shade(OLIVE, 0.15) : Math.abs(z - 4.2) < 0.3 ? WHITE : OLIVE;
-        const dr = drums(u, v, z, [[-19, 8, RUST], [-16.4, 8.6, f.main], [-18, 10.6, hex('#3f6f8a')], [-15.6, 11.4, RUST]]);
+        // the assembly ring under the hook, with a chassis being put together on it
+        const ad = Math.hypot(u - HU, v - mv);
+        if (inBox(u, v, z, HU - 3, HU + 3, mv - 2, mv + 2, 1, 2.8)) return z > 2.3 ? (mod(u, 1.5) < 0.4 ? GUN_D : g(f.main, u, v, z)) : f.dark;
+        if (Math.abs(Math.abs(v - mv) - 1.6) < 0.5 && Math.abs(Math.abs(u - HU) - 2) < 0.8 && z < 1.6) return WHEEL;
+        if (ad < 5.4 && z < 1) return ad > 4.7 ? hazard(Math.atan2(v - mv, u - HU) * 8, 0) : ad > 4.2 ? GUN_D : mod(Math.atan2(v - mv, u - HU) * 6 / Math.PI, 1) < 0.08 ? GUN : METAL_D;
+        // parts waiting: crates, drums, girders
+        if (inBox(u, v, z, -20, -15, 13, 17, 0, 3)) return z > 2.5 ? (mod(u, 2.5) < 0.4 ? shade(WOOD, -0.3) : WOOD_L) : Math.abs(mod(u, 2.5) - 1.2) < 0.3 ? shade(WOOD, -0.3) : WOOD;
+        const dr = drums(u, v, z, [[-12, 14, RUST], [-10, 15.6, f.main], [-12.4, 16.6, hex('#3f6f8a')]]);
         if (dr) return dr;
-        for (const bv of [16, 17.6, 19.2]) if (cyl(u, v, -19.4, bv, 0.7) && z < 5.4) return z > 4.6 ? GUN_D : bv === 17.6 ? hex('#3f8a5a') : hex('#b9462f');
-        if (inBox(u, v, z, 1.4, 9, 15.6, 16.4, 0, 2.4) || inBox(u, v, z, 1.4, 9, 17.6, 18.4, 0, 1.6)) return mod(u, 2.4) < 0.4 ? RUST : GUN_L; // girders
-        // floodlight mast at the corner of the apron
-        if (Math.abs(u - 21.6) < 0.4 && Math.abs(v - 19.6) < 0.4 && z < 15) return GUN_D;
-        if (inBox(u, v, z, 20.4, 22.8, 18.6, 20.6, 15, 16.4)) return v > 20 || u > 22.2 ? LAMP : GUN;
-        // the apron: concrete with painted bays and a hazard edge
-        if (Math.abs(u) <= 24 && Math.abs(v) <= 22 && z < 1) {
-          if (Math.abs(u) > 23 || Math.abs(v) > 21) return hazard(u, v);
-          if (v > 4 && Math.abs(Math.abs(u + 7) - 8.4) < 0.35 && mod(v, 3) < 2) return WHITE; // lane to the door
-          if (mod(u, 8) < 0.4 || mod(v, 8) < 0.4) return CONC_D;
-          return g(hash2(Math.floor(u * 0.7), Math.floor(v * 0.7), 8) > 0.93 ? shade(CONC, -0.14) : CONC, u, v, z, 0.07);
-        }
+        if (inBox(u, v, z, -4, 4, 15, 15.8, 0, 2) || inBox(u, v, z, -4, 4, 16.8, 17.6, 0, 1.4)) return mod(u, 2.4) < 0.4 ? RUST : GUN_L;
         return null;
       };
-      return { shape, rx: 24, ry: 22, zmax: 34, fx: [{ x: 13, y: -13, z: 33.6 }, { x: 21, y: -13, z: 17 }] };
+      return { shape, rx: 24, ry: 22, zmax: 38, fx: [{ x: mu, y: mv, z: 37.6 }, { x: HU, y: mv, z: 19 }] };
     }
     case 'lab': {
-      // The Tech lab: a domed research block with antenna masts, a walkway
-      // and a glowing test cell beside it.
-      const glow = hex('#9ff0ff');
+      // The Tech lab: a great geodesic dome of glass panes in steel frames,
+      // the panes lit from inside in the side's color, with a vaulted
+      // entrance. Its `glow` is the light in the panes alone, which the game
+      // pulses over it.
+      const AU = 17;
+      const AV = 14;
+      const AZ = 19;
+      const Z0 = 1.4; // the dome stands on a low ring
+      const BANDS = 5;
+      const pane = (k: number) => {
+        // the panes: dark at the foot, glowing higher up, a few brighter ones
+        if (k > 0.86) return glow;
+        if (k > 0.66) return f.light;
+        if (k > 0.36) return mix(f.main, f.light, 0.25);
+        return k > 0.14 ? f.main : mix(f.dark, f.main, 0.45);
+      };
+      // the color at (u, v, z) and how brightly it is lit from inside (0 for frames)
+      let lit = 0;
       const shape: Shape = (u, v, z) => {
-        // dome in ribbed panels with an observation slot and a ring at its foot
-        const d = Math.hypot(u + 4, v + 3);
-        if (d < 11.6 && z >= 10 && z < 11) return mod(Math.atan2(v + 3, u + 4) * 6, 2) < 1 ? METAL_D : GUN;
-        if (d < 11 && z >= 10 && z <= 10 + Math.sqrt(Math.max(0, 121 - d * d)) * 0.8) {
-          if (Math.abs(v + 3) < 1.3 && z > 13 && u > -6) return Math.abs(v + 3) > 0.8 ? GUN : u > 2 ? glow : GLASS_D;
-          const a = mod(Math.atan2(v + 3, u + 4) * 3.2, 1);
-          if (a < 0.1) return METAL_D;
-          if (Math.abs(z - 14.5) < 0.3 || Math.abs(z - 17.2) < 0.25) return METAL_D;
-          return g(z > 17.4 ? STEEL : METAL, u, v, z, 0.05);
+        lit = 0;
+        const nu = u / AU;
+        const nv = v / AV;
+        const nz = (z - Z0) / AZ;
+        const q = nu * nu + nv * nv + nz * nz;
+        if (z >= Z0 && q <= 1) {
+          const el = Math.asin(Math.min(1, Math.max(0, nz / Math.sqrt(q || 1)))); // 0 at the foot, pi/2 at the top
+          const band = Math.min(BANDS - 1, Math.floor((el / (Math.PI / 2)) * BANDS));
+          const t = (el / (Math.PI / 2)) * BANDS - band; // 0..1 up the band
+          const n = [16, 15, 12, 8, 4][band];
+          const s = ((Math.atan2(nv, nu) + Math.PI) / (Math.PI * 2)) * n + (band % 2) * 0.5;
+          const w = mod(s, 1);
+          const R = Math.sqrt(AU * AV) * Math.cos(el); // the band's radius, roughly
+          const seg = (Math.PI * 2 * R) / n || 1;
+          const bh = (AZ * Math.PI) / 2 / BANDS;
+          // frames: the rings between the bands and the zigzag struts in each
+          const ring = Math.min(t, 1 - t) * bh < 0.3;
+          const strut = Math.min(Math.abs(w - 0.5 * t), Math.abs(1 - w - 0.5 * t)) * seg < 0.3;
+          if (ring || strut || (band === BANDS - 1 && t > 0.7)) return z > Z0 + AZ * 0.7 ? PLAS_L : STEEL;
+          // which pane: up-pointing or down-pointing triangle in the cell
+          const tri = w < 0.5 * t ? 0 : 1 - w < 0.5 * t ? 2 : 1;
+          const id = hash2(Math.floor(s) * 3 + tri, band, 41);
+          const k = Math.min(1, id * 0.55 + (el / (Math.PI / 2)) * 0.55);
+          lit = 0.35 + k * 0.65;
+          return pane(k);
         }
-        if (d < 1.2 && z <= 20.6) return z > 20 ? RED : GUN;
-        // block under the dome
-        if (inBox(u, v, z, -17, 9, -16, 10, 0, 10)) {
-          if (z > 9.4) return roofSkin(u, v, z, -17, 9, -16, 10);
-          if (v > 9.4 && Math.abs(u + 4) < 2.2 && z < 6.4) return z > 5.6 ? f.light : Math.abs(u + 4) < 0.25 ? f.dark : z > 2.4 ? GLASS : GLASS_D; // glass doors
-          return wallSkin(u, v, z, 9, 10, 0, 10, 31, { win: [2.2, 7.2], band: f.main });
+        // the vaulted entrance on the front (+v), a dark doorway with light spilling out
+        if (v > 9 && v < 16 && Math.abs(u) < 3.6) {
+          const r = Math.hypot(u, z - 1.2);
+          if (r < 3.6 && z >= 0) {
+            if (v > 15.4) {
+              if (r > 2.8) return STEEL;
+              if (z < 1.8) return GUN_D;
+              lit = r < 1.6 ? 1 : 0.4;
+              return r < 1.6 ? glow : mix(f.dark, f.main, 0.4);
+            }
+            if (mod(v, 2) < 0.5) return STEEL;
+            if (r > 3) return STEEL;
+            lit = 0.4;
+            return z > 3.4 ? pane(0.5) : pane(0.2);
+          }
         }
-        // entrance canopy on posts, and steps
-        if (inBox(u, v, z, -7, -1, 10, 13, 6.6, 7.4)) return z > 7 ? f.light : f.main;
-        if ((Math.abs(u + 6.4) < 0.4 || Math.abs(u + 1.6) < 0.4) && Math.abs(v - 12.4) < 0.4 && z < 6.6) return STEEL;
-        if (inBox(u, v, z, -7, -1, 10, 12, 0, 1.2)) return v > 11 && z > 0.6 ? null : CONC_L;
-        const ac = acUnit(u, v, z, 5.5, 6.5, 10) ?? acUnit(u, v, z, -14, 7, 10);
-        if (ac) return ac;
-        // antenna masts with cross arms, a small dish on one
-        for (const [au, av] of [
-          [12, -12],
-          [12, 2],
-        ]) {
-          if (Math.abs(u - au) < 0.5 && Math.abs(v - av) < 0.5 && z < 24) return z > 23 ? RED : mod(Math.floor(z / 3), 2) ? WHITE : RED;
-          if (Math.abs(u - au) < 0.4 && Math.abs(v - av) < 2 && (Math.abs(z - 20) < 0.35 || Math.abs(z - 17) < 0.35)) return GUN_D;
-          if (inBox(u, v, z, au - 1.5, au + 1.5, av - 1.5, av + 1.5, 0, 1.4)) return CONC_D;
-        }
-        if ((u - 12.8) ** 2 + (v + 12) ** 2 + (z - 12) ** 2 < 4 && u > 12.6) return (u - 12.8) ** 2 + (v + 12) ** 2 + (z - 12) ** 2 < 0.6 ? GUN_D : WHITE;
-        // test cell: a glass cylinder with something glowing in it, pipes back to the block
-        if (cyl(u, v, 14, 10, 4.2) && z < 9.4) {
-          if (z < 1.6 || z > 8.2) return z > 8.9 ? (cyl(u, v, 14, 10, 1.4) ? GUN_D : f.main) : g(f.dark, u, v, z);
-          if (!cyl(u, v, 14, 10, 3.6)) return mod(Math.atan2(v - 10, u - 14) * 2.5, 2) < 0.35 ? STEEL : z > 6.4 ? GLASS_L : GLASS;
-          return cyl(u, v, 14, 10, 1.8) ? (mod(Math.floor(z), 2) ? glow : WHITE) : GLASS;
-        }
-        if (Math.abs(v - 8) < 0.6 && u > 9 && u < 11 && Math.abs(z - 4) < 0.6) return COPPER;
-        if (Math.abs(v - 8) < 0.6 && u > 9 && u < 11 && Math.abs(z - 6) < 0.6) return STEEL;
-        // coolant tanks along the side wall
-        for (const cv of [-12, -8.4]) if (cyl(u, v, 11.4, cv, 1.5) && z < 6 + Math.sqrt(Math.max(0, 2.25 - (u - 11.4) ** 2 - (v - cv) ** 2)) * 0.6) return Math.abs(z - 3.4) < 0.5 ? f.main : WHITE;
-        // the plinth, with a painted walkway to the door
-        if (inBox(u, v, z, -20, 20, -16, 16, 0, 0.6)) {
-          if (Math.abs(u) > 19.2 || Math.abs(v) > 15.2) return CONC_L;
-          if (v > 12 && Math.abs(Math.abs(u + 4) - 3) < 0.3) return HAZ;
-          return mod(u, 6) < 0.4 || mod(v, 6) < 0.4 ? shade(CONC_D, -0.12) : g(CONC_D, u, v, z, 0.08);
-        }
+        // the ring the dome stands on
+        const e = (u / (AU + 0.8)) ** 2 + (v / (AV + 0.8)) ** 2;
+        if (e <= 1 && z < Z0) return z > Z0 - 0.5 ? GUN : mod(Math.atan2(v, u) * 24 / Math.PI, 1) < 0.15 ? GUN_D : METAL_D;
         return null;
       };
-      return { shape, rx: 20, ry: 16, zmax: 25, fx: [{ x: 14, y: 10, z: 5 }] };
+      const light = mix(f.light, WHITE, 0.15);
+      const glowShape: Shape = (u, v, z) => {
+        const c = shape(u, v, z);
+        if (!c) return null;
+        return lit ? shade(light, (lit - 1) * 0.9) : BLACK;
+      };
+      return { shape, glow: glowShape, rx: 20, ry: 16, zmax: 22, fx: [{ x: 0, y: 0, z: Z0 + AZ * 0.55 }] };
     }
     case 'hq': {
+      // Command center: a rounded office block round a tall drum tower with a
+      // glazed ring of control rooms near the top, a domed cap and a mast.
+      const [tu, tv] = [-4, -5];
       const shape: Shape = (u, v, z) => {
-        // antenna mast with stays and cross arms, and a dish on the tower roof
-        if (Math.abs(u - 4) < 0.5 && Math.abs(v + 6) < 0.5 && z < 36) return z > 35 ? RED : mod(Math.floor(z / 2.5), 2) ? WHITE : RED;
-        for (const az of [27, 30, 33]) if (Math.abs(u - 4) < (az === 30 ? 2.4 : 1.4) && Math.abs(v + 6) < 0.4 && Math.abs(z - az) < 0.35) return GUN_D;
-        if (inBox(u, v, z, 2.6, 5.4, -7.4, -4.6, 22, 23)) return GUN;
-        const dd = Math.hypot(u + 9, v + 9);
-        if (dd < 3.4 && z > 22 && z < 25.6) {
-          if (dd < 0.5) return z > 25 ? RED : GUN_D;
-          if (Math.abs(z - (23 + dd * 0.7)) < 0.45) return dd > 2.9 ? METAL_D : WHITE;
+        if (Math.abs(u - tu) < 0.5 && Math.abs(v - tv) < 0.5 && z < 41) return z > 40 ? RED : mod(Math.floor(z / 2.5), 2) ? WHITE : RED;
+        for (const az of [35, 37.5]) if (Math.abs(u - tu) < 2 && Math.abs(v - tv) < 0.35 && Math.abs(z - az) < 0.3) return GUN_D;
+        const t = drum(u, v, z, tu, tv, 7.4, 28, 4.6);
+        if (t) {
+          if (t.roof) return mod(t.a * 8 / Math.PI, 1) < 0.1 ? f.dark : g(roofC, u, v, z);
+          if (z > 21 && z < 25.4) return mod(t.a * 12 / Math.PI, 1) < 0.16 ? f.dark : z > 24.4 ? GLASS_L : GLASS;
+          if (z > 25.4 || (z > 20.2 && z <= 21)) return g(f.main, u, v, z);
+          return rskin(t.a * 7.4, z, 28, { seed: 4, win: [13, 18], pitch: 3.6, lit: glow, body: PLAS_L });
         }
-        // tower block with a glazed control room round the top
-        if (inBox(u, v, z, -14, 8, -14, 0, 0, 22)) {
-          if (z > 21.4) {
-            const e = Math.min(u + 14, 8 - u, v + 14, -v);
-            return e < 1 ? f.light : g(roofC, u, v, z);
-          }
-          if (z > 16.4 && z < 19.6 && (u > 7.4 || v > -0.6)) {
-            const along = u > 7.4 ? v : u;
-            return mod(along, 3) < 0.4 ? f.dark : z > 18.6 ? GLASS_L : GLASS;
-          }
-          if (z > 19.6 || (z > 15.6 && z <= 16.4)) return g(f.dark, u, v, z);
-          return wallSkin(u, v, z, 8, 0, 12, 22, 4, { win: [0.4, 4.6], body: CONC_L, pitch: 4.4 });
-        }
-        // main block
-        if (inBox(u, v, z, -20, 20, -16, 16, 0, 12)) {
-          // entrance on the +y face: double doors under a lit sign
-          if (v > 15.4 && Math.abs(u - 4) < 4 && z < 7.4) {
+        const e = -rrect(u, v, 0, 2, 20, 17, 8);
+        if (e >= 0 && z <= shoulder(e, 13, 3)) {
+          if (e > 0.6 && z > shoulder(e, 13, 3) - 0.7) return e < 3 ? PLAS_L : g(mod(u, 4) < 0.4 ? shade(TAR, -0.14) : TAR, u, v, z, 0.07);
+          if (v > 18.4 && Math.abs(u - 4) < 4 && z < 7.4) {
             if (z > 6.3) return mod(Math.floor(u * 1.3), 2) ? WHITE : f.main;
-            if (Math.abs(u - 4) > 3.4) return CONC_L;
+            if (Math.abs(u - 4) > 3.4) return PLAS_L;
             return Math.abs(u - 4) < 0.3 || z < 0.8 ? GUN_D : z > 3 ? GLASS : GLASS_D;
           }
-          if (z > 11.4) return roofSkin(u, v, z, -20, 20, -16, 16);
-          if (u > 19.4 && Math.abs(v - 9) < 1.2 && z < 5) return z > 4 ? GLASS_D : GUN; // side door
-          return wallSkin(u, v, z, 20, 16, 0, 12, 3, { win: [1.6, 9.4], band: f.main });
+          return rskin(u + v, z, 13, { seed: 3, win: [2, 10.4], pitch: 4.6, band: [10.8, 12, f.main], lit: glow });
         }
-        // awning over the door on posts, steps, planters and a flag
-        if (inBox(u, v, z, -0.6, 8.6, 16, 19.4, 7.4, 8.3)) return z > 7.9 ? f.light : mod(Math.floor(u * 1.2), 2) ? f.main : f.dark;
-        if ((Math.abs(u) < 0.4 || Math.abs(u - 8) < 0.4) && Math.abs(v - 18.8) < 0.4 && z < 7.4) return STEEL;
-        if (inBox(u, v, z, 0.4, 7.6, 16, 18.4, 0, 1.2)) return v > 17.2 && z > 0.6 ? null : CONC_L;
-        for (const pu of [-3, 11]) if (inBox(u, v, z, pu - 1.6, pu + 1.6, 16.4, 18.8, 0, 2.6)) return z > 1.4 ? (hash2(Math.floor(u * 2), Math.floor(v * 2), 6) > 0.5 ? hex('#3e7a35') : hex('#2f5a2c')) : CONC_D;
-        if (Math.abs(u + 16) < 0.4 && Math.abs(v - 18) < 0.4 && z < 17) return STEEL;
-        if (Math.abs(v - 18) < 0.35 && u > -15.6 && u < -11.4 && z > 13.4 && z < 16.6) return z > 15.4 ? f.light : z > 14.5 ? WHITE : f.main;
-        // roof clutter: air conditioning, a stair head, vents, a water tank, a helipad H
-        if (z > 12) {
-          const ac = acUnit(u, v, z, 12.5, 6.5, 12) ?? acUnit(u, v, z, 12.5, 11, 12) ?? acUnit(u, v, z, -15, 9, 12);
+        if (inBox(u, v, z, -0.6, 8.6, 19, 21.4, 7.4, 8.3)) return z > 7.9 ? f.light : f.main;
+        if ((Math.abs(u) < 0.4 || Math.abs(u - 8) < 0.4) && Math.abs(v - 20.8) < 0.4 && z < 7.4) return STEEL;
+        if (z > 13) {
+          const ac = acUnit(u, v, z, 12, 8, 13) ?? acUnit(u, v, z, 12, 12.4, 13);
           if (ac) return ac;
-          if (inBox(u, v, z, 12, 17, -11, -6, 12, 15.4)) {
-            if (z > 14.9) return CONC_L;
-            return v > -6.6 && Math.abs(u - 14.5) < 1 && z < 14.6 ? GUN : g(CONC, u, v, z);
+          const dd = Math.hypot(u - 9, v + 8);
+          if (dd < 3.4 && z < 17) {
+            if (dd < 0.5) return z > 16.4 ? RED : GUN_D;
+            if (Math.abs(z - (14 + dd * 0.7)) < 0.45) return dd > 2.9 ? METAL_D : WHITE;
           }
-          if (cyl(u, v, -6, 8, 2.6) && z <= 16.2 + Math.sqrt(Math.max(0, 6.8 - (u + 6) ** 2 - (v - 8) ** 2)) * 0.5) return z < 13 ? GUN_D : Math.abs(z - 14.6) < 0.3 ? METAL_D : g(z > 16.2 ? STEEL : METAL, u, v, z);
-          for (const [cu, cv] of [[2, 4], [5, 4], [2, 12]]) if (cyl(u, v, cu, cv, 0.8) && z <= 13.8) return z > 13.2 ? GUN_D : STEEL;
-          if (z <= 12.5 && Math.abs(v - 8) < 0.5 && u > 1 && u < 11) return COPPER; // pipe run
         }
         return null;
       };
-      return { shape, rx: 21, ry: 20, zmax: 37, fx: [{ x: 4, y: -6, z: 36 }] };
+      return { shape, rx: 21, ry: 20, zmax: 42, fx: [{ x: tu, y: tv, z: 41 }] };
     }
     case 'power': {
-      // The power plant: two cooling towers, a turbine hall and a transformer yard.
+      // The power plant: a tall cooling tower, a domed reactor ringed with
+      // glowing ports, and a barrel-roofed turbine hall in front.
       const tower = (u: number, v: number, z: number, cu: number, cv: number) => {
         const d = Math.hypot(u - cu, v - cv);
-        const r = 8 - 2.2 * Math.sin((Math.PI * Math.min(z, 26)) / 30);
-        if (z > 26 || d > r) return null;
-        if (z > 25.4 || d > r - 1.4) {
-          if (z > 25.4 && d < r - 1.4) return null;
+        const r = 9.5 - 3 * Math.sin((Math.PI * Math.min(z, 34)) / 40);
+        if (z > 34 || d > r) return null;
+        if (z > 33.4 || d > r - 1.4) {
+          if (z > 33.4 && d < r - 1.4) return null;
           const a = Math.atan2(v - cv, u - cu);
-          let c = CONC_L;
-          if (z > 25) c = shade(CONC_L, 0.12);
-          else if (z > 18 && z < 21) c = mod(a * 5, 2) < 1 || z > 20.3 || z < 18.7 ? f.main : f.light;
-          else if (z < 3.4) c = mod(a * 9, 2) < 1.1 ? CONC_D : BLACK; // legs round the air inlet
-          else if (mod(a * 7, 1) < 0.12 || Math.abs(mod(z, 5.6) - 2.8) < 0.22) c = shade(CONC_L, -0.1); // shuttering lines
-          else if (hash2(Math.floor(a * 9), 3, cu) > 0.7 && z > 21 + hash2(Math.floor(a * 9), 4, cu) * 3) c = shade(CONC_L, -0.14); // stains under the rim
-          // ladder with hoops up the side facing the camera
+          let c = PLAS_L;
+          if (z > 33) c = shade(PLAS_L, 0.1);
+          else if (z > 26 && z < 29.4) c = z > 28.7 || z < 26.7 ? f.dark : mod(a * 5, 2) < 1 ? f.main : f.light;
+          else if (z < 3.4) c = mod(a * 9, 2) < 1.1 ? CONC_D : BLACK;
+          else if (mod(a * 7, 1) < 0.1 || Math.abs(mod(z, 5.6) - 2.8) < 0.22) c = shade(PLAS_L, -0.1);
+          else if (hash2(Math.floor(a * 9), 3, cu) > 0.7 && z > 29 + hash2(Math.floor(a * 9), 4, cu) * 3) c = shade(PLAS_L, -0.14);
           if (Math.abs(a - 0.9) < 0.11 && z > 3 && d > r - 0.7) c = mod(Math.floor(z * 1.5), 2) ? GUN_D : GUN_L;
           return g(c, u, v, z, 0.05);
         }
-        return z > 22 ? hex('#30302c') : null;
+        return z > 30 ? hex('#30302c') : null;
       };
       const shape: Shape = (u, v, z) => {
-        const t = tower(u, v, z, -7, -5) ?? tower(u, v, z, 10, -5);
+        const t = tower(u, v, z, -8, -5);
         if (t) return t;
-        // turbine hall with a ribbed roof and vents
-        if (inBox(u, v, z, -18, 18, 3, 13, 0, 9)) {
-          if (v > 12.4 && z < 6.4 && mod(u + 40, 7) < 3.2) {
-            const a = mod(u + 40, 7);
-            return z > 5.6 ? hazard(u, 0) : a < 0.4 || a > 2.8 ? GUN_D : mod(Math.floor(z * 1.5), 2) ? METAL_D : METAL;
+        // the reactor: a drum with glowing ports and a dome, a vent on top
+        if (cyl(u, v, 9, -6, 1.2) && z < 17.6) return z > 17 ? BLACK : STEEL;
+        const r = drum(u, v, z, 9, -6, 7, 9, 7);
+        if (r) {
+          if (r.roof) {
+            if (z > 15) return g(f.main, u, v, z);
+            return mod(r.a * 6 / Math.PI, 1) < 0.08 || Math.abs(z - 12.6) < 0.3 ? PLAS_D : g(PLAS_L, u, v, z);
           }
-          if (z > 8.4) {
-            const e = Math.min(u + 18, 18 - u, v - 3, 13 - v);
-            if (e < 0.9) return CONC_L;
-            if (Math.abs(u) < 3) return g(f.main, u, v, z);
+          if (z > 4.6 && z < 7) return mod(r.a * 8 / Math.PI, 1) < 0.3 ? f.dark : z > 6.2 ? WHITE : glow;
+          return rskin(r.a * 7, z, 9, { seed: 40 });
+        }
+        // the turbine hall: walls with a half-round roof
+        const e = -rrect(u, v, 0, 10, 18, 5, 5);
+        if (e >= 0 && z <= shoulder(e, 11, 5)) {
+          if (e > 0.6 && z > 6.4) {
+            if (Math.abs(u) < 2.4) return g(f.main, u, v, z);
             return mod(u, 2.4) < 0.5 ? METAL_D : METAL;
           }
-          return wallSkin(u, v, z, 18, 13, 0, 9, 41, { band: f.main, win: [5.4, 8], pitch: 7 });
+          if (v > 14.4 && z < 5.4 && mod(u + 40, 8) < 3.2) {
+            const a = mod(u + 40, 8);
+            return z > 4.7 ? hazard(u, 0) : a < 0.4 || a > 2.8 ? GUN_D : mod(Math.floor(z * 1.5), 2) ? METAL_D : METAL;
+          }
+          return rskin(u + v, z, 6.4, { seed: 41, band: [5.4, 6.4, f.main] });
         }
-        for (const cu of [-13, -9, 9, 13]) if (cyl(u, v, cu, 8, 1.1) && z > 9 && z <= 11.2) return z > 10.6 ? GUN_D : STEEL;
-        // steam pipes from the towers down to the hall, lagged and banded
-        for (const cu of [-7, 10]) {
-          if (Math.abs(u - cu) < 1 && v > -1 && v < 3.4 && Math.abs(z - 7) < 1) return mod(Math.floor(v * 1.5), 3) === 0 ? METAL_D : STEEL;
-          if (Math.abs(u - cu) < 1 && Math.abs(v - 2.6) < 1 && z > 7 && z < 9.6) return STEEL;
+        for (const cu of [-12, -6, 6, 12]) if (cyl(u, v, cu, 10, 1) && z > 10 && z <= 12.6) return z > 12 ? GUN_D : STEEL;
+        // lagged steam pipes from the tower and the reactor to the hall
+        for (const cu of [-8, 9]) {
+          if (Math.abs(u - cu) < 1 && v > 1 && v < 6 && Math.abs(z - 7) < 1) return mod(Math.floor(v * 1.5), 3) === 0 ? METAL_D : STEEL;
         }
-        if (Math.abs(v + 5) < 0.9 && u > 0.4 && u < 2.6 && Math.abs(z - 6) < 0.9) return COPPER;
-        // transformer yard: finned transformers, insulators, a fence
-        for (const cu of [14.5, 9.5]) {
-          if (inBox(u, v, z, cu - 2, cu + 2, 14, 17, 0, 4.6)) return z > 4 ? GUN_D : mod(Math.floor(u * 2), 2) ? METAL : METAL_D;
-          for (const du of [-1, 1]) if (cyl(u, v, cu + du, 15.5, 0.5) && z > 4.6 && z <= 7) return mod(Math.floor(z * 2), 2) ? WHITE : hex('#8a5a3a');
+        if (Math.abs(v + 6) < 0.9 && u > 0.6 && u < 2.4 && Math.abs(z - 6) < 0.9) return COPPER;
+        // transformers behind the reactor
+        for (const cv of [-14.5, -11]) {
+          if (inBox(u, v, z, 15, 18, cv - 1.4, cv + 1.4, 0, 4)) return z > 3.5 ? GUN_D : mod(Math.floor(v * 2), 2) ? METAL : METAL_D;
+          if (cyl(u, v, 16.5, cv, 0.5) && z > 4 && z <= 6.4) return mod(Math.floor(z * 2), 2) ? WHITE : RUST;
         }
-        if (z > 6.6 && z < 7.2 && Math.abs(v - 15.5) < 0.3 && u > 8.5 && u < 15.5) return GUN_D; // busbar
-        if (inBox(u, v, z, 6, 18.6, 13.4, 17.6, 0, 3.2) && (u > 18 || v > 17 || u < 6.6) && (z > 2.8 || mod(u + v, 2) < 0.4)) return STEEL;
-        if (inBox(u, v, z, -17.4, -14.6, 13.6, 16.4, 0, 2.6)) return z > 2 ? hazard(u, v) : HAZ; // a warning-striped cabinet
-        const dr = drums(u, v, z, [[-11, 15, RUST], [-8.6, 15.4, hex('#3f6f8a')]]);
-        if (dr) return dr;
         return null;
       };
-      return { shape, rx: 19, ry: 17, zmax: 27, fx: [{ x: -7, y: -5, z: 26 }, { x: 10, y: -5, z: 26 }] };
+      return { shape, rx: 19, ry: 17, zmax: 35, fx: [{ x: -8, y: -5, z: 34 }, { x: 9, y: -6, z: 17.6 }] };
     }
     case 'barracks': {
-      // A corrugated hut with a brick end wall, a chimney, sandbags and kit outside.
+      // A tall round-roofed hut with a brick end wall, a watchtower at the
+      // back corner, sandbags and kit outside, and a flag on a tall pole.
       const R = 9;
-      const skinC = mix(f.main, CONC, 0.35);
+      const H = 13;
+      const skinC = mix(f.main, PLAS, 0.4);
       const shape: Shape = (u, v, z) => {
-        if (Math.abs(u) <= 14 && v * v + z * z <= R * R) {
+        if (Math.abs(u) <= 14 && (v / R) ** 2 + (z / H) ** 2 <= 1) {
           if (u > 13.4) {
-            // end wall with a door, a window and a lamp over the door
-            // (a pair of doors the game draws opening when soldiers come out: BARRACKS_DOOR)
             const [dv, dhw, dtop] = BARRACKS_DOOR;
             if (Math.abs(v - dv) < dhw && z < dtop) return z > dtop - 0.7 ? hazard(v, 0) : Math.abs(v - dv) > dhw - 0.5 ? CONC_L : Math.abs(v - dv) < 0.2 ? GUN_D : z > 4 && z < 5.6 ? GLASS_D : shade(OLIVE, -0.1);
             if (Math.abs(v - dv) < 0.6 && z > dtop + 0.2 && z < dtop + 1.1) return LAMP;
-            if (Math.abs(Math.abs(v) - 5) < 1.4 && z > 2.6 && z < 5.2) return Math.abs(Math.abs(v) - 5) > 1 || z > 4.8 || z < 3 ? CONC_L : v > 0 ? WIN_LIT : WIN_B;
+            if (Math.abs(Math.abs(v) - 5) < 1.4 && z > 2.6 && z < 5.2) return Math.abs(Math.abs(v) - 5) > 1 || z > 4.8 || z < 3 ? CONC_L : glow;
+            if (Math.abs(v) < 1.8 && z > 8.6 && z < 10.6) return Math.abs(v) > 1.4 || z < 9 || z > 10.2 ? CONC_L : glow; // round window up in the gable
             return mod(z, 1.4) < 0.3 || mod(v + (Math.floor(z / 1.4) % 2) * 1.2, 2.4) < 0.3 ? shade(BRICK, -0.25) : g(BRICK, u, v, z, 0.1);
           }
-          const a = Math.atan2(z, v);
-          // skylights along the crown, a painted number, corrugations
-          if (Math.abs(a - Math.PI / 2) < 0.2 && mod(u + 14, 7) > 2 && mod(u + 14, 7) < 5) return mod(u + 14, 7) < 2.4 || mod(u + 14, 7) > 4.6 ? STEEL : GLASS_D;
+          const a = Math.atan2(z / H, v / R);
+          if (Math.abs(a - Math.PI / 2) < 0.2 && mod(u + 14, 7) > 2 && mod(u + 14, 7) < 5) return mod(u + 14, 7) < 2.4 || mod(u + 14, 7) > 4.6 ? STEEL : glow;
+          if (Math.abs(a - 1.0) < 0.14) return g(f.main, u, v, z); // a stripe in the side's color along each flank
           if (v > 0 && z > 3 && z < 6 && u > -2 && u < 3) return mod(Math.floor(u * 1.4) + Math.floor(z), 2) ? WHITE : skinC;
           const rib = mod(u + 40, 2) < 0.6;
           if (z < 1.2) return CONC_D;
           return g(rib ? shade(skinC, -0.2) : mod(u + 40, 2) < 1.1 ? shade(skinC, 0.1) : skinC, u, v, z, 0.06);
         }
-        // stove pipe with a cowl
-        if (cyl(u, v, -8, -3, 0.8) && z <= 13) return z > 12.2 ? BLACK : z > 11.4 ? STEEL : RUST;
-        // sandbags along the front in courses, with a gap for the path
+        // the watchtower: a round shaft, a glazed lookout and a pointed roof
+        const td = Math.hypot(u + 11, v + 9.4);
+        if (z >= 18 && z < 22 && td < 3.4 - (z - 18) * 0.85) return z < 18.5 ? f.dark : g(f.main, u, v, z);
+        if (td < 3.2 && z >= 15 && z < 18) return z < 15.5 || z > 17.5 ? PLAS_L : mod(Math.atan2(v + 9.4, u + 11) * 4 / Math.PI, 1) < 0.2 ? PLAS_D : GLASS;
+        if (td < 2.3 && z < 15) return rskin(Math.atan2(v + 9.4, u + 11) * 2.3, z, 15, { seed: 5 });
+        if (cyl(u, v, -6, -3, 0.8) && z <= 15.4) return z > 14.6 ? BLACK : z > 13.8 ? STEEL : RUST;
         if (v > 10 && v < 12.2 && u > -12 && u < 8 && z < 2.6 && !(u > -3.4 && u < -0.6)) {
           const course = Math.floor(z / 0.9);
           const bag = mod(u + course * 1.1, 2.2);
           return bag < 0.35 ? shade(SAND_BAG, -0.3) : shade(SAND_BAG, (hash2(Math.floor((u + course * 1.1) / 2.2), course, 5) - 0.5) * 0.2 + (z - course * 0.9 > 0.5 ? 0.06 : -0.06));
         }
-        // ammunition boxes, a water bowser and a rifle rack
         if (inBox(u, v, z, -13, -9.4, 9.6, 11.6, 0, 2) || inBox(u, v, z, -12.4, -10, 9.8, 11.4, 2, 3.6)) return Math.abs(mod(z, 2) - 1) < 0.25 ? HAZ : z > 3.2 || (z > 1.6 && z < 2) ? shade(OLIVE, 0.15) : OLIVE;
         if ((u - 11) ** 2 / 6 + (z - 2.6) ** 2 / 2.4 < 1 && Math.abs(v - 10.6) < 1.4) return Math.abs(u - 11) < 0.3 ? OLIVE_D : z > 3.4 ? shade(OLIVE, 0.15) : OLIVE;
         if (Math.abs(v - 10.6) < 1.5 && (Math.abs(u - 9.6) < 0.4 || Math.abs(u - 12.4) < 0.4) && z < 1.4) return WHEEL;
-        // flagpole on a base
-        if (Math.abs(u - 15.5) < 0.4 && Math.abs(v - 9) < 0.4 && z < 22) return z > 21.4 ? HAZ : STEEL;
-        if (inBox(u, v, z, 14.6, 16, 8.2, 9.8, 0, 1)) return CONC_L;
+        if (Math.abs(u - 15.5) < 0.4 && Math.abs(v - 9) < 0.4 && z < 27) return z > 26.4 ? HAZ : STEEL;
+        if (cyl(u, v, 15.3, 9, 1) && z < 1) return CONC_L;
         return null;
       };
-      return { shape, rx: 16, ry: 12, zmax: 22, fx: [{ x: 15.5, y: 9, z: 21 }] };
+      return { shape, rx: 16, ry: 12, zmax: 27, fx: [{ x: 15.5, y: 9, z: 26 }] };
     }
     case 'refinery': {
-      // The processing hall (with its crusher tower and chimney) and, beside
-      // it, the receiving bay: a hauler backs onto the striped pad in front
-      // of the bay's intake and tips its load in, and a conveyor carries it
-      // up and over to the crusher. A furnace glows in the bay's end wall.
+      // A great domed processing drum with a tall chimney, a round ore tank,
+      // and the receiving bay: a hauler backs onto the striped pad in front of
+      // the bay's intake and tips its load in, and a covered conveyor carries
+      // it up and over to the drum. A furnace glows in the bay's end wall.
       const EMB = hex('#ff8a3a');
       const EMB_L = hex('#ffd27a');
       const shape: Shape = (u, v, z) => {
-        // the receiving bay
-        if (inBox(u, v, z, 4, 20, -14, -2, 0, 15)) {
-          // the intake: a dark mouth in the wall facing the pad, framed in
-          // hazard stripes, with grimy chutes inside
+        // the receiving bay: rounded at the back, a vaulted roof, the intake in its front
+        const be = -rrect(u, v, 12, -8, 8, 6, 3);
+        if (be >= 0 && z <= 12 + Math.max(0, capH(Math.abs(v + 8), 6.6, 4.6)) && z <= 16.6) {
           if (v > -2.6 && u > 7.4 && u < 17.6 && z < 8) {
             if (u < 8.3 || u > 16.7 || z > 7.1) return hazard(u, z);
             if (v > -2.3) return null;
             return z < 1.2 ? BLACK : mod(Math.floor(u * 1.3), 3) === 0 ? GUN : z > 5.6 ? GUN_D : BLACK;
           }
-          if (v > -2.6 && u > 7.4 && u < 17.6 && z < 8.6) return CONC_L;
-          if (z > 14.4) {
-            const e = Math.min(u - 4, 20 - u, v + 14, -2 - v);
-            if (e < 1) return CONC_L;
-            return g(mod(u, 3) < 0.4 ? shade(TAR, -0.14) : TAR, u, v, z, 0.07);
-          }
-          // the furnace in the end wall: glowing slits under a louvred vent
+          if (z > 12) return mod(u, 2.4) < 0.45 ? METAL_D : Math.abs(v + 8) < 1.2 ? g(f.main, u, v, z) : METAL;
           if (u > 19.4 && v > -12 && v < -4) {
             if (z > 2.4 && z < 5.4) {
               if (z < 2.9 || z > 4.9 || mod(v + 12, 2.7) < 0.6) return GUN_D;
               return z > 4 ? EMB : EMB_L;
             }
-            if (z > 7 && z < 11) return mod(Math.floor(z * 1.6), 2) ? GUN_D : METAL_D;
+            if (z > 7 && z < 10) return mod(Math.floor(z * 1.6), 2) ? GUN_D : METAL_D;
           }
-          // a stripe of the faction's color, and the amber lamps either side of the intake
           if (v > -2.6 && z > 9 && z < 10.6 && (Math.abs(u - 6) < 0.8 || Math.abs(u - 19) < 0.8)) return LAMP;
-          return wallSkin(u, v, z, 20, -2, 0, 15, 13, { band: f.main });
+          return rskin(u + v, z, 12, { seed: 13, band: [10.6, 11.6, f.main] });
         }
-        // a hood over the intake, jutting out over the pad's back edge
         if (u > 7 && u < 18 && v > -2 && v < 0.6 && z > 8 && z < 9.6 - (v + 2) * 0.35) return z > 9.2 - (v + 2) * 0.35 ? f.main : g(METAL_D, u, v, z);
-        // the crusher housing on the bay's roof, where the conveyor starts
-        if (inBox(u, v, z, 5, 13, -12, -4, 15, 20)) {
-          if (z > 19.4) return g(roofC, u, v, z);
-          if (z > 16.4 && z < 18.4 && (u > 12.4 || v > -4.6)) return mod(u > 12.4 ? v : u, 2) < 1 ? WIN_B : METAL_D;
-          return mod(Math.floor(z * 1.2), 2) ? METAL : shade(METAL, -0.1);
+        // the crusher drum on the bay's roof, where the conveyor starts
+        const c = drum(u, v, z, 8, -8, 3.4, 20, 1.4);
+        if (c && z > 14) return c.roof ? roofC : z > 17 && z < 18.6 ? (mod(c.a * 4 / Math.PI, 1) < 0.3 ? METAL_D : glow) : mod(Math.floor(z * 1.2), 2) ? METAL : shade(METAL, -0.1);
+        // the covered conveyor over to the drum
+        if (Math.abs(v + 8) < 1.4 && u > -2 && u < 6 && z > 16.4 && z < 18.4) {
+          if (z > 17.8) return Math.abs(v + 8) > 1 ? HAZ : shade(METAL, -0.1);
+          return mod(u, 2.4) < 0.5 ? METAL_D : Math.abs(v + 8) > 1 ? METAL : TREAD;
         }
-        const bayAc = acUnit(u, v, z, 16.5, -6, 15) ?? acUnit(u, v, z, 16.5, -11, 15);
-        if (bayAc) return bayAc;
-        // processing hall
-        if (inBox(u, v, z, -20, 3, -14, 14, 0, 12)) {
-          const door = rollerDoor(u, v, z, -10, 6, 14, 8.6);
-          if (door) return door;
-          if (z > 11.4) {
-            const e = Math.min(u + 20, 3 - u, v + 14, 14 - v);
-            if (e < 1) return CONC_L;
-            if (Math.abs(v) < 2) return g(f.main, u, v, z);
-            return mod(v, 2.6) < 0.5 ? METAL_D : shade(METAL, -0.06);
+        if (Math.abs(u - 2.6) < 0.4 && Math.abs(Math.abs(v + 8) - 1) < 0.4 && z <= 16.4) return GUN_D;
+        // the chimney, on the drum's shoulder
+        if (cyl(u, v, -15, -9, 1.6) && z >= 12 && z < 31) return z > 30.2 ? BLACK : z > 28.4 ? f.main : mod(Math.floor(z / 2), 2) ? PLAS_D : shade(PLAS_D, 0.12);
+        // the processing drum
+        const p = drum(u, v, z, -9, -3, 10, 13, 7.4);
+        if (p) {
+          if (p.roof) {
+            if (p.d < 2.6) return p.d < 1.6 ? GUN_D : f.main;
+            return mod(p.a * 8 / Math.PI, 1) < 0.07 || Math.abs(z - 17.6) < 0.3 ? PLAS_D : g(PLAS_L, u, v, z);
           }
-          if (u > 2.4 && Math.abs(v - 10) < 1.1 && z < 5) return z > 4 ? GLASS_D : GUN;
-          return wallSkin(u, v, z, 3, 14, 0, 12, 11, { win: [7, 11], band: f.main });
+          if (Math.abs(p.a - Math.PI / 2) < 0.34 && z < 8.6) {
+            // a roller door facing the front
+            if (Math.abs(p.a - Math.PI / 2) > 0.29 || z > 8) return hazard(u, z);
+            return mod(Math.floor(z * 1.5), 2) ? METAL_D : METAL;
+          }
+          return rskin(p.a * 10, z, 13, { seed: 11, win: [8.8, 11.4], band: [11.8, 12.8, f.main], pitch: 4.4, lit: glow });
         }
-        // crusher tower on the hall's roof
-        if (inBox(u, v, z, -17, -10, -11, -4, 12, 18)) {
-          if (z > 17.4) return g(roofC, u, v, z);
-          if (z > 14 && z < 16 && (u > -10.6 || v > -4.6)) return mod(u > -10.6 ? v : u, 2.4) < 1.2 ? WIN_B : METAL_D;
-          return mod(u + v, 2) < 0.5 ? METAL_D : METAL;
-        }
-        // the covered conveyor from the bay's housing over to the crusher
-        if (Math.abs(v + 7.5) < 1.5 && u > -10 && u < 5 && z > 16.4 && z < 18.6) {
-          if (z > 18) return Math.abs(v + 7.5) > 1.1 ? HAZ : shade(METAL, -0.1);
-          return mod(u, 2.4) < 0.5 ? METAL_D : Math.abs(v + 7.5) > 1.1 ? METAL : TREAD;
-        }
-        for (const cu of [-4, 1]) if (Math.abs(u - cu) < 0.4 && Math.abs(Math.abs(v + 7.5) - 1.2) < 0.4 && z >= 12 && z <= 16.4) return GUN_D;
-        // chimney with bands and a soot-black lip
-        if (cyl(u, v, -16, -10.4, 1.6) && z >= 18 && z < 27) return z > 26.2 ? BLACK : z > 24.6 ? f.main : mod(Math.floor(z / 2), 2) ? CONC_D : shade(CONC_D, 0.12);
-        const ac = acUnit(u, v, z, -5, 8, 12) ?? acUnit(u, v, z, -15, 8, 12);
-        if (ac) return ac;
-        // the docking pad: hazard border, guide stripes for the tracks and a
-        // grille over the pit at the intake, bollards at its front corners
+        // the ore tank
+        const k = drum(u, v, z, -13.5, 10.5, 4.4, 10, 3.2);
+        if (k) return k.roof ? (k.d < 1 ? GUN_D : g(STEEL, u, v, z)) : z > 6 && z < 7.4 ? mod(k.a * 4 / Math.PI, 1) < 0.5 ? f.main : f.light : rskin(k.a * 4.4, z, 10, { seed: 12, body: METAL });
+        // the docking pad: hazard border, guide stripes for the tracks, a grille over the pit
         if (inBox(u, v, z, 4.5, 20.5, -2, 16, 0, 1)) {
           if (u > 7.6 && u < 17.4 && v < 2) return mod(Math.floor(u * 1.2), 2) || mod(Math.floor(v * 1.2), 2) ? GUN : BLACK;
           if (u < 5.6 || u > 19.4 || v > 14.9) return hazard(u, v);
@@ -2052,18 +2113,16 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
           return g(hash2(Math.floor(u * 0.8), Math.floor(v * 0.8), 21) > 0.93 ? shade(TAR, -0.2) : shade(TAR, 0.12), u, v, z, 0.08);
         }
         for (const [bu, bv] of [[4.9, 15.6], [20.1, 15.6]]) if (cyl(u, v, bu, bv, 0.7) && z < 3) return mod(Math.floor(z * 1.4), 2) ? HAZ : BLACK;
-        // spilt ore by the hall's corner
-        if ((u - 1.4) ** 2 + (v - 15) ** 2 + (z * 1.6) ** 2 < 4.5 + hash2(Math.floor(u * 2), Math.floor(v * 2), 9)) return hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 7, 4) > 0.8 ? hex('#f2d06a') : hex('#c09443');
+        if ((u - 1.4) ** 2 + (v - 13) ** 2 + (z * 1.6) ** 2 < 4.5 + hash2(Math.floor(u * 2), Math.floor(v * 2), 9)) return hash2(Math.floor(u * 2), Math.floor(v * 2) + Math.floor(z * 2) * 7, 4) > 0.8 ? hex('#f2d06a') : hex('#c09443');
         return null;
       };
-      // fx: the chimney, the two intake lamps, and the intake itself
       return {
         shape,
         rx: 21,
         ry: 16,
-        zmax: 28,
+        zmax: 32,
         fx: [
-          { x: -16, y: -10.4, z: 27 },
+          { x: -15, y: -9, z: 31 },
           { x: 6, y: -1.6, z: 10 },
           { x: 19, y: -1.6, z: 10 },
           { x: 12.5, y: -1.5, z: 4 },
@@ -2071,360 +2130,400 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       };
     }
     case 'radar': {
-      // The Air command: the old radar bunker with its mast and dish at the
-      // west end (shifted along by AIR_DU) and four landing pads for Swift
-      // jets beside it (fx[1..4], where the jets sit).
+      // The Air command: a domed round command hall with a control tower
+      // rising from it, the radar dish on top (shifted along by AIR_DU), and
+      // four round landing pads for Swift jets beside it (fx[1..4]).
       const bunker: Shape = (u, v, z) => {
-        if (inBox(u, v, z, -10, 10, -8, 8, 0, 9)) {
-          if (z > 8.4) {
-            const e = Math.min(u + 10, 10 - u, v + 8, 8 - v);
-            if (e < 1) return f.light;
-            if (Math.abs(u) < 3 && Math.abs(v) < 3) return Math.abs(u) > 2.4 || Math.abs(v) > 2.4 ? GUN : GUN_D;
-            return g(roofC, u, v, z);
-          }
-          if (v > 7.4 && Math.abs(u + 5) < 1.3 && z < 5.4) return z > 4.4 ? GLASS_D : Math.abs(u + 5) > 0.9 ? CONC_L : GUN;
-          if (v > 7.4 && u > 0 && u < 7 && z > 3.4 && z < 6.4) {
-            // a wide operations window, screens glowing inside
-            if (u < 0.5 || u > 6.5 || z > 6 || z < 3.9) return CONC_L;
-            return mod(u, 2) < 0.3 ? WIN : hash2(Math.floor(u / 2), 1, 7) > 0.4 ? hex('#6fe0a0') : WIN_B;
-          }
-          return wallSkin(u, v, z, 10, 8, 0, 9, 7, { win: [2.4, 7.4], pitch: 4.6 });
+        // the control tower: a shaft, a glazed cab, a roof the dish turns on
+        if (Math.hypot(u, v) < 3.4 && z >= 20 && z < 23.6) {
+          if (z > 23) return f.light;
+          if (z < 20.5) return f.dark;
+          return mod(Math.atan2(v, u) * 6 / Math.PI, 1) < 0.2 ? f.dark : z > 22.2 ? GLASS_L : GLASS;
         }
-        // lattice mast with a platform under the dish
-        if (z >= 9 && z < 19) {
-          const m = lattice(u, v, z, 0, 0, 1.7, GUN_L);
-          if (m) return m;
+        if (Math.hypot(u, v) < 2.2 && z >= 12 && z < 20) return mod(Math.floor(z / 2), 2) ? PLAS_L : PLAS;
+        const h = drum(u, v, z, 0, 0, 9, 8.4, 5.6);
+        if (h) {
+          if (h.roof) return mod(h.a * 6 / Math.PI, 1) < 0.08 ? PLAS_D : z > 12.4 ? g(roofC, u, v, z) : g(PLAS_L, u, v, z);
+          if (Math.abs(h.a - Math.PI / 2) < 0.18 && z < 5.4) return z > 4.6 ? LAMP : Math.abs(h.a - Math.PI / 2) > 0.13 ? PLAS_L : GUN; // door
+          if (z > 3.6 && z < 6.6) {
+            if (z < 4 || z > 6.2 || mod(h.a * 10 / Math.PI, 1) < 0.15) return PLAS_L;
+            return hash2(Math.floor(h.a * 10 / Math.PI), 1, 7) > 0.45 ? hex('#6fe0a0') : WIN_B; // screens glowing inside
+          }
+          return rskin(h.a * 9, z, 8.4, { seed: 7, band: [7, 8, f.main] });
         }
-        if (inBox(u, v, z, -2.4, 2.4, -2.4, 2.4, 18.4, 19)) return Math.abs(u) > 1.9 || Math.abs(v) > 1.9 ? HAZ : GUN;
-        // roof aerials, a small relay dish, a generator set by the wall
-        if (Math.abs(u - 7.6) < 0.35 && Math.abs(v + 5.6) < 0.35 && z >= 9 && z < 15) return z > 14.4 ? RED : GUN_D;
-        if (Math.abs(u + 7.6) < 0.35 && Math.abs(v + 5.6) < 0.35 && z >= 9 && z < 13) return GUN_D;
-        const ac = acUnit(u, v, z, -6.4, 4.6, 9);
-        if (ac) return ac;
-        if ((u - 7) ** 2 + (v - 5) ** 2 + (z - 10.8) ** 2 < 3 && z > 9.6 && v > 4.6) return WHITE;
-        if (inBox(u, v, z, -10.8, -10, -4, 2, 0, 4)) return z > 3.4 ? GUN_D : mod(Math.floor(v * 1.5), 2) ? OLIVE : OLIVE_D;
+        if (Math.abs(u - 6.4) < 0.3 && Math.abs(v + 3.4) < 0.3 && z < 16) return z > 15.4 ? RED : GUN_D;
+        if (inBox(u, v, z, -10.8, -9.6, -4, 2, 0, 4)) return z > 3.4 ? GUN_D : mod(Math.floor(v * 1.5), 2) ? OLIVE : OLIVE_D;
         return null;
       };
       const shape: Shape = (u, v, z) => {
         const b = bunker(u - AIR_DU, v, z);
         if (b) return b;
         const au = Math.abs(v);
-        // a covered walkway from the bunker to the pads
-        if (u > -3.4 && u < -0.4 && au < 2 && z < 3.4) return z > 2.8 ? f.dark : mod(u, 1.5) < 0.3 ? GUN_D : g(CONC_L, u, v, z);
+        if (u > -3.4 && u < -0.4 && au < 2 && z < 3.4) return z > 2.8 ? f.dark : mod(u, 1.5) < 0.3 ? GUN_D : g(PLAS_L, u, v, z);
         for (const [pu, pv] of AIR_PAD_AT) {
           const du = u - pu;
           const dv = v - pv;
-          if (Math.abs(du) > 5.6 || Math.abs(dv) > 5.6) continue;
+          const d = Math.hypot(du, dv);
+          if (d > 5.8) continue;
           if (z > 0.6) {
-            // a lamp at the outer corner of each pad
-            if (Math.abs(Math.abs(du) - 5.1) < 0.35 && Math.abs(Math.abs(dv) - 5.1) < 0.35 && z < 1.6) return z > 1.2 ? (du * dv > 0 ? LAMP : hex('#7fe0a0')) : GUN_D;
+            for (let i = 0; i < 4; i++) {
+              const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+              if (Math.hypot(du - Math.cos(a) * 5.3, dv - Math.sin(a) * 5.3) < 0.45 && z < 1.6) return z > 1.2 ? (i % 2 ? LAMP : hex('#7fe0a0')) : GUN_D;
+            }
             continue;
           }
-          if (Math.abs(du) > 5 || Math.abs(dv) > 5) return hazard(du + dv, 0);
-          // a white ring with a chevron pointing out, on dark tarmac
-          const d = Math.hypot(du, dv);
+          if (d > 5) return hazard(Math.atan2(dv, du) * 7, 0);
           if (Math.abs(d - 3.6) < 0.4) return WHITE;
           if (Math.abs(dv) < 0.4 + Math.max(0, du) * 0.5 && du > 0 && du < 2) return HAZ;
           return g(shade(TAR, 0.1), u, v, z, 0.08);
         }
-        // concrete apron between the pads
-        if (u > -1 && u < 23 && Math.abs(v) < 12.6 && z < 0.5) return Math.abs(v) > 12 || u > 22.4 ? CONC_L : g(CONC_D, u, v, z, 0.06);
         return null;
       };
-      return { shape, rx: 23.5, ry: 13, zmax: 20, fx: [{ x: AIR_DU, y: 0, z: 21 }, ...AIR_PAD_AT.map(([x, y]) => ({ x, y, z: 0.6 }))] };
+      return { shape, rx: 23.5, ry: 13, zmax: 24, fx: [{ x: AIR_DU, y: 0, z: 26.6 }, ...AIR_PAD_AT.map(([x, y]) => ({ x, y, z: 0.6 }))] };
     }
     case 'factory': {
-      // The Vehicle works: a long hall under a saw-tooth roof with one big
-      // garage door in the front (+y) wall, which finished vehicles drive out
-      // of (FACTORY_DOOR; the game draws it opening), and stacks on the roof.
+      // The Vehicle works: a great vaulted hangar with one big garage door in
+      // its front (+y) wall, which finished vehicles drive out of
+      // (FACTORY_DOOR; the game draws it opening), lower rounded wings either
+      // side and a stack on each.
       const [dcu, dhw, dtop] = FACTORY_DOOR;
+      const VR = 20.5;
+      const top = (u: number) => 11 + 15 * Math.sqrt(Math.max(0, 1 - (u / VR) ** 2));
       const shape: Shape = (u, v, z) => {
-        if (inBox(u, v, z, -26, 26, -18, 18, 0, 24)) {
-          // saw-tooth roof: glazed on the steep side, ribbed sheet on the slope
-          const s = mod(u + 26, 10) / 10;
-          const roof = 19 + s * 5;
-          if (z > roof) return null;
-          if (z > 19) {
-            if (Math.abs(v) > 16.6) return z > roof - 0.7 ? CONC_L : g(CONC_D, u, v, z);
-            if (s > 0.86) return mod(v, 4) < 0.5 ? STEEL : z > 22 ? GLASS : GLASS_D;
-            if (z > roof - 0.7) return mod(v, 2) < 0.4 ? METAL_D : s < 0.1 ? GUN : shade(METAL, -0.1 + s * 0.16);
-            return METAL_D;
+        if (Math.abs(u) <= VR && Math.abs(v) <= 18 && z <= top(u)) {
+          const tz = top(u);
+          if (v > 17.4) {
+            // the front wall: the door, an arch of the side's color over it
+            const door = rollerDoor(u, v, z, dcu, dhw, 18, dtop);
+            if (door) return door;
+            if (z > tz - 1) return PLAS_L;
+            if (z > tz - 2.4) return g(f.main, u, v, z);
+            if (z > dtop && z < dtop + 1.6 && Math.abs(u - dcu) < dhw + 1.5) return mod(Math.floor(u * 1.3), 2) && z > dtop + 0.4 && z < dtop + 1.2 ? WHITE : f.dark;
+            if (Math.abs(Math.abs(u - dcu) - dhw - 2.2) < 0.7 && z > 13 && z < 14.2) return LAMP;
+            // round windows high up either side
+            for (const wu of [-16, 16]) {
+              const wd = Math.hypot(u - wu, z - 13);
+              if (wd < 1.8) return wd > 1.3 ? PLAS_D : glow;
+            }
+            if (z > 18 && z < tz - 3) {
+              const wd = Math.hypot(u - dcu, z - 21.5);
+              if (wd < 2.4) return wd > 1.9 ? PLAS_D : mod(Math.atan2(z - 21.5, u - dcu) * 4 / Math.PI, 1) < 0.2 ? PLAS_D : glow;
+            }
+            return rskin(u, z, tz, { seed: 13 });
           }
-          const door = rollerDoor(u, v, z, dcu, dhw, 18, dtop);
-          if (door) return door;
-          // a hazard-striped header over the door with the faction's sign on it
-          if (v > 17.4 && z > dtop && z < dtop + 1.6 && Math.abs(u - dcu) < dhw + 1.5) return mod(Math.floor(u * 1.3), 2) && z > dtop + 0.4 && z < dtop + 1.2 ? WHITE : f.dark;
-          if (v > 17.4 && Math.abs(Math.abs(u - dcu) - dhw - 2.2) < 0.7 && z > 13 && z < 14.2) return LAMP; // lamps either side
-          if ((u > 25.4 && Math.abs(Math.abs(v) - 12) < 0.45) || (v > 17.4 && Math.abs(Math.abs(u - dcu) - 21) < 0.45)) return z > 1 ? METAL_D : CONC_D; // downpipes
-          return wallSkin(u, v, z, 26, 18, 0, 19, 13, { win: [6.4, 11.4], band: f.main, pitch: 5.2 });
+          if (z > 11 && z > tz - 0.8) {
+            // the vault: ribbed sheet, a glazed strip along the crown, stripes of the side's color
+            if (Math.abs(u) < 2.4) return mod(v, 3) < 0.45 ? STEEL : z > tz - 0.4 ? GLASS : GLASS_D;
+            if (mod(v + 18, 6) < 0.7) return PLAS_D;
+            if (Math.abs(Math.abs(u) - 10) < 1) return g(f.main, u, v, z);
+            return mod(u, 1.6) < 0.4 ? METAL_D : g(METAL, u, v, z, 0.04);
+          }
+          return rskin(u + v, z, 11, { seed: 14, band: [9.2, 10.4, f.main] });
         }
-        // roof stacks and vents
-        for (const cu of [-18, 12]) if (cyl(u, v, cu, -8, 1.7) && z < 28.4) return z > 27.6 ? BLACK : z > 26.4 ? f.main : mod(Math.floor(z), 3) === 0 ? METAL_D : STEEL;
-        for (const cu of [-13, -3, 7, 17]) if (cyl(u, v, cu, 6, 1) && z > 19 && z < 23 + mod(cu + 26, 10) * 0.5) return METAL_D;
-        // the apron in front of the door: concrete with guide stripes
+        // the wings, and a stack on each
+        for (const s of [-1, 1]) {
+          if (cyl(u, v, s * 23.5, -11, 1.5) && z < 25) return z > 24.2 ? BLACK : z > 22.6 ? f.main : mod(Math.floor(z), 3) === 0 ? METAL_D : STEEL;
+          const e = -rrect(u, v, s * 23.5, 0, 3.6, 17, 3);
+          if (e >= 0 && z <= shoulder(e, 12, 3)) {
+            if (e > 0.6 && z > shoulder(e, 12, 3) - 0.7) return e < 3 ? PLAS_L : g(roofC, u, v, z);
+            if (v > 16.4 && Math.abs(u - s * 23.5) < 1.2 && z < 5) return z > 4 ? LAMP : GUN;
+            return rskin(u + v, z, 12, { seed: 15, win: [5, 8.4], band: [9.6, 10.8, f.main], pitch: 4.6, lit: glow });
+          }
+        }
         if (v > 18 && v < 19 && Math.abs(u - dcu) < dhw && z < 0.5) return Math.abs(Math.abs(u - dcu) - dhw + 1.5) < 0.5 ? HAZ : CONC_L;
         return null;
       };
-      return { shape, rx: 27, ry: 19, zmax: 29, fx: [{ x: -18, y: -8, z: 28.4 }, { x: 12, y: -8, z: 28.4 }] };
+      return { shape, rx: 27, ry: 19, zmax: 27, fx: [{ x: -23.5, y: -11, z: 25 }, { x: 23.5, y: -11, z: 25 }] };
     }
     case 'tower': {
-      // Gun tower: an eight-sided concrete emplacement with a sandbagged rim.
+      // Gun tower: a tall round bunker with a sloped skirt, firing slits and
+      // a band of the side's color; the game draws the turning guns on top.
+      const H = 9;
       const shape: Shape = (u, v, z) => {
-        const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.72);
-        if (oct < 7.5 && z < 5) {
-          if (z > 4.4) {
-            if (oct > 6.6) return CONC_L;
-            if (oct < 4.6) return oct > 4 ? GUN_D : mod(Math.atan2(v, u) * 4, 2) < 1 ? f.dark : shade(f.dark, 0.14); // turret ring
-            return hazard(Math.atan2(v, u) * 7, 0);
+        const d = Math.hypot(u, v);
+        const r = z < 3 ? 7.6 - z * 0.45 : 6.25 - (z - 3) * 0.05;
+        if (d < r && z < H) {
+          const a = Math.atan2(v, u);
+          if (z > H - 0.6) {
+            if (d > r - 1) return PLAS_L;
+            if (d < 4.4) return d > 3.8 ? GUN_D : mod(a * 4, 2) < 1 ? f.dark : shade(f.dark, 0.14);
+            return hazard(a * 7, 0);
           }
-          if (z < 1) return CONC_D;
-          const onX = u > v;
-          const along = onX ? v : u;
-          if (Math.abs(along) < 1.6 && z > 2.2 && z < 3.4 && oct > 6.8) return BLACK; // firing slit
-          if (v > 6.8 && Math.abs(u + 4) < 1.1 && z < 3.6) return GUN; // hatch
-          if (Math.abs(z - 2) < 0.2) return shade(CONC, -0.14);
-          return grime(g(CONC, u, v, z, 0.06), along, z, 5, 5);
+          if (z < 3) return z < 1 ? CONC_D : mod(a * 12 / Math.PI, 1) < 0.08 ? PLAS_D : g(PLAS, u, v, z);
+          if (z > 4.6 && z < 5.8 && mod(a * 4 / Math.PI + 0.5, 1) < 0.22) return BLACK; // firing slits
+          if (z > 7 && z < 7.9) return g(f.main, u, v, z);
+          if (Math.abs(a - 2.2) < 0.2 && z < 6) return GUN; // hatch
+          return rskin(a * 6.2, z, H, { seed: 9 });
         }
-        // sandbags on the rim to either side
-        if (oct < 7.6 && oct > 5.8 && z >= 5 && z < 6.4 && (Math.abs(u) > 3.4 && Math.abs(v) > 3.4)) return mod(Math.atan2(v, u) * 6, 2) < 0.4 ? shade(SAND_BAG, -0.3) : shade(SAND_BAG, z > 5.7 ? 0.06 : -0.06);
-        // ammunition by the hatch
-        if (inBox(u, v, z, -6.4, -3.6, 7.6, 9, 0, 1.6)) return z > 1.2 ? shade(OLIVE, 0.15) : Math.abs(u + 5) < 0.3 ? HAZ : OLIVE;
+        if (inBox(u, v, z, -7, -4.2, 6.8, 8.4, 0, 1.6)) return z > 1.2 ? shade(OLIVE, 0.15) : Math.abs(u + 5.6) < 0.3 ? HAZ : OLIVE;
         return null;
       };
-      return { shape, rx: 8, ry: 8, zmax: 7, fx: [{ x: 0, y: 0, z: 5 }] };
+      return { shape, rx: 8, ry: 8, zmax: 10, fx: [{ x: 0, y: 0, z: H }] };
     }
     case 'silo': {
-      const silo = (u: number, v: number, z: number, cu: number, cv: number, h: number) => {
-        const d = Math.hypot(u - cu, v - cv);
-        if (d > 5.5 || z > h + Math.sqrt(Math.max(0, 30 - d * d)) * 0.6) return null;
-        const a = Math.atan2(v - cv, u - cu);
-        if (z > h) {
-          if (d < 1) return z > h + 3 ? GUN_D : GUN; // filler hatch
-          return mod(a * 4, Math.PI) < 0.12 ? METAL_D : g(STEEL, u, v, z, 0.05);
+      // Ore silos: a tall rounded tank and a smaller one, each with a glowing
+      // gauge of the side's color up its front, a pump house between.
+      const tank = (u: number, v: number, z: number, cu: number, cv: number, r: number, h: number) => {
+        const k = drum(u, v, z, cu, cv, r, h, r * 0.75);
+        if (!k) return null;
+        if (k.roof) {
+          if (k.d < 1) return z > h + r * 0.75 - 0.4 ? GUN_D : GUN;
+          return mod(k.a * 4 / Math.PI, 1) < 0.07 ? METAL_D : g(STEEL, u, v, z, 0.05);
         }
-        if (z > h - 0.7) return METAL_D; // eaves ring
-        if (z > h * 0.5 && z < h * 0.5 + 2.5) return mod(Math.floor(a * 3.2) + Math.floor(z * 0.8), 2) ? f.main : f.light; // chequered band
-        if (z < 1.6) return CONC_D;
-        if (Math.abs(a - 0.85) < 0.13 && d > 4.9) return mod(Math.floor(z * 1.5), 2) ? GUN_D : GUN_L; // ladder
-        if (mod(z, 2.6) < 0.35) return METAL_D; // hoops
-        if (mod(a * 4, 1) < 0.07) return shade(METAL, -0.1);
-        return grime(g(METAL, u, v, z, 0.05), a * 8, z, h, cu + 9);
+        if (Math.abs(k.a - Math.PI / 4) < 0.16 && z > 2.4 && z < h - 1.6) {
+          // the gauge: a glass slot, lit as high as the silo is full
+          if (Math.abs(k.a - Math.PI / 4) > 0.11) return METAL_D;
+          return z < h * 0.62 ? glow : GLASS_D;
+        }
+        if (z > h - 0.7) return METAL_D;
+        if (z > h - 2.8 && z < h - 1.2) return g(f.main, u, v, z);
+        if (Math.abs(k.a - 1.5) < 0.12 && k.d > r - 0.7 && z > 1.4) return mod(Math.floor(z * 1.5), 2) ? GUN_D : GUN_L;
+        if (mod(z, 3.2) < 0.35) return METAL_D;
+        return rskin(k.a * r, z, h, { seed: cu + 9, body: METAL });
       };
       const shape: Shape = (u, v, z) => {
-        const s = silo(u, v, z, -5, -3, 18) ?? silo(u, v, z, 6, 3, 14);
+        const s = tank(u, v, z, -4.4, -2.6, 6.4, 18) ?? tank(u, v, z, 6.4, 3.8, 4.4, 12);
         if (s) return s;
-        // a gantry between the tops, feed pipes down to a pump house, a slab under it all
-        if (Math.abs(v - u * 0.55) < 0.8 && u > -3 && u < 4 && Math.abs(z - 15.4) < 0.5) return mod(Math.floor(u * 1.4), 2) ? HAZ : GUN;
-        if (inBox(u, v, z, -10.6, -6.4, 4.4, 8.6, 0, 4.4)) {
-          if (z > 3.8) return g(roofC, u, v, z);
-          if (v > 8 && Math.abs(u + 8.5) < 0.9 && z < 3.2) return GUN;
-          return mod(u + v, 3) < 0.4 ? CONC_D : CONC;
+        if (Math.abs(v + 2.6 - (u + 4.4) * 0.6) < 0.8 && u > -1 && u < 4 && Math.abs(z - 13.4) < 0.5) return mod(Math.floor(u * 1.4), 2) ? HAZ : GUN;
+        const e = -rrect(u, v, -7.4, 6.6, 3, 2.4, 1.6);
+        if (e >= 0 && z <= shoulder(e, 5, 1.6)) {
+          if (e > 0.6 && z > 4.4) return g(roofC, u, v, z);
+          if (v > 8.4 && Math.abs(u + 7.4) < 0.9 && z < 3.4) return GUN;
+          return rskin(u + v, z, 5, { seed: 30 });
         }
-        if (Math.abs(u + 8.5) < 0.6 && Math.abs(z - 5) < 0.6 && v > -1 && v < 6) return COPPER;
-        if (Math.abs(v - 8.6) < 0.6 && Math.abs(z - 2.2) < 0.6 && u > -6.4 && u < 2.4) return STEEL;
+        if (Math.abs(u + 6) < 0.6 && Math.abs(z - 3) < 0.6 && v > 2 && v < 5) return COPPER;
         const dr = drums(u, v, z, [[9.4, -6, f.main], [10.4, -3.8, RUST]]);
         if (dr) return dr;
-        if (Math.abs(u) <= 12 && Math.abs(v) <= 10 && z < 0.6) return Math.abs(u) > 11.2 || Math.abs(v) > 9.2 ? CONC_L : mod(u, 6) < 0.4 || mod(v, 6) < 0.4 ? shade(CONC_D, -0.12) : g(CONC_D, u, v, z, 0.08);
         return null;
       };
-      return { shape, rx: 12, ry: 10, zmax: 23, fx: [] };
+      return { shape, rx: 12, ry: 10, zmax: 23.4, fx: [] };
     }
     case 'prism': {
-      // Lumen tower: an eight-sided plinth, a tapering ribbed column and a
-      // big crystal on top, which the beam leaves from.
+      // Lumen tower: a stepped round plinth, a tall column braced by four
+      // fins of the side's color that sweep up into it, an emitter cradle and
+      // a big crystal at the very top, which the beam leaves from.
+      const CZ = 40;
       const shape: Shape = (u, v, z) => {
-        const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.72);
-        if (oct < 7 && z < 4) {
-          if (z > 3.4) return oct > 6.2 ? CONC_L : shade(CONC, -0.05);
-          if (z < 1) return CONC_D;
-          if (v > 6.2 && Math.abs(u + 3.6) < 1 && z < 3) return GUN; // hatch
-          return grime(g(CONC, u, v, z, 0.06), u > v ? v : u, z, 4, 21);
+        const d = Math.hypot(u, v);
+        const a = Math.atan2(v, u);
+        // the plinth, in two rounded steps
+        if (z < 3.4 && d < 7.6 - Math.max(0, z - 2.2) * 0.9) return z < 1 ? CONC_D : z > 2.6 ? PLAS_L : g(PLAS, u, v, z);
+        if (z >= 3.4 && z < 6.4 && d < 5.6 - Math.max(0, z - 5.6) * 1.1) {
+          if (z > 4.2 && z < 5.2) return mod(a * 8 / Math.PI, 1) < 0.25 ? f.dark : glow;
+          return z > 5.6 ? PLAS_L : g(PLAS_D, u, v, z);
         }
-        const c = crystal(u, v, z, 0, 0, 22.5, 3.6, 4.6);
+        const c = crystal(u, v, z, 0, 0, CZ, 4.4, 6.2);
         if (c) return c;
-        if (z >= 4 && z < 18) {
-          // the column narrows as it rises, ribbed in the side's color
-          const r = 3.8 - (z - 4) * 0.12;
-          const o = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.72);
-          if (o < r) {
-            const a = Math.atan2(v, u);
-            if (mod(a * 4 / Math.PI + 0.5, 1) < 0.18) return f.main;
-            if (Math.abs(z - 11) < 0.4) return f.light;
-            return g(z > 16 ? GUN : METAL, u, v, z, 0.05);
+        // the column, tapering as it rises, with glowing slits between the fins
+        if (z >= 6.4 && z < 34) {
+          const r = 3 - (z - 6.4) * 0.04;
+          if (d < r) {
+            const ph = mod(a / (Math.PI / 2) + 0.5, 1);
+            if (Math.abs(ph - 0.5) < 0.08 && mod(z, 4) > 0.8) return glow;
+            if (mod(z, 4) < 0.4) return METAL_D;
+            return g(z > 30 ? GUN_L : STEEL, u, v, z, 0.05);
           }
+          // the fins: blades on the diagonals, wide at the foot, sweeping in
+          const fr = 7.4 - (z - 6.4) * 0.19;
+          const ph = mod(a / (Math.PI / 2), 1);
+          const w = Math.min(ph, 1 - ph) * (Math.PI / 2) * d; // distance across the blade
+          if (w < 0.7 && d < fr) return d > fr - 0.8 ? f.light : z < 9 ? f.dark : g(f.main, u, v, z);
         }
-        // a collar holding the crystal, and four struts
-        if (z >= 17 && z < 18.6 && Math.hypot(u, v) < 3.4) return z > 18 ? GUN_L : GUN_D;
-        for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-          const k = (z - 17) / 4;
-          if (k > 0 && k < 1 && Math.abs(u - su * (1.6 + k * 1.6)) < 0.35 && Math.abs(v - sv * (1.6 + k * 1.6)) < 0.35) return GUN;
+        // collars at the top of the column and the cradle's four prongs
+        if (z >= 32.4 && z < 34.4 && d < 3.8) return z < 33 ? GUN_D : z > 33.8 ? f.light : g(f.main, u, v, z);
+        if (z >= 34.4 && z < 44) {
+          const pr = 2.6 + (z - 34.4) * 0.5 - Math.max(0, z - 40.5) * 1.1;
+          const ph = mod(a / (Math.PI / 2), 1);
+          if (Math.abs(d - pr) < 0.55 && Math.min(ph, 1 - ph) * (Math.PI / 2) * d < 0.6) return z > 42 ? f.light : GUN;
         }
         return null;
       };
-      return { shape, rx: 8, ry: 8, zmax: 28, fx: [{ x: 0, y: 0, z: 22.5 }] };
+      return { shape, rx: 8, ry: 8, zmax: 47, fx: [{ x: 0, y: 0, z: CZ }] };
     }
     case 'aa': {
-      // Skyguard battery: a sandbagged concrete pad with a radar box and the
-      // launcher's pedestal in the middle (the game draws the launcher,
-      // turning, on top of fx[0]).
+      // Skyguard battery: a round raised emplacement with the launcher's
+      // pedestal in the middle (the game draws the launcher, turning, on top
+      // of fx[0]) and a radar dome on a short tower at the back.
       const shape: Shape = (u, v, z) => {
-        const au = Math.abs(u);
-        const av = Math.abs(v);
-        if (Math.hypot(u, v) < 3.4 && z < 3.4) return z > 2.8 ? GUN_D : g(CONC_L, u, v, z);
-        // sandbags round the edge, open at the front
-        if (Math.max(au, av) > 6.4 && Math.max(au, av) < 8 && z < 2.6 && !(v > 6 && au < 2.4)) return mod(Math.floor((au > av ? v : u) * 0.8) + Math.floor(z * 1.4), 2) ? shade(SAND_BAG, -0.06) : SAND_BAG;
-        // a radar box at the back corner, its little dish on top
-        if (inBox(u, v, z, -6, -3.2, -6, -3.2, 0, 4)) return z > 3.5 ? shade(f.main, 0.1) : u > -3.6 || v > -3.6 ? (Math.abs(z - 2) < 0.6 ? GLASS_D : f.main) : f.dark;
-        if ((u + 4.6) ** 2 + (v + 4.6) ** 2 < 2.4 && z > 4 && z < 5 + ((u + 4.6) + (v + 4.6)) * 0.3) return WHITE;
-        // spare missile crates
-        if (inBox(u, v, z, 3, 5.6, -5.8, -3.6, 0, 1.6)) return z > 1.2 ? OLIVE : Math.abs(u - 4.3) < 0.25 ? HAZ : OLIVE_D;
-        if (au <= 8 && av <= 8 && z < 0.6) return au > 7.4 || av > 7.4 ? CONC_L : mod(u, 4) < 0.3 || mod(v, 4) < 0.3 ? CONC_D : g(CONC, u, v, z, 0.08);
+        const d = Math.hypot(u, v);
+        const a = Math.atan2(v, u);
+        if (d < 3.2 && z < 5.4) return z > 4.8 ? GUN_D : z > 3.4 ? f.dark : g(PLAS_L, u, v, z);
+        const rr = 7.6 - Math.max(0, z - 2) * 0.7;
+        if (d < rr && z < 3.6) {
+          if (z > 3) return d > rr - 1 ? PLAS_L : d < 4.2 ? GUN : mod(a * 6 / Math.PI, 1) < 0.1 ? GUN_D : TAR;
+          if (z > 1.8 && z < 2.6) return g(f.main, u, v, z);
+          return z < 1 ? CONC_D : g(PLAS, u, v, z);
+        }
+        // the radar dome
+        const rd = Math.hypot(u + 4.6, v + 4.6);
+        if (rd < 1.4 && z >= 3.6 && z < 6) return PLAS_D;
+        if (Math.hypot(u + 4.6, v + 4.6, z - 7.6) < 2.2) return mod(Math.atan2(v + 4.6, u + 4.6) * 3, 1) < 0.1 ? PLAS_D : WHITE;
+        if (inBox(u, v, z, 3.4, 6, -5.6, -3.4, 3.6, 5)) return z > 4.6 ? OLIVE : Math.abs(u - 4.7) < 0.25 ? HAZ : OLIVE_D;
         return null;
       };
-      return { shape, rx: 8, ry: 8, zmax: 8, fx: [{ x: 0, y: 0, z: 3.4 }] };
+      return { shape, rx: 8, ry: 8, zmax: 10, fx: [{ x: 0, y: 0, z: 5.4 }] };
     }
     case 'depot': {
-      // Service depot: a flat repair pad that vehicles drive onto, under a
-      // steel gantry with a hoist, lamps at the corners.
+      // Service depot: a round repair pad that vehicles drive onto, under
+      // four curved pylons that meet in a ring overhead holding the hoist.
+      const RING = 15;
       const shape: Shape = (u, v, z) => {
-        const au = Math.abs(u);
-        const av = Math.abs(v);
-        // gantry legs and beams, high enough to drive under
-        if (Math.abs(au - 11) < 0.6 && Math.abs(av - 11) < 0.6 && z < 13) return z < 1 ? CONC_D : mod(Math.floor(z * 1.2), 4) === 0 ? HAZ : GIRDER;
-        if (Math.abs(au - 11) < 0.6 && av < 11.6 && z > 11.6 && z < 13) return mod(Math.floor(v), 3) ? GIRDER : GIRDER_D;
-        if (av < 0.6 && au < 11 && z > 12 && z < 13) return GIRDER_D;
-        // the hoist hanging from the cross beam, with its hook
-        if (inBox(u, v, z, -1.2, 1.2, -0.9, 0.9, 10.2, 12)) return z > 11.6 ? GUN_D : f.main;
-        if (Math.abs(u) < 0.2 && Math.abs(v) < 0.2 && z > 7.4 && z < 10.2) return GUN_D;
-        if (Math.abs(u) < 0.6 && Math.abs(v) < 0.3 && z > 6.6 && z < 7.4) return HAZ;
-        // corner lamps on posts
-        if (Math.abs(au - 12.6) < 0.4 && Math.abs(av - 12.6) < 0.4 && z < 3) return z > 2.4 ? LAMP : GUN_D;
-        if (au > 13 || av > 13 || z > 0.6) return null;
-        // the pad: a hazard-striped edge, a ring and a wrench mark
-        if (au > 12 || av > 12) return hazard(u + v, 0);
-        if (au > 11.2 || av > 11.2) return CONC_L;
         const d = Math.hypot(u, v);
+        const a = Math.atan2(v, u);
+        // the four pylons, arcing in from the rim to the ring
+        for (let i = 0; i < 4; i++) {
+          const la = (i / 4) * Math.PI * 2 + Math.PI / 4;
+          const rho = u * Math.cos(la) + v * Math.sin(la);
+          const w = -u * Math.sin(la) + v * Math.cos(la);
+          if (rho < 3.6 || Math.abs(w) > 0.9 || z > RING + 1) continue;
+          const ell = Math.hypot((rho - 3.8) / 7.8, z / RING);
+          if (Math.abs(ell - 1) * 9 < 0.85) return z < 1 ? CONC_D : mod(Math.floor(z * 1.1), 4) === 0 ? HAZ : Math.abs(w) > 0.5 ? GIRDER_D : GIRDER;
+        }
+        if (z > RING - 0.8 && z < RING + 0.8 && Math.abs(d - 4) < 0.8) return z > RING + 0.3 ? f.light : g(f.main, u, v, z);
+        // the hoist and its hook
+        if (d < 1.4 && z > 11.6 && z < RING) return z > RING - 0.6 ? GUN_D : g(f.main, u, v, z);
+        if (d < 0.25 && z > 7.4 && z <= 11.6) return GUN_D;
+        if (Math.abs(u) < 0.6 && Math.abs(v) < 0.3 && z > 6.6 && z <= 7.4) return HAZ;
+        // lamps on posts round the rim
+        for (let i = 0; i < 4; i++) {
+          const la = (i / 4) * Math.PI * 2;
+          if (Math.hypot(u - Math.cos(la) * 11.6, v - Math.sin(la) * 11.6) < 0.45 && z < 3.4) return z > 2.8 ? LAMP : GUN_D;
+        }
+        if (d > 12.6 || z > 0.6) return null;
+        if (d > 11.8) return hazard(a * 10, 0);
+        if (d > 11) return CONC_L;
         if (Math.abs(d - 7.5) < 0.5) return WHITE;
-        if (d < 6 && Math.abs(u - v) < 1 && d > 2.5) return HAZ; // the wrench's handle
-        if (d < 2.8 && d > 1.2 && !(u + v > 1 && Math.abs(u - v) < 1.2)) return HAZ; // its jaw
-        if (hash2(Math.floor(u), Math.floor(v), 31) > 0.95) return shade(TAR, -0.15); // oil
+        if (d < 6 && Math.abs(u - v) < 1 && d > 2.5) return HAZ;
+        if (d < 2.8 && d > 1.2 && !(u + v > 1 && Math.abs(u - v) < 1.2)) return HAZ;
+        if (hash2(Math.floor(u), Math.floor(v), 31) > 0.95) return shade(TAR, -0.15);
         return g(d < 11 ? shade(TAR, 0.12) : CONC, u, v, z, 0.08);
       };
-      return { shape, rx: 13, ry: 13, zmax: 14, fx: [{ x: 0, y: 0, z: 7 }] };
+      return { shape, rx: 13, ry: 13, zmax: 17, fx: [{ x: 0, y: 0, z: 7 }] };
     }
     case 'navy': {
-      // Naval yard, built out on the water: two concrete piers either side of
-      // an open slip, joined at the back by a pier with the yard office, and
-      // a big gantry crane over the slip where ships are mended.
+      // Naval yard, built out on the water: two concrete piers with rounded
+      // ends either side of an open slip, joined at the back, a domed round
+      // control tower, and a tall gantry crane over the slip.
+      const CZ = 22;
       const shape: Shape = (u, v, z) => {
         const au = Math.abs(u);
-        // the gantry crane: legs on the two piers, a beam across, a trolley and hook
-        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 0.8 && z < 17) return z < 2.4 ? CONC_D : mod(Math.floor(z * 1.2), 4) === 0 ? HAZ : GIRDER;
-        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 2.4 && z < 3.2 && z > 1.6) return GIRDER_D; // its bogies
-        if (au < 16.8 && Math.abs(v - 2) < 0.9 && z > 15.4 && z < 17) return mod(Math.floor(u * 0.8), 3) ? GIRDER : GIRDER_D;
-        if (inBox(u, v, z, 1.6, 4.4, 0.6, 3.4, 13.6, 15.4)) return z > 15 ? GUN_D : f.main;
-        if (Math.abs(u - 3) < 0.2 && Math.abs(v - 2) < 0.2 && z > 8 && z < 13.6) return GUN_D;
-        if (Math.abs(u - 3) < 0.7 && Math.abs(v - 2) < 0.3 && z > 7.2 && z < 8) return HAZ;
-        // the yard office on the back pier: windows, the side's color, a roof light
-        if (inBox(u, v, z, -19, -7, -15.6, -10, 0, 7.5)) return wallSkin(u + 13, v + 12.8, z, 6, 2.8, 0, 7.5, 61, { win: [2.4, 6], band: f.main });
-        if (Math.abs(u + 9) < 0.35 && Math.abs(v + 12) < 0.35 && z < 9.6) return z > 9.1 ? RED : GUN_D;
-        // bollards and lamps along the inner edges of the piers
-        if (Math.abs(au - 13.6) < 0.4 && mod(v, 6) < 0.8 && v > -9 && z < 3) return GUN_D;
-        if (Math.abs(au - 19.2) < 0.4 && Math.abs(v - 14.5) < 0.4 && z < 5) return z > 4.4 ? LAMP : GUN_D;
-        // the piers: concrete with hazard edges on the slip side
-        const pier = au > 13 || v < -9.4;
-        if (!pier || au > 20 || Math.abs(v) > 16 || z > 2.2) return null;
+        // the gantry crane: legs braced in an arch, a beam across, a trolley and hook
+        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 0.8 && z < CZ) return z < 2.4 ? CONC_D : mod(Math.floor(z * 1.2), 4) === 0 ? HAZ : GIRDER;
+        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 2.4 && z < 3.2 && z > 1.6) return GIRDER_D;
+        if (au < 16.8 && Math.abs(v - 2) < 0.9 && z > CZ - 1.6 && z < CZ) return mod(Math.floor(u * 0.8), 3) ? GIRDER : GIRDER_D;
+        if (au < 16 && au > 10 && Math.abs(v - 2) < 0.5) {
+          const ar = Math.hypot(au - 10, (CZ - 1.6 - z) * 0.9);
+          if (z < CZ - 1.6 && Math.abs(ar - 6) < 0.6) return GIRDER_D; // the arched braces
+        }
+        if (inBox(u, v, z, 1.6, 4.4, 0.6, 3.4, CZ - 3.4, CZ - 1.6)) return z > CZ - 2 ? GUN_D : f.main;
+        if (Math.abs(u - 3) < 0.2 && Math.abs(v - 2) < 0.2 && z > 12 && z < CZ - 3.4) return GUN_D;
+        if (Math.abs(u - 3) < 0.7 && Math.abs(v - 2) < 0.3 && z > 11.2 && z <= 12) return HAZ;
+        // the control tower on the back pier
+        if (Math.abs(u + 13) < 0.3 && Math.abs(v + 12.6) < 0.3 && z < 16.4) return z > 15.8 ? RED : GUN_D;
+        const t = drum(u, v, z, -13, -12.6, 3.6, 10, 2.6);
+        if (t) {
+          if (t.roof) return g(roofC, u, v, z);
+          if (z > 7 && z < 9.4) return mod(t.a * 4 / Math.PI, 1) < 0.2 ? f.dark : z > 8.6 ? GLASS_L : GLASS;
+          if (z > 9.4) return f.main;
+          return rskin(t.a * 3.6, z, 10, { seed: 61 });
+        }
+        // bollards along the slip, a lamp at each pier's end
+        if (Math.abs(au - 13.6) < 0.4 && mod(v, 6) < 0.8 && v > -9 && v < 12 && z < 3) return GUN_D;
+        if (Math.abs(au - 16.5) < 0.4 && Math.abs(v - 14.6) < 0.4 && z < 5.4) return z > 4.8 ? LAMP : GUN_D;
+        // the piers: the two arms with rounded ends, the back one with rounded corners
+        const arm = au > 13 && au < 20 && v > -9.4 && v < 12.5 + Math.sqrt(Math.max(0, 12.25 - (au - 16.5) ** 2));
+        const back = rrect(u, v, 0, -12.7, 20, 3.3, 3) < 0;
+        if (!(arm || back) || z > 2.2) return null;
         if (z < 1) return shade(CONC_D, -0.15);
-        if (z > 1.6 && ((au < 13.8 && v > -9.4) || (v < -8.6 && v > -9.4 && au < 13.8))) return hazard(u + v, 0);
+        if (z > 1.6 && ((arm && au < 13.8) || (back && v > -10.2 && au < 13.8))) return hazard(u + v, 0);
         if (mod(u, 5) < 0.25 || mod(v, 5) < 0.25) return CONC_D;
         return g(CONC, u, v, z, 0.08);
       };
-      return { shape, rx: 20, ry: 16, zmax: 17, fx: [{ x: 0, y: 3, z: 0 }, { x: 3, y: 2, z: 14 }] };
+      return { shape, rx: 20, ry: 16, zmax: 23, fx: [{ x: 0, y: 3, z: 0 }, { x: 3, y: 2, z: CZ - 3 }] };
     }
     case 'uplink': {
-      // Satellite uplink: a big dish on a pylon, tipped up at the sky, over an
-      // equipment block, with a feed horn on struts over the bowl.
+      // Satellite uplink: a big dish on a tall pylon, tipped up at the sky,
+      // over a domed equipment drum, a feed horn on struts over the bowl.
       const tilt = 0.75;
       const ct = Math.cos(tilt);
       const st = Math.sin(tilt);
+      const DZ = 19;
       const shape: Shape = (u, v, z) => {
-        // the dish: a shallow bowl about (0, 0, 13), facing up and to the south-east
         const du = u - 1;
-        const dz = z - 13;
-        const a = du * ct - dz * st; // across the bowl's face
-        const n = du * st + dz * ct; // out of its face
+        const dz = z - DZ;
+        const a = du * ct - dz * st;
+        const n = du * st + dz * ct;
         const r = Math.hypot(a, v);
         if (r < 8 && n > r * r * 0.045 - 0.4 && n < r * r * 0.045 + 0.4) {
-          if (Math.abs(r - 7.6) < 0.4) return METAL_D; // rim
-          if (mod(Math.atan2(v, a) * 4 / Math.PI, 1) < 0.08) return METAL_D; // panel seams
+          if (Math.abs(r - 7.6) < 0.4) return f.main;
+          if (mod(Math.atan2(v, a) * 4 / Math.PI, 1) < 0.08) return METAL_D;
           return n > r * r * 0.045 ? g(WHITE, u, v, z, 0.04) : METAL;
         }
-        // the feed horn on three struts, out in front of the bowl
         const hu = 1 + st * 5;
-        const hz = 13 + ct * 5;
-        if ((u - hu) ** 2 + v * v + (z - hz) ** 2 < 0.9) return GUN_D;
+        const hz = DZ + ct * 5;
+        if ((u - hu) ** 2 + v * v + (z - hz) ** 2 < 0.9) return glow;
         for (const ang of [0, 2.1, 4.2]) {
           const ax = Math.cos(ang) * 6;
           const k = n / 5;
           if (k > 0.1 && k < 1 && Math.hypot(a - ax * (1 - k), v - Math.sin(ang) * 6 * (1 - k)) < 0.3) return GUN;
         }
-        // the pylon and its yoke
-        if (cyl(u, v, 0, 0, 1.6) && z < 12) return z > 11.4 ? GUN_D : g(f.dark, u, v, z);
-        // the equipment block, with the side's color in a band and a lit door
-        if (inBox(u, v, z, -9, 9, -9, 9, 0, 5)) {
-          if (z > 4.4) return Math.max(Math.abs(u), Math.abs(v)) > 8.4 ? CONC_L : g(roofC, u, v, z);
-          if (v > 8.4 && Math.abs(u - 4) < 1.2 && z < 3.4) return z > 2.8 ? LAMP : GUN;
-          if (z > 3.2 && z < 3.9) return f.main;
-          return wallSkin(u, v, z, 9, 9, 0, 5, 23);
+        // the pylon, tapering, with a band of the side's color
+        if (z >= 8 && z < DZ - 1 && Math.hypot(u, v) < 2.2 - (z - 8) * 0.06) return Math.abs(z - 13) < 0.8 ? f.main : z > DZ - 1.6 ? GUN_D : g(PLAS_L, u, v, z);
+        const k = drum(u, v, z, 0, 0, 8.8, 6, 3);
+        if (k) {
+          if (k.roof) return mod(k.a * 6 / Math.PI, 1) < 0.08 ? PLAS_D : g(roofC, u, v, z);
+          if (Math.abs(k.a - Math.PI / 4) < 0.14 && z < 3.6) return z > 3 ? LAMP : GUN;
+          return rskin(k.a * 8.8, z, 6, { seed: 23, band: [3.8, 4.8, f.main] });
         }
-        // a whip aerial and a box of electronics on the roof
-        if (Math.abs(u + 6.5) < 0.3 && Math.abs(v + 6.5) < 0.3 && z < 12) return z > 11.4 ? RED : GUN_D;
-        const ac = acUnit(u, v, z, -5.5, 5.5, 5);
-        if (ac) return ac;
+        if (Math.abs(u + 6.5) < 0.3 && Math.abs(v + 4) < 0.3 && z < 15) return z > 14.4 ? RED : GUN_D;
         return null;
       };
-      return { shape, rx: 10, ry: 10, zmax: 22, fx: [{ x: 1, y: 0, z: 14 }] };
+      return { shape, rx: 10, ry: 10, zmax: 28, fx: [{ x: 1, y: 0, z: DZ + 1 }] };
     }
     case 'wall': {
-      // A wall segment: a square concrete block with a coping and merlons on
-      // its corners. Segments stand side by side on an 8-unit grid, so a row
-      // of them makes one wall.
+      // A wall segment: a tall concrete block with a rounded coping and a
+      // round post on each corner. Segments stand side by side on an 8-unit
+      // grid, so a row of them makes one wall.
       const shape: Shape = (u, v, z) => {
         const au = Math.abs(u);
         const av = Math.abs(v);
         if (au > 4 || av > 4) return null;
-        if (z < 5) {
+        const pd = Math.hypot(au - 2.9, av - 2.9);
+        if (pd < 1.2 && z < 8.6 - Math.max(0, pd - 0.4) * 0.8) return z > 7.6 ? PLAS_L : g(PLAS, u, v, z, 0.06);
+        if (z < 7) {
           if (z < 0.8) return CONC_D;
-          if (z > 4.4) return CONC_L;
-          if (mod(z, 1.6) < 0.25) return shade(CONC, -0.1); // courses of blocks
-          return grime(g(CONC, u, v, z, 0.07), u + v, z, 5, 41);
+          if (z > 6.2) return PLAS_L;
+          if (mod(z, 1.6) < 0.25) return shade(PLAS, -0.12);
+          return grime(g(PLAS, u, v, z, 0.07), u + v, z, 7, 41);
         }
-        if (z < 6.6 && au > 2.2 && av > 2.2) return z > 6.1 ? CONC_L : g(CONC, u, v, z, 0.06);
         return null;
       };
-      return { shape, rx: 4, ry: 4, zmax: 7, fx: [] };
+      return { shape, rx: 4, ry: 4, zmax: 9, fx: [] };
     }
     case 'helipad': {
+      // A round raised landing deck with a hazard rim, a ring of lights and a
+      // windsock on a tall pole.
+      const DECK = 1.8;
       const shape: Shape = (u, v, z) => {
         const d = Math.hypot(u, v);
-        // landing lights, a windsock on a pole and a fuel bowser at the edge
         for (let i = 0; i < 8; i++) {
           const a = (i / 8) * Math.PI * 2 + 0.39;
-          if (cyl(u, v, Math.cos(a) * 11.2, Math.sin(a) * 11.2, 0.6) && z < 1.8) return z > 1.1 ? (i % 2 ? LAMP : hex('#7fe0a0')) : GUN_D;
+          if (cyl(u, v, Math.cos(a) * 10.6, Math.sin(a) * 10.6, 0.55) && z < DECK + 0.8) return z > DECK + 0.3 ? (i % 2 ? LAMP : glow) : GUN_D;
         }
-        if (Math.abs(u + 9.6) < 0.35 && Math.abs(v + 9.6) < 0.35 && z < 9) return STEEL;
-        if (Math.abs(v + 9.6) < 0.5 && u > -9.4 && u < -5.6 && Math.abs(z - 8.2) < 0.8 - (u + 9.4) * 0.12) return mod(Math.floor(u * 1.2), 2) ? hex('#e8743a') : WHITE;
-        if (d > 12 || z > 1) return null;
-        if (d > 11) return CONC_D;
-        if (d > 10.2) return hazard(Math.atan2(v, u) * 9, 0);
-        if (Math.abs(d - 8.4) < 0.6) return WHITE;
+        if (Math.abs(u + 9.6) < 0.35 && Math.abs(v + 9.6) < 0.35 && z < 14) return z > 13.5 ? RED : STEEL;
+        if (Math.abs(v + 9.6) < 0.5 && u > -9.4 && u < -5.6 && Math.abs(z - 12.8) < 0.8 - (u + 9.4) * 0.12) return mod(Math.floor(u * 1.2), 2) ? hex('#e8743a') : WHITE;
+        if (d > 11.6 || z > DECK - Math.max(0, d - 10.8) * 0.9) return null;
+        if (z < DECK - 0.5) return d > 11 ? CONC_D : null;
+        if (d > 10.8) return PLAS_L;
+        if (d > 10) return hazard(Math.atan2(v, u) * 9, 0);
+        if (Math.abs(d - 8.4) < 0.6) return g(f.main, u, v, z);
         if ((Math.abs(u + 3) < 0.8 || Math.abs(u - 3) < 0.8) && Math.abs(v) < 4.2) return HAZ;
         if (Math.abs(u) < 3 && Math.abs(v) < 0.8) return HAZ;
-        if (d < 8 && (Math.abs(mod(u + v, 8) - 4) < 0.25 || Math.abs(mod(u - v, 8) - 4) < 0.25)) return shade(TAR, 0.1); // tie-down grid
-        if (hash2(Math.floor(u * 0.8), Math.floor(v * 0.8), 14) > 0.94) return shade(TAR, -0.2); // scorch and oil
+        if (d < 8 && (Math.abs(mod(u + v, 8) - 4) < 0.25 || Math.abs(mod(u - v, 8) - 4) < 0.25)) return shade(TAR, 0.1);
+        if (hash2(Math.floor(u * 0.8), Math.floor(v * 0.8), 14) > 0.94) return shade(TAR, -0.2);
         return g(d < 8 ? shade(TAR, 0.16) : CONC, u, v, z, 0.08);
       };
-      return { shape, rx: 12, ry: 12, zmax: 10, fx: [] };
+      return { shape, rx: 12, ry: 12, zmax: 15, fx: [] };
     }
   }
 }
@@ -2530,6 +2629,16 @@ export function buildingBlock(kind: BuildingKind): BuildingBlock {
   for (let c = 0; c < nx * ny; c++) if (!out[c]) solid[c] = 1;
   blockCache.set(kind, (b = { nx, ny, rx, ry, solid }));
   return b;
+}
+
+/**
+ * The light in a building's windows alone (black elsewhere), drawn over it
+ * with additive blending so it can pulse: only the Tech lab has one.
+ */
+export function makeBuildingGlow(kind: BuildingKind, f: Faction): StackSprite | null {
+  const b = buildingShape(kind, f);
+  if (!b.glow) return null;
+  return renderStack(b.glow, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, step: 0.5, flat: true, noGroundShadow: true });
 }
 
 export function makeBuilding(kind: BuildingKind, f: Faction): V2BuildingArt {

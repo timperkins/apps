@@ -7,7 +7,7 @@ import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt
 import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
-import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
+import { buildingArt as workerBuilding, constructionArt, glowArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { cameoUrl, tabIconUrl } from './cameo';
 import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
@@ -43,6 +43,7 @@ import {
   makeRocks,
   makeTrees,
   makeConstruction,
+  makeBuildingGlow,
   riseTime,
   KNEEL_DROP,
 } from './sprites';
@@ -785,6 +786,20 @@ export class IsoGame implements GameLike {
     void constructionArt(kind, f, urgent).then((st) => {
       if (st) this.stageArt.set(key, st);
       else setTimeout(() => this.stageArt.set(key, makeConstruction(kind, FACTIONS[f])), 0);
+    });
+    return null;
+  }
+
+  // The light in a building's windows (makeBuildingGlow), drawn by a worker
+  // when first wanted; null until it arrives, or if the building has none.
+  private glowSpr = new Map<string, StackSprite | null>();
+  glowOf(kind: BuildingKind, f: number): StackSprite | null {
+    const key = `${kind}-${f}`;
+    if (this.glowSpr.has(key)) return this.glowSpr.get(key)!;
+    this.glowSpr.set(key, null);
+    void glowArt(kind, f).then((st) => {
+      if (st) this.glowSpr.set(key, st[0] ?? null);
+      else setTimeout(() => this.glowSpr.set(key, makeBuildingGlow(kind, FACTIONS[f])), 0);
     });
     return null;
   }
@@ -6340,9 +6355,15 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'lab': {
-        const [x, y] = fx(0);
-        c.fillStyle = `rgba(160,240,255,${0.25 + 0.2 * Math.sin(b.phase * 3)})`;
-        c.fillRect(x - 3, y - 5, 7, 9);
+        // the dome's panes brighten and dim with the light inside
+        const glow = hurt ? null : this.glowOf('lab', b.f);
+        if (!glow) break;
+        const [sx, sy] = toScreen(b.x, b.y, 0);
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        c.globalAlpha = 0.18 + 0.14 * Math.sin(b.phase * 2.4);
+        drawSprite(c, glow.img, glow, sx, sy);
+        c.restore();
         break;
       }
       case 'hq': {
