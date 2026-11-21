@@ -41,10 +41,10 @@ export interface Weapon {
   big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
 }
 
-export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren';
+export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng';
 
 // The foot soldiers.
-export const FOOT: ReadonlySet<UnitKind> = new Set<UnitKind>(['inf', 'rocket', 'gren']);
+export const FOOT: ReadonlySet<UnitKind> = new Set<UnitKind>(['inf', 'rocket', 'gren', 'eng']);
 export const isFoot = (k: string): boolean => FOOT.has(k as UnitKind);
 
 export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
@@ -71,6 +71,7 @@ export const DIG_S = 1.2;
 export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   inf: { strength: 50, armor: 'none' },
   gren: { strength: 55, armor: 'none' },
+  eng: { strength: 40, armor: 'none' },
   rocket: { strength: 45, armor: 'none' },
   buggy: { strength: 150, armor: 'light' },
   apc: { strength: 280, armor: 'heavy' },
@@ -146,7 +147,8 @@ export function muzzles(kind: UnitKind | 'tower', x: number, y: number, z: numbe
   switch (kind) {
     case 'inf':
     case 'rocket':
-    case 'gren': {
+    case 'gren':
+    case 'eng': {
       const [mu, mv, mz] = TROOPER_MUZZLE[kind === 'inf' ? 'gi' : kind];
       return [at(x, y, a, mu, mv, mz)];
     }
@@ -280,7 +282,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1 };
 
 interface Flash {
   x: number;

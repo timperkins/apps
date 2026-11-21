@@ -583,8 +583,9 @@ function heli(f: Faction): Shape {
 // Each one is built from capsules (limbs, weapons) on a slim torso, about
 // eleven units tall: a little over half a tank's height and a third as wide
 // as it is tall. frame: 0 standing at the ready, 1 and 2 the two strides of a
-// walk, 3 a grenadier's throw, 4 kneeling (a G.I. dug in).
-export type Trooper = 'gi' | 'rocket' | 'gren';
+// walk, 3 a grenadier's throw (an engineer's wrench swung up), 4 kneeling
+// (a G.I. dug in).
+export type Trooper = 'gi' | 'rocket' | 'gren' | 'eng';
 type P3 = [number, number, number];
 
 // Distance from (u, v, z) to the segment a-b.
@@ -603,19 +604,21 @@ const limb = (u: number, v: number, z: number, a: P3, b: P3, c: P3, r: number) =
 const KHAKI = hex('#9a8a62');
 const BRASS = hex('#c9a24a');
 const GRENADE = hex('#4d5a36');
+const HARDHAT = hex('#d8b23a');
+const HAZARD = hex('#e0b52e');
 
 // Where each kind holds its weapon (standing; kneeling drops it KNEEL_DROP),
 // for the muzzle flash in combat.ts.
 export const KNEEL_DROP = 1.8;
 const BAG_H = 3.45;
-export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4] };
+export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4], eng: [1.2, -1, 9.6] };
 
 // bags: how far up the sandbags round a dug-in G.I. have been stacked (0 to 1).
 export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Shape {
-  const body = kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : f.main;
+  const body = kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : kind === 'eng' ? mix(f.main, KHAKI, 0.6) : f.main;
   const bodyD = shade(body, -0.2);
   const trouser = shade(f.dark, -0.08);
-  const helmet = kind === 'rocket' ? OLIVE_D : shade(f.dark, 0.05);
+  const helmet = kind === 'rocket' ? OLIVE_D : kind === 'eng' ? HARDHAT : shade(f.dark, 0.05);
   const vest = mix(OLIVE_D, body, 0.25);
   const kneel = frame === 4;
   const dz = kneel ? -KNEEL_DROP : 0;
@@ -642,6 +645,11 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
   } else if (kind === 'rocket') {
     armR = [sh(1), [0.2, 1.55, 6.9], [0.9, 1.05, 7.7]];
     armL = [sh(-1), [0.9, -1.2, 7], [1.9, 0.6, 7.9]];
+  } else if (kind === 'eng') {
+    // the right hand carries the toolbox; the left swings, or holds the
+    // wrench up to work (frame 3)
+    armR = [sh(1), [0.05, 1.6, 6.5], [0.15 + swing * 0.25, 1.65, 5.2]];
+    armL = frame === 3 ? [sh(-1), [0.9, -1.4, 7.6], [1.3, -1.05, 8.9]] : [sh(-1), [-0.1 - swing * 0.3, -1.45, 6.6], [0.2 - swing * 0.7, -1.35, 5.5]];
   } else if (frame === 3) {
     armR = [sh(1), [-0.9, 1.5, 8.8], [-0.4, 1.3, 10.1]];
     armL = [sh(-1), [0.9, -1.4, 8.2], [1.9, -1, 8.6]];
@@ -688,6 +696,20 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       }
       if (inBox(u, v, z, 0.6, 1.4, y - 0.95, y - 0.45, h - 0.2, h + 0.45)) return u > 1.2 ? GLASS : GUN_D; // the sight
       if (segD(u, v, z, [0.9, y, h - 0.4], [0.8, y, h - 1]) < 0.25) return GUN_D; // grip
+    } else if (kind === 'eng') {
+      // a striped steel toolbox in the right hand, its handle in the fist
+      const bu = armR[2][0];
+      if (inBox(u, v, z, bu - 0.85, bu + 0.85, 1.35, 2.05, 3.2, 4.7)) {
+        if (z > 4.5) return GUN_L; // the lid
+        if (Math.abs(v - 2.05) < 0.12 || Math.abs(v - 1.35) < 0.12) return mod(Math.floor((u - z) * 1.6), 2) ? HAZARD : BLACK;
+        return z > 4.1 ? GUN : GUN_D;
+      }
+      if (segD(u, v, z, [bu - 0.4, 1.7, 4.9], [bu + 0.4, 1.7, 4.9]) < 0.14) return BLACK; // its handle
+      // a big wrench: held up to work, or slung across the back
+      const [w0, w1]: [P3, P3] = frame === 3 ? [[1.3, -1.05, 8.2], [1.25, -1, 10.6]] : [[-1.05, -0.95, 5.4], [-1.05, 0.75, 9.5]];
+      if (segD(u, v, z, w0, w1) < 0.22) return GUN_L;
+      const jaw = (u - w1[0]) ** 2 + (v - w1[1]) ** 2 + (z - w1[2]) ** 2;
+      if (jaw < 0.36 && jaw > 0.08) return z > w1[2] ? shade(GUN_L, 0.15) : GUN;
     }
     if (grenadeAt && (u - grenadeAt[0]) ** 2 + (v - grenadeAt[1]) ** 2 + (z - grenadeAt[2]) ** 2 < 0.3) return z > grenadeAt[2] + 0.2 ? shade(GRENADE, 0.2) : GRENADE;
     // ----- hands and arms
@@ -700,7 +722,12 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     const hz = 9.55 + dz;
     const hr2 = (u - 0.1) ** 2 + v * v + (z - hz) ** 2;
     if (z > hz + 0.05) {
-      if (kind === 'gren') {
+      if (kind === 'eng') {
+        // a hard hat: a round dome with a ridge, and a brim all round
+        const r = Math.hypot(u - 0.05, v);
+        if (z < hz + 0.25 && r < 1.2) return shade(helmet, -0.18);
+        if (r * r + ((z - hz - 0.15) / 0.85) ** 2 < 1.0) return Math.abs(v) < 0.12 ? shade(helmet, 0.22) : z > hz + 0.7 ? shade(helmet, 0.14) : helmet;
+      } else if (kind === 'gren') {
         if (z < hz + 0.8 && (u - 0.05) ** 2 + v * v < 0.95) return z > hz + 0.55 ? shade(helmet, 0.12) : helmet;
         if (z < hz + 0.3 && u > 0.5 && u < 1.25 && av < 0.6) return shade(helmet, -0.2); // its peak
       } else {
@@ -710,7 +737,7 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       }
     }
     if (hr2 < 0.74) {
-      if (u < -0.2) return kind === 'gren' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
+      if (u < -0.2) return kind === 'gren' || kind === 'eng' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
       if (u > 0.45 && z > hz && z < hz + 0.3 && av > 0.15 && av < 0.45) return BLACK; // eyes
       return z < hz - 0.45 ? shade(SKIN, -0.12) : SKIN;
     }
@@ -722,6 +749,8 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     } else if (kind === 'gi') {
       if (inBox(u, v, z, -1.45, -0.6, -0.75, 0.75, 6.1 + dz, 8 + dz)) return z > 7.7 + dz ? shade(OLIVE, 0.12) : Math.abs(z - 7 - dz) < 0.15 ? OLIVE_D : OLIVE;
       if ((u + 1.05) ** 2 + (z - 8.3 - dz) ** 2 < 0.2 && av < 0.85) return SAND_BAG; // bedroll
+    } else if (kind === 'eng') {
+      if (inBox(u, v, z, -1.35, -0.6, -0.7, 0.7, 6.2, 7.9)) return z > 7.6 ? shade(KHAKI, -0.05) : shade(KHAKI, -0.22); // a tool pack
     } else {
       if (inBox(u, v, z, -1.3, -0.6, -0.65, 0.65, 6.4, 7.9)) return OLIVE;
       if (inBox(u, v, z, -0.5, 0.6, -1.6, -0.95, 4.7, 6.1)) return z > 5.8 ? shade(OLIVE_D, 0.15) : Math.abs(u) < 0.15 ? BLACK : OLIVE_D; // satchel of grenades
@@ -858,6 +887,7 @@ export interface V2FactionArt {
   infantry: StackSprite[][]; // [frame][dir]: standing, two strides
   rocket: StackSprite[][];
   gren: StackSprite[][]; // and a throw
+  eng: StackSprite[][]; // and a wrench held up to work
   infantryDug: StackSprite[][]; // [how far dug in][dir]: a G.I. kneeling in a ring of sandbags
 }
 
@@ -892,6 +922,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     infantry: inf('gi', 'infantry', [0, 1, 2]),
     rocket: inf('rocket', 'rocket', [0, 1, 2]),
     gren: inf('gren', 'gren', [0, 1, 2, 3]),
+    eng: inf('eng', 'eng', [0, 1, 2, 3]),
     infantryDug: [1, 2, 3].map((n, i) => renderDirs(soldier(f, 'gi', 4, n / 3), 16, { r: 4.8, zmax: 10, step: 0.5, bakeShadow: true }, k(`infantryDug:${i}`))),
   };
 }

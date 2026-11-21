@@ -34,6 +34,7 @@ What is used now, so a new one can be different:
 | inf | rifleman, chest up | olive drab | burning ruins |
 | gren | grenadier throwing, waist up | desert tan | mountain ridge |
 | rocket | soldier aiming a shoulder launcher | grey urban camo | dusk |
+| eng | engineer in a hard hat, wrench on shoulder, striped toolbox | khaki, safety yellow | river bank, broken stone bridge |
 | buggy | open dune buggy, roll cage, gun | sand tan | desert, dust |
 | apc | eight-wheeled armored carrier | olive green | meadow |
 | light | medium tank, one gun | green-grey | meadow |

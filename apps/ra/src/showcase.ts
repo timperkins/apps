@@ -458,7 +458,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -674,9 +674,9 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   const di = (a: number) => dirIndex(a, DIRS);
 
   // soldiers: 16 headings, a four-beat walk (a grenadier throws, too)
-  const NAMES = { inf: 'G.I.', rocket: 'Rocketeer', gren: 'Grenadier' };
-  for (const kind of ['inf', 'rocket', 'gren'] as const) {
-    const frames = (art: V2FactionArt) => (kind === 'inf' ? art.infantry : kind === 'gren' ? art.gren : art.rocket);
+  const NAMES = { inf: 'G.I.', rocket: 'Rocketeer', gren: 'Grenadier', eng: 'Engineer' };
+  for (const kind of ['inf', 'rocket', 'gren', 'eng'] as const) {
+    const frames = (art: V2FactionArt) => (kind === 'inf' ? art.infantry : kind === 'gren' ? art.gren : kind === 'eng' ? art.eng : art.rocket);
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a, t, moving) => {

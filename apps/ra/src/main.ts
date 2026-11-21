@@ -15,7 +15,7 @@ import { initBuild } from './build-ui';
 import { Lobby, type Match } from './lobby';
 import { Bot } from './v2/bot';
 import { startArtPool } from './v2/art-pool';
-import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, DEPLOY_CLICK_CSS, DEPLOY_FRAMES, ENTER_CLICK_CSS, ENTER_CLICK_FRAMES, ENTER_FRAMES, ENTER_RING_SIZE, MOVE_CLICK_FRAMES, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, enterRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
+import { ATTACK_CLICK_CSS, ATTACK_CLICK_FRAMES, ATTACK_FRAMES, CORNER_FRAMES, CURSORS, DEPLOY_CLICK_CSS, DEPLOY_FRAMES, ENTER_CLICK_CSS, ENTER_CLICK_FRAMES, ENTER_FRAMES, ENTER_RING_SIZE, MOVE_CLICK_FRAMES, REPAIR_CLICK_CSS, REPAIR_CLICK_FRAMES, REPAIR_FRAMES, repairRingFrames, MOVE_RING_SIZE, MOVE_STEPS, attackRingFrames, enterRingFrames, harvestRingFrames, initCursors, moveCursor, moveRingFrames, type CursorKind } from './cursors';
 
 initCursors();
 
@@ -389,15 +389,15 @@ function showSelection(names: string[]): void {
 // arrowheads), enter a tap on a transport of yours with soldiers selected
 // (they get in) or on your refinery with an ore hauler selected (it unloads
 // there), gold under the enter cursor's triangles
-type Order = 'move' | 'attack' | 'harvest' | 'enter';
+type Order = 'move' | 'attack' | 'harvest' | 'enter' | 'repair';
 let pending: { x: number; y: number; kind: Order } | null = null;
 let ringFrame = -1;
 function setPending(p: { x: number; y: number; kind: Order } | null): void {
   pending = p;
   confirmEl.hidden = !p;
   confirmEl.classList.toggle('foe', p?.kind === 'attack');
-  confirmEl.classList.toggle('ore', p?.kind === 'harvest' || p?.kind === 'enter');
-  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : p?.kind === 'enter' ? 'Go in' : 'Send them here';
+  confirmEl.classList.toggle('ore', p?.kind === 'harvest' || p?.kind === 'enter' || p?.kind === 'repair');
+  okBtn.title = p?.kind === 'attack' ? 'Attack it' : p?.kind === 'harvest' ? 'Dig this ore' : p?.kind === 'enter' ? 'Go in' : p?.kind === 'repair' ? 'Repair it' : 'Send them here';
   okBtn.setAttribute('aria-label', `${okBtn.title} (clear the selection to call it off)`);
   ringFrame = -1;
   if (p) placeConfirm();
@@ -412,12 +412,12 @@ function placeConfirm(): void {
   const r = canvas.getBoundingClientRect();
   // the arrowheads at the game's pixel size, turning as the cursor does
   const px = Math.max(3, Math.round(base) + 1);
-  const size = `${(pending.kind === 'enter' ? ENTER_RING_SIZE : MOVE_RING_SIZE) * px}px`;
+  const size = `${(pending.kind === 'enter' || pending.kind === 'repair' ? ENTER_RING_SIZE : MOVE_RING_SIZE) * px}px`;
   if (okRing.style.width !== size) {
     okRing.style.width = okRing.style.height = size;
     okRing.style.backgroundSize = size;
   }
-  const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : pending.kind === 'enter' ? enterRingFrames() : moveRingFrames();
+  const frames = pending.kind === 'attack' ? attackRingFrames() : pending.kind === 'harvest' ? harvestRingFrames() : pending.kind === 'enter' ? enterRingFrames() : pending.kind === 'repair' ? repairRingFrames() : moveRingFrames();
   const i = Math.floor(performance.now() / 150) % frames.length;
   if (i !== ringFrame) {
     ringFrame = i;
@@ -1519,7 +1519,7 @@ function spaceTap(e: PointerEvent, orderOnly = false): void {
 // A tap on the map with a finger: orders wait for the check.
 function touchTap(x: number, y: number): void {
   const what = game.cursorAt?.(x, y);
-  if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || (locked && what === 'pick')) setPending({ x, y, kind: what === 'pick' ? 'move' : what });
+  if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || what === 'repair' || (locked && what === 'pick')) setPending({ x, y, kind: what === 'pick' ? 'move' : what });
   else {
     setPending(null);
     game.click(x, y, false);
@@ -1549,7 +1549,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
       if (e.pointerType === 'mouse') {
         clicked();
         const what = game.cursorAt?.(down.x, down.y);
-        if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || (locked && what === 'pick')) sendTo(down.x, down.y);
+        if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || what === 'repair' || (locked && what === 'pick')) sendTo(down.x, down.y);
         else if (what === 'deploy') game.act?.('deploy');
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);
@@ -1575,12 +1575,14 @@ let movedAt = -Infinity;
 let attackedAt = -Infinity;
 let dugAt = -Infinity;
 let enteredAt = -Infinity;
+let fixedAt = -Infinity;
 // A click with the move, attack, harvest, deploy or enter cursor showing: play its burst.
 function clicked(): void {
   if (cursorKind === 'move') movedAt = performance.now();
   else if (cursorKind === 'attack') attackedAt = performance.now();
   else if (cursorKind === 'harvest' || cursorKind === 'deploy') dugAt = performance.now();
   else if (cursorKind === 'enter') enteredAt = performance.now();
+  else if (cursorKind === 'repair') fixedAt = performance.now();
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
@@ -1610,6 +1612,9 @@ function hoverNow(now: number): void {
   const ent = Math.floor((now - enteredAt) / 55);
   const entering = ent >= 0 && ent < ENTER_CLICK_FRAMES && k !== 'grabbing';
   if (entering) k = 'enter';
+  const fix = Math.floor((now - fixedAt) / 55);
+  const fixing = fix >= 0 && fix < REPAIR_CLICK_FRAMES && k !== 'grabbing';
+  if (fixing) k = 'repair';
   cursorKind = k;
   canvas.dataset.cursor = k;
   let css = CURSORS[k];
@@ -1617,6 +1622,7 @@ function hoverNow(now: number): void {
   else if (k === 'attack') css = shooting ? ATTACK_CLICK_CSS[shot] : ATTACK_FRAMES[Math.floor(now / 150) % ATTACK_FRAMES.length];
   else if (k === 'harvest' || k === 'deploy') css = digging ? DEPLOY_CLICK_CSS[dig] : DEPLOY_FRAMES[Math.floor(now / 150) % DEPLOY_FRAMES.length];
   else if (k === 'enter') css = entering ? ENTER_CLICK_CSS[ent] : ENTER_FRAMES[Math.floor(now / 150) % ENTER_FRAMES.length];
+  else if (k === 'repair') css = fixing ? REPAIR_CLICK_CSS[fix] : REPAIR_FRAMES[Math.floor(now / 120) % REPAIR_FRAMES.length];
   else if (k === 'move') css = moveCursor(Math.floor(now / 150) % MOVE_STEPS, burst < MOVE_CLICK_FRAMES ? burst : -1);
   if (css !== cursor) {
     cursor = css;

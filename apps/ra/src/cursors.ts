@@ -13,9 +13,11 @@
 // burst on click. The enter cursor (soldiers onto a transport, an ore hauler
 // onto its refinery) is three yellow triangles stacked one over another,
 // pointing down at the spot, a light running down them, with a gold burst
-// when clicked.
+// when clicked. The repair cursor (an engineer onto a damaged bridge's
+// blockhouse or a damaged building of yours) is a steel wrench, rocking as
+// if turning a nut, with a gold burst when clicked.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -31,7 +33,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'repair'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -195,6 +197,7 @@ const FALLBACK: Record<CursorKind, string> = {
   harvest: 'crosshair',
   deploy: 'crosshair',
   enter: 'pointer',
+  repair: 'pointer',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
@@ -393,6 +396,63 @@ function chevClickRows(f: ChevFrame): string[] {
   });
 }
 
+// ---------- The repair cursor ----------
+// A wrench: a steel handle with a gold grip and an open jaw at the top,
+// turned by angle a about (cx, cy), the jaw's middle.
+function wrench(put: (x: number, y: number, col: string) => void, cx: number, cy: number, a: number, size: number): void {
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const vx = x - cx;
+      const vy = y - cy;
+      // along the handle (down and to the left of the jaw) and across it
+      const s = -(vx * ca + vy * sa);
+      const t = -vx * sa + vy * ca;
+      const r = Math.hypot(vx, vy);
+      // the head: a ring round the jaw, open on the far side
+      if (r <= 4.1 && r >= 1.4 && !(s < 0.5 && Math.abs(t) < 1.5)) put(x, y, s > 1 || t > 0.5 ? 's' : 'w');
+      // the handle
+      else if (s > 2.8 && s < 11.5 && Math.abs(t) <= 1.05) put(x, y, s > 7 ? (t > 0 ? 'y' : 'Y') : t > 0.3 ? 's' : 'w');
+    }
+}
+// Rocking through REPAIR_STEPS frames (and the angle at each).
+const REPAIR_STEPS = 6;
+const rock = (i: number) => -Math.PI / 4 + Math.sin((i / REPAIR_STEPS) * Math.PI * 2) * 0.35;
+const RS = 17;
+const repairRows = (i: number) => drawn(RS, (put) => wrench(put, 10, 6, rock(i), RS));
+// A click: the wrench gives a hard turn, then a gold ring bursts out of the jaw.
+const REPAIR_CLICK: { a: number; ring?: number; dots?: boolean; flash?: number }[] = [
+  { a: -0.2 },
+  { a: 0.25, flash: 1.5 },
+  { a: 0.5, flash: 2.5, ring: 3 },
+  { a: 0.35, ring: 5 },
+  { a: 0.1, ring: 7 },
+  { a: -0.1, ring: 9, dots: true },
+  { a: -0.3, ring: 11, dots: true },
+  { a: -0.4, ring: 12, dots: true },
+];
+export const REPAIR_CLICK_FRAMES = REPAIR_CLICK.length;
+function repairClickRows(f: (typeof REPAIR_CLICK)[number]): string[] {
+  return drawn(MS, (put) => {
+    for (let y = 0; y < MS; y++)
+      for (let x = 0; x < MS; x++) {
+        const r = Math.hypot(x - MC, y - MC);
+        if (f.ring && Math.abs(r - f.ring) < 0.55) {
+          const ang = Math.atan2(y - MC, x - MC);
+          if (!f.dots || Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 16) % 2 === 0) put(x, y, f.ring < 4 ? 'w' : 'Y');
+        }
+      }
+    wrench(put, MC, MC, -Math.PI / 4 + f.a, MS);
+    if (f.flash)
+      for (let y = 0; y < MS; y++)
+        for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, y - MC) <= f.flash) put(x, y, 'w');
+  });
+}
+// The repair cursor through one rock, and its click burst.
+export const REPAIR_FRAMES: string[] = [];
+export const REPAIR_CLICK_CSS: string[] = [];
+
 // The attack cursor's click burst, one CSS value per frame.
 export const ATTACK_CLICK_CSS: string[] = [];
 // The deploy and harvest cursor's (gold arrowheads snapping in).
@@ -419,6 +479,8 @@ export function initCursors(): void {
   for (const f of MOVE_CLICK) DEPLOY_CLICK_CSS.push(gridCss(moveRows(0, f, 'gold'), [MC, MC], FALLBACK.deploy));
   for (let i = 0; i < CHEV_STEPS; i++) ENTER_FRAMES.push(gridCss(chevronRows(i), [8, 16], FALLBACK.enter));
   for (const f of CHEV_CLICK) ENTER_CLICK_CSS.push(gridCss(chevClickRows(f), [MC, MC], FALLBACK.enter));
+  for (let i = 0; i < REPAIR_STEPS; i++) REPAIR_FRAMES.push(gridCss(repairRows(i), [10, 6], FALLBACK.repair));
+  for (const f of REPAIR_CLICK) REPAIR_CLICK_CSS.push(gridCss(repairClickRows(f), [MC, MC], FALLBACK.repair));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);
@@ -426,6 +488,7 @@ export function initCursors(): void {
     else if (kind === 'attack') CURSORS[kind] = ATTACK_FRAMES[0];
     else if (kind === 'harvest' || kind === 'deploy') CURSORS[kind] = DEPLOY_FRAMES[0];
     else if (kind === 'enter') CURSORS[kind] = ENTER_FRAMES[0];
+    else if (kind === 'repair') CURSORS[kind] = REPAIR_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }
@@ -473,6 +536,18 @@ export function enterRingFrames(): string[] {
   return oreRingFrames;
 }
 
+// The repair cursor's wrench, rocking over the confirm button for sending
+// engineers to repair something (ENTER_RING_SIZE across, like the triangles).
+const repairRing: string[] = [];
+export function repairRingFrames(): string[] {
+  if (!repairRing.length)
+    for (let i = 0; i < REPAIR_STEPS; i++) {
+      const c = ENTER_RING_SIZE >> 1;
+      repairRing.push(gridCanvas(drawn(ENTER_RING_SIZE, (put) => wrench(put, c + 3, c - 11, rock(i), ENTER_RING_SIZE)), 1).toDataURL('image/png'));
+    }
+  return repairRing;
+}
+
 // The enter cursor's triangles as pictures for the map (a grid pixel to a
 // map pixel), through one run of their light: the lowest tip is at
 // (CHEV_TIP[0], CHEV_TIP[1]) in them. They float over a Foundry vehicle that
@@ -492,12 +567,13 @@ export function chevronFrames(): HTMLCanvasElement[] {
 
 export const BURST_CENTER = MC;
 export const BURST_FRAME = 0.055;
-export type BurstKind = 'move' | 'attack' | 'harvest' | 'enter';
-const bursts: Record<BurstKind, HTMLCanvasElement[]> = { move: [], attack: [], harvest: [], enter: [] };
+export type BurstKind = 'move' | 'attack' | 'harvest' | 'enter' | 'repair';
+const bursts: Record<BurstKind, HTMLCanvasElement[]> = { move: [], attack: [], harvest: [], enter: [], repair: [] };
 export function burstFrames(kind: BurstKind): HTMLCanvasElement[] {
   const out = bursts[kind];
   if (!out.length) {
     if (kind === 'enter') for (const f of CHEV_CLICK) out.push(gridCanvas(chevClickRows(f), 1));
+    else if (kind === 'repair') for (const f of REPAIR_CLICK) out.push(gridCanvas(repairClickRows(f), 1));
     else for (const f of MOVE_CLICK) out.push(gridCanvas(moveRows(0, f, kind === 'attack' ? 'red' : kind === 'harvest' ? 'gold' : 'green'), 1));
   }
   return out;
