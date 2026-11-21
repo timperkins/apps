@@ -58,7 +58,7 @@ export const WEAPON: Partial<Record<UnitKind | 'tower', Weapon>> = {
   gren: { name: 'Grenades', dmg: 45, rof: 2.4, range: 4.25 * CELL, wh: 'HE', shot: 'grenade', speed: 55, barrels: 1, air: false, ground: true, splash: 8, scatter: 3 },
   dog: { name: 'Bite', dmg: 400, rof: 1.3, range: 1.1 * CELL, wh: 'SA', shot: 'bite', speed: 0, barrels: 1, air: false, ground: true, foot: true },
   cmdo: { name: 'Twin pistols', dmg: 90, rof: 0.8, range: 5 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 2, air: false, ground: true, foot: true, c4: true },
-  flamer: { name: 'Flamethrower', dmg: 38, rof: 1, range: 2.5 * CELL, wh: 'FL', shot: 'flame', speed: 75, barrels: 1, air: false, ground: true, splash: 6, scatter: 1.5 },
+  flamer: { name: 'Flamethrower', dmg: 38, rof: 1, range: 2.5 * CELL, wh: 'FL', shot: 'flame', speed: 50, barrels: 1, air: false, ground: true, splash: 6, scatter: 1.5 },
   rocket: { name: 'Rocket launcher', dmg: 35, rof: 2.6, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 120, barrels: 1, air: true, ground: true },
   buggy: { name: 'Machine gun', dmg: 15, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
   apc: { name: 'Pintle machine gun', dmg: 12, rof: 0.6, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
@@ -671,10 +671,10 @@ export class Fx {
         const [sx, sy] = toScreen(s.x, s.y, s.z);
         this.p(sx, sy, 'smoke', { vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 2, max: 0.5 + Math.random() * 0.3, size: 1 });
       }
-      if (s.kind === 'flame' && Math.random() < dt * 40) {
+      if (s.kind === 'flame' && Math.random() < dt * 70) {
         // burning fuel drips and sparks off the jet
         const [sx, sy] = toScreen(s.x, s.y, s.z);
-        this.p(sx + (Math.random() - 0.5) * 2, sy, Math.random() < 0.3 ? 'soot' : 'ember', { vx: (Math.random() - 0.5) * 6, vy: -6 - Math.random() * 6, max: 0.35 + Math.random() * 0.3, g: -4, size: 1 });
+        this.p(sx + (Math.random() - 0.5) * 4, sy - 1, Math.random() < 0.35 ? 'soot' : 'ember', { vx: (Math.random() - 0.5) * 8, vy: -8 - Math.random() * 8, max: 0.45 + Math.random() * 0.4, g: -4, size: 1.4 });
       }
       if (s.kind === 'bullet' && s.t <= dt) {
         const [ax, ay] = toScreen(s.x0, s.y0, s.z0);
@@ -808,21 +808,31 @@ export class Fx {
         const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * (s.t / s.dur));
         c.fillStyle = 'rgba(0,0,0,0.25)';
         c.fillRect(Math.round(gx * 2) / 2, Math.round(gy * 2) / 2, 0.5, 0.5);
-        c.fillStyle = '#2f3524';
+        c.fillStyle = '#8a8880';
         c.fillRect(X, Y, 1, 1);
-        c.fillStyle = Math.floor(s.t * 16) % 2 ? '#7d8a5a' : '#4d5a36';
+        c.fillStyle = Math.floor(s.t * 16) % 2 ? '#ffffff' : '#e6e2d4';
         c.fillRect(X, Y, 0.5, 0.5);
       } else if (s.kind === 'flame') {
-        // a jet of fire, widening and reddening as it goes, its tail back to the nozzle
+        // a roaring jet of fire: white-hot at the nozzle, swelling into a
+        // ragged orange plume that curls upwards and darkens to red and soot
+        // at its far end
         const k = s.t / s.dur;
-        for (let i = 0; i < 6; i++) {
-          const b = k - i * 0.07;
-          if (b < 0) break;
-          const [fx, fy] = toScreen(s.x0 + (s.x1 - s.x0) * b, s.y0 + (s.y1 - s.y0) * b, s.z0 + (s.z1 - s.z0) * b + s.peak * 4 * b * (1 - b));
-          const r = 0.5 + b * 1.4;
-          const j = Math.floor(s.t * 40 + i) % 3;
-          c.fillStyle = i === 0 ? '#fff1b0' : b > 0.6 ? (j ? '#e0602c' : '#b8401e') : j ? '#ffb347' : '#ffd65a';
-          c.fillRect(Math.round((fx - r / 2) * 2) / 2, Math.round((fy - r / 2) * 2) / 2, Math.max(0.5, Math.round(r * 2) / 2), Math.max(0.5, Math.round(r * 1.5) / 2));
+        const N = 16;
+        const fl = Math.floor(s.t * 30);
+        for (const layer of [0, 1, 2]) {
+          for (let i = N; i >= 0; i--) {
+            const b = (k * i) / N;
+            const [fx, fy0] = toScreen(s.x0 + (s.x1 - s.x0) * b, s.y0 + (s.y1 - s.y0) * b, s.z0 + (s.z1 - s.z0) * b + s.peak * 4 * b * (1 - b));
+            const wob = hash2(i, fl, 7) - 0.5;
+            const fy = fy0 - b * b * 3 + wob * b * 1.5;
+            const r = (1.2 + b * 5.6) * (layer === 0 ? 1 : layer === 1 ? 0.68 : 0.36) * (0.85 + 0.3 * hash2(i, fl, 11 + layer));
+            if (layer === 2 && b > 0.75) continue;
+            c.fillStyle =
+              layer === 0 ? (b > 0.7 ? (hash2(i, fl, 3) > 0.5 ? '#9a2f18' : '#b8401e') : '#e0602c') : layer === 1 ? (b > 0.8 ? '#e0602c' : '#ffb347') : b < 0.25 ? '#fffbe6' : '#ffe27a';
+            const w = Math.max(0.5, Math.round(r * 2) / 2);
+            const h = Math.max(0.5, Math.round(r * 1.6) / 2);
+            c.fillRect(Math.round((fx - w / 2) * 2) / 2, Math.round((fy - h / 2) * 2) / 2, w, h);
+          }
         }
       } else if (s.kind === 'arc') {
         // the shell high up, and its shadow sliding along the ground
