@@ -5076,7 +5076,7 @@ export class IsoGame implements GameLike {
     if (w.splash) {
       // a shell bursting: everything of the other side near it is hit, less further out
       const nade = w.shot === 'grenade';
-      if (w.shot === 'flame') this.fx.scorch(sx, sy, w.splash * 0.45);
+      if (w.shot === 'flame') this.fx.scorch(sx, sy, w.splash * 0.7);
       else if (w.shot === 'beam') this.fx.boom(sx, sy, 3);
       else {
         this.fx.boom(sx, sy, nade ? 4 : 6);

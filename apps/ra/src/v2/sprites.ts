@@ -1048,8 +1048,11 @@ const limb = (u: number, v: number, z: number, a: P3, b: P3, c: P3, r: number) =
 
 const KHAKI = hex('#9a8a62');
 const BRASS = hex('#c9a24a');
-const GRENADE = hex('#4d5a36');
-const HARDHAT = hex('#d8b23a');
+const GRENADE = hex('#f2f0e6'); // white, so a grenadier's grenades show up
+const HARDHAT = hex('#f2c418');
+const CASE_D = hex('#a87d0c');
+const STRAP = hex('#26241f');
+const GEAR = hex('#3b3d34');
 const HAZARD = hex('#e0b52e');
 const FUEL = hex('#b8452f');
 const SUIT = hex('#b8a27a');
@@ -1059,15 +1062,15 @@ const MASK = hex('#4a4a44');
 // for the muzzle flash in combat.ts.
 export const KNEEL_DROP = 1.8;
 const BAG_H = 3.45;
-export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4], eng: [1.2, -1, 9.6], cmdo: [3.3, 0.85, 7.45], flame: [3.6, 0.6, 6.75] };
+export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [4.6, 0.65, 7.1], rocket: [4, 1.4, 9.1], gren: [-0.3, 1.3, 10.4], eng: [1.2, -1, 9.6], cmdo: [3.5, 0.85, 7.45], flame: [3.9, 0.6, 6.75] };
 
 // bags: how far up the sandbags round a dug-in G.I. have been stacked (0 to 1).
 export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Shape {
   const body =
-    kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : kind === 'eng' ? mix(f.main, KHAKI, 0.6) : kind === 'cmdo' ? mix(f.main, BLACK, 0.55) : kind === 'flame' ? mix(f.main, SUIT, 0.55) : f.main;
+    kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : kind === 'eng' ? mix(f.main, KHAKI, 0.6) : kind === 'cmdo' ? mix(BLACK, f.main, 0.1) : kind === 'flame' ? mix(f.main, SUIT, 0.55) : f.main;
   const bodyD = shade(body, -0.2);
-  const trouser = shade(f.dark, -0.08);
-  const helmet = kind === 'rocket' ? OLIVE_D : kind === 'eng' ? HARDHAT : kind === 'cmdo' ? hex('#2a2622') : kind === 'flame' ? hex('#7a7a6e') : shade(f.dark, 0.05);
+  const trouser = kind === 'cmdo' ? hex('#1f1e1c') : shade(f.dark, -0.08);
+  const helmet = kind === 'rocket' ? OLIVE_D : kind === 'eng' ? HARDHAT : kind === 'cmdo' ? f.main : kind === 'gren' ? f.main : kind === 'flame' ? hex('#7a7a6e') : shade(f.dark, 0.05);
   const vest = mix(OLIVE_D, body, 0.25);
   const kneel = frame === 4;
   const dz = kneel ? -KNEEL_DROP : 0;
@@ -1092,8 +1095,10 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     armR = [sh(1), [-0.3, 1.45, 6.6 + dz], [0.6, 0.85, 6.9 + dz]];
     armL = [sh(-1), [0.9, -1.15, 6.6 + dz], [2.1, 0.35, 7 + dz]];
   } else if (kind === 'rocket') {
-    armR = [sh(1), [0.2, 1.55, 6.9], [0.9, 1.05, 7.7]];
-    armL = [sh(-1), [0.9, -1.2, 7], [1.9, 0.6, 7.9]];
+    // the launcher rides on the right shoulder: the right hand on its grip,
+    // the left reaching across to steady it
+    armR = [sh(1), [0.3, 1.75, 6.9], [1, 1.45, 8.2]];
+    armL = [sh(-1), [1, -0.8, 7.1], [2, 0.9, 8.4]];
   } else if (kind === 'cmdo') {
     // a pistol held out in each hand
     armR = [sh(1), [0.9, 1.4, 7.05 + dz], [2.1, 0.85, 7.35 + dz]];
@@ -1137,55 +1142,60 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     if (kind === 'gi') {
       const y = 0.65;
       const h = 7.1 + dz;
-      if (segD(u, v, z, [-0.5, y, h + 0.35], [0.4, y, h + 0.05]) < 0.36) return mod(Math.floor(u * 2), 3) === 0 ? WOOD_L : WOOD; // stock
-      if (segD(u, v, z, [0.4, y, h], [1.6, y, h]) < 0.38) return z > h + 0.2 ? GUN_L : GUN_D; // receiver
-      if (segD(u, v, z, [1.1, y, h - 0.2], [1.35, y, h - 1]) < 0.3) return BLACK; // magazine
-      if (segD(u, v, z, [1.6, y, h], [2.6, y, h]) < 0.34) return WOOD; // handguard
-      if (segD(u, v, z, [2.6, y, h], [3.8, y, h]) < 0.28) return u > 3.5 ? BLACK : GUN; // barrel
+      // a big, dark rifle, so a G.I. reads as one at a glance
+      if (segD(u, v, z, [-0.7, y, h + 0.4], [0.4, y, h + 0.05]) < 0.46) return mod(Math.floor(u * 2), 3) === 0 ? shade(WOOD, -0.2) : shade(WOOD, -0.32); // stock
+      if (segD(u, v, z, [0.4, y, h], [1.8, y, h]) < 0.5) return z > h + 0.3 ? GUN : GUN_D; // receiver
+      if (segD(u, v, z, [1.2, y, h - 0.2], [1.5, y, h - 1.4]) < 0.36) return BLACK; // magazine
+      if (segD(u, v, z, [1.8, y, h], [3, y, h]) < 0.42) return z > h + 0.25 ? GUN_D : BLACK; // handguard
+      if (segD(u, v, z, [3, y, h], [4.5, y, h]) < 0.32) return BLACK; // barrel
     } else if (kind === 'rocket') {
-      const y = 1.05;
-      const h = 8.5;
-      if (u > 2.7 && u < 3.7 && (v - y) ** 2 + (z - h) ** 2 < (0.6 - (u - 2.7) * 0.45) ** 2) return RED; // the warhead
-      if (u > -2.3 && u <= 2.7 && (v - y) ** 2 + (z - h) ** 2 < 0.36) {
-        if (u < -2) return BLACK;
-        if (Math.abs(u - 1.6) < 0.25 || Math.abs(u + 1.2) < 0.25) return OLIVE_D;
-        return z > h + 0.3 ? shade(OLIVE, 0.12) : OLIVE;
+      // a big, dark tube resting on the right shoulder
+      const y = 1.4;
+      const h = 9.1;
+      const rr = (v - y) ** 2 + (z - h) ** 2;
+      if (u > 2.7 && u < 4 && rr < (0.72 - (u - 2.7) * 0.5) ** 2) return z > h + 0.25 ? shade(RED, 0.1) : shade(RED, -0.1); // the warhead
+      if (u > -2.8 && u <= 2.7 && rr < 0.5) {
+        if (u < -2.4 || (u > 2.3 && rr > 0.3)) return BLACK; // flared ends
+        if (Math.abs(u - 1.7) < 0.22 || Math.abs(u + 1.3) < 0.22) return BLACK;
+        return z > h + 0.4 ? shade(OLIVE_D, -0.1) : shade(OLIVE_D, -0.35);
       }
-      if (inBox(u, v, z, 0.6, 1.4, y - 0.95, y - 0.45, h - 0.2, h + 0.45)) return u > 1.2 ? GLASS : GUN_D; // the sight
-      if (segD(u, v, z, [0.9, y, h - 0.4], [0.8, y, h - 1]) < 0.25) return GUN_D; // grip
+      if (inBox(u, v, z, 0.5, 1.5, y + 0.6, y + 1, h - 0.2, h + 0.5)) return u > 1.3 ? GLASS : GUN_D; // the sight, out to the side
+      if (segD(u, v, z, [1, y, h - 0.5], [1, y, h - 1]) < 0.25) return GUN_D; // grip
     } else if (kind === 'cmdo') {
       // a pistol in each fist, barrel forward
       for (const arm of [armL, armR]) {
         const [hu, hv, hz] = arm[2];
-        if (segD(u, v, z, [hu + 0.1, hv, hz + 0.05], [hu + 1.15, hv, hz + 0.1]) < 0.27) return u > hu + 0.95 ? BLACK : z > hz + 0.15 ? GUN_L : GUN_D;
-        if (segD(u, v, z, [hu, hv, hz], [hu - 0.1, hv, hz - 0.5]) < 0.22) return GUN_D;
+        if (segD(u, v, z, [hu + 0.1, hv, hz + 0.05], [hu + 1.35, hv, hz + 0.1]) < 0.32) return u > hu + 1.1 ? BLACK : z > hz + 0.2 ? GUN : GUN_D;
+        if (segD(u, v, z, [hu, hv, hz], [hu - 0.1, hv, hz - 0.6]) < 0.26) return BLACK;
       }
     } else if (kind === 'flame') {
       // the wand: a steel tube with a nozzle and a pilot flame, its hose back to the tanks
-      if (segD(u, v, z, [0.7, 0.6, 6.2], [3.35, 0.6, 6.7]) < 0.27) return u > 3 ? BLACK : u < 1.2 ? GUN_D : mod(Math.floor(u * 2), 3) === 0 ? GUN : METAL_D;
-      if ((u - 3.55) ** 2 + (v - 0.6) ** 2 + (z - 6.75) ** 2 < 0.07) return hex('#ffb347');
+      if (segD(u, v, z, [0.7, 0.6, 6.2], [3.55, 0.6, 6.7]) < 0.32) return u > 3.2 ? BLACK : u < 1.2 ? GUN_D : mod(Math.floor(u * 2), 3) === 0 ? GUN : METAL_D;
+      const pf = (u - 3.85) ** 2 + (v - 0.6) ** 2 + (z - 6.85) ** 2;
+      if (pf < 0.2) return pf < 0.07 ? hex('#fff1b0') : hex('#ffb347'); // the pilot flame
       if (segD(u, v, z, [0.7, 0.6, 6.1], [-1.1, 0.7, 5.6]) < 0.18) return BLACK;
     } else if (kind === 'eng') {
-      // a striped steel toolbox in the right hand, its handle in the fist
+      // a big yellow briefcase in the right hand, its handle in the fist
       const bu = armR[2][0];
-      if (inBox(u, v, z, bu - 0.85, bu + 0.85, 1.35, 2.05, 3.2, 4.7)) {
-        if (z > 4.5) return GUN_L; // the lid
-        if (Math.abs(v - 2.05) < 0.12 || Math.abs(v - 1.35) < 0.12) return mod(Math.floor((u - z) * 1.6), 2) ? HAZARD : BLACK;
-        return z > 4.1 ? GUN : GUN_D;
+      if (inBox(u, v, z, bu - 1.25, bu + 1.25, 1.4, 2.2, 2.4, 4.75)) {
+        if (Math.abs(z - 4.1) < 0.14) return CASE_D; // where the lid closes
+        if (z > 4.55 || Math.abs(Math.abs(u - bu) - 1.25) < 0.15) return shade(HARDHAT, z > 4.55 ? 0.15 : -0.12); // rims
+        if (Math.abs(z - 4.1) < 0.3 && Math.abs(Math.abs(u - bu) - 0.6) < 0.18) return GUN_L; // clasps
+        return g(HARDHAT, u, v, z, 0.06);
       }
-      if (segD(u, v, z, [bu - 0.4, 1.7, 4.9], [bu + 0.4, 1.7, 4.9]) < 0.14) return BLACK; // its handle
+      if (segD(u, v, z, [bu - 0.45, 1.8, 5], [bu + 0.45, 1.8, 5]) < 0.18) return BLACK; // its handle
       // a big wrench: held up to work, or slung across the back
       const [w0, w1]: [P3, P3] = frame === 3 ? [[1.3, -1.05, 8.2], [1.25, -1, 10.6]] : [[-1.05, -0.95, 5.4], [-1.05, 0.75, 9.5]];
       if (segD(u, v, z, w0, w1) < 0.22) return GUN_L;
       const jaw = (u - w1[0]) ** 2 + (v - w1[1]) ** 2 + (z - w1[2]) ** 2;
       if (jaw < 0.36 && jaw > 0.08) return z > w1[2] ? shade(GUN_L, 0.15) : GUN;
     }
-    if (grenadeAt && (u - grenadeAt[0]) ** 2 + (v - grenadeAt[1]) ** 2 + (z - grenadeAt[2]) ** 2 < 0.3) return z > grenadeAt[2] + 0.2 ? shade(GRENADE, 0.2) : GRENADE;
+    if (grenadeAt && (u - grenadeAt[0]) ** 2 + (v - grenadeAt[1]) ** 2 + (z - grenadeAt[2]) ** 2 < 0.45) return z > grenadeAt[2] + 0.45 ? GUN_D : z < grenadeAt[2] - 0.3 ? shade(GRENADE, -0.18) : GRENADE;
     // ----- hands and arms
     for (const arm of [armL, armR]) {
       const hd = (u - arm[2][0]) ** 2 + (v - arm[2][1]) ** 2 + (z - arm[2][2]) ** 2;
       if (hd < 0.2) return SKIN;
-      if (limb(u, v, z, arm[0], arm[1], arm[2], 0.42)) return segD(u, v, z, arm[0], arm[0]) < 0.5 ? shade(body, 0.08) : body;
+      if (limb(u, v, z, arm[0], arm[1], arm[2], 0.42)) return segD(u, v, z, arm[0], arm[0]) < (kind === 'cmdo' ? 0.75 : 0.5) ? (kind === 'cmdo' ? f.main : shade(body, 0.08)) : body;
     }
     // ----- the head: face, and a helmet (a grenadier's cap) over it
     const hz = 9.55 + dz;
@@ -1193,17 +1203,29 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     if (z > hz + 0.05) {
       if (kind === 'eng') {
         // a hard hat: a round dome with a ridge, and a brim all round
-        const r = Math.hypot(u - 0.05, v);
-        if (z < hz + 0.25 && r < 1.2) return shade(helmet, -0.18);
-        if (r * r + ((z - hz - 0.15) / 0.85) ** 2 < 1.0) return Math.abs(v) < 0.12 ? shade(helmet, 0.22) : z > hz + 0.7 ? shade(helmet, 0.14) : helmet;
+        // (big and bright, so an engineer is easy to spot)
+        const r = Math.hypot(u - 0.1, v);
+        if (z < hz + 0.3 && r < 1.55) return shade(helmet, -0.15);
+        if ((r / 1.2) ** 2 + ((z - hz - 0.2) / 1.05) ** 2 < 1.0) return Math.abs(v) < 0.18 ? shade(helmet, 0.22) : z > hz + 0.85 ? shade(helmet, 0.14) : helmet;
       } else if (kind === 'cmdo') {
         // a beret, pulled down to one side
+        // (in the side's color, the one bit of it on him besides the shoulders)
         const r2 = (u + 0.05) ** 2 + v * v;
-        if (r2 < 1.05 && z < hz + 0.55 - v * 0.12) return z > hz + 0.35 - v * 0.12 ? shade(helmet, 0.12) : helmet;
-        if (r2 < 1.05 && z < hz + 0.75 && Math.abs(u + 0.1) < 0.3 && Math.abs(v + 0.5) < 0.3) return hex('#c9a24a'); // its badge
+        if (r2 < 1.1 && z < hz + 0.6 - v * 0.14) return z > hz + 0.4 - v * 0.14 ? shade(helmet, 0.12) : helmet;
+        if (r2 < 1.1 && z < hz + 0.8 && Math.abs(u + 0.1) < 0.3 && Math.abs(v + 0.5) < 0.3) return BRASS; // its badge
       } else if (kind === 'gren') {
-        if (z < hz + 0.8 && (u - 0.05) ** 2 + v * v < 0.95) return z > hz + 0.55 ? shade(helmet, 0.12) : helmet;
-        if (z < hz + 0.3 && u > 0.5 && u < 1.25 && av < 0.6) return shade(helmet, -0.2); // its peak
+        // a tall grenadier's cap in the side's color, a brass plate on the
+        // front and a white grenade badge on top: nobody else is this tall
+        const k = z - hz;
+        const cr = 0.95 - k * 0.22;
+        const cu = (u + 0.05) - k * 0.08;
+        if (k < 2.3 && cu * cu + v * v < cr * cr) {
+          if (k < 0.3) return shade(helmet, -0.25); // the band
+          if (cu > cr * 0.45 && av < 0.5 && k < 1.9) return k > 1.6 ? shade(BRASS, 0.15) : BRASS; // the plate
+          return k > 1.8 ? shade(helmet, 0.12) : helmet;
+        }
+        const tb = (u + 0.05 - 0.2) ** 2 + v * v + (k - 2.55) ** 2;
+        if (tb < 0.22) return z > hz + 2.6 ? GRENADE : shade(GRENADE, -0.12);
       } else {
         const r2 = u * u + v * v + (z - hz + 0.15) ** 2;
         if (r2 < 1.2 && z < hz + 0.3 && r2 > 0.7) return shade(helmet, -0.22); // the brim
@@ -1216,6 +1238,11 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       return MASK;
     }
     if (kind === 'flame' && (u - 0.95) ** 2 + v * v + (z - hz + 0.45) ** 2 < 0.13) return GUN_D;
+    if (kind === 'cmdo' && hr2 < 0.78) {
+      // a black balaclava, open only round the eyes
+      if (u > 0.4 && z > hz - 0.05 && z < hz + 0.4) return av > 0.15 && av < 0.45 && z < hz + 0.3 ? hex('#e8e4d4') : SKIN;
+      return z > hz + 0.3 ? hex('#2a2825') : hex('#1f1e1c');
+    }
     if (hr2 < 0.74) {
       if (u < -0.2) return kind === 'gren' || kind === 'eng' || kind === 'cmdo' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
       if (u > 0.45 && z > hz && z < hz + 0.3 && av > 0.15 && av < 0.45) return BLACK; // eyes
@@ -1231,18 +1258,25 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       if ((u + 1.05) ** 2 + (z - 8.3 - dz) ** 2 < 0.2 && av < 0.85) return SAND_BAG; // bedroll
     } else if (kind === 'flame') {
       // twin fuel tanks on the back, banded, with valves on top
-      for (const pv of [-0.55, 0.55]) {
-        const d2 = (u + 1.35) ** 2 + (v - pv) ** 2;
-        if (d2 < 0.3 && z > 4.9 && z < 8.7) return z > 8.3 ? GUN_D : Math.abs(z - 7.7) < 0.2 ? HAZ : d2 < 0.1 && u < -1.5 ? shade(FUEL, 0.15) : FUEL;
+      // (big ones, standing up past the shoulders so they show from the front too)
+      for (const pv of [-0.78, 0.78]) {
+        const d2 = (u + 1.45) ** 2 + (v - pv) ** 2;
+        const top = 9.7 - d2 * 1.2;
+        if (d2 < 0.48 && z > 4.6 && z < top) return z > top - 0.35 ? GUN_D : Math.abs(z - 8.1) < 0.22 || Math.abs(z - 5.6) < 0.2 ? HAZ : d2 < 0.16 && u < -1.6 ? shade(FUEL, 0.18) : FUEL;
+        if ((u + 1.45) ** 2 + (v - pv) ** 2 < 0.05 && z < 10.2 && z >= top - 0.35) return GUN_L; // the valve
       }
-      if (inBox(u, v, z, -1.3, -0.7, -0.9, 0.9, 5.4, 8)) return GUN_D; // the frame
+      if (inBox(u, v, z, -1.3, -0.7, -1.1, 1.1, 5.2, 8.4)) return GUN_D; // the frame
     } else if (kind === 'cmdo') {
-      if (inBox(u, v, z, -1.3, -0.6, -0.6, 0.6, 6.4, 7.8 + dz)) return shade(body, -0.1);
+      // a radio pack with a tall whip antenna, a coil of rope under it
+      if (segD(u, v, z, [-1.2, -0.45, 8.3 + dz], [-1.45, -0.55, 12.6 + dz]) < 0.32) return z > 12.1 + dz ? RED : BLACK;
+      if (inBox(u, v, z, -1.6, -0.6, -0.75, 0.75, 6.1 + dz, 8.4 + dz)) return z > 8.1 + dz ? shade(GEAR, 0.15) : Math.abs(z - 7.2 - dz) < 0.15 ? STRAP : GEAR;
+      if ((u + 1.1) ** 2 + (z - 5.8 - dz) ** 2 < 0.3 && av < 0.8) return mod(Math.floor(v * 3), 2) ? KHAKI : shade(KHAKI, -0.2); // rope
     } else if (kind === 'eng') {
       if (inBox(u, v, z, -1.35, -0.6, -0.7, 0.7, 6.2, 7.9)) return z > 7.6 ? shade(KHAKI, -0.05) : shade(KHAKI, -0.22); // a tool pack
     } else {
       if (inBox(u, v, z, -1.3, -0.6, -0.65, 0.65, 6.4, 7.9)) return OLIVE;
       if (inBox(u, v, z, -0.5, 0.6, -1.6, -0.95, 4.7, 6.1)) return z > 5.8 ? shade(OLIVE_D, 0.15) : Math.abs(u) < 0.15 ? BLACK : OLIVE_D; // satchel of grenades
+      for (const gu of [-0.2, 0.35]) if ((u - gu) ** 2 + (v + 1.3) ** 2 + (z - 6.35) ** 2 < 0.12) return GRENADE; // two peeking out
     }
     // ----- the torso: a jacket under a chest rig, with a belt
     if (z >= 5 + dz && z < 8.4 + dz) {
@@ -1252,16 +1286,24 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       if (dd < 1) {
         if (zz < 5.5) return u > 0.5 && av < 0.25 ? BRASS : BLACK; // belt and buckle
         if (zz > 8.1) return bodyD; // collar
-        if (kind === 'cmdo' && u > 0 && (Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.22 || Math.abs(zz - (8 - (1.1 - v) * 0.7)) < 0.22)) {
-          // crossed bandoliers
-          return mod(Math.floor((v + u) * 2.5), 2) ? BRASS : BLACK;
+        if (kind === 'cmdo') {
+          // a chest rig crammed with pouches, a knife on the strap, C4 on the belt
+          if (u > 0.2 && Math.abs(v + 0.75) < 0.15 && zz > 6.4 && zz < 7.7) return zz > 7.5 ? GUN_L : STEEL;
+          if (u > 0.25 && zz > 5.6 && zz < 7.4) return zz > 7.15 || mod(Math.floor(v * 2.2 + 0.5), 2) ? shade(GEAR, 0.12) : GEAR;
+          if (u < -0.3 && zz > 5.5 && zz < 6.2 && av > 0.6) return hex('#c8b27a'); // C4
+          if (Math.abs(av - 0.6) < 0.2) return STRAP;
         }
-        if (kind === 'gren' && u > 0 && Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.3) {
-          // a bandolier of grenades across the chest
-          return mod(Math.floor(v * 2), 2) ? GRENADE : OLIVE_D;
+        if (kind === 'gren' && u > 0 && (Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.32 || Math.abs(zz - (8 - (1.1 - v) * 0.7)) < 0.32)) {
+          // crossed bandoliers of white grenades
+          return mod(Math.floor(v * 2.2), 2) ? GRENADE : STRAP;
+        }
+        if (kind === 'flame') {
+          // the tank harness: black straps over both shoulders, a buckled chest strap
+          if (Math.abs(av - 0.6) < 0.24 && zz > 5.6) return STRAP;
+          if (u > 0 && Math.abs(zz - 7) < 0.2) return av < 0.22 ? BRASS : STRAP;
         }
         if (Math.abs(av - 0.6) < 0.18 && zz > 6.6) return shade(OLIVE_D, -0.15); // shoulder straps
-        if (u > 0.3 && zz > 5.6 && zz < 6.7 && kind !== 'gren' && kind !== 'flame') return mod(Math.floor(v * 2 + 0.5), 2) ? shade(vest, 0.1) : vest; // pouches
+        if (u > 0.3 && zz > 5.6 && zz < 6.7 && kind !== 'gren' && kind !== 'flame' && kind !== 'cmdo') return mod(Math.floor(v * 2 + 0.5), 2) ? shade(vest, 0.1) : vest; // pouches
         if (zz > 7.6 && av > 0.8) return shade(body, 0.1); // the lit tops of the shoulders
         return g(body, u, v, z, 0.05);
       }
@@ -1275,6 +1317,7 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
         const kd = Math.hypot(u - knee[0], v - knee[1], z - knee[2]);
         if (kd < 0.5 && u > knee[0]) return shade(trouser, -0.25); // knee pad
         if (z < 1.6 && !kneel) return shade(trouser, -0.12); // tucked into the boot
+        if (kind === 'cmdo' && !kneel && z > 3.4 && z < 4.4 && Math.abs(v) > 0.75) return z > 4.2 ? shade(GEAR, 0.15) : GEAR; // thigh pouches
         return g(trouser, u, v, z, 0.05);
       }
     }
@@ -1457,7 +1500,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     [0, 1, 2].map((fill) => renderDirs(hauler(f, fill, 0, tilt), DIRS, { r: 15, zmax: 16, bakeShadow: true }, k(`haulerDump:${i * 3 + fill}`))),
   );
   const inf = (kind: Trooper, name: string, frames: number[]) =>
-    frames.map((fr) => renderDirs(soldier(f, kind, fr), 16, { r: 4.3, zmax: 12, step: 0.5, bakeShadow: true }, k(`${name}:${fr}`)));
+    frames.map((fr) => renderDirs(soldier(f, kind, fr), 16, { r: 4.9, zmax: 13.5, step: 0.5, bakeShadow: true }, k(`${name}:${fr}`)));
   return {
     mcv: renderDirs(foundryVehicle(f), DIRS, { r: 17.5, zmax: 17, bakeShadow: true }, k('mcv')),
     lightTank: renderDirs(tankHull(f, 16, 12, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lightTank')),
