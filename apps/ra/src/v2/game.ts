@@ -20,7 +20,7 @@ import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, isFoot, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -58,6 +58,8 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   dog: { name: 'Attack dog', speed: 24, turn: 99, r: 4, hp: 1 },
   cmdo: { name: 'Commando', speed: 11, turn: 99, r: 4, hp: 1 },
   flamer: { name: 'Flame trooper', speed: 8, turn: 99, r: 4, hp: 1 },
+  scorch: { name: 'Scorch tank', speed: 20, turn: 2.8, r: 7.5, hp: 1 },
+  lumen: { name: 'Lumen tank', speed: 18, turn: 2.6, r: 7.5, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
   yard: 'Foundry',
@@ -71,6 +73,10 @@ const BNAME: Record<BuildingKind, string> = {
   silo: 'Ore silo',
   helipad: 'Helipad',
   lab: 'Tech lab',
+  prism: 'Lumen tower',
+  aa: 'Skyguard battery',
+  depot: 'Service depot',
+  wall: 'Wall',
 };
 // Where a hauler unloads at a refinery, from its center: backed onto the
 // striped pad, facing out (DOCK_A) with its bed's tail at the intake. It
@@ -101,6 +107,8 @@ const VOICE: Record<Kind, UnitVoice> = {
   dog: 'dog',
   cmdo: 'commando',
   flamer: 'flamer',
+  scorch: 'tank',
+  lumen: 'tank',
 };
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
@@ -112,6 +120,20 @@ const PACE_R = 6; // and how far from where it was left
 const SWIM_DROP = 5.5;
 // How close the Commando goes to plant a charge on a building (world
 // units from its wall), and how long the charge takes to go off.
+// Lumen towers: how near another must stand to beam its light into one
+// that is firing, how many can, and how much each adds to the blow.
+const PRISM_LINK = 9 * CELL;
+const PRISM_MAX = 6;
+const PRISM_ADD = 0.5;
+// Walls: the grid their segments snap to (one segment a side) and the
+// seconds to make one.
+const WALL_GRID = 8;
+const WALL_S = 0.6;
+// A Service depot: health a second it gives back to a vehicle standing on its
+// pad (as a share of full), and what it costs, as a share of the vehicle's
+// price, for a full repair.
+const DEPOT_RATE = 0.08;
+const DEPOT_COST = 0.25;
 const C4_REACH = 5;
 const C4_S = 2.2;
 // Foot soldiers ride in a Mule APC, up to CARGO of them. They climb out of
@@ -405,10 +427,10 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -436,11 +458,17 @@ const GARRISON: [Kind, number][] = [
   ['gren', 3],
   ['dog', 2],
   ['flamer', 2],
+  ['scorch', 2],
+  ['lumen', 2],
 ];
 // The walk and stand frames of each kind of foot soldier.
 const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] =>
   k === 'rocket' ? art.rocket : k === 'gren' ? art.gren : k === 'eng' ? art.eng : k === 'dog' ? art.dog : k === 'cmdo' ? art.cmdo : k === 'flamer' ? art.flamer : art.infantry;
-const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
+// The tanks with a turning turret, and the hull and turret each is drawn with.
+const TURRETED: ReadonlySet<Kind> = new Set<Kind>(['light', 'heavy', 'scorch', 'lumen']);
+const tankParts = (art: V2FactionArt, k: Kind): [StackSprite[], StackSprite[]] =>
+  k === 'heavy' ? [art.heavyTank, art.heavyTurret] : k === 'scorch' ? [art.scorchTank, art.scorchTurret] : k === 'lumen' ? [art.lumenTank, art.lumenTurret] : [art.lightTank, art.lightTurret];
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
 // ...and it waits in groups of this many at each of its posts round its base.
 const SQUAD = 4;
 const POSTS = 6;
@@ -725,7 +753,7 @@ export class IsoGame implements GameLike {
 
   /** Before generate(): the buildings it will place (it needn't wait for them). */
   preload(): Promise<unknown>[] {
-    const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad'];
+    const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
     if (this.stage === 'combat') now.push(...[...placed, 'lab' as BuildingKind].map((k): [BuildingKind, number] => [k, this.me]));
@@ -753,9 +781,12 @@ export class IsoGame implements GameLike {
       case 'flamer':
         return [...footFrames(art, u.kind), ...(u.kind === 'inf' ? art.infantryDug : [])].map((s): [StackSprite[], number] => [s, dirIndex(u.a, 16)]);
       case 'light':
-        return [[art.lightTank, di], [art.lightTurret, dirIndex(u.turret, DIRS)]];
       case 'heavy':
-        return [[art.heavyTank, di], [art.heavyTurret, dirIndex(u.turret, DIRS)]];
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
+        return [[hull, di], [tur, dirIndex(u.turret, DIRS)]];
+      }
       case 'heli':
         return [[art.heli, di]];
       case 'boat':
@@ -797,11 +828,12 @@ export class IsoGame implements GameLike {
     for (const b of this.buildings) {
       const now = near(b.x, b.y);
       if (b.kind === 'tower') add(this.art[b.f].towerGun, dirIndex(b.gun, DIRS), now);
+      if (b.kind === 'aa') add(this.art[b.f].aaGun, dirIndex(b.gun, DIRS), now);
       if (b.kind === 'radar') for (let d = 0; d < 16; d++) add(this.dish, d, now);
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
@@ -1269,11 +1301,9 @@ export class IsoGame implements GameLike {
     const di = dirIndex(a, DIRS);
     return isFoot(kind)
       ? [footFrames(art, kind)[0][dirIndex(a, 16)]]
-      : kind === 'light'
-        ? [art.lightTank[di], art.lightTurret[di]]
-        : kind === 'heavy'
-          ? [art.heavyTank[di], art.heavyTurret[di]]
-          : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+      : TURRETED.has(kind)
+        ? tankParts(art, kind).map((s) => s[di])
+        : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -1542,7 +1572,7 @@ export class IsoGame implements GameLike {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
       if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
-      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt * (e.lowPower ? 0.5 : 1);
+      const want = (j.tech.cost / (j.tech.building === 'wall' ? WALL_S : buildTime(j.tech.cost))) * dt * (e.lowPower ? 0.5 : 1);
       const pay = Math.min(want, e.credits, j.tech.cost - j.spent);
       e.credits -= pay;
       j.spent += pay;
@@ -1594,18 +1624,22 @@ export class IsoGame implements GameLike {
     if (!gh) return;
     const art = this.buildingArt(gh.tech.building!, this.me);
     let [wx, wy] = this.fold(...toWorld(x, y, 0));
-    wx = Math.round(wx / 4) * 4;
-    wy = Math.round(wy / 4) * 4;
+    // (wall segments snap to their own grid, so a row of them lines up)
+    const step = gh.tech.building === 'wall' ? WALL_GRID : 4;
+    wx = Math.round(wx / step) * step;
+    wy = Math.round(wy / step) * step;
     gh.x = wx;
     gh.y = wy;
-    gh.pad = { x: wx - art.rx - 3, y: wy - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+    gh.pad = padOf(gh.tech.building!, art, wx, wy);
     gh.why = this.placeWhy(gh.pad, this.me);
   }
 
   // Why a building can't go on pad r ('' if it can): it needs clear, level
   // ground next to the rest of your base.
   private placeWhy(r: Rect, f: number): string {
-    if (!this.siteOk(r)) return 'Blocked: needs open, level ground';
+    // (a wall's pad has no margin round it, so it may butt up against the next)
+    const tight = r.w <= WALL_GRID;
+    if (!this.siteOk(tight ? { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 } : r, tight ? 0 : 1)) return 'Blocked: needs open, level ground';
     const [gsx, gsy] = toScreen(r.x + r.w / 2, r.y + r.h / 2);
     for (const b of this.buildings) {
       if (b.f !== f) continue;
@@ -1624,7 +1658,8 @@ export class IsoGame implements GameLike {
     if (gh?.why) ui('ui_error');
     if (!gh || gh.why) return;
     this.command({ c: 'place', t: gh.tech.id, x: gh.x, y: gh.y });
-    this.ghost = null;
+    // walls keep coming: the ghost stays up for the next segment
+    if (gh.tech.building !== 'wall') this.ghost = null;
     this.emit();
   }
 
@@ -1634,7 +1669,7 @@ export class IsoGame implements GameLike {
     const j = t && this.eco[f].jobs.get(t.tab);
     if (!t?.building || !j || j.tech !== t || !j.ready) return;
     const art = this.buildingArt(t.building, f);
-    const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+    const pad = padOf(t.building, art, x, y);
     const why = this.placeWhy(pad, f);
     if (why) {
       this.tell(f, why);
@@ -1646,7 +1681,13 @@ export class IsoGame implements GameLike {
     this.puff(b, 12);
     this.sound(b.x, b.y, 'build_place');
     this.sound(b.x, b.y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
-    this.eco[f].jobs.delete(t.tab);
+    const e = this.eco[f];
+    e.jobs.delete(t.tab);
+    // the next wall segment is ready straight away, while there are credits for it
+    if (t.building === 'wall' && e.credits >= t.cost) {
+      e.credits -= t.cost;
+      e.jobs.set(t.tab, { tech: t, spent: t.cost, paused: false, ready: true });
+    }
   }
 
   // Everyone standing on rect r (but `keep`) drives off it.
@@ -1677,8 +1718,8 @@ export class IsoGame implements GameLike {
   }
 
   // Open, level grass, away from other buildings.
-  private siteOk(r: Rect): boolean {
-    if (!this.terrain.clear(r, 1)) return false;
+  private siteOk(r: Rect, margin = 1): boolean {
+    if (!this.terrain.clear(r, margin)) return false;
     // not on ore either
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
@@ -2091,7 +2132,11 @@ export class IsoGame implements GameLike {
     if (id === 'primary' && sb) this.command({ c: 'primary', b: sb.id });
     if (id === 'unrally' && sb) this.command({ c: 'rally', b: sb.id });
     if (id === 'place') this.placeNow();
-    else if (id === 'unplace') this.ghost = null;
+    else if (id === 'unplace') {
+      // (walls come one after another: stopping hands back the next one's credits)
+      if (this.ghost?.tech.building === 'wall') this.buildCancel(this.ghost.tech.id);
+      this.ghost = null;
+    }
     else if (id === 'unload') {
       const go = this.loaded().filter((u) => !u.unloading);
       if (go.length) this.command({ c: 'unload', u: go.map((u) => u.id) });
@@ -3361,7 +3406,7 @@ export class IsoGame implements GameLike {
               const [bx, by] = toScreen(u.x - Math.cos(u.a) * 13, u.y - Math.sin(u.a) * 13, 0);
               this.particles.push({ x: bx, y: by, vx: 0, vy: 0, life: 0, max: 1.6, kind: 'wake', size: 1 });
             } else if (!foot && u.kind !== 'heli' && k !== K.Water && u.z === 0) {
-              const hw = u.kind === 'mcv' ? 7.5 : u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 4 : 5;
+              const hw = u.kind === 'mcv' ? 7.5 : u.kind === 'heavy' || u.kind === 'scorch' || u.kind === 'lumen' ? 6 : u.kind === 'buggy' ? 4 : 5;
               const px = -Math.sin(u.a) * hw;
               const py = Math.cos(u.a) * hw;
               const style = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.2)' : k === K.Pad ? 'rgba(30,30,30,0.08)' : 'rgba(25,22,12,0.16)';
@@ -3411,7 +3456,7 @@ export class IsoGame implements GameLike {
       u.z += (gz - u.z) * Math.min(1, dt * 8);
       if (Math.abs(gz - u.z) < 0.05) u.z = gz;
 
-      if (u.kind === 'light' || u.kind === 'heavy') {
+      if (TURRETED.has(u.kind)) {
         if (u.target) {
           // (fight() aims it)
         } else if (u.moving) u.turretGoal = u.a;
@@ -3494,6 +3539,7 @@ export class IsoGame implements GameLike {
           for (let i = 0; i < 3; i++) this.sparks.push({ x: sx, y: sy, vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, life: 0 });
         }
       }
+      if (b.kind === 'depot' && b.rise >= 1 && b.hp > 0) this.serviceAt(b, dt);
       const emit = (i: number, kind: 'smoke' | 'soot', rate: number) => {
         if (!b.art.fx[i] || Math.random() > dt * rate) return;
         const p = b.art.fx[i];
@@ -3510,7 +3556,7 @@ export class IsoGame implements GameLike {
         emit(0, 'smoke', 0.8);
         emit(1, 'smoke', 0.8);
       }
-      if (b.kind === 'tower') {
+      if (isDefense(b.kind) && b.rise >= 1) {
         this.towerFight(b, dt);
         if (!b.target && Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
         const d = angDiff(b.gunGoal, b.gun);
@@ -4006,7 +4052,7 @@ export class IsoGame implements GameLike {
     // gun towers aim where the host's do
     for (const e of s.b) {
       const b = bldgs.get(e[0] as number);
-      if (b && b.kind === 'tower') b.target = target(e[14] as number);
+      if (b && isDefense(b.kind)) b.target = target(e[14] as number);
     }
     // your purse
     const mine = s.eco.find((e) => e[0] === this.me);
@@ -4066,8 +4112,7 @@ export class IsoGame implements GameLike {
       for (let i = 0; i < 14; i++) {
         const a = a0 + (i / 14) * Math.PI * 2;
         const [x, y] = this.fold(Math.round((cx + Math.cos(a) * r) / 4) * 4, Math.round((cy + Math.sin(a) * r) / 4) * 4);
-        const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-        if (!this.placeWhy(pad, f)) return [x, y];
+        if (!this.placeWhy(padOf(t.building, art, x, y), f)) return [x, y];
       }
     return null;
   }
@@ -4282,7 +4327,7 @@ export class IsoGame implements GameLike {
     }
     if (best) return best;
     for (const b of this.buildings) {
-      if (b.f === f || b.kind !== 'tower' || b.rise < 1 || w.foot || !this.canHit(w, b)) continue;
+      if (b.f === f || !isDefense(b.kind) || b.rise < 1 || w.foot || !this.canHit(w, b)) continue;
       const d = this.reach(x, y, b);
       if (d <= bd) {
         bd = d;
@@ -4367,7 +4412,7 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(u.x, u.y, t);
     const want = Math.atan2(ay - u.y, ax - u.x);
     let off: number;
-    if (u.kind === 'light' || u.kind === 'heavy') {
+    if (TURRETED.has(u.kind)) {
       u.turretGoal = want;
       off = angDiff(want, u.turret);
     } else {
@@ -4463,7 +4508,8 @@ export class IsoGame implements GameLike {
 
   // A gun tower picks the nearest enemy unit in range, turns and fires.
   private towerFight(b: Building, dt: number): void {
-    const w = WEAPON.tower!;
+    const kind = b.kind as DefenseKind;
+    const w = WEAPON[kind]!;
     const p = b.art.fx[0];
     const gx = b.x + p.x;
     const gy = b.y + p.y;
@@ -4480,17 +4526,63 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(gx, gy, t);
     const want = Math.atan2(ay - gy, ax - gx);
     b.gunGoal = want;
-    if (Math.abs(angDiff(want, b.gun)) > 0.1 || b.cool > 0) return;
+    // (a Lumen tower has nothing to turn: its crystal fires any way)
+    if ((kind !== 'prism' && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
     b.cool = w.rof * (0.9 + Math.random() * 0.2);
-    this.shoot(b, w, t, muzzles('tower', gx, gy, p.z, 0, b.gun));
+    const from = muzzles(kind, gx, gy, p.z, 0, b.gun);
+    this.shoot(b, kind === 'prism' ? this.prismBoost(b, w, from[0]) : w, t, from);
+  }
+
+  // A Lumen tower about to fire draws on the others of its side nearby that
+  // are free (not reloading and with nothing of their own to shoot): each
+  // beams its light into this one, using up its own shot, and adds to the
+  // blow. Returns the weapon to fire with.
+  private prismBoost(b: Building, w: Weapon, at: [number, number, number]): Weapon {
+    let n = 0;
+    const [ax, ay] = toScreen(...at);
+    for (const o of this.buildings) {
+      if (n >= PRISM_MAX || o === b || o.f !== b.f || o.kind !== 'prism' || o.dead || o.rise < 1 || (o.cool ?? 0) > 0 || o.target) continue;
+      const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
+      if (Math.hypot(ox - b.x, oy - b.y) > PRISM_LINK) continue;
+      o.cool = w.rof;
+      const q = o.art.fx[0];
+      const [sx, sy] = toScreen(ox + q.x, oy + q.y, q.z);
+      this.fx.beam(sx, sy, ax, ay, 0.5);
+      n++;
+    }
+    return n ? { ...w, dmg: w.dmg * (1 + n * PRISM_ADD) } : w;
+  }
+
+  // A Service depot mends one vehicle of its side standing on its pad at a
+  // time, a little each second, for credits (the host's call; a player's
+  // screen only shows the sparks).
+  private serviceAt(b: Building, dt: number): void {
+    const u = this.units.find((o) => {
+      if (o.f !== b.f || o.dead || o.hp >= 1 || isFoot(o.kind) || o.kind === 'heli' || o.kind === 'boat' || o.moving) return false;
+      const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
+      return Math.abs(ox - b.x) < 11 && Math.abs(oy - b.y) < 11;
+    });
+    if (!u) return;
+    if (Math.random() < dt * 6) {
+      const [sx, sy] = toScreen(u.x + (Math.random() - 0.5) * 6, u.y + (Math.random() - 0.5) * 6, u.z + MID[u.kind]);
+      this.fx.sparks(sx, sy, 3);
+    }
+    if (this.net === 'client') return;
+    const price = TECH.find((t) => t.unit === u.kind)?.cost ?? 500;
+    const add = Math.min(DEPOT_RATE * dt, 1 - u.hp);
+    const pay = add * price * DEPOT_COST;
+    const e = this.eco[b.f];
+    if (e.credits < pay) return;
+    e.credits -= pay;
+    u.hp += add;
   }
 
   // Rounds leave the muzzles (a flash at each) for t.
   private shoot(src: Unit | Building, w: Weapon, t: Target, from: [number, number, number][]): void {
-    this.gunSound(isB(src) ? 'tower' : src.kind, from[0], from.length);
+    this.gunSound(isB(src) ? (src.kind as DefenseKind) : src.kind, from[0], from.length);
     for (const m of from) {
       const [sx, sy] = toScreen(...m);
-      if (w.shot !== 'grenade') this.fx.muzzle(sx, sy, w.shot !== 'bullet');
+      if (w.shot !== 'grenade' && w.shot !== 'beam') this.fx.muzzle(sx, sy, w.shot !== 'bullet');
       let aim = this.aimPoint(m[0], m[1], t);
       let track: Shot['track'];
       if (w.shot === 'arc' || w.shot === 'grenade') {
@@ -4524,13 +4616,17 @@ export class IsoGame implements GameLike {
       }
       const shot = makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track);
       this.fx.fire(shot);
+      if (w.shot === 'beam') {
+        const [ex, ey] = toScreen(...aim);
+        this.fx.beam(sx, sy, ex, ey, w.dmg > 120 ? 1.5 : 1);
+      }
       // a lobbed shell whistles down the last moment or so of its flight
       if (w.shot === 'arc') this.sound(aim[0], aim[1], 'shell_whistle', 1, { delay: Math.max(0, shot.dur - 1.2), rate: 1.1 }, aim[2]);
     }
   }
 
   // The sound of a gun going off: kind is who is firing, at muzzle m, with n barrels.
-  private gunSound(kind: Kind | 'tower', m: [number, number, number], n: number): void {
+  private gunSound(kind: Kind | DefenseKind, m: [number, number, number], n: number): void {
     const [x, y, z] = m;
     const twin = (s: Sfx, rate: number, vol = 1) => {
       this.sound(x, y, s, vol, { rate }, z);
@@ -4558,6 +4654,13 @@ export class IsoGame implements GameLike {
         return twin('cannon_shot', 0.8, 1.1);
       case 'tower':
         return twin('cannon_shot', 0.92);
+      case 'scorch':
+        return this.sound(x, y, 'flame_burst', 1, { rate: 0.85 }, z);
+      case 'lumen':
+      case 'prism':
+        return this.sound(x, y, 'beam_fire', 1, { rate: kind === 'prism' ? 0.9 : 1.05 }, z);
+      case 'aa':
+        return twin('rocket_launch', 1.3, 0.9);
       case 'boat':
         return twin('cannon_shot', 1.2, 0.8);
       case 'arty':
@@ -4575,6 +4678,7 @@ export class IsoGame implements GameLike {
       // a shell bursting: everything of the other side near it is hit, less further out
       const nade = w.shot === 'grenade';
       if (w.shot === 'flame') this.fx.scorch(sx, sy, w.splash * 0.45);
+      else if (w.shot === 'beam') this.fx.boom(sx, sy, 3);
       else {
         this.fx.boom(sx, sy, nade ? 4 : 6);
         if (nade) this.fx.dust(sx, sy, 6);
@@ -4600,6 +4704,8 @@ export class IsoGame implements GameLike {
       if (soft) this.fx.dust(sx, sy);
       else this.fx.sparks(sx, sy, 4);
       if (!soft) this.sound(s.x, s.y, 'bullet_hit', 0.8, { rate: 0.9 + Math.random() * 0.4 }, s.z);
+    } else if (w.shot === 'beam') {
+      this.fx.boom(sx, sy, 2.5);
     } else {
       this.fx.boom(sx, sy, w.shot === 'rocket' ? 3.5 : 3);
       this.fx.sparks(sx, sy, 6);
@@ -5014,10 +5120,14 @@ export class IsoGame implements GameLike {
         return [[this.footSprite(u), u.x, u.y, u.z - (this.swimming(u) ? SWIM_DROP : 0)]];
       case 'light':
       case 'heavy':
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
         return [
-          [(u.kind === 'light' ? art.lightTank : art.heavyTank)[di], u.x, u.y, u.z],
-          [(u.kind === 'light' ? art.lightTurret : art.heavyTurret)[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z],
+          [hull[di], u.x, u.y, u.z],
+          [tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z],
         ];
+      }
       case 'heli':
         return [[art.heli[di], u.x, u.y, u.z + HELI_ALT]];
       case 'boat':
@@ -5607,9 +5717,10 @@ export class IsoGame implements GameLike {
         else this.blit(this.footSprite(u), u.x, u.y, u.z);
         break;
       case 'light':
-      case 'heavy': {
-        const hull = u.kind === 'light' ? art.lightTank : art.heavyTank;
-        const tur = u.kind === 'light' ? art.lightTurret : art.heavyTurret;
+      case 'heavy':
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
         this.blit(hull[di], u.x, u.y, u.z);
         this.blit(tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2 - Math.cos(u.turret) * kick, u.y - Math.sin(u.a) * 1.2 - Math.sin(u.turret) * kick, u.z);
         break;
@@ -5775,8 +5886,21 @@ export class IsoGame implements GameLike {
         this.blit(this.art[b.f].towerGun[dirIndex(b.gun, DIRS)], b.x + p.x, b.y + p.y, p.z);
         break;
       }
+      case 'aa': {
+        const p = b.art.fx[0];
+        this.blit(this.art[b.f].aaGun[dirIndex(b.gun, DIRS)], b.x + p.x, b.y + p.y, p.z);
+        break;
+      }
     }
   }
+}
+
+// The ground a building of this kind standing at (x, y) takes up: its
+// footprint and a margin round it (none for a wall segment, which lines up
+// with the next).
+function padOf(kind: BuildingKind, art: { rx: number; ry: number }, x: number, y: number): Rect {
+  const m = kind === 'wall' ? 0 : 3;
+  return { x: x - art.rx - m, y: y - art.ry - m, w: art.rx * 2 + m * 2, h: art.ry * 2 + m * 2 };
 }
 
 function angDiff(a: number, b: number): number {

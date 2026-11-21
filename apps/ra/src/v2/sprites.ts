@@ -450,6 +450,107 @@ function hauler(f: Faction, fill = 2, scoop = 0, tilt = 0): Shape {
   };
 }
 
+// The Scorch tank's turret: a low rounded dome with two stubby flame
+// projectors and a pair of fuel drums slung across its back.
+function scorchTurret(f: Faction): Shape {
+  const roof = mix(f.main, f.light, 0.5);
+  return (u, v, z) => {
+    if (z < 5) return null;
+    // the projectors, each with a pilot light at the tip
+    for (const off of [1.3, -1.3]) {
+      if (u < 2.4 || u > 9) continue;
+      const d2 = (v - off) ** 2 + (z - 6.6) ** 2;
+      const rad = u > 8 ? 0.75 : u < 3.6 ? 0.85 : 0.5;
+      if (d2 < rad * rad + 0.1) return u > 8.6 ? (d2 < 0.2 ? hex('#ffb347') : BLACK) : u > 8 ? GUN_D : z > 6.8 ? GUN_L : GUN;
+    }
+    // fuel drums lying across the back, banded
+    if (u > -6.2 && u < -2.8 && Math.abs(v) < 3.4) {
+      const d2 = (u + 4.5) ** 2 + (z - 6.8) ** 2;
+      if (d2 < 2.6) return Math.abs(Math.abs(v) - 2.2) < 0.3 ? HAZ : Math.abs(v) > 3.1 ? GUN_D : d2 < 1 && z > 7.2 ? shade(OLIVE, 0.18) : OLIVE;
+    }
+    // the dome
+    const d = Math.hypot((u + 0.4) * 0.92, v);
+    if (d > 4.2) return null;
+    const top = 5 + 2.9 * Math.sqrt(Math.max(0, 1 - (d / 4.2) ** 2));
+    if (z > top) {
+      // a hatch standing proud
+      if ((u + 1) ** 2 + (v + 1.4) ** 2 < 1.2 && z < top + 0.6) return shade(f.dark, 0.08);
+      return null;
+    }
+    if (z > top - 0.6) {
+      if (Math.abs(u - 1.4) < 0.4 && Math.abs(v - 1.6) < 0.5) return GLASS_D; // sight
+      if (u < -2.6 && u > -3.4) return WHITE; // identity stripe
+      return g(roof, u, v, z);
+    }
+    if (z < 5.6) return shade(f.dark, -0.1);
+    if (u > 2.6 && Math.abs(v) < 2.4) return z > 6.9 ? GUN : GUN_D; // mantlet
+    return g(f.main, u, v, z);
+  };
+}
+
+// Lumen crystal colors: a pale lens that lights white-hot as it fires.
+const LENS = hex('#bfe6f2');
+const LENS_D = hex('#6aa9c4');
+const LENS_L = hex('#f2fbff');
+
+// A faceted crystal (two pyramids base to base) centered on (cu, cv, cz).
+function crystal(u: number, v: number, z: number, cu: number, cv: number, cz: number, rad: number, half: number): RGB | null {
+  const du = u - cu;
+  const dv = v - cv;
+  const dz = z - cz;
+  const r = Math.max(Math.abs(du), Math.abs(dv), (Math.abs(du) + Math.abs(dv)) * 0.72);
+  if (Math.abs(dz) / half + r / rad > 1) return null;
+  const face = Math.floor((Math.atan2(dv, du) + Math.PI) / (Math.PI / 4)) % 8;
+  if (r / rad > 1 - Math.abs(dz) / half - 0.14) return face % 2 ? (dz > 0 ? LENS : LENS_D) : dz > 0 ? LENS_L : LENS;
+  return LENS_D;
+}
+
+// The Lumen tank's turret: a crystal held up in a cradle on a turntable.
+function lumenTurret(f: Faction): Shape {
+  return (u, v, z) => {
+    if (z < 5) return null;
+    const c = crystal(u, v, z, 0, 0, 10.4, 2.3, 3);
+    if (c) return c;
+    const d = Math.hypot(u + 0.3, v);
+    // the turntable, an emitter collar and two cradle arms
+    if (d < 3.8 && z < 6.4) return z > 5.8 ? (d > 3.2 ? shade(f.dark, 0.1) : mix(f.main, f.light, 0.4)) : f.dark;
+    if (d < 1.1 && z < 7.6) return z > 7 ? GUN_L : GUN;
+    if (Math.abs(Math.abs(v) - 2.3) < 0.45 && Math.abs(u) < 0.6 && z < 10.6) return z > 9.6 ? GUN_L : z > 6.4 ? GUN : GUN_D;
+    // a counterweight box behind
+    if (u < -2.4 && u > -4.6 && Math.abs(v) < 1.8 && z < 7.6) return z > 7.1 ? mix(f.main, f.light, 0.4) : f.main;
+    return null;
+  };
+}
+
+// The Skyguard battery's launcher: a yoke on a turntable holding a box of
+// four missile tubes tilted up at the sky.
+function aaLauncher(f: Faction): Shape {
+  const tilt = 0.55;
+  const ct = Math.cos(tilt);
+  const st = Math.sin(tilt);
+  return (u, v, z) => {
+    const d = Math.hypot(u, v);
+    if (z < 1.2) return d < 3.6 ? (d > 3 ? GUN_D : f.dark) : null;
+    // the yoke arms either side of the box
+    if (Math.abs(Math.abs(v) - 3.6) < 0.5 && Math.abs(u) < 1 && z < 4.6) return z > 4 ? GUN_L : GUN;
+    if (d < 1.4 && z < 3) return GUN;
+    // the box, tipped up about its trunnions at z = 4
+    const bu = u * ct + (z - 4) * st;
+    const bz = -u * st + (z - 4) * ct;
+    if (Math.abs(bu - 1) > 4.2 || Math.abs(v) > 3.1 || Math.abs(bz) > 2.1) return null;
+    if (bu > 4.6) {
+      // the business end: four tube mouths
+      const tv = Math.abs(v) - 1.5;
+      const tz = Math.abs(bz) - 1;
+      if (tv * tv + tz * tz < 0.55) return tv * tv + tz * tz < 0.2 ? BLACK : GUN_D;
+      return GUN;
+    }
+    if (bz > 1.6) return mix(f.main, f.light, 0.45);
+    if (Math.abs(bu + 0.8) < 0.3) return HAZ; // a warning band
+    return g(f.main, u, v, z);
+  };
+}
+
 function artillery(f: Faction): Shape {
   const hull = tankHull(f, 16, 12, false);
   return (u, v, z) => {
@@ -977,6 +1078,11 @@ export interface V2FactionArt {
   boat: StackSprite[];
   heli: StackSprite[];
   towerGun: StackSprite[];
+  scorchTank: StackSprite[];
+  scorchTurret: StackSprite[];
+  lumenTank: StackSprite[];
+  lumenTurret: StackSprite[];
+  aaGun: StackSprite[];
   infantry: StackSprite[][]; // [frame][dir]: standing, two strides
   rocket: StackSprite[][];
   gren: StackSprite[][]; // and a throw
@@ -1015,6 +1121,11 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }, k('boat')),
     heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }, k('heli')),
     towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }, k('towerGun')),
+    scorchTank: renderDirs(tankHull(f, 17, 12.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('scorchTank')),
+    scorchTurret: renderDirs(scorchTurret(f), DIRS, { r: 10, zmax: 10 }, k('scorchTurret')),
+    lumenTank: renderDirs(tankHull(f, 16, 13, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lumenTank')),
+    lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 14 }, k('lumenTurret')),
+    aaGun: renderDirs(aaLauncher(f), DIRS, { r: 7.5, zmax: 10 }, k('aaGun')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
     rocket: inf('rocket', 'rocket', [0, 1, 2]),
     gren: inf('gren', 'gren', [0, 1, 2, 3]),
@@ -1041,7 +1152,7 @@ export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad';
+export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall';
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -1674,6 +1785,108 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       };
       return { shape, rx: 12, ry: 10, zmax: 23, fx: [] };
     }
+    case 'prism': {
+      // Lumen tower: an eight-sided plinth, a tapering ribbed column and a
+      // big crystal on top, which the beam leaves from.
+      const shape: Shape = (u, v, z) => {
+        const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.72);
+        if (oct < 7 && z < 4) {
+          if (z > 3.4) return oct > 6.2 ? CONC_L : shade(CONC, -0.05);
+          if (z < 1) return CONC_D;
+          if (v > 6.2 && Math.abs(u + 3.6) < 1 && z < 3) return GUN; // hatch
+          return grime(g(CONC, u, v, z, 0.06), u > v ? v : u, z, 4, 21);
+        }
+        const c = crystal(u, v, z, 0, 0, 22.5, 3.6, 4.6);
+        if (c) return c;
+        if (z >= 4 && z < 18) {
+          // the column narrows as it rises, ribbed in the side's color
+          const r = 3.8 - (z - 4) * 0.12;
+          const o = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.72);
+          if (o < r) {
+            const a = Math.atan2(v, u);
+            if (mod(a * 4 / Math.PI + 0.5, 1) < 0.18) return f.main;
+            if (Math.abs(z - 11) < 0.4) return f.light;
+            return g(z > 16 ? GUN : METAL, u, v, z, 0.05);
+          }
+        }
+        // a collar holding the crystal, and four struts
+        if (z >= 17 && z < 18.6 && Math.hypot(u, v) < 3.4) return z > 18 ? GUN_L : GUN_D;
+        for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const k = (z - 17) / 4;
+          if (k > 0 && k < 1 && Math.abs(u - su * (1.6 + k * 1.6)) < 0.35 && Math.abs(v - sv * (1.6 + k * 1.6)) < 0.35) return GUN;
+        }
+        return null;
+      };
+      return { shape, rx: 8, ry: 8, zmax: 28, fx: [{ x: 0, y: 0, z: 22.5 }] };
+    }
+    case 'aa': {
+      // Skyguard battery: a sandbagged concrete pad with a radar box and the
+      // launcher's pedestal in the middle (the game draws the launcher,
+      // turning, on top of fx[0]).
+      const shape: Shape = (u, v, z) => {
+        const au = Math.abs(u);
+        const av = Math.abs(v);
+        if (Math.hypot(u, v) < 3.4 && z < 3.4) return z > 2.8 ? GUN_D : g(CONC_L, u, v, z);
+        // sandbags round the edge, open at the front
+        if (Math.max(au, av) > 6.4 && Math.max(au, av) < 8 && z < 2.6 && !(v > 6 && au < 2.4)) return mod(Math.floor((au > av ? v : u) * 0.8) + Math.floor(z * 1.4), 2) ? shade(SAND_BAG, -0.06) : SAND_BAG;
+        // a radar box at the back corner, its little dish on top
+        if (inBox(u, v, z, -6, -3.2, -6, -3.2, 0, 4)) return z > 3.5 ? shade(f.main, 0.1) : u > -3.6 || v > -3.6 ? (Math.abs(z - 2) < 0.6 ? GLASS_D : f.main) : f.dark;
+        if ((u + 4.6) ** 2 + (v + 4.6) ** 2 < 2.4 && z > 4 && z < 5 + ((u + 4.6) + (v + 4.6)) * 0.3) return WHITE;
+        // spare missile crates
+        if (inBox(u, v, z, 3, 5.6, -5.8, -3.6, 0, 1.6)) return z > 1.2 ? OLIVE : Math.abs(u - 4.3) < 0.25 ? HAZ : OLIVE_D;
+        if (au <= 8 && av <= 8 && z < 0.6) return au > 7.4 || av > 7.4 ? CONC_L : mod(u, 4) < 0.3 || mod(v, 4) < 0.3 ? CONC_D : g(CONC, u, v, z, 0.08);
+        return null;
+      };
+      return { shape, rx: 8, ry: 8, zmax: 8, fx: [{ x: 0, y: 0, z: 3.4 }] };
+    }
+    case 'depot': {
+      // Service depot: a flat repair pad that vehicles drive onto, under a
+      // steel gantry with a hoist, lamps at the corners.
+      const shape: Shape = (u, v, z) => {
+        const au = Math.abs(u);
+        const av = Math.abs(v);
+        // gantry legs and beams, high enough to drive under
+        if (Math.abs(au - 11) < 0.6 && Math.abs(av - 11) < 0.6 && z < 13) return z < 1 ? CONC_D : mod(Math.floor(z * 1.2), 4) === 0 ? HAZ : GIRDER;
+        if (Math.abs(au - 11) < 0.6 && av < 11.6 && z > 11.6 && z < 13) return mod(Math.floor(v), 3) ? GIRDER : GIRDER_D;
+        if (av < 0.6 && au < 11 && z > 12 && z < 13) return GIRDER_D;
+        // the hoist hanging from the cross beam, with its hook
+        if (inBox(u, v, z, -1.2, 1.2, -0.9, 0.9, 10.2, 12)) return z > 11.6 ? GUN_D : f.main;
+        if (Math.abs(u) < 0.2 && Math.abs(v) < 0.2 && z > 7.4 && z < 10.2) return GUN_D;
+        if (Math.abs(u) < 0.6 && Math.abs(v) < 0.3 && z > 6.6 && z < 7.4) return HAZ;
+        // corner lamps on posts
+        if (Math.abs(au - 12.6) < 0.4 && Math.abs(av - 12.6) < 0.4 && z < 3) return z > 2.4 ? LAMP : GUN_D;
+        if (au > 13 || av > 13 || z > 0.6) return null;
+        // the pad: a hazard-striped edge, a ring and a wrench mark
+        if (au > 12 || av > 12) return hazard(u + v, 0);
+        if (au > 11.2 || av > 11.2) return CONC_L;
+        const d = Math.hypot(u, v);
+        if (Math.abs(d - 7.5) < 0.5) return WHITE;
+        if (d < 6 && Math.abs(u - v) < 1 && d > 2.5) return HAZ; // the wrench's handle
+        if (d < 2.8 && d > 1.2 && !(u + v > 1 && Math.abs(u - v) < 1.2)) return HAZ; // its jaw
+        if (hash2(Math.floor(u), Math.floor(v), 31) > 0.95) return shade(TAR, -0.15); // oil
+        return g(d < 11 ? shade(TAR, 0.12) : CONC, u, v, z, 0.08);
+      };
+      return { shape, rx: 13, ry: 13, zmax: 14, fx: [{ x: 0, y: 0, z: 7 }] };
+    }
+    case 'wall': {
+      // A wall segment: a square concrete block with a coping and merlons on
+      // its corners. Segments stand side by side on an 8-unit grid, so a row
+      // of them makes one wall.
+      const shape: Shape = (u, v, z) => {
+        const au = Math.abs(u);
+        const av = Math.abs(v);
+        if (au > 4 || av > 4) return null;
+        if (z < 5) {
+          if (z < 0.8) return CONC_D;
+          if (z > 4.4) return CONC_L;
+          if (mod(z, 1.6) < 0.25) return shade(CONC, -0.1); // courses of blocks
+          return grime(g(CONC, u, v, z, 0.07), u + v, z, 5, 41);
+        }
+        if (z < 6.6 && au > 2.2 && av > 2.2) return z > 6.1 ? CONC_L : g(CONC, u, v, z, 0.06);
+        return null;
+      };
+      return { shape, rx: 4, ry: 4, zmax: 7, fx: [] };
+    }
     case 'helipad': {
       const shape: Shape = (u, v, z) => {
         const d = Math.hypot(u, v);
@@ -2155,7 +2368,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {

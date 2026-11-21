@@ -32,7 +32,11 @@ export const TECH: Tech[] = [
   { id: 'radar', name: 'Radar mast', tab: 'base', cost: 1000, needs: ['refinery'], building: 'radar', blurb: 'Opens up air power and artillery.' },
   { id: 'helipad', name: 'Helipad', tab: 'base', cost: 1000, needs: ['radar'], building: 'helipad', blurb: 'Builds copters.' },
   { id: 'lab', name: 'Tech lab', tab: 'base', cost: 1500, needs: ['factory', 'radar'], building: 'lab', blurb: 'Opens up the heaviest arms.' },
+  { id: 'depot', name: 'Service depot', tab: 'base', cost: 800, needs: ['factory'], building: 'depot', blurb: 'Repairs vehicles parked on its pad, for credits.' },
+  { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; Cancel stops.' },
   { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
+  { id: 'aa', name: 'Skyguard battery', tab: 'defense', cost: 1000, needs: ['barracks', 'radar'], building: 'aa', blurb: 'Missile launcher that shoots down aircraft. Can\'t hit anything on the ground.' },
+  { id: 'prism', name: 'Lumen tower', tab: 'defense', cost: 1500, needs: ['radar', 'lab'], building: 'prism', blurb: 'Long-range light beam. Lumen towers near one that fires beam their light into it and add to the blow.' },
 
   { id: 'inf', name: 'G.I.', tab: 'inf', cost: 100, needs: ['barracks'], unit: 'inf', from: 'barracks', blurb: 'Cheap foot soldier. Deploys behind sandbags to hold ground.' },
   { id: 'dog', name: 'Attack dog', tab: 'inf', cost: 200, needs: ['barracks'], unit: 'dog', from: 'barracks', blurb: 'Fast and sharp-eyed. Kills a soldier in one bite, but cannot hurt vehicles or buildings.' },
@@ -46,8 +50,10 @@ export const TECH: Tech[] = [
   { id: 'apc', name: 'Mule APC', tab: 'veh', cost: 600, needs: ['factory', 'barracks'], unit: 'apc', from: 'factory', blurb: 'Armored carrier for five foot soldiers.' },
   { id: 'light', name: 'Lancer tank', tab: 'veh', cost: 700, needs: ['factory'], unit: 'light', from: 'factory', blurb: 'The workhorse tank.' },
   { id: 'hauler', name: 'Ore hauler', tab: 'veh', cost: 1400, needs: ['factory', 'refinery'], unit: 'hauler', from: 'factory', blurb: 'Gathers ore for the refinery.' },
+  { id: 'scorch', name: 'Scorch tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'scorch', from: 'factory', blurb: 'Twin flame projectors: burns soldiers and buildings at short range.' },
   { id: 'arty', name: 'Howler artillery', tab: 'veh', cost: 800, needs: ['factory', 'radar'], unit: 'arty', from: 'factory', blurb: 'Long-range gun.' },
   { id: 'heavy', name: 'Bastion tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'heavy', from: 'factory', blurb: 'Heavy twin-gun tank.' },
+  { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },
   { id: 'heli', name: 'Kestrel copter', tab: 'veh', cost: 1200, needs: ['helipad', 'lab'], unit: 'heli', from: 'helipad', blurb: 'Rocket copter.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Foundry.' },
 ];
@@ -73,6 +79,9 @@ export const POWER: Partial<Record<BuildingKind, number>> = {
   helipad: -10,
   lab: -75,
   tower: -20,
+  prism: -75,
+  aa: -50,
+  depot: -25,
 };
 
 // Credits you can hold: a little of your own, more per refinery and silo.
