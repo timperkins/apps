@@ -783,6 +783,256 @@ function cargoPlane(f: Faction): Shape {
 export type Trooper = 'gi' | 'rocket' | 'gren' | 'eng' | 'cmdo' | 'flame';
 type P3 = [number, number, number];
 
+// ---------- Ships ----------
+
+const HULL = hex('#9ea4a6');
+const DECK = hex('#6f7476');
+const KEEL = hex('#7a3b33');
+
+// A ship's hull from its stern (u0) to its bow (u1), half beam w, deck at
+// z = h: a pointed bow, a square stern, dark red below the waterline under a
+// white boot stripe, and the side's color in a band under the deck edge.
+// Returns undefined off the hull's span (so the ship's top can be looked
+// for), null for empty air beside it.
+function hullAt(u: number, v: number, z: number, f: Faction, u0: number, u1: number, w: number, h: number): RGB | null | undefined {
+  if (u < u0 || u > u1 || z > h) return undefined;
+  const bowL = Math.min(12, (u1 - u0) * 0.35);
+  const flare = z < h * 0.7 ? 0.8 + (0.2 * z) / (h * 0.7) : 1;
+  const hw = (u > u1 - bowL ? w * Math.sqrt(Math.max(0, (u1 - u) / bowL)) : u < u0 + 1.5 ? w - (u0 + 1.5 - u) * 0.6 : w) * flare;
+  const av = Math.abs(v);
+  if (av > hw) return null;
+  const side = av > hw - 0.8 || u < u0 + 0.6;
+  if (z > h - 0.6 && !side) {
+    if (av > hw - 1.5) return shade(DECK, -0.2);
+    if (mod(u, 3) < 0.4) return shade(DECK, -0.1);
+    return g(DECK, u, v, z, 0.06);
+  }
+  if (!side) return shade(HULL, -0.25);
+  if (z < 0.9) return KEEL;
+  if (z < 1.4) return WHITE;
+  if (z > h - 1.2 && z < h - 0.6 && u < u1 - bowL) return f.main;
+  return g(HULL, u, v, z, 0.05);
+}
+
+// A rail of stanchions round a deck at height h.
+const rail = (u: number, av: number, z: number, h: number, hw: number) => z > h && z <= h + 1.3 && av > hw - 1.3 && av <= hw - 0.5 && (z > h + 0.9 || mod(u, 3) < 0.5);
+
+// The Otter: an amphibious hovercraft on a black rubber skirt, a cabin up
+// front with its windows, a cargo well, and two ducted fans at the stern.
+function hovercraft(f: Faction): Shape {
+  const skirt = hex('#2a2a28');
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    if (u < -11.5 || u > 11 || av > 6.4 || z > 9) return null;
+    // the skirt: a fat rounded ring under it all
+    const ru = Math.max(0, Math.abs(u + 0.25) - 5.5);
+    const rv = Math.max(0, av - 2.4);
+    const d = Math.hypot(ru, rv);
+    if (z < 2.2) {
+      if (d > 5.6 - (z < 1 ? (1 - z) * 0.8 : 0)) return null;
+      return mod(u * 0.8 + v * 0.8, 3) < 0.25 ? shade(skirt, -0.3) : g(skirt, u, v, z, 0.1);
+    }
+    // the deck
+    if (z < 3 && d < 5) return av > 5.4 ? f.dark : z > 2.6 && av < 3 && u > -6 && u < 1 ? shade(DECK, -0.3) : g(mix(HULL, f.main, 0.15), u, v, z);
+    // the cabin, with a windscreen across its front and side windows
+    if (u > 1 && u < 8.2 && av < 4.2 && z < 6.8) {
+      if (z > 4.6 && z < 5.9) {
+        if (u > 7.6) return mod(v + 9, 2.2) < 0.35 ? f.dark : GLASS_L;
+        if (av > 3.6) return mod(u, 2.2) < 0.4 ? f.dark : GLASS_D;
+      }
+      if (z > 6.3) return g(mix(f.main, f.light, 0.4), u, v, z);
+      return g(f.main, u, v, z);
+    }
+    // a little mast and lamp on the cabin roof
+    if (Math.abs(u - 3) < 0.35 && av < 0.35 && z < 8.6) return z > 8.1 ? LAMP : GUN_D;
+    // the cargo well's side rails
+    if (u > -7 && u <= 1 && Math.abs(av - 4.6) < 0.5 && z < 4.2) return z > 3.7 ? STEEL : GUN;
+    // two ducted fans side by side at the stern, facing back, with rudders
+    for (const cv of [-3.1, 3.1]) {
+      const r = Math.hypot(v - cv, z - 5.6);
+      if (u > -10.6 && u < -8.6) {
+        if (r > 2 && r < 2.7) return g(f.dark, u, v, z);
+        if (r < 2 && u > -9.8 && u < -9.4) return Math.abs(Math.sin(Math.atan2(z - 5.6, v - cv) * 2)) < 0.35 ? GUN_D : null;
+      }
+      if (u > -11.4 && u < -10.7 && Math.abs(v - cv) < 0.25 && Math.abs(z - 5.6) < 2) return GUN;
+      if (u > -9 && u < -7 && Math.abs(v - cv) < 0.5 && z < 3.6) return GUN_D; // its pylon
+    }
+    return null;
+  };
+}
+
+// The Destroyer: a long, lean warship with a gun turret on the bow, a
+// bridge and mast amidships, a funnel, and a helicopter deck at the stern.
+function destroyer(f: Faction): Shape {
+  const H = 3;
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    const hull = hullAt(u, v, z, f, -19, 20, 4.4, H);
+    if (hull !== undefined) return hull;
+    if (u < -19 || u > 20 || z > 15) return null;
+    // the helicopter deck: a white ring and H, a hangar in front of it
+    if (u < -10 && z <= H + 0.1) return null;
+    if (u > -10 && u < -5.6 && av < 3.2 && z < 6) return z > 5.5 ? CONC_L : u < -9.6 ? (av < 2.4 && z < 5.4 ? GUN_D : g(HULL, u, v, z)) : g(HULL, u, v, z);
+    // the bridge block, the side's color on top, windows wrapped round its front
+    if (u > -5.6 && u < 7 && av < 3 && z < 7.6) {
+      if (z > 5.6 && z < 6.8 && u > 3) {
+        if (u > 6.4) return mod(v + 9, 2) < 0.35 ? f.dark : GLASS_L;
+        if (av > 2.4) return mod(u, 2.2) < 0.4 ? f.dark : GLASS_D;
+      }
+      if (z > 7) return g(f.main, u, v, z);
+      return g(u < 3 && z > 5 ? shade(HULL, 0.08) : HULL, u, v, z);
+    }
+    // the mast: a radar bar and a light at the top
+    if (Math.abs(u - 1.5) < 0.4 && av < 0.4 && z < 14.6) return z > 14 ? RED : GUN_D;
+    if (Math.abs(u - 1.5) < 0.5 && av < 2.4 && Math.abs(z - 12) < 0.4) return STEEL;
+    if (Math.abs(u - 1.5) < 1.4 && av < 0.5 && Math.abs(z - 10.2) < 0.5) return GUN;
+    // the funnel
+    if (cyl(u, v, -3.6, 0, 1.4) && z < 10) return z > 9.4 ? BLACK : z > 8.4 ? f.main : GUN_L;
+    // the gun turret on the bow, on its ring, with its barrel
+    const gd = (u - 12) ** 2 + v * v;
+    if (gd < 5 && z < H + 0.7) return GUN_D;
+    if (gd < 3.6 && z < H + 2.6) return g(z > H + 2.1 ? mix(f.main, f.light, 0.5) : f.main, u, v, z);
+    if (u > 12.5 && u < 18 && av < 0.4 && Math.abs(z - (H + 1.6)) < 0.4) return u > 17.4 ? BLACK : GUN;
+    // depth charge racks at the stern corners, and the rail round the bow
+    if (u > -18.6 && u < -16.4 && Math.abs(av - 3) < 0.7 && z < H + 1.3) return z > H + 0.9 ? GUN_D : OLIVE;
+    if (u > 7 && u < 16 && rail(u, av, z, H, 4.4)) return STEEL;
+    return null;
+  };
+}
+
+// The Sentinel cruiser: a big block of a superstructure with four flat
+// radar panels on its faces, banks of missile hatches fore and aft, and a
+// small gun at the bow.
+function cruiser(f: Faction): Shape {
+  const H = 3.2;
+  const PANEL = hex('#3e4a52');
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    const hull = hullAt(u, v, z, f, -18, 19, 5, H);
+    if (hull !== undefined) return hull;
+    if (u < -18 || u > 19 || z > 15) return null;
+    // the superstructure, narrower as it rises
+    const top = 9.4;
+    const shrink = (z - H) * 0.12;
+    if (u > -6 + shrink && u < 7 - shrink && av < 3.8 - shrink && z < top) {
+      // the radar panels: an octagon on each face
+      const face = av > 3.8 - shrink - 0.5 ? Math.abs(u - 0.5) : u > 6.5 - shrink ? av : -1;
+      if (face >= 0 && face < 2 && Math.abs(z - 6.6) < 1.6 && face + Math.abs(z - 6.6) < 3) return mod(face * 2 + z * 2, 1.4) < 0.15 ? shade(PANEL, 0.25) : PANEL;
+      if (z > top - 0.6) return g(f.main, u, v, z);
+      if (z > H + 1.2 && z < H + 1.6) return f.dark;
+      return g(shade(HULL, 0.05), u, v, z);
+    }
+    // the bridge windows on a step in front of it
+    if (u >= 7 - (5 - H) * 0.12 && u < 8.6 && av < 2.8 && z < 6) return z > 4.6 && z < 5.6 ? (mod(v + 9, 2) < 0.35 ? f.dark : GLASS_L) : g(HULL, u, v, z);
+    // a mast with a cross bar and a light
+    if (Math.abs(u - 0.5) < 0.4 && av < 0.4 && z < 14.4) return z > 13.8 ? RED : GUN_D;
+    if (Math.abs(u - 0.5) < 0.4 && av < 2.4 && Math.abs(z - 12.2) < 0.35) return GUN_D;
+    // missile hatches: raised banks of square lids, fore and aft
+    for (const [a, b] of [[9.4, 14.2], [-14.6, -7.6]]) {
+      if (u > a && u < b && av < 2.6 && z < H + 0.8) {
+        if (mod(u - a, 1.6) < 0.25 || mod(v + 2.6, 1.3) < 0.2) return GUN_D;
+        return z > H + 0.5 ? g(METAL, u, v, z) : GUN;
+      }
+    }
+    // the bow gun
+    const gd = (u - 15.6) ** 2 + v * v;
+    if (gd < 2.6 && z < H + 1.8) return g(f.main, u, v, z);
+    if (u > 16 && u < 19.6 && av < 0.3 && Math.abs(z - (H + 1.1)) < 0.3) return GUN;
+    // a small helicopter-less pad of hazard paint at the stern
+    if (u < -15 && u > -17.4 && av < 2.4 && z < H + 0.1) return hazard(u, v);
+    return null;
+  };
+}
+
+// The carrier: a long flat flight deck over a broad hull, an island tower
+// on the starboard side, deck markings and drones parked along the edge.
+function carrier(f: Faction): Shape {
+  const H = 4.6;
+  const DK = hex('#55595b');
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    if (u < -27 || u > 28 || av > 10 || z > 17) return null;
+    // the hull, narrower than the deck
+    if (z < H) {
+      const hull = hullAt(u, v, z, f, -26, 27, 7.4, H);
+      return hull === undefined ? null : hull;
+    }
+    // the flight deck: a slab that overhangs the hull, angled to port
+    const dw = u > 18 ? 9.4 * Math.sqrt(Math.max(0, (28 - u) / 10)) : 9.4;
+    const portCut = v < -6.5 && u > 4; // the angled deck sticks out to port further back
+    if (z < H + 1 && av < dw && u > -26.5 && !portCut) {
+      if (z < H + 0.6) return av > dw - 0.5 ? f.dark : shade(DK, -0.2);
+      // markings: a dashed white centre line, an angled landing line, and a yellow edge
+      if (av > dw - 0.5) return HAZ;
+      if (av < 0.3 && mod(u, 4) < 2) return WHITE;
+      if (Math.abs(v + 2 - (u + 26) * 0.12) < 0.25 && u < 10) return WHITE;
+      if (u > 20 && u < 23 && av < 3 && mod(Math.floor(v), 2)) return HAZ; // the bow's number block
+      return g(DK, u, v, z, 0.05);
+    }
+    // the island on the starboard side: a stepped tower with a bridge, a mast and radar
+    if (v > 5.6 && v < 8.6 && u > -7 && u < 6 && z < 13) {
+      if (z > 10.4 && z < 11.6 && (u > 5.4 || v < 6.2)) return mod(u + v, 2) < 0.4 ? f.dark : GLASS_L;
+      if (z > 12.4) return g(f.main, u, v, z);
+      if (u < -3 && z > 9) return null;
+      return g(shade(HULL, 0.06), u, v, z);
+    }
+    if (Math.abs(u - 1) < 0.4 && Math.abs(v - 7) < 0.4 && z < 16.6) return z > 16 ? RED : GUN_D;
+    if (Math.abs(u - 1) < 0.5 && Math.abs(v - 7) < 2.4 && Math.abs(z - 14.4) < 0.35) return STEEL;
+    if (cyl(u, v, -5, 7.1, 1.1) && z < 11.4) return z > 10.8 ? BLACK : GUN;
+    // drones parked in a row along the starboard edge, wings folded
+    for (const pu of [-22, -17.5, -13, 10, 14.5]) {
+      const du = u - pu;
+      if (Math.abs(du) < 1.8 && Math.abs(v - 7.2) < 0.5 && z < H + 1.9) return g(GUN, u, v, z);
+      if (Math.abs(du + 1) < 0.5 && Math.abs(v - 7.2) < 1.4 && z < H + 1.6) return GUN_D;
+    }
+    return null;
+  };
+}
+
+// The submarine: a long dark cigar riding low in the water, a sail (its
+// tower) with diving planes, and a cross of fins at the tail.
+function submarine(f: Faction): Shape {
+  const SUBC = hex('#3b4043');
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    if (u < -16.5 || u > 15 || av > 4.4 || z > 8) return null;
+    // the hull: round in section, tapering at both ends
+    const t = u > 9 ? Math.sqrt(Math.max(0, (15 - u) / 6)) : u < -9 ? Math.max(0, (u + 16) / 7) : 1;
+    const R = 2.7 * t;
+    const dz = z - 0.6;
+    if (v * v + dz * dz < R * R) {
+      if (dz > R - 0.5 && av < 0.4 && mod(u, 2) < 1) return shade(SUBC, -0.25); // deck line
+      return g(SUBC, u, v, z, 0.06);
+    }
+    // the sail, with the side's color in a band, and planes on its sides
+    if (u > 1.5 && u < 6.4 && av < 0.9 * (1 - Math.max(0, u - 5.4) * 0.6) && z < 7) {
+      if (z > 6.4) return GUN_D;
+      if (z > 4.6 && z < 5.4) return f.main;
+      return g(SUBC, u, v, z);
+    }
+    if (u > 3 && u < 4.4 && av < 3.2 && Math.abs(z - 5) < 0.25) return GUN_D;
+    // the periscope
+    if (Math.abs(u - 2.6) < 0.25 && av < 0.25 && z < 7.9) return z > 7.6 ? GLASS : GUN;
+    // tail fins and the propeller
+    if (u < -12.5 && u > -15.5 && ((av < 0.25 && Math.abs(dz) < 2.6) || (Math.abs(dz) < 0.25 && av < 2.6))) return GUN_D;
+    if (u < -15.6 && u > -16.4 && Math.hypot(v, dz) < 1.4) return COPPER;
+    return null;
+  };
+}
+
+// One of the carrier's drones: a little flying wing, seen tiny.
+function drone(f: Faction): Shape {
+  return (u, v, z) => {
+    if (z > 1.2) return null;
+    const av = Math.abs(v);
+    if (u > 2.4 || u < -2.2) return null;
+    // swept wings
+    if (av < 3 && u < 1.2 - av * 0.55 && u > -0.6 - av * 0.55) return av > 2.4 ? f.main : GUN;
+    if (av < 0.6) return z > 0.6 ? GLASS_D : GUN_D;
+    return null;
+  };
+}
+
 // Distance from (u, v, z) to the segment a-b.
 function segD(u: number, v: number, z: number, a: P3, b: P3): number {
   const bx = b[0] - a[0];
@@ -1180,6 +1430,12 @@ export interface V2FactionArt {
   heron: StackSprite[];
   jet: StackSprite[];
   plane: StackSprite[];
+  otter: StackSprite[];
+  destroyer: StackSprite[];
+  cruiser: StackSprite[];
+  carrier: StackSprite[];
+  sub: StackSprite[];
+  drone: StackSprite[];
   infantry: StackSprite[][]; // [frame][dir]: standing, two strides
   rocket: StackSprite[][];
   gren: StackSprite[][]; // and a throw
@@ -1226,6 +1482,12 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
     jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
     plane: renderDirs(cargoPlane(f), DIRS, { r: 21, zmax: 11 }, k('plane')),
+    otter: renderDirs(hovercraft(f), DIRS, { r: 13, zmax: 9, bakeShadow: true, shadowAlpha: 0.2 }, k('otter')),
+    destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
+    cruiser: renderDirs(cruiser(f), DIRS, { r: 20.5, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
+    carrier: renderDirs(carrier(f), DIRS, { r: 29, zmax: 17, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
+    sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
+    drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
     rocket: inf('rocket', 'rocket', [0, 1, 2]),
     gren: inf('gren', 'gren', [0, 1, 2, 3]),
@@ -1262,7 +1524,7 @@ export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink';
+export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy';
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -2007,6 +2269,35 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       };
       return { shape, rx: 13, ry: 13, zmax: 14, fx: [{ x: 0, y: 0, z: 7 }] };
     }
+    case 'navy': {
+      // Naval yard, built out on the water: two concrete piers either side of
+      // an open slip, joined at the back by a pier with the yard office, and
+      // a big gantry crane over the slip where ships are mended.
+      const shape: Shape = (u, v, z) => {
+        const au = Math.abs(u);
+        // the gantry crane: legs on the two piers, a beam across, a trolley and hook
+        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 0.8 && z < 17) return z < 2.4 ? CONC_D : mod(Math.floor(z * 1.2), 4) === 0 ? HAZ : GIRDER;
+        if (Math.abs(au - 16) < 0.8 && Math.abs(v - 2) < 2.4 && z < 3.2 && z > 1.6) return GIRDER_D; // its bogies
+        if (au < 16.8 && Math.abs(v - 2) < 0.9 && z > 15.4 && z < 17) return mod(Math.floor(u * 0.8), 3) ? GIRDER : GIRDER_D;
+        if (inBox(u, v, z, 1.6, 4.4, 0.6, 3.4, 13.6, 15.4)) return z > 15 ? GUN_D : f.main;
+        if (Math.abs(u - 3) < 0.2 && Math.abs(v - 2) < 0.2 && z > 8 && z < 13.6) return GUN_D;
+        if (Math.abs(u - 3) < 0.7 && Math.abs(v - 2) < 0.3 && z > 7.2 && z < 8) return HAZ;
+        // the yard office on the back pier: windows, the side's color, a roof light
+        if (inBox(u, v, z, -19, -7, -15.6, -10, 0, 7.5)) return wallSkin(u + 13, v + 12.8, z, 6, 2.8, 0, 7.5, 61, { win: [2.4, 6], band: f.main });
+        if (Math.abs(u + 9) < 0.35 && Math.abs(v + 12) < 0.35 && z < 9.6) return z > 9.1 ? RED : GUN_D;
+        // bollards and lamps along the inner edges of the piers
+        if (Math.abs(au - 13.6) < 0.4 && mod(v, 6) < 0.8 && v > -9 && z < 3) return GUN_D;
+        if (Math.abs(au - 19.2) < 0.4 && Math.abs(v - 14.5) < 0.4 && z < 5) return z > 4.4 ? LAMP : GUN_D;
+        // the piers: concrete with hazard edges on the slip side
+        const pier = au > 13 || v < -9.4;
+        if (!pier || au > 20 || Math.abs(v) > 16 || z > 2.2) return null;
+        if (z < 1) return shade(CONC_D, -0.15);
+        if (z > 1.6 && ((au < 13.8 && v > -9.4) || (v < -8.6 && v > -9.4 && au < 13.8))) return hazard(u + v, 0);
+        if (mod(u, 5) < 0.25 || mod(v, 5) < 0.25) return CONC_D;
+        return g(CONC, u, v, z, 0.08);
+      };
+      return { shape, rx: 20, ry: 16, zmax: 17, fx: [{ x: 0, y: 3, z: 0 }, { x: 3, y: 2, z: 14 }] };
+    }
     case 'uplink': {
       // Satellite uplink: a big dish on a pylon, tipped up at the sky, over an
       // equipment block, with a feed horn on struts over the bowl.
@@ -2551,7 +2842,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {

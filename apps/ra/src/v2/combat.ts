@@ -18,7 +18,9 @@ export type Armor = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 export type Warhead = 'SA' | 'AP' | 'HE' | 'FL' | 'EN';
 // bite: an attack dog's jaws (nothing flies); flame: a jet of burning fuel.
 // beam: a Lumen lens's bolt of light, there at once.
-export type ShotKind = 'bullet' | 'shell' | 'rocket' | 'arc' | 'grenade' | 'flame' | 'bite' | 'beam';
+// torpedo: runs along the water to a ship; drone: a carrier's little
+// flying wing, out to the target and down onto it.
+export type ShotKind = 'bullet' | 'shell' | 'rocket' | 'arc' | 'grenade' | 'flame' | 'bite' | 'beam' | 'torpedo' | 'drone';
 
 // How much of each warhead's damage gets through each armor.
 export const VERSUS: Record<Warhead, Record<Armor, number>> = {
@@ -48,12 +50,18 @@ export interface Weapon {
   big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
   foot?: boolean; // only hits foot soldiers (a dog's bite, the Commando's pistols)
   c4?: boolean; // walks up to buildings and blows them up with a charge (the Commando)
+  sea?: boolean; // only hits ships (torpedoes)
+  deep?: boolean; // reaches a submarine under the water (depth charges)
 }
 
-export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng' | 'dog' | 'cmdo' | 'flamer' | 'scorch' | 'lumen' | 'heron' | 'jet' | 'plane';
+export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng' | 'dog' | 'cmdo' | 'flamer' | 'scorch' | 'lumen' | 'heron' | 'jet' | 'plane' | 'otter' | 'destroyer' | 'cruiser' | 'carrier' | 'sub';
 // The aircraft: they fly over everything and only some weapons reach them.
 export const AIR: ReadonlySet<string> = new Set<UnitKind>(['heli', 'heron', 'jet', 'plane']);
 export const isAir = (k: string): boolean => AIR.has(k);
+// The ships: they keep to the water. (The Otter hovercraft goes on land
+// and water both, so it isn't one of them.)
+export const NAVAL: ReadonlySet<string> = new Set<UnitKind>(['boat', 'destroyer', 'cruiser', 'carrier', 'sub']);
+export const isNaval = (k: string): boolean => NAVAL.has(k);
 // The buildings that fight back on their own.
 export type DefenseKind = 'tower' | 'prism' | 'aa';
 export const DEFENSE: ReadonlySet<string> = new Set<DefenseKind>(['tower', 'prism', 'aa']);
@@ -83,6 +91,10 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
   aa: { name: 'Skyguard missiles', dmg: 45, rof: 1, range: 8 * CELL, wh: 'AP', shot: 'rocket', speed: 190, barrels: 2, air: true, ground: false },
   heron: { name: 'Door gun', dmg: 14, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
   jet: { name: 'Swift missiles', dmg: 70, rof: 0.9, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 200, barrels: 2, air: false, ground: true },
+  destroyer: { name: 'Naval gun', dmg: 50, rof: 2, range: 6.5 * CELL, wh: 'HE', shot: 'shell', speed: 260, barrels: 1, air: false, ground: true, deep: true, big: true },
+  cruiser: { name: 'Sentinel missiles', dmg: 60, rof: 1.2, range: 10 * CELL, wh: 'AP', shot: 'rocket', speed: 230, barrels: 2, air: true, ground: false },
+  carrier: { name: 'Drone strike', dmg: 45, rof: 4, range: 12 * CELL, wh: 'HE', shot: 'drone', speed: 90, barrels: 3, air: false, ground: true, splash: 6 },
+  sub: { name: 'Torpedoes', dmg: 130, rof: 3, range: 6 * CELL, wh: 'AP', shot: 'torpedo', speed: 70, barrels: 1, air: false, ground: true, sea: true },
   tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
 };
 
@@ -115,6 +127,11 @@ export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   mcv: { strength: 600, armor: 'light' },
   heli: { strength: 120, armor: 'heavy' },
   boat: { strength: 200, armor: 'heavy' },
+  otter: { strength: 300, armor: 'heavy' },
+  destroyer: { strength: 600, armor: 'heavy' },
+  cruiser: { strength: 700, armor: 'heavy' },
+  carrier: { strength: 900, armor: 'heavy' },
+  sub: { strength: 450, armor: 'heavy' },
 };
 
 export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor }> = {
@@ -134,6 +151,7 @@ export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor
   depot: { strength: 800, armor: 'heavy' },
   wall: { strength: 300, armor: 'concrete' },
   uplink: { strength: 1000, armor: 'wood' },
+  navy: { strength: 1000, armor: 'heavy' },
 };
 
 // A building is shown damaged (scorched, holed, on fire) at or below this much health.
@@ -149,7 +167,7 @@ export const PLANE_ALT = 48;
 export const DROP_ALT = 42;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
-export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, heron: 9, jet: 7, plane: 11, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, heron: 9, jet: 7, plane: 11, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9, otter: 9, destroyer: 13, cruiser: 13, carrier: 16, sub: 10 };
 // Tracked armor: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'scorch', 'lumen', 'mcv', 'hauler']);
 
@@ -159,7 +177,7 @@ export const BURN_RUIN = 20;
 
 // How hard the screen shakes (in map pixels) when something big is
 // destroyed nearby: tanks and the like, and every building, by its size.
-export const QUAKE: Partial<Record<UnitKind, number>> = { apc: 1.3, light: 1.5, heavy: 2, scorch: 1.6, lumen: 1.4, mcv: 2, hauler: 1.6, boat: 1.2 };
+export const QUAKE: Partial<Record<UnitKind, number>> = { apc: 1.3, light: 1.5, heavy: 2, scorch: 1.6, lumen: 1.4, mcv: 2, hauler: 1.6, boat: 1.2, destroyer: 2, cruiser: 2, carrier: 2.6, sub: 1.5 };
 export const buildingQuake = (rx: number, ry: number) => Math.min(3.5, 1.8 + (rx + ry) * 0.04);
 // How long a shake lasts, in seconds.
 export const QUAKE_S = 0.5;
@@ -218,6 +236,14 @@ export function muzzles(kind: UnitKind | DefenseKind, x: number, y: number, z: n
       return [at(x, y, a, 3.8, 4.1, 2.7), at(x, y, a, 3.8, -4.1, 2.7)];
     case 'boat':
       return [at(x, y, a, 13.8, 0, 4.4)];
+    case 'destroyer':
+      return [at(x, y, a, 18, 0, 4.6)];
+    case 'cruiser':
+      return [at(x, y, a, 11.8, 1.2, 4.2), at(x, y, a, -11, -1.2, 4.2)];
+    case 'carrier':
+      return [at(x, y, a, 18, -3, 6), at(x, y, a, 12, 3, 6), at(x, y, a, 6, -3, 6)];
+    case 'sub':
+      return [at(x, y, a, 15, 0, 0)];
     case 'heron':
       return [at(x, y, a, 5, 3.2, 3.8)];
     case 'jet':
@@ -274,7 +300,7 @@ export function makeShot(kind: ShotKind, from: [number, number, number], to: [nu
     z1: to[2],
     t: 0,
     dur: Math.max(0.04, dur),
-    peak: kind === 'arc' ? 10 + d * 0.32 : kind === 'grenade' ? 5 + d * 0.2 : kind === 'rocket' ? 2 : kind === 'flame' ? 1.2 : 0,
+    peak: kind === 'drone' ? 14 + d * 0.08 : kind === 'arc' ? 10 + d * 0.32 : kind === 'grenade' ? 5 + d * 0.2 : kind === 'rocket' ? 2 : kind === 'flame' ? 1.2 : 0,
     x: from[0],
     y: from[1],
     z: from[2],
@@ -349,7 +375,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5, heron: 6, jet: 5, plane: 9 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5, heron: 6, jet: 5, plane: 9, otter: 6, destroyer: 10, cruiser: 10, carrier: 14, sub: 8 };
 
 interface Flash {
   x: number;
@@ -905,6 +931,29 @@ export class Fx {
           const j = Math.floor(s.t * 40 + i) % 3;
           c.fillStyle = i === 0 ? '#fff1b0' : b > 0.6 ? (j ? '#e0602c' : '#b8401e') : j ? '#ffb347' : '#ffd65a';
           c.fillRect(Math.round((fx - r / 2) * 2) / 2, Math.round((fy - r / 2) * 2) / 2, Math.max(0.5, Math.round(r * 2) / 2), Math.max(0.5, Math.round(r * 1.5) / 2));
+        }
+      } else if (s.kind === 'torpedo') {
+        // a dark fish under the surface, a line of white water behind it
+        for (let i = 1; i < 6; i++) {
+          const b = Math.max(0, s.t / s.dur - i * 0.03);
+          const [wx, wy] = toScreen(s.x0 + (s.x1 - s.x0) * b, s.y0 + (s.y1 - s.y0) * b, 0);
+          c.fillStyle = `rgba(235,245,250,${0.7 - i * 0.11})`;
+          c.fillRect(Math.round(wx * 2) / 2, Math.round(wy * 2) / 2, 0.5, 0.5);
+        }
+        c.fillStyle = '#1f2a2e';
+        c.fillRect(X, Y, 1, 0.5);
+      } else if (s.kind === 'drone') {
+        // a little flying wing, and its shadow on the ground
+        const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * (s.t / s.dur));
+        c.fillStyle = 'rgba(0,0,0,0.25)';
+        c.fillRect(Math.round(gx * 2) / 2 - 0.5, Math.round(gy * 2) / 2, 1.5, 0.5);
+        c.fillStyle = '#5c6266';
+        c.fillRect(X - 1, Y, 2.5, 0.5);
+        c.fillStyle = '#2e3133';
+        c.fillRect(X, Y - 0.5, 0.5, 1);
+        if (Math.floor(s.t * 8) % 2) {
+          c.fillStyle = '#ff5a3c';
+          c.fillRect(X - 1, Y, 0.5, 0.5);
         }
       } else if (s.kind === 'arc') {
         // the shell high up, and its shadow sliding along the ground

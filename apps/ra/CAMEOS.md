@@ -36,6 +36,7 @@ What is used now, so a new one can be different:
 | wall | run of crenellated concrete block wall with a corner | grey concrete | autumn hills |
 | aa | four-tube missile launcher tilted up, firing, sandbagged pad | khaki, olive | steppe, big cloudy sky |
 | prism | slender ribbed tower with a glowing crystal on top | pale concrete, steel | coastal headland, twilight |
+| navy | U-shaped concrete dock, orange gantry crane over the slip | grey concrete, orange girders | misty harbor, morning |
 | inf | rifleman, chest up | olive drab | burning ruins |
 | gren | grenadier throwing, waist up | desert tan | mountain ridge |
 | rocket | soldier aiming a shoulder launcher | grey urban camo | dusk |
@@ -55,6 +56,11 @@ What is used now, so a new one can be different:
 | heron | tandem-rotor transport, ramp open, door gun | khaki tan, olive stripes | red canyon, golden dust |
 | jet | jump jet hovering, missiles launching | light gunmetal, off-white | stormy sea coast |
 | mcv | long tracked truck carrying a folded base | grey, hazard stripes | pine forest |
+| otter | hovercraft on a black skirt coming up a beach | sand tan, black | tropical beach |
+| destroyer | lean warship at speed, bow gun firing | haze grey | rough ocean, sunset |
+| cruiser | warship with radar panels, missiles launching straight up | light grey, white | arctic sea, ice floes |
+| carrier | flat-deck carrier, drones taking off | dark gunmetal deck | ocean, cumulus clouds |
+| sub | half-submerged submarine, split above and below the water | black, charcoal | night, moonlight |
 
 ## Making a build menu picture
 
