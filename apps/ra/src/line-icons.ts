@@ -4,7 +4,7 @@
 
 export type IconName =
   | 'menu' | 'select' | 'home' | 'build' | 'group' | 'all' | 'clear' | 'close'
-  | 'shuffle' | 'units' | 'check' | 'deploy' | 'gear' | 'back' | 'flag' | 'bolt' | 'coin' | 'play' | 'users' | 'bot' | 'star' | 'pack' | 'unload';
+  | 'shuffle' | 'units' | 'check' | 'deploy' | 'gear' | 'back' | 'flag' | 'bolt' | 'coin' | 'play' | 'users' | 'bot' | 'star' | 'pack' | 'unload' | 'chute';
 
 export const LINE: Record<IconName, string> = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
@@ -30,6 +30,8 @@ export const LINE: Record<IconName, string> = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   // soldiers out of the back: an open door and an arrow walking out of it
   unload: '<path d="M4 20V4h8v16"/><path d="M4 20h16"/><path d="M10.5 12H20M16.5 8.5L20 12l-3.5 3.5"/>',
+  // paratroopers: a canopy, its lines, and the man hanging under it
+  chute: '<path d="M3.5 10a8.5 6.5 0 0 1 17 0z"/><path d="M3.5 10L11 17M20.5 10L13 17M12 10v7"/><circle cx="12" cy="19" r="1.6"/>',
   pack: '<path d="M12 3v6M9.5 6.5L12 9l2.5-2.5M12 21v-6M9.5 17.5L12 15l2.5 2.5M3 12h6M6.5 9.5L9 12l-2.5 2.5M21 12h-6M17.5 9.5L15 12l2.5 2.5"/>',
 };
 

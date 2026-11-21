@@ -680,6 +680,100 @@ function heli(f: Faction): Shape {
   };
 }
 
+// The Heron transport: a long tandem-rotor copter with a boxy cabin for five
+// soldiers, a rotor pylon at each end (the game draws the blades), a
+// loading ramp at the back and a door gun on the side.
+function heron(f: Faction): Shape {
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    // the cabin: a rounded box, the nose rounding down to the cockpit
+    if (u > -10 && u < 9 && av < 2.8 && z > 1.2 && z < 6.4) {
+      const nose = u > 6 ? (u - 6) * 0.9 : 0;
+      const tail = u < -7.5 ? (-7.5 - u) * 0.9 : 0;
+      if (z > 6.4 - nose * 0.6 - tail * 0.4 || z < 1.2 + nose * 0.5 + tail * 0.9) return null;
+      if (av > 2.8 - nose * 0.25) return null;
+      if (u > 6.2 && z > 3.4) return Math.abs(u - 7.4) < 0.3 || av < 0.3 ? f.dark : z > 4.8 ? GLASS_L : GLASS; // cockpit glazing
+      if (z > 5.8) return shade(f.main, 0.1);
+      if (av > 2.2 && z > 3.4 && z < 4.6 && mod(u, 2.4) < 1.2 && u > -6 && u < 5) return GLASS_D; // cabin windows
+      if (av > 2.2 && Math.abs(u - 4) < 1.2 && z < 5) return f.dark; // side door
+      if (Math.abs(u + 3) < 0.4) return WHITE; // band
+      if (z < 2.2) return shade(f.dark, -0.05);
+      return g(f.main, u, v, z);
+    }
+    // the rotor pylons, the back one tall
+    if (u > 4.6 && u < 7.4 && av < 1.3 && z >= 6.4 && z < 7.6) return z > 7.2 ? GUN_D : f.dark;
+    if (u > -11 && u < -6.4 && av < 1.4 && z >= 6 && z < 9.4 - (u > -7.4 ? (u + 7.4) * 1.4 : 0)) return z > 9 ? GUN_D : g(f.dark, u, v, z);
+    if (cyl(u, v, 6, 0, 0.6) && z >= 7.6 && z < 8.4) return STEEL;
+    if (cyl(u, v, -8.6, 0, 0.6) && z >= 9.4 && z < 10.2) return STEEL;
+    // engine pods on the back pylon's flanks
+    if (u > -10.6 && u < -6.6 && Math.abs(av - 2.2) < 0.8 && Math.abs(z - 7.4) < 0.8) return u > -7.2 ? BLACK : GUN;
+    // a door gun, wheels
+    if (u > 3.6 && u < 6.4 && Math.abs(v - 3.2) < 0.35 && Math.abs(z - 3.8) < 0.35) return GUN_D;
+    for (const [wu, wv] of [[5, 2.2], [5, -2.2], [-6.5, 2.4], [-6.5, -2.4]]) if ((u - wu) ** 2 + (z - 0.8) ** 2 < 0.7 && Math.abs(v - wv) < 0.5) return WHEEL;
+    return null;
+  };
+}
+
+// The Swift jet: a small swept-wing jump jet with a bubble canopy, two
+// missile rails under the wings and its landing legs down.
+function jet(f: Faction): Shape {
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    // the fuselage: a long tapering body, pointed nose
+    const r = u > 4 ? 1.4 * (1 - (u - 4) / 6) : u < -6 ? 1.4 - (-6 - u) * 0.2 : 1.4;
+    if (u > -9 && u < 10 && r > 0 && v * v + (z - 3.4) ** 2 * 1.3 < r * r) {
+      if (u > 2 && u < 5.6 && z > 3.8) return z > 4.4 ? GLASS_L : GLASS; // canopy
+      if (u > 8.6) return GUN_D; // nose probe
+      if (u < -7.6) return BLACK; // exhaust
+      if (z < 2.9) return shade(f.dark, -0.05);
+      if (Math.abs(u + 2) < 0.35) return WHITE;
+      return g(f.main, u, v, z);
+    }
+    // intakes either side of the cockpit
+    if (u > -0.6 && u < 2.6 && Math.abs(av - 1.6) < 0.5 && Math.abs(z - 3.4) < 0.7) return u > 2 ? BLACK : f.dark;
+    // swept wings, a little anhedral, tipped in the light color
+    const sweep = -av * 0.55;
+    if (av < 7 && u < 1.6 + sweep && u > -2.4 + sweep && Math.abs(z - (3.1 - av * 0.06)) < 0.35) return av > 6 ? f.light : Math.abs(av - 4) < 0.3 ? f.dark : g(mix(f.main, f.light, 0.2), u, v, z);
+    // missiles under the wings
+    if (Math.abs(av - 3.6) < 0.4 && u > -2.6 + sweep * 0.3 && u < 2.4 && Math.abs(z - 2.4) < 0.4) return u > 1.8 ? RED : WHITE;
+    // tailplanes and a fin
+    if (av < 3.4 && u < -6 - av * 0.3 && u > -8.6 - av * 0.3 && Math.abs(z - 3.6) < 0.3) return f.dark;
+    if (av < 0.3 && u < -5.4 && u > -8.6 && z > 4 && z < 7.6 - (u + 5.4) * -0.3 - 0.4 && z < 4 + (u + 9) * 1.2) return z > 6.4 ? f.light : g(f.dark, u, v, z);
+    // landing legs and wheels
+    for (const [lu, lv] of [[5.4, 0], [-3, 1.8], [-3, -1.8]]) {
+      if (Math.abs(u - lu) < 0.3 && Math.abs(v - lv) < 0.3 && z < 2.4 && z > 0.6) return GUN_D;
+      if ((u - lu) ** 2 + (z - 0.5) ** 2 < 0.35 && Math.abs(v - lv) < 0.4) return WHEEL;
+    }
+    return null;
+  };
+}
+
+// The paratroop plane: a big high-winged four-engined transport (drawn
+// overhead, so no wheels), its rear door open.
+function cargoPlane(f: Faction): Shape {
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    const r = u > 10 ? 2.6 * Math.sqrt(Math.max(0, 1 - ((u - 10) / 5) ** 2)) : u < -9 ? 2.6 - (-9 - u) * 0.28 : 2.6;
+    if (u > -18 && u < 15 && r > 0 && v * v + (z - 3) ** 2 < r * r) {
+      if (u > 11.6 && z > 3.6 && av < 1.6) return GLASS_D; // flight deck windows
+      if (u < -14 && z < 2.4) return BLACK; // the open door
+      if (z < 1.4) return shade(f.dark, -0.06);
+      if (Math.abs(u - 2) < 0.4) return WHITE;
+      return g(mix(f.main, METAL, 0.45), u, v, z);
+    }
+    // the high straight wing with four engines under it
+    if (av < 20 && u > -2 + av * 0.04 && u < 2.4 + av * -0.02 && Math.abs(z - 5.2) < 0.4) return av > 18.6 ? f.light : g(mix(f.main, METAL, 0.55), u, v, z);
+    for (const ev of [6, 11.5]) {
+      if (Math.abs(av - ev) < 1 && u > -0.6 && u < 4.4 && Math.abs(z - 4.2) < 0.9) return u > 3.8 ? BLACK : GUN;
+      if (Math.abs(av - ev) < 0.25 && Math.abs(u - 4.6) < 0.2 && Math.abs(z - 4.2) < 2.6) return GUN_D; // a blurred propeller
+    }
+    // the tail: a tall fin and tailplanes
+    if (av < 0.4 && u < -12 && u > -18 && z > 3 && z < 3 + (u + 18) * 1.1 && z < 10) return z > 8.6 ? f.light : g(f.dark, u, v, z);
+    if (av < 7 && u < -14.6 && u > -18 && Math.abs(z - 4.6) < 0.35) return f.dark;
+    return null;
+  };
+}
+
 // ---------- Foot soldiers ----------
 // Each one is built from capsules (limbs, weapons) on a slim torso, about
 // eleven units tall: a little over half a tank's height and a third as wide
@@ -1083,6 +1177,9 @@ export interface V2FactionArt {
   lumenTank: StackSprite[];
   lumenTurret: StackSprite[];
   aaGun: StackSprite[];
+  heron: StackSprite[];
+  jet: StackSprite[];
+  plane: StackSprite[];
   infantry: StackSprite[][]; // [frame][dir]: standing, two strides
   rocket: StackSprite[][];
   gren: StackSprite[][]; // and a throw
@@ -1126,6 +1223,9 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     lumenTank: renderDirs(tankHull(f, 16, 13, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('lumenTank')),
     lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 14 }, k('lumenTurret')),
     aaGun: renderDirs(aaLauncher(f), DIRS, { r: 7.5, zmax: 10 }, k('aaGun')),
+    heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
+    jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
+    plane: renderDirs(cargoPlane(f), DIRS, { r: 21, zmax: 11 }, k('plane')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
     rocket: inf('rocket', 'rocket', [0, 1, 2]),
     gren: inf('gren', 'gren', [0, 1, 2, 3]),
@@ -1147,12 +1247,22 @@ export function factionSet(art: V2FactionArt, key: string): StackSprite[] | null
 
 // ---------- Buildings ----------
 
+/** The Air command's bunker sits this far west of its middle... */
+const AIR_DU = -12;
+/** ...and its four landing pads east of it, in rows of two (centers). */
+const AIR_PAD_AT: [number, number][] = [
+  [5, -6.5],
+  [16.5, -6.5],
+  [5, 6.5],
+  [16.5, 6.5],
+];
+
 /** The Vehicle works' garage door, on its front (+y) wall at v = 18: its middle along the wall, half width and height. */
 export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall';
+export type BuildingKind = 'yard' | 'lab' | 'hq' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink';
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -1656,7 +1766,10 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
       };
     }
     case 'radar': {
-      const shape: Shape = (u, v, z) => {
+      // The Air command: the old radar bunker with its mast and dish at the
+      // west end (shifted along by AIR_DU) and four landing pads for Swift
+      // jets beside it (fx[1..4], where the jets sit).
+      const bunker: Shape = (u, v, z) => {
         if (inBox(u, v, z, -10, 10, -8, 8, 0, 9)) {
           if (z > 8.4) {
             const e = Math.min(u + 10, 10 - u, v + 8, 8 - v);
@@ -1687,7 +1800,33 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
         if (inBox(u, v, z, -10.8, -10, -4, 2, 0, 4)) return z > 3.4 ? GUN_D : mod(Math.floor(v * 1.5), 2) ? OLIVE : OLIVE_D;
         return null;
       };
-      return { shape, rx: 11, ry: 9, zmax: 20, fx: [{ x: 0, y: 0, z: 21 }] };
+      const shape: Shape = (u, v, z) => {
+        const b = bunker(u - AIR_DU, v, z);
+        if (b) return b;
+        const au = Math.abs(v);
+        // a covered walkway from the bunker to the pads
+        if (u > -3.4 && u < -0.4 && au < 2 && z < 3.4) return z > 2.8 ? f.dark : mod(u, 1.5) < 0.3 ? GUN_D : g(CONC_L, u, v, z);
+        for (const [pu, pv] of AIR_PAD_AT) {
+          const du = u - pu;
+          const dv = v - pv;
+          if (Math.abs(du) > 5.6 || Math.abs(dv) > 5.6) continue;
+          if (z > 0.6) {
+            // a lamp at the outer corner of each pad
+            if (Math.abs(Math.abs(du) - 5.1) < 0.35 && Math.abs(Math.abs(dv) - 5.1) < 0.35 && z < 1.6) return z > 1.2 ? (du * dv > 0 ? LAMP : hex('#7fe0a0')) : GUN_D;
+            continue;
+          }
+          if (Math.abs(du) > 5 || Math.abs(dv) > 5) return hazard(du + dv, 0);
+          // a white ring with a chevron pointing out, on dark tarmac
+          const d = Math.hypot(du, dv);
+          if (Math.abs(d - 3.6) < 0.4) return WHITE;
+          if (Math.abs(dv) < 0.4 + Math.max(0, du) * 0.5 && du > 0 && du < 2) return HAZ;
+          return g(shade(TAR, 0.1), u, v, z, 0.08);
+        }
+        // concrete apron between the pads
+        if (u > -1 && u < 23 && Math.abs(v) < 12.6 && z < 0.5) return Math.abs(v) > 12 || u > 22.4 ? CONC_L : g(CONC_D, u, v, z, 0.06);
+        return null;
+      };
+      return { shape, rx: 23.5, ry: 13, zmax: 20, fx: [{ x: AIR_DU, y: 0, z: 21 }, ...AIR_PAD_AT.map(([x, y]) => ({ x, y, z: 0.6 }))] };
     }
     case 'factory': {
       // The Vehicle works: a long hall under a saw-tooth roof with one big
@@ -1867,6 +2006,50 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; rx: numb
         return g(d < 11 ? shade(TAR, 0.12) : CONC, u, v, z, 0.08);
       };
       return { shape, rx: 13, ry: 13, zmax: 14, fx: [{ x: 0, y: 0, z: 7 }] };
+    }
+    case 'uplink': {
+      // Satellite uplink: a big dish on a pylon, tipped up at the sky, over an
+      // equipment block, with a feed horn on struts over the bowl.
+      const tilt = 0.75;
+      const ct = Math.cos(tilt);
+      const st = Math.sin(tilt);
+      const shape: Shape = (u, v, z) => {
+        // the dish: a shallow bowl about (0, 0, 13), facing up and to the south-east
+        const du = u - 1;
+        const dz = z - 13;
+        const a = du * ct - dz * st; // across the bowl's face
+        const n = du * st + dz * ct; // out of its face
+        const r = Math.hypot(a, v);
+        if (r < 8 && n > r * r * 0.045 - 0.4 && n < r * r * 0.045 + 0.4) {
+          if (Math.abs(r - 7.6) < 0.4) return METAL_D; // rim
+          if (mod(Math.atan2(v, a) * 4 / Math.PI, 1) < 0.08) return METAL_D; // panel seams
+          return n > r * r * 0.045 ? g(WHITE, u, v, z, 0.04) : METAL;
+        }
+        // the feed horn on three struts, out in front of the bowl
+        const hu = 1 + st * 5;
+        const hz = 13 + ct * 5;
+        if ((u - hu) ** 2 + v * v + (z - hz) ** 2 < 0.9) return GUN_D;
+        for (const ang of [0, 2.1, 4.2]) {
+          const ax = Math.cos(ang) * 6;
+          const k = n / 5;
+          if (k > 0.1 && k < 1 && Math.hypot(a - ax * (1 - k), v - Math.sin(ang) * 6 * (1 - k)) < 0.3) return GUN;
+        }
+        // the pylon and its yoke
+        if (cyl(u, v, 0, 0, 1.6) && z < 12) return z > 11.4 ? GUN_D : g(f.dark, u, v, z);
+        // the equipment block, with the side's color in a band and a lit door
+        if (inBox(u, v, z, -9, 9, -9, 9, 0, 5)) {
+          if (z > 4.4) return Math.max(Math.abs(u), Math.abs(v)) > 8.4 ? CONC_L : g(roofC, u, v, z);
+          if (v > 8.4 && Math.abs(u - 4) < 1.2 && z < 3.4) return z > 2.8 ? LAMP : GUN;
+          if (z > 3.2 && z < 3.9) return f.main;
+          return wallSkin(u, v, z, 9, 9, 0, 5, 23);
+        }
+        // a whip aerial and a box of electronics on the roof
+        if (Math.abs(u + 6.5) < 0.3 && Math.abs(v + 6.5) < 0.3 && z < 12) return z > 11.4 ? RED : GUN_D;
+        const ac = acUnit(u, v, z, -5.5, 5.5, 5);
+        if (ac) return ac;
+        return null;
+      };
+      return { shape, rx: 10, ry: 10, zmax: 22, fx: [{ x: 1, y: 0, z: 14 }] };
     }
     case 'wall': {
       // A wall segment: a square concrete block with a coping and merlons on
@@ -2368,7 +2551,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, hq: 3, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {

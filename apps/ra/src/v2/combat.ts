@@ -50,7 +50,10 @@ export interface Weapon {
   c4?: boolean; // walks up to buildings and blows them up with a charge (the Commando)
 }
 
-export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng' | 'dog' | 'cmdo' | 'flamer' | 'scorch' | 'lumen';
+export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng' | 'dog' | 'cmdo' | 'flamer' | 'scorch' | 'lumen' | 'heron' | 'jet' | 'plane';
+// The aircraft: they fly over everything and only some weapons reach them.
+export const AIR: ReadonlySet<string> = new Set<UnitKind>(['heli', 'heron', 'jet', 'plane']);
+export const isAir = (k: string): boolean => AIR.has(k);
 // The buildings that fight back on their own.
 export type DefenseKind = 'tower' | 'prism' | 'aa';
 export const DEFENSE: ReadonlySet<string> = new Set<DefenseKind>(['tower', 'prism', 'aa']);
@@ -78,6 +81,8 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
   lumen: { name: 'Lumen lens', dmg: 100, rof: 3.6, range: 7 * CELL, wh: 'EN', shot: 'beam', speed: 4000, barrels: 1, air: false, ground: true, splash: 10 },
   prism: { name: 'Lumen crystal', dmg: 85, rof: 2.8, range: 7.5 * CELL, wh: 'EN', shot: 'beam', speed: 4000, barrels: 1, air: false, ground: true },
   aa: { name: 'Skyguard missiles', dmg: 45, rof: 1, range: 8 * CELL, wh: 'AP', shot: 'rocket', speed: 190, barrels: 2, air: true, ground: false },
+  heron: { name: 'Door gun', dmg: 14, rof: 0.5, range: 4 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
+  jet: { name: 'Swift missiles', dmg: 70, rof: 0.9, range: 5 * CELL, wh: 'AP', shot: 'rocket', speed: 200, barrels: 2, air: false, ground: true },
   tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
 };
 
@@ -98,6 +103,9 @@ export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   flamer: { strength: 60, armor: 'none' },
   scorch: { strength: 320, armor: 'heavy' },
   lumen: { strength: 180, armor: 'light' },
+  heron: { strength: 175, armor: 'light' },
+  plane: { strength: 400, armor: 'light' },
+  jet: { strength: 150, armor: 'light' },
   buggy: { strength: 150, armor: 'light' },
   apc: { strength: 280, armor: 'heavy' },
   light: { strength: 300, armor: 'heavy' },
@@ -125,6 +133,7 @@ export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor
   aa: { strength: 500, armor: 'heavy' },
   depot: { strength: 800, armor: 'heavy' },
   wall: { strength: 300, armor: 'concrete' },
+  uplink: { strength: 1000, armor: 'wood' },
 };
 
 // A building is shown damaged (scorched, holed, on fire) at or below this much health.
@@ -132,9 +141,15 @@ export const DAMAGED = 0.5;
 // How long the pieces of something destroyed fly about before they're gone.
 export const PIECE_S = 1.3;
 export const HELI_ALT = 20;
+// Jets fly higher than copters.
+export const JET_ALT = 30;
+// The cargo plane that drops paratroopers flies higher still, and they
+// come down from a little under it.
+export const PLANE_ALT = 48;
+export const DROP_ALT = 42;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
-export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, heron: 9, jet: 7, plane: 11, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9 };
 // Tracked armor: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'scorch', 'lumen', 'mcv', 'hauler']);
 
@@ -203,6 +218,10 @@ export function muzzles(kind: UnitKind | DefenseKind, x: number, y: number, z: n
       return [at(x, y, a, 3.8, 4.1, 2.7), at(x, y, a, 3.8, -4.1, 2.7)];
     case 'boat':
       return [at(x, y, a, 13.8, 0, 4.4)];
+    case 'heron':
+      return [at(x, y, a, 5, 3.2, 3.8)];
+    case 'jet':
+      return [at(x, y, a, 2.4, 3.6, 2.4), at(x, y, a, 2.4, -3.6, 2.4)];
     case 'scorch':
       return [at(px, py, tur, 9.2, 1.3, 6.6), at(px, py, tur, 9.2, -1.3, 6.6)];
     case 'lumen':
@@ -330,7 +349,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5, heron: 6, jet: 5, plane: 9 };
 
 interface Flash {
   x: number;

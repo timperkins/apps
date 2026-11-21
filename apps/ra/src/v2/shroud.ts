@@ -115,6 +115,15 @@ export class Shroud {
       for (let tx = t0; tx <= t1; tx++) this.dirty[this.tile(tx, ty)] = 1;
   }
 
+  // Lift the whole shroud at once (a Satellite uplink).
+  revealAll(): void {
+    this.g.fill(255);
+    this.v.fill(255);
+    this.dirty.fill(1);
+    this.version++;
+    this.box = [0, 0, this.w, this.h];
+  }
+
   // Lift the shroud wherever it is only a thin strip or a small pocket next
   // to what you have seen: none of it more than about r from its edge (on the ground, as the sea's
   // edge is measured). What stays is the shroud within r of a spot at least r

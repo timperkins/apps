@@ -244,7 +244,7 @@ clearBtn.addEventListener('click', () => game?.deselect());
 // More and Clear. They are refreshed every frame, but the buttons are only
 // rebuilt when something about them changes.
 // the icons on the selection's command buttons (types.ts Act.icon)
-const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack', unload: 'unload' };
+const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack', unload: 'unload', chute: 'chute' };
 let actsKey = '';
 let hasActs = false;
 // The bar above the toolbar: commands for the selection, and the selection menu.
