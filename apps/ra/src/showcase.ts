@@ -460,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -1130,6 +1130,34 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => boatDraw(foe)(s, 0, 0, Math.PI / 4, t) });
     addRow(parent, 'Patrol boat', 'Patrols the water: it only goes on lakes and seas in the game.', cells);
   }
+
+  // the Otter, the warships and the submarine
+  for (const [kind, name, R] of [
+    ['otter', 'Otter hovercraft', 18],
+    ['destroyer', 'Destroyer', 26],
+    ['sub', 'Submarine', 22],
+    ['cruiser', 'Sentinel cruiser', 26],
+    ['carrier', 'Carrier', 34],
+  ] as const) {
+    const draw =
+      (art: V2FactionArt): Draw =>
+      (s, x, y, a, t) =>
+        s.blit(art[kind][di(a)], x, y, kind === 'sub' ? -0.6 : kind === 'otter' ? Math.sin(t * 5) * 0.25 : Math.sin(t * 1.4) * 0.4);
+    const spr = me[kind][0];
+    const box = union(boxOf(spr, 0, 0, 1), boxOf(spr, 0, 0, -1));
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, a, t) }));
+    cells.push({
+      label: 'Sail',
+      box: union(circleBox(spr, R + 4, 1), { l: R * 1.42 + 22, r: R * 1.42 + 22, u: 26, d: R * 0.71 + 10 }),
+      anim: true,
+      draw: (s, t) => {
+        const [x, y, a] = round(t, R, 20);
+        draw(me)(s, x, y, a, t);
+      },
+    });
+    cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => draw(foe)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, name, blurbOf(kind), cells);
+  }
 }
 
 // ---------- Buildings ----------
@@ -1162,6 +1190,7 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'lab', name: 'Tech lab' },
   { kind: 'uplink', name: 'Satellite uplink' },
   { kind: 'depot', name: 'Service depot' },
+  { kind: 'navy', name: 'Naval yard' },
   { kind: 'wall', name: 'Wall' },
   { kind: 'tower', name: 'Gun tower' },
   { kind: 'aa', name: 'Skyguard battery' },
