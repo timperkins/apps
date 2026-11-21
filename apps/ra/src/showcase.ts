@@ -3,13 +3,15 @@
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
+import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
 import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
 
 const TAU = Math.PI * 2;
 const HELI_ALT = 20; // as in the game (see combat.ts)
+const JET_ALT = 30;
+const PLANE_ALT = 48;
 
 // ---------- The ground: plain grass, in the game's greens ----------
 
@@ -458,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -490,7 +492,7 @@ function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
 
 // Firing at a spot on the ground in front of it, as fast as it reloads
 // (artillery a little faster, so there is something to see).
-function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: number, kick: boolean) => void, from: () => [number, number, number][], to: [number, number, number], weapon?: Weapon, label = 'Attack'): Cell {
+function attackCell(kind: UnitKind | DefenseKind, box: Box, draw: (s: Scene, t: number, kick: boolean) => void, from: () => [number, number, number][], to: [number, number, number], weapon?: Weapon, label = 'Attack'): Cell {
   const w = weapon ?? WEAPON[kind]!;
   let cool = 0.4;
   let clock = 0;
@@ -506,9 +508,10 @@ function attackCell(kind: UnitKind | 'tower', box: Box, draw: (s: Scene, t: numb
         fired = clock;
         for (const m of from()) {
           const [sx, sy] = toScreen(...m);
-          if (w.shot !== 'grenade') s.fx.muzzle(sx, sy, w.shot !== 'bullet');
+          if (w.shot !== 'grenade' && w.shot !== 'beam') s.fx.muzzle(sx, sy, w.shot !== 'bullet');
           const sc = w.scatter ?? (w.shot === 'bullet' ? 2 : 0.5);
           const aim: [number, number, number] = [to[0] + (Math.random() - 0.5) * sc * 2, to[1] + (Math.random() - 0.5) * sc * 2, to[2]];
+          if (w.shot === 'beam') s.fx.beam(sx, sy, ...toScreen(...aim));
           s.fx.fire(makeShot(w.shot, m, aim, w.speed, (sh) => impactFx(s.fx, w.shot, sh, true)));
         }
       }
@@ -829,9 +832,10 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   ]);
 
   // tanks: a hull and a turret that turns on its own
-  for (const kind of ['light', 'heavy'] as const) {
-    const hull = (art: V2FactionArt) => (kind === 'light' ? art.lightTank : art.heavyTank);
-    const tur = (art: V2FactionArt) => (kind === 'light' ? art.lightTurret : art.heavyTurret);
+  const TANK_NAMES = { light: 'Lancer tank', heavy: 'Bastion tank', scorch: 'Scorch tank', lumen: 'Lumen tank' };
+  for (const kind of ['light', 'heavy', 'scorch', 'lumen'] as const) {
+    const hull = (art: V2FactionArt) => ({ light: art.lightTank, heavy: art.heavyTank, scorch: art.scorchTank, lumen: art.lumenTank })[kind];
+    const tur = (art: V2FactionArt) => ({ light: art.lightTurret, heavy: art.heavyTurret, scorch: art.scorchTurret, lumen: art.lumenTurret })[kind];
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a, _t, turret) => {
@@ -841,8 +845,8 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       };
     const spr = union(boxOf(hull(me)[0]), boxOf(tur(me)[0]));
     const cells = unitCells(hull(me)[0], draw(me), draw(foe), {
-      R: kind === 'light' ? 16 : 18,
-      speed: kind === 'light' ? 20 : 13,
+      R: kind === 'heavy' ? 18 : 16,
+      speed: kind === 'heavy' ? 13 : 19,
       more: [
         { label: 'Idle', box: spr, anim: true, draw: scanner(draw(me)) },
         {
@@ -870,7 +874,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       ],
     });
     for (const c of cells) c.box = union(c.box, spr);
-    addRow(parent, kind === 'light' ? 'Lancer tank' : 'Bastion tank', blurbOf(kind), cells);
+    addRow(parent, TANK_NAMES[kind], blurbOf(kind), cells);
   }
 
   plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13, idleShuffle(me.artillery, 2));
@@ -1036,6 +1040,78 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     addRow(parent, 'Kestrel copter', blurbOf('heli'), cells);
   }
 
+  // the Heron, the Swift jet and the cargo plane, as the game draws them
+  const flyerDraw =
+    (art: V2FactionArt, kind: 'heron' | 'jet' | 'plane'): Draw =>
+    (s, x, y, a, t) => {
+      const spr = art[kind][di(a)];
+      const alt = kind === 'heron' ? HELI_ALT : kind === 'jet' ? JET_ALT : PLANE_ALT;
+      const z = alt + (kind === 'heron' ? Math.sin(t * 2) * 1.2 : kind === 'jet' ? Math.sin(t * 2.6) * 0.6 : 0);
+      const k = alt / HELI_ALT;
+      s.shadow(spr, x + 4 * k, y - 2 * k, 0);
+      s.blit(spr, x, y, z);
+      const c = s.c;
+      if (kind === 'heron') {
+        c.fillStyle = 'rgba(28,28,28,0.5)';
+        for (const [ru, rz, sg] of [[6, 8.4, 1], [-8.6, 10.2, -1]]) {
+          const hx = x + Math.cos(a) * ru;
+          const hy = y + Math.sin(a) * ru;
+          for (let b = 0; b < 3; b++) {
+            const ang = sg * t * 24 + (b * Math.PI * 2) / 3;
+            const [x0, y0] = toScreen(hx, hy, z + rz);
+            const [x1, y1] = toScreen(hx + Math.cos(ang) * 9.5, hy + Math.sin(ang) * 9.5, z + rz);
+            pxLine(c, x0, y0, x1, y1);
+          }
+        }
+      } else if (kind === 'jet') {
+        const [ex, ey] = toScreen(x - Math.cos(a) * 9.6, y - Math.sin(a) * 9.6, z + 3.4);
+        c.fillStyle = Math.floor(t * 30) % 2 ? '#ffd65a' : '#ff8a3a';
+        c.fillRect(Math.round(ex * 2) / 2, Math.round(ey * 2) / 2, 1, 0.5);
+      } else {
+        c.fillStyle = 'rgba(28,28,28,0.45)';
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        for (const side of [-12.5, -6.5, 6.5, 12.5]) {
+          const [px, py] = toScreen(x + ca * 2.4 - sa * side, y + sa * 2.4 + ca * side, z + 3.2);
+          const sz = Math.floor(t * 24 + side) % 2 ? 2 : 1;
+          c.fillRect(Math.round(px) - sz, Math.round(py), sz * 2 + 1, 1);
+        }
+      }
+    };
+  for (const [kind, name, blurb, R] of [
+    ['heron', 'Heron transport', blurbOf('heron'), 22],
+    ['jet', 'Swift jet', blurbOf('jet'), 26],
+    ['plane', 'Cargo plane', 'Flies in from the Air command to drop eight paratroopers wherever you pick, every few minutes. It can be shot down on the way.', 34],
+  ] as const) {
+    const spr = me[kind][0];
+    const alt = kind === 'heron' ? HELI_ALT : kind === 'jet' ? JET_ALT : PLANE_ALT;
+    const k = alt / HELI_ALT;
+    const air = union(boxOf(spr, 0, 0, alt + 1.5), boxOf(spr, 4 * k, -2 * k, 0), { l: 18, r: 18, u: alt + 14, d: 10 });
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box: air, anim: true, draw: (s, t) => flyerDraw(me, kind)(s, 0, 0, a, t) }));
+    cells.push({
+      label: 'Fly',
+      box: union(circleBox(spr, R + 4 * k + 4, alt + 1.5), { l: R * 1.42 + 22, r: R * 1.42 + 22, u: alt + 26, d: R * 0.71 + 10 }),
+      anim: true,
+      draw: (s, t) => {
+        const [x, y, a] = round(t, R, kind === 'heron' ? 30 : 50);
+        flyerDraw(me, kind)(s, x, y, a, t);
+      },
+    });
+    if (kind !== 'plane')
+      cells.push(
+        ...combatCells({
+          kind,
+          spr,
+          still: air,
+          air: alt,
+          draw: (s, x, y, a, _tur, t) => flyerDraw(me, kind)(s, x, y, a, t),
+          parts: [[me[kind][di(A)], 0, 0, alt]],
+        }),
+      );
+    cells.push({ label: 'Enemy', box: air, anim: true, draw: (s, t) => flyerDraw(foe, kind)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, name, blurb, cells);
+  }
+
   // the boat bobs (it only goes on water in the game)
   const boatDraw =
     (art: V2FactionArt): Draw =>
@@ -1055,6 +1131,34 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     );
     cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => boatDraw(foe)(s, 0, 0, Math.PI / 4, t) });
     addRow(parent, 'Patrol boat', 'Patrols the water: it only goes on lakes and seas in the game.', cells);
+  }
+
+  // the Otter, the warships and the submarine
+  for (const [kind, name, R] of [
+    ['otter', 'Otter hovercraft', 18],
+    ['destroyer', 'Destroyer', 26],
+    ['sub', 'Submarine', 22],
+    ['cruiser', 'Sentinel cruiser', 26],
+    ['carrier', 'Carrier', 34],
+  ] as const) {
+    const draw =
+      (art: V2FactionArt): Draw =>
+      (s, x, y, a, t) =>
+        s.blit(art[kind][di(a)], x, y, kind === 'sub' ? -0.6 : kind === 'otter' ? Math.sin(t * 5) * 0.25 : Math.sin(t * 1.4) * 0.4);
+    const spr = me[kind][0];
+    const box = union(boxOf(spr, 0, 0, 1), boxOf(spr, 0, 0, -1));
+    const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, a, t) }));
+    cells.push({
+      label: 'Sail',
+      box: union(circleBox(spr, R + 4, 1), { l: R * 1.42 + 22, r: R * 1.42 + 22, u: 26, d: R * 0.71 + 10 }),
+      anim: true,
+      draw: (s, t) => {
+        const [x, y, a] = round(t, R, 20);
+        draw(me)(s, x, y, a, t);
+      },
+    });
+    cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => draw(foe)(s, 0, 0, Math.PI / 4, t) });
+    addRow(parent, name, blurbOf(kind), cells);
   }
 }
 
@@ -1083,10 +1187,16 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'refinery', name: 'Ore refinery' },
   { kind: 'silo', name: 'Ore silo' },
   { kind: 'factory', name: 'Vehicle works' },
-  { kind: 'radar', name: 'Radar mast' },
+  { kind: 'radar', name: 'Air command' },
   { kind: 'helipad', name: 'Helipad' },
   { kind: 'lab', name: 'Tech lab' },
+  { kind: 'uplink', name: 'Satellite uplink' },
+  { kind: 'depot', name: 'Service depot' },
+  { kind: 'navy', name: 'Naval yard' },
+  { kind: 'wall', name: 'Wall' },
   { kind: 'tower', name: 'Gun tower' },
+  { kind: 'aa', name: 'Skyguard battery' },
+  { kind: 'prism', name: 'Lumen tower' },
   { kind: 'hq', name: 'Command post', blurb: 'The heart of an enemy base.' },
 ];
 
@@ -1140,9 +1250,10 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
       s.blit(dish[Math.floor(((phase * 0.5) % 1) * 16)], p.x, p.y, p.z - 3);
       break;
     }
-    case 'tower': {
+    case 'tower':
+    case 'aa': {
       const p = b.fx[0];
-      s.blit(art.towerGun[dirIndex(gun, DIRS)], p.x, p.y, p.z);
+      s.blit(gunOf(art, kind)![dirIndex(gun, DIRS)], p.x, p.y, p.z);
       break;
     }
     case 'power':
@@ -1159,6 +1270,9 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
   }
 }
 
+// The turning gun drawn on top of a defense, if it has one.
+const gunOf = (art: V2FactionArt, kind: BuildingKind): StackSprite[] | null => (kind === 'tower' ? art.towerGun : kind === 'aa' ? art.aaGun : null);
+
 const cssOf = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts: V2FactionArt[], dish: StackSprite[]): void {
@@ -1171,10 +1285,11 @@ function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts:
   const still = (b: V2BuildingArt, fi: number, gun: number) => (s: Scene) => {
     s.blit(b.spr, 0, 0, 0);
     if (def.kind === 'radar') s.blit(dish[2], b.fx[0].x, b.fx[0].y, b.fx[0].z - 3);
-    if (def.kind === 'tower') s.blit(arts[fi].towerGun[dirIndex(gun, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
+    const g = gunOf(arts[fi], def.kind);
+    if (g) s.blit(g[dirIndex(gun, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
   };
   const cells: Cell[] = [];
-  if (def.kind === 'tower') {
+  if (gunOf(arts[0], def.kind)) {
     // the building is fixed; its gun turns to any of 32 headings
     for (const { a, label } of ANGLES) cells.push({ label: `Gun ${label}`, box, draw: still(me, 0, a) });
   } else cells.push({ label: 'Standing', box, draw: still(me, 0, Math.PI / 4) });
@@ -1301,7 +1416,8 @@ function buildingFight(kind: BuildingKind, b: V2BuildingArt, st: BuildingStates,
   const bar = { x: 0, y: Math.min(top, -8) - 5, w: bw };
   const withBar = union(box, { l: bw / 2 + 1, r: bw / 2 + 1, u: -bar.y + 2, d: 0 });
   const gun = (s: Scene, a: number) => {
-    if (kind === 'tower') s.blit(art.towerGun[dirIndex(a, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
+    const g = gunOf(art, kind);
+    if (g) s.blit(g[dirIndex(a, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
     if (kind === 'radar') s.blit(dish[2], b.fx[0].x, b.fx[0].y, b.fx[0].z - 3);
   };
   const flames = (s: Scene, pts: V2BuildingArt['fx'], t: number, dt: number, h: number) => {
@@ -1311,19 +1427,20 @@ function buildingFight(kind: BuildingKind, b: V2BuildingArt, st: BuildingStates,
       if (Math.random() < dt * 2.5) s.fx.smoke(sx, sy - 3, true, 1.5);
     }
   };
-  if (kind === 'tower') {
-    const w = WEAPON.tower!;
+  if (kind === 'tower' || kind === 'prism' || kind === 'aa') {
     const p = b.fx[0];
     const far = 20;
+    const g = gunOf(art, kind);
+    // (the Skyguard battery fires up at the sky)
+    const to: [number, number, number] = kind === 'aa' ? [far * 1.5, far * 1.5, 60] : [far, far, 0];
     cells.push(
-      attackCell('tower', union(box, { l: 8, r: 8, u: 0, d: far + 6 }), (s, t, kick) => {
+      attackCell(kind, union(box, { l: 8, r: 8, u: kind === 'aa' ? 40 : 0, d: far + 6 }), (s, t, kick) => {
         s.blit(spr, 0, 0, 0);
         const k = kick ? 0.8 : 0;
-        s.blit(art.towerGun[dirIndex(A, DIRS)], p.x - Math.cos(A) * k, p.y - Math.sin(A) * k, p.z);
+        if (g) s.blit(g[dirIndex(A, DIRS)], p.x - Math.cos(A) * k, p.y - Math.sin(A) * k, p.z);
         void t;
-      }, () => muzzles('tower', p.x, p.y, p.z, 0, A), [far, far, 0]),
+      }, () => muzzles(kind, p.x, p.y, p.z, 0, A), to),
     );
-    void w;
   }
   cells.push(hitCell(withBar, (s) => draw(s), spot, 'shell', bar, 0.22, 0.55));
   cells.push({

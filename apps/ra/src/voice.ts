@@ -8,7 +8,7 @@
 
 import { onSettings, settings } from './settings';
 
-export type UnitVoice = 'soldier' | 'tank' | 'copter' | 'scout' | 'harvester' | 'engineer' | 'dog' | 'commando' | 'flamer';
+export type UnitVoice = 'soldier' | 'tank' | 'copter' | 'scout' | 'harvester' | 'engineer' | 'dog' | 'commando' | 'flamer' | 'pilot' | 'navy';
 export type UnitLine = 'select' | 'move' | 'attack' | 'harvest' | 'full' | 'repair';
 export type Announce =
   | 'building'
@@ -35,6 +35,8 @@ const UNIT_CLIPS: Record<UnitVoice, Partial<Record<UnitLine, number>>> = {
   dog: { select: 2, move: 2, attack: 2 },
   commando: { select: 4, move: 4, attack: 4 },
   flamer: { select: 4, move: 4, attack: 4 },
+  pilot: { select: 4, move: 4, attack: 4 },
+  navy: { select: 4, move: 4, attack: 4 },
 };
 
 const ANNOUNCE: Announce[] = [

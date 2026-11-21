@@ -20,7 +20,7 @@ import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, isFoot, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -58,6 +58,16 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   dog: { name: 'Attack dog', speed: 24, turn: 99, r: 4, hp: 1 },
   cmdo: { name: 'Commando', speed: 11, turn: 99, r: 4, hp: 1 },
   flamer: { name: 'Flame trooper', speed: 8, turn: 99, r: 4, hp: 1 },
+  scorch: { name: 'Scorch tank', speed: 20, turn: 2.8, r: 7.5, hp: 1 },
+  lumen: { name: 'Lumen tank', speed: 18, turn: 2.6, r: 7.5, hp: 1 },
+  heron: { name: 'Heron transport', speed: 30, turn: 2.6, r: 9, hp: 1 },
+  jet: { name: 'Swift jet', speed: 52, turn: 3.2, r: 8, hp: 1 },
+  plane: { name: 'Cargo plane', speed: 60, turn: 0.6, r: 12, hp: 1 },
+  otter: { name: 'Otter hovercraft', speed: 26, turn: 2.4, r: 10, hp: 1 },
+  destroyer: { name: 'Destroyer', speed: 22, turn: 1.4, r: 15, hp: 1 },
+  cruiser: { name: 'Sentinel cruiser', speed: 19, turn: 1.3, r: 15, hp: 1 },
+  carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 22, hp: 1 },
+  sub: { name: 'Submarine', speed: 20, turn: 1.7, r: 12, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
   yard: 'Foundry',
@@ -65,12 +75,18 @@ const BNAME: Record<BuildingKind, string> = {
   power: 'Power plant',
   barracks: 'Barracks',
   refinery: 'Ore refinery',
-  radar: 'Radar mast',
+  radar: 'Air command',
   factory: 'Vehicle works',
   tower: 'Gun tower',
   silo: 'Ore silo',
   helipad: 'Helipad',
   lab: 'Tech lab',
+  prism: 'Lumen tower',
+  aa: 'Skyguard battery',
+  depot: 'Service depot',
+  wall: 'Wall',
+  uplink: 'Satellite uplink',
+  navy: 'Naval yard',
 };
 // Where a hauler unloads at a refinery, from its center: backed onto the
 // striped pad, facing out (DOCK_A) with its bed's tail at the intake. It
@@ -81,7 +97,7 @@ const DOCK_RUN = 14;
 // How long a hauler's bed takes to tip all the way up (or back down), in seconds.
 const TIP_S = 0.9;
 // Buildings that make units, and so have rally points.
-const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad'];
+const MAKERS: BuildingKind[] = ['barracks', 'factory', 'helipad', 'navy'];
 
 // Whose voice each kind of unit answers in (src/voice.ts).
 const VOICE: Record<Kind, UnitVoice> = {
@@ -101,6 +117,16 @@ const VOICE: Record<Kind, UnitVoice> = {
   dog: 'dog',
   cmdo: 'commando',
   flamer: 'flamer',
+  scorch: 'tank',
+  lumen: 'tank',
+  heron: 'pilot',
+  plane: 'pilot',
+  otter: 'navy',
+  destroyer: 'navy',
+  cruiser: 'navy',
+  carrier: 'navy',
+  sub: 'navy',
+  jet: 'pilot',
 };
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
@@ -112,11 +138,32 @@ const PACE_R = 6; // and how far from where it was left
 const SWIM_DROP = 5.5;
 // How close the Commando goes to plant a charge on a building (world
 // units from its wall), and how long the charge takes to go off.
+// Lumen towers: how near another must stand to beam its light into one
+// that is firing, how many can, and how much each adds to the blow.
+const PRISM_LINK = 9 * CELL;
+const PRISM_MAX = 6;
+const PRISM_ADD = 0.5;
+// Walls: the grid their segments snap to (one segment a side) and the
+// seconds to make one.
+const WALL_GRID = 8;
+const WALL_S = 0.6;
+// A Service depot: health a second it gives back to a vehicle standing on its
+// pad (as a share of full), and what it costs, as a share of the vehicle's
+// price, for a full repair.
+const DEPOT_RATE = 0.08;
+const DEPOT_COST = 0.25;
+// Air commands: how many landing pads each has (one Swift jet to a pad),
+// and a jet's missile pairs and the seconds to load each one back on.
+const AIR_PADS = 4;
+const JET_AMMO = 3;
+const JET_REARM = 2.5;
 const C4_REACH = 5;
 const C4_S = 2.2;
 // Foot soldiers ride in a Mule APC, up to CARGO of them. They climb out of
 // the ramp at the back one every EXIT_S seconds.
 const CARGO = 5;
+// The transports soldiers can ride in.
+const TRANSPORT = new Set<Kind>(['apc', 'heron', 'otter']);
 const EXIT_S = 0.22;
 const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren', 'eng', 'dog', 'cmdo', 'flamer']);
 
@@ -218,6 +265,20 @@ interface Unit {
   // a transport's passengers (out of play while they ride), and whether it
   // is letting them out, and when the next one gets out
   cargo?: Unit[];
+  // aircraft: how far up it is (0 on the ground, 1 flying), and a Swift
+  // jet's missile pairs, its Air command and pad, and its timers
+  fly?: number;
+  ammo?: number;
+  // a cargo plane: how many paratroopers it still has, where it drops them,
+  // and when the next one jumps (a paratrooper on the way down has fly set,
+  // 1 at the top and 0 on the ground)
+  drops?: number;
+  dropAt?: [number, number];
+  jumpT?: number;
+  nest?: number; // (not `pad`: isB takes anything with a pad for a building)
+  padI?: number;
+  rearm?: number;
+  idleAir?: number;
   unloading?: boolean;
   exitT?: number;
 }
@@ -405,10 +466,10 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -436,11 +497,17 @@ const GARRISON: [Kind, number][] = [
   ['gren', 3],
   ['dog', 2],
   ['flamer', 2],
+  ['scorch', 2],
+  ['lumen', 2],
 ];
 // The walk and stand frames of each kind of foot soldier.
 const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] =>
   k === 'rocket' ? art.rocket : k === 'gren' ? art.gren : k === 'eng' ? art.eng : k === 'dog' ? art.dog : k === 'cmdo' ? art.cmdo : k === 'flamer' ? art.flamer : art.infantry;
-const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
+// The tanks with a turning turret, and the hull and turret each is drawn with.
+const TURRETED: ReadonlySet<Kind> = new Set<Kind>(['light', 'heavy', 'scorch', 'lumen']);
+const tankParts = (art: V2FactionArt, k: Kind): [StackSprite[], StackSprite[]] =>
+  k === 'heavy' ? [art.heavyTank, art.heavyTurret] : k === 'scorch' ? [art.scorchTank, art.scorchTurret] : k === 'lumen' ? [art.lumenTank, art.lumenTurret] : [art.lightTank, art.lightTurret];
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
 // ...and it waits in groups of this many at each of its posts round its base.
 const SQUAD = 4;
 const POSTS = 6;
@@ -461,8 +528,20 @@ interface Eco {
   jobs: Map<Tab, Job>;
   queue: Map<Tab, Tech[]>;
   lowPower: boolean;
+  paraT: number; // seconds until the Air command's paratroopers are ready
 }
-const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new Map(), lowPower: false });
+const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new Map(), lowPower: false, paraT: PARA_S });
+
+// Paratroopers: one planeload every few minutes from a standing Air command.
+const PARA_S = 240;
+const PARA_N = 8;
+const PARA_RUN = 380; // how far off the cargo plane comes in from, and goes on past
+const DROP_S = 3.2; // seconds for a paratrooper to come down
+
+// A submarine stays surfaced this long after it fires; Destroyers hear one
+// under the water this far off.
+const SUB_UP = 3;
+const SONAR = 6 * CELL;
 
 /** A player in a multiplayer game: the side (color) they play and their name. */
 export interface Player {
@@ -487,7 +566,8 @@ export type Command =
   | { c: 'rally'; b: number; x?: number; y?: number }
   | { c: 'build'; t: string }
   | { c: 'cancel'; t: string }
-  | { c: 'place'; t: string; x: number; y: number };
+  | { c: 'place'; t: string; x: number; y: number }
+  | { c: 'para'; x: number; y: number }; // the Air command's paratroopers drop here
 
 // How a unit or building left the game, for the players' screens: destroyed
 // (blows up), quietly (a Foundry vehicle unfolding into its yard), razed, or
@@ -509,7 +589,7 @@ export interface Snapshot {
   b: (number | string)[][];
   gone: [number, number][];
   // [side, credits, low power, jobs [tab, tech, spent, paused, ready][], queue [tab, techs][]]
-  eco: [number, number, number, [string, string, number, number, number][], [string, string[]][]][];
+  eco: [number, number, number, [string, string, number, number, number][], [string, string[]][], number?][];
   ore?: number[]; // x, y, amount, variant, ...
   told: [number, string, string][];
   out: number[];
@@ -725,7 +805,7 @@ export class IsoGame implements GameLike {
 
   /** Before generate(): the buildings it will place (it needn't wait for them). */
   preload(): Promise<unknown>[] {
-    const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad'];
+    const all: BuildingKind[] = ['yard', 'lab', 'hq', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
     if (this.stage === 'combat') now.push(...[...placed, 'lab' as BuildingKind].map((k): [BuildingKind, number] => [k, this.me]));
@@ -753,13 +833,27 @@ export class IsoGame implements GameLike {
       case 'flamer':
         return [...footFrames(art, u.kind), ...(u.kind === 'inf' ? art.infantryDug : [])].map((s): [StackSprite[], number] => [s, dirIndex(u.a, 16)]);
       case 'light':
-        return [[art.lightTank, di], [art.lightTurret, dirIndex(u.turret, DIRS)]];
       case 'heavy':
-        return [[art.heavyTank, di], [art.heavyTurret, dirIndex(u.turret, DIRS)]];
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
+        return [[hull, di], [tur, dirIndex(u.turret, DIRS)]];
+      }
       case 'heli':
         return [[art.heli, di]];
+      case 'heron':
+        return [[art.heron, di]];
+      case 'jet':
+        return [[art.jet, di]];
+      case 'plane':
+        return [[art.plane, di]];
       case 'boat':
-        return [[art.boat, di]];
+      case 'otter':
+      case 'destroyer':
+      case 'cruiser':
+      case 'carrier':
+      case 'sub':
+        return [[art[u.kind], di]];
       case 'hauler':
         return art.haulerLoad.map((s): [StackSprite[], number] => [s, di]);
       case 'buggy':
@@ -797,11 +891,12 @@ export class IsoGame implements GameLike {
     for (const b of this.buildings) {
       const now = near(b.x, b.y);
       if (b.kind === 'tower') add(this.art[b.f].towerGun, dirIndex(b.gun, DIRS), now);
+      if (b.kind === 'aa') add(this.art[b.f].aaGun, dirIndex(b.gun, DIRS), now);
       if (b.kind === 'radar') for (let d = 0; d < 16; d++) add(this.dish, d, now);
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
@@ -990,9 +1085,9 @@ export class IsoGame implements GameLike {
         const ok =
           kind === 'boat'
             ? water(0, 0) && water(12, 0) && water(-12, 0) && water(0, 12) && water(0, -12)
-            : kind === 'heli' || k === K.Grass || k === K.Road || k === K.Pad;
+            : isAir(kind) || k === K.Grass || k === K.Road || k === K.Pad;
         if (!ok || T.isHigh(x, y)) continue;
-        if (kind !== 'heli' && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
+        if (!isAir(kind) && this.buildings.some((b) => Math.abs(b.x - x) < b.art.rx + 3 && Math.abs(b.y - y) < b.art.ry + 3)) continue;
         [x, y] = T.fold(x, y);
         const a = rand() * Math.PI * 2;
         if (kind === 'mcv' && !this.siteOk(this.siteOf(x, y))) continue;
@@ -1145,15 +1240,17 @@ export class IsoGame implements GameLike {
 
   // Where a unit is on screen, for the shroud: its feet, or a copter's body.
   private spot(u: Unit): [number, number] {
-    return toScreen(u.x, u.y, u.z + (u.kind === 'heli' ? HELI_ALT : 0));
+    return toScreen(u.x, u.y, u.z + this.alt(u));
   }
 
   // Can you see this enemy unit (it isn't under the shroud)? Yours always.
   private shown(u: Unit): boolean {
+    if (u.f !== this.me && this.under(u) && !this.sonar(u, this.me)) return false;
     return u.f === this.me || !this.shroud || this.shroud.seen(...this.spot(u));
   }
 
   // Your units and buildings lift the shroud round themselves.
+  private satUp = false;
   private lookAround(): void {
     const sh = this.shroud;
     if (!sh) return;
@@ -1163,6 +1260,12 @@ export class IsoGame implements GameLike {
       if (last && Math.abs(last[0] - u.x) + Math.abs(last[1] - u.y) < 6) continue;
       this.looked.set(u, [u.x, u.y]);
       sh.reveal(...this.spot(u), SIGHT[u.kind] * CELL);
+    }
+    // a Satellite uplink, once up, shows you the whole world for good
+    if (!this.satUp && this.buildings.some((b) => b.f === this.me && b.kind === 'uplink' && b.rise >= 1 && !b.dead)) {
+      this.satUp = true;
+      sh.revealAll();
+      this.notice('Satellite uplink online: the whole map is revealed');
     }
     for (const b of this.buildings) {
       if (b.f !== this.me || this.lookedB.has(b)) continue;
@@ -1269,11 +1372,9 @@ export class IsoGame implements GameLike {
     const di = dirIndex(a, DIRS);
     return isFoot(kind)
       ? [footFrames(art, kind)[0][dirIndex(a, 16)]]
-      : kind === 'light'
-        ? [art.lightTank[di], art.lightTurret[di]]
-        : kind === 'heavy'
-          ? [art.heavyTank[di], art.heavyTurret[di]]
-          : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, boat: art.boat }[kind as 'mcv'][di]];
+      : TURRETED.has(kind)
+        ? tankParts(art, kind).map((s) => s[di])
+        : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, heron: art.heron, jet: art.jet, plane: art.plane, boat: art.boat, otter: art.otter, destroyer: art.destroyer, cruiser: art.cruiser, carrier: art.carrier, sub: art.sub }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -1377,6 +1478,14 @@ export class IsoGame implements GameLike {
         return;
       }
       if (!open) return;
+      if (t.unit === 'jet') {
+        const pads = this.buildings.filter((b) => b.f === f && b.kind === 'radar' && b.rise >= 1).length * AIR_PADS;
+        const jets = this.units.filter((u) => u.f === f && u.kind === 'jet').length + (j?.tech === t ? 1 : 0) + (e.queue.get(t.tab) ?? []).filter((q) => q === t).length;
+        if (jets >= pads) {
+          this.tell(f, 'Every landing pad is taken: build another Air command');
+          return;
+        }
+      }
       if (t.unit === 'cmdo' && this.hasCommando(f)) {
         this.tell(f, 'Only one Commando at a time');
         return;
@@ -1437,15 +1546,30 @@ export class IsoGame implements GameLike {
   private deliver(t: Tech, f: number): boolean {
     const makers = this.buildings.filter((b) => b.f === f && b.kind === t.from && b.rise >= 1 && !b.packing);
     if (!makers.length) return false;
-    const b = makers.find((m) => m.primary) ?? makers[makers.length - 1];
     const kind = t.unit as Kind;
+    if (kind === 'jet') {
+      // a Swift jet is made sitting on a free landing pad
+      const fp = this.freePad(f);
+      if (!fp) return false;
+      const [b, i] = fp;
+      const p = b.art.fx[1 + i];
+      const [x, y] = this.fold(b.x + p.x, b.y + p.y);
+      const u = this.newUnit('jet', f, x, y, Math.PI / 2);
+      Object.assign(u, { fly: 0, ammo: JET_AMMO, nest: b.id, padI: i });
+      return true;
+    }
+    const b = makers.find((m) => m.primary) ?? makers[makers.length - 1];
     if (b.kind === 'factory') this.sound(b.x, b.y, 'unit_exit');
     // out of the door, or up off the helipad
     this.outOf(b, kind, f, (u) => {
       if (kind === 'hauler') {
         u.job = { st: 'seek', t: 0 };
         u.load = 0;
-      } else this.toRally(u, b);
+      } else {
+        this.toRally(u, b);
+        // ships sail out of the slip, to the rally point only if they can get there by water
+        if (b.kind === 'navy' && !this.okAt(u, u.tx, u.ty)) [u.tx, u.ty] = this.fold(b.x, b.y + b.art.ry + 14);
+      }
     });
     return true;
   }
@@ -1455,7 +1579,7 @@ export class IsoGame implements GameLike {
   // and a single-player game only). Without a door (a helipad) it is made on
   // the spot.
   private outOf(b: Building, kind: Kind, f: number, then: (u: Unit) => void): Unit {
-    const d = kind === 'heli' ? null : doorOf(b.kind);
+    const d = isAir(kind) ? null : doorOf(b.kind);
     if (!d) {
       const [fx, fy] = this.fold(b.x, b.y);
       const u = this.newUnit(kind, f, fx, fy, Math.PI / 2);
@@ -1537,12 +1661,18 @@ export class IsoGame implements GameLike {
     const have = this.have(f);
     const pw = this.power(f);
     e.lowPower = pw.used > pw.made;
+    // the paratroopers get ready while an Air command stands, and the
+    // countdown stops while the power is short
+    if (have.has('radar') && !e.lowPower && e.paraT > 0 && (e.paraT -= dt) <= 0) {
+      e.paraT = 0;
+      this.tell(f, 'Paratroopers ready: pick your Air command to call them in');
+    }
     let paid = false;
     for (const j of [...e.jobs.values()]) {
       if (j.ready || j.paused) continue;
       if (j.tech.building && !have.has('yard')) continue;
       if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
-      const want = (j.tech.cost / buildTime(j.tech.cost)) * dt * (e.lowPower ? 0.5 : 1);
+      const want = (j.tech.cost / (j.tech.building === 'wall' ? WALL_S : buildTime(j.tech.cost))) * dt * (e.lowPower ? 0.5 : 1);
       const pay = Math.min(want, e.credits, j.tech.cost - j.spent);
       e.credits -= pay;
       j.spent += pay;
@@ -1594,18 +1724,24 @@ export class IsoGame implements GameLike {
     if (!gh) return;
     const art = this.buildingArt(gh.tech.building!, this.me);
     let [wx, wy] = this.fold(...toWorld(x, y, 0));
-    wx = Math.round(wx / 4) * 4;
-    wy = Math.round(wy / 4) * 4;
+    // (wall segments snap to their own grid, so a row of them lines up)
+    const step = gh.tech.building === 'wall' ? WALL_GRID : 4;
+    wx = Math.round(wx / step) * step;
+    wy = Math.round(wy / step) * step;
     gh.x = wx;
     gh.y = wy;
-    gh.pad = { x: wx - art.rx - 3, y: wy - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-    gh.why = this.placeWhy(gh.pad, this.me);
+    gh.pad = padOf(gh.tech.building!, art, wx, wy);
+    gh.why = this.placeWhy(gh.pad, this.me, gh.tech.building === 'navy');
   }
 
   // Why a building can't go on pad r ('' if it can): it needs clear, level
   // ground next to the rest of your base.
-  private placeWhy(r: Rect, f: number): string {
-    if (!this.siteOk(r)) return 'Blocked: needs open, level ground';
+  private placeWhy(r: Rect, f: number, wet = false): string {
+    // (a wall's pad has no margin round it, so it may butt up against the next)
+    const tight = r.w <= WALL_GRID;
+    if (wet) {
+      if (!this.waterOk(r)) return 'Blocked: needs open water';
+    } else if (!this.siteOk(tight ? { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 } : r, tight ? 0 : 1)) return 'Blocked: needs open, level ground';
     const [gsx, gsy] = toScreen(r.x + r.w / 2, r.y + r.h / 2);
     for (const b of this.buildings) {
       if (b.f !== f) continue;
@@ -1614,7 +1750,8 @@ export class IsoGame implements GameLike {
       const [bx, by] = toWorld(nx, ny, 0);
       const gx = Math.abs(bx - (r.x + r.w / 2)) - (r.w + b.pad.w) / 2;
       const gy = Math.abs(by - (r.y + r.h / 2)) - (r.h + b.pad.h) / 2;
-      if (Math.max(gx, gy) <= BUILD_GAP) return '';
+      // (a Naval yard may reach out across the beach to the water)
+      if (Math.max(gx, gy) <= (wet ? BUILD_GAP * 3 : BUILD_GAP)) return '';
     }
     return 'Too far from your base';
   }
@@ -1624,7 +1761,8 @@ export class IsoGame implements GameLike {
     if (gh?.why) ui('ui_error');
     if (!gh || gh.why) return;
     this.command({ c: 'place', t: gh.tech.id, x: gh.x, y: gh.y });
-    this.ghost = null;
+    // walls keep coming: the ghost stays up for the next segment
+    if (gh.tech.building !== 'wall') this.ghost = null;
     this.emit();
   }
 
@@ -1634,8 +1772,8 @@ export class IsoGame implements GameLike {
     const j = t && this.eco[f].jobs.get(t.tab);
     if (!t?.building || !j || j.tech !== t || !j.ready) return;
     const art = this.buildingArt(t.building, f);
-    const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-    const why = this.placeWhy(pad, f);
+    const pad = padOf(t.building, art, x, y);
+    const why = this.placeWhy(pad, f, t.building === 'navy');
     if (why) {
       this.tell(f, why);
       return;
@@ -1646,7 +1784,13 @@ export class IsoGame implements GameLike {
     this.puff(b, 12);
     this.sound(b.x, b.y, 'build_place');
     this.sound(b.x, b.y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
-    this.eco[f].jobs.delete(t.tab);
+    const e = this.eco[f];
+    e.jobs.delete(t.tab);
+    // the next wall segment is ready straight away, while there are credits for it
+    if (t.building === 'wall' && e.credits >= t.cost) {
+      e.credits -= t.cost;
+      e.jobs.set(t.tab, { tech: t, spent: t.cost, paused: false, ready: true });
+    }
   }
 
   // Everyone standing on rect r (but `keep`) drives off it.
@@ -1654,7 +1798,7 @@ export class IsoGame implements GameLike {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     for (const o of this.units) {
-      if (o === keep || o.kind === 'heli' || o.kind === 'boat') continue;
+      if (o === keep || isAir(o.kind) || isNaval(o.kind)) continue;
       if (!inside(o.x, o.y, r, 6) && !(o.moving && inside(o.tx, o.ty, r, 6))) continue;
       let dx = o.x - cx;
       let dy = o.y - cy;
@@ -1677,8 +1821,21 @@ export class IsoGame implements GameLike {
   }
 
   // Open, level grass, away from other buildings.
-  private siteOk(r: Rect): boolean {
-    if (!this.terrain.clear(r, 1)) return false;
+  // Is rect r open water (with a little room round it, and clear water out
+  // in front where ships come and go), for a Naval yard?
+  private waterOk(r: Rect): boolean {
+    for (let y = r.y - 2; y <= r.y + r.h + 24; y += 3)
+      for (let x = r.x - 2; x <= r.x + r.w + 2; x += 3) if (this.terrain.k(x, y) !== K.Water || this.blockAt(x, y)) return false;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    return !this.buildings.some((b) => {
+      const [bx, by] = this.nearPoint(cx, cy, b.x, b.y);
+      return Math.abs(bx - cx) < (r.w + b.pad.w) / 2 + 2 && Math.abs(by - cy) < (r.h + b.pad.h) / 2 + 2;
+    });
+  }
+
+  private siteOk(r: Rect, margin = 1): boolean {
+    if (!this.terrain.clear(r, margin)) return false;
     // not on ore either
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
@@ -2029,8 +2186,23 @@ export class IsoGame implements GameLike {
         { id: 'unplace', label: 'Cancel', icon: 'x', title: 'Keep it for later' },
       ];
     }
+    if (this.paraAim) return [{ id: 'unpara', label: 'Cancel', icon: 'x', title: 'Keep the paratroopers for later' }];
     const b = this.selB();
     if (b) {
+      if (b.f === this.me && b.kind === 'radar' && b.rise >= 1) {
+        const left = Math.ceil(this.eco[this.me].paraT);
+        const ready = left <= 0;
+        const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+        return [
+          {
+            id: 'para',
+            label: ready ? 'Paratroopers' : `Paratroopers ${clock}`,
+            icon: 'chute',
+            disabled: !ready,
+            title: ready ? 'Then tap where they should drop' : this.eco[this.me].lowPower ? 'Waiting for power' : `Ready in ${clock}`,
+          },
+        ];
+      }
       if (b.f === this.me && b.kind === 'yard') return [{ id: 'pack', label: 'Pack up', icon: 'pack', disabled: b.rise < 1, title: 'Pack the Foundry back into a vehicle' }];
       if (b.f === this.me && MAKERS.includes(b.kind)) {
         const acts: Action[] = [];
@@ -2090,8 +2262,16 @@ export class IsoGame implements GameLike {
     const sb = this.selB();
     if (id === 'primary' && sb) this.command({ c: 'primary', b: sb.id });
     if (id === 'unrally' && sb) this.command({ c: 'rally', b: sb.id });
+    if (id === 'para' && sb && sb.kind === 'radar' && this.eco[this.me].paraT <= 0) {
+      this.paraAim = true;
+      this.notice('Tap where the paratroopers should drop');
+    } else if (id === 'unpara') this.paraAim = false;
     if (id === 'place') this.placeNow();
-    else if (id === 'unplace') this.ghost = null;
+    else if (id === 'unplace') {
+      // (walls come one after another: stopping hands back the next one's credits)
+      if (this.ghost?.tech.building === 'wall') this.buildCancel(this.ghost.tech.id);
+      this.ghost = null;
+    }
     else if (id === 'unload') {
       const go = this.loaded().filter((u) => !u.unloading);
       if (go.length) this.command({ c: 'unload', u: go.map((u) => u.id) });
@@ -2159,6 +2339,8 @@ export class IsoGame implements GameLike {
 
   // Lay or lift a building's concrete, and repaint the ground under it.
   private setPad(pad: Rect, on: boolean): void {
+    // (a Naval yard stands out on the water: no concrete pad goes down under it)
+    if (on && this.terrain.k(pad.x + pad.w / 2, pad.y + pad.h / 2) === K.Water) return;
     if (on) this.terrain.markPad(pad);
     else this.terrain.unmarkPad(pad);
     const pts = [toScreen(pad.x, pad.y), toScreen(pad.x + pad.w, pad.y), toScreen(pad.x, pad.y + pad.h), toScreen(pad.x + pad.w, pad.y + pad.h)];
@@ -2215,15 +2397,24 @@ export class IsoGame implements GameLike {
     for (const u of this.units) {
       if (u.dead) continue;
       const k = u.kind;
-      if (k === 'heli') {
-        sum.rotor_loop += at(u.x, u.y, u.z + HELI_ALT) * (u.moving ? 1 : 0.6);
+      if (k === 'heli' || k === 'heron') {
+        sum.rotor_loop += at(u.x, u.y, u.z + this.alt(u)) * (u.moving ? 1 : 0.6) * (u.fly ?? 1);
+        continue;
+      }
+      if (k === 'plane') {
+        sum.engine_loop += at(u.x, u.y, u.z + this.alt(u)) * 1.2;
+        continue;
+      }
+      if (k === 'jet') {
+        // (a jet's engine whines over the rest, up high)
+        sum.engine_loop += at(u.x, u.y, u.z + this.alt(u)) * (u.fly ?? 0) * 0.8;
         continue;
       }
       if (u.job?.st === 'dig') sum.ore_dig += at(u.x, u.y);
       if (!u.moving) continue;
       const h = at(u.x, u.y);
       if (isFoot(k)) sum.footsteps += h * 0.5;
-      else if (k === 'boat') sum.boat_loop += h;
+      else if (isNaval(k) || (k === 'otter' && this.terrain.k(u.x, u.y) === K.Water)) sum.boat_loop += h * (k === 'carrier' ? 1.4 : 1);
       else if (k === 'buggy' || k === 'arty' || k === 'apc') sum.engine_loop += h;
       else sum.tracks_loop += h;
     }
@@ -2303,8 +2494,10 @@ export class IsoGame implements GameLike {
   // the cliffs and out of the buildings (helicopters fly over it all).
   private okAt(u: Unit, x: number, y: number): boolean {
     const w = this.terrain.k(x, y) === K.Water;
-    if (u.kind === 'boat') return w;
-    if (u.kind === 'heli') return !w;
+    if (isNaval(u.kind)) return w && !this.blockAt(x, y);
+    if (isAir(u.kind)) return !w;
+    // (the Otter rides its air cushion over the water too)
+    if (u.kind === 'otter' && w) return !this.blockAt(x, y);
     // (over the water on a bridge's deck)
     // (the Commando swims)
     if ((w && u.kind !== 'cmdo' && !this.deckAt(x, y)) || this.terrain.cliff(x, y)) return false;
@@ -2372,8 +2565,8 @@ export class IsoGame implements GameLike {
   // The way for unit u to its destination round cliffs and water (see path.ts).
   private route(u: Unit): void {
     u.path = undefined;
-    if (u.kind === 'heli' || !this.okAt(u, u.x, u.y)) return;
-    const boat = u.kind === 'boat';
+    if (isAir(u.kind) || !this.okAt(u, u.x, u.y)) return;
+    const boat = isNaval(u.kind);
     const okFn = (x: number, y: number) => this.okAt(u, x, y);
     const t0 = performance.now();
     // (a unit let through a building finds its own way: the shared grid is for everyone else)
@@ -2385,7 +2578,7 @@ export class IsoGame implements GameLike {
   }
 
   private groundZ(u: Unit): number {
-    if (u.kind === 'boat') return 0;
+    if (isNaval(u.kind) || (u.kind === 'otter' && this.terrain.k(u.x, u.y) === K.Water)) return 0;
     const dz = this.deckZ(u.x, u.y);
     if (dz >= 0) return dz;
     return this.terrain.elev(u.x, u.y);
@@ -2525,7 +2718,7 @@ export class IsoGame implements GameLike {
       return;
     }
     b.fellT = this.time;
-    for (const u of [...this.units]) if (u.kind !== 'heli' && !u.exit && this.deckAt(u.x, u.y) === b && this.net !== 'client') this.kill(u, true);
+    for (const u of [...this.units]) if (!isAir(u.kind) && !u.exit && this.deckAt(u.x, u.y) === b && this.net !== 'client') this.kill(u, true);
     this.refreshDecks();
     const ex = b.axis === 0 ? 1 : 0;
     const ey = 1 - ex;
@@ -2572,7 +2765,7 @@ export class IsoGame implements GameLike {
   // ---------- Input (screen coordinates) ----------
 
   private screenOf(u: Unit): [number, number] {
-    const alt = u.kind === 'heli' ? HELI_ALT : 0;
+    const alt = this.alt(u);
     return toScreen(u.x, u.y, u.z + alt + MID[u.kind]);
   }
 
@@ -2597,7 +2790,7 @@ export class IsoGame implements GameLike {
     let bestLap: [number, number] = [0, 0];
     let bd = 1e9;
     for (const u of this.units) {
-      if (!this.shown(u)) continue;
+      if (!this.shown(u) || this.noPick(u)) continue;
       const lap = this.copyNear(u, x, y);
       const [sx, sy] = this.screenOf(u);
       const d = Math.hypot(sx + lap[0] * this.w - x, sy + lap[1] * this.h - y);
@@ -2614,6 +2807,7 @@ export class IsoGame implements GameLike {
   cursorAt(x: number, y: number): CursorAt {
     this.hoverBridge = null;
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
+    if (this.paraAim) return 'attack';
     const mine = this.mine();
     // Ctrl or Cmd held over a bridge: fire on it
     const fb = this.forceBridge(x, y);
@@ -2752,7 +2946,7 @@ export class IsoGame implements GameLike {
   private rideAt(x: number, y: number): Unit | null {
     const hit = this.unitAt(x, y);
     const t = hit?.u;
-    if (!t || t.f !== this.me || t.kind !== 'apc' || (t.cargo?.length ?? 0) >= CARGO) return null;
+    if (!t || t.f !== this.me || !TRANSPORT.has(t.kind) || (t.cargo?.length ?? 0) >= CARGO) return null;
     return this.mine().some((u) => RIDERS.has(u.kind)) ? t : null;
   }
 
@@ -2772,6 +2966,16 @@ export class IsoGame implements GameLike {
   // You command your own side. Enemy units and buildings can be tapped to
   // look at them (their health), but not ordered about.
   click(x: number, y: number, add: boolean): void {
+    if (this.paraAim) {
+      // the drop zone for the paratroopers
+      this.paraAim = false;
+      const [wx, wy] = this.fold(...this.groundAt(x, y));
+      this.command({ c: 'para', x: wx, y: wy });
+      this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0, foe: true });
+      ui('order_confirm');
+      this.emit();
+      return;
+    }
     if (this.forceBridge(x, y) || this.fixAt(x, y)) return this.order(x, y);
     // soldiers selected and a tap on a transport of yours: they get in
     const ride = add ? null : this.rideAt(x, y);
@@ -2962,7 +3166,7 @@ export class IsoGame implements GameLike {
 
   // If your unit u is inside a screen rect, the copy of it there (as laps).
   private inRect(u: Unit, x0: number, y0: number, x1: number, y1: number): [number, number] | null {
-    if (u.f !== this.me || u.dead) return null;
+    if (u.f !== this.me || u.dead || this.noPick(u)) return null;
     const minx = Math.min(x0, x1);
     const maxx = Math.max(x0, x1);
     const miny = Math.min(y0, y1);
@@ -3122,6 +3326,7 @@ export class IsoGame implements GameLike {
   }
 
   deselect(): void {
+    this.paraAim = false;
     for (const u of this.units) u.sel = false;
     for (const b of this.buildings) b.sel = false;
     this.emit();
@@ -3174,6 +3379,8 @@ export class IsoGame implements GameLike {
         if (u.fix !== undefined && !u.dead) this.fixing(u);
         if (u.unloading && !u.dead) this.letOut(u, dt);
       }
+    for (const u of [...this.units]) if (u.kind === 'jet' || u.kind === 'heron') this.flyAbout(u, dt);
+    for (const u of [...this.units]) if (u.kind === 'plane' || (u.fly !== undefined && isFoot(u.kind))) this.paraDrop(u, dt);
     for (const u of [...this.units]) if (!u.dead && !u.exit) this.fight(u, dt);
     // ore creeps back slowly, as long as a clump isn't dug out completely
     for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
@@ -3221,7 +3428,7 @@ export class IsoGame implements GameLike {
       const foot = isFoot(u.kind);
       // (finding ways takes time: past a few milliseconds' worth in a frame,
       // units with somewhere new to go wait for the next)
-      const wait = this.routeMs > ROUTE_MS && u.kind !== 'heli' && (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty);
+      const wait = this.routeMs > ROUTE_MS && !isAir(u.kind) && (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty);
       if (u.moving && !u.deploy && !wait && !u.digK) {
         let dx = u.tx - u.x;
         let dy = u.ty - u.y;
@@ -3268,7 +3475,7 @@ export class IsoGame implements GameLike {
           }
           u.best ??= dist;
           const want = Math.atan2(dy, dx);
-          const free = foot || u.kind === 'heli';
+          const free = foot || isAir(u.kind);
           let ang = free ? want : u.a;
           let sp = 0;
           let face = want;
@@ -3276,7 +3483,7 @@ export class IsoGame implements GameLike {
           // into the edge, they slide along it whichever way is nearer to
           // where they are going (and stick to that way, so they don't dither).
           let slideA: number | null = null;
-          if (u.kind !== 'heli' && this.okAt(u, u.x, u.y)) {
+          if (!isAir(u.kind) && this.okAt(u, u.x, u.y)) {
             const ahead = (a: number) =>
               this.okAt(u, u.x + Math.cos(a) * 0.9, u.y + Math.sin(a) * 0.9) && this.okAt(u, u.x + Math.cos(a) * 2, u.y + Math.sin(a) * 2) && this.okAt(u, u.x + Math.cos(a) * 3.5, u.y + Math.sin(a) * 3.5) && this.okAt(u, u.x + Math.cos(a) * 5, u.y + Math.sin(a) * 5);
             if (!ahead(want)) {
@@ -3316,7 +3523,7 @@ export class IsoGame implements GameLike {
             const go = free ? 1 : Math.max(0, Math.cos(angDiff(want, u.a)) - 0.4) / 0.6;
             ang = free ? want : u.a;
             // (a tank still turning towards dry land waits to get there)
-            sp = u.kind !== 'heli' && !this.okAt(u, u.x + Math.cos(ang) * 5, u.y + Math.sin(ang) * 5) && this.okAt(u, u.x, u.y) ? 0 : Math.min(dist, st.speed * 1.1 * dt * go);
+            sp = !isAir(u.kind) && !this.okAt(u, u.x + Math.cos(ang) * 5, u.y + Math.sin(ang) * 5) && this.okAt(u, u.x, u.y) ? 0 : Math.min(dist, st.speed * 1.1 * dt * go);
           }
           // give up if it has got hardly any closer in the last few seconds
           // (it has hit a dead end)
@@ -3335,7 +3542,7 @@ export class IsoGame implements GameLike {
           const nx = u.x + Math.cos(ang) * sp;
           const ny = u.y + Math.sin(ang) * sp;
           // (somewhere it shouldn't be, it can drive out, but not on into a building)
-          if (u.kind === 'heli' || this.okAt(u, nx, ny) || (!this.okAt(u, u.x, u.y) && (!this.inBuilding(u, nx, ny) || this.inBuilding(u, u.x, u.y)))) {
+          if (isAir(u.kind) || this.okAt(u, nx, ny) || (!this.okAt(u, u.x, u.y) && (!this.inBuilding(u, nx, ny) || this.inBuilding(u, u.x, u.y)))) {
             u.x = nx;
             u.y = ny;
           } else if (sp > 0) {
@@ -3357,11 +3564,12 @@ export class IsoGame implements GameLike {
             u.trackAcc = 0;
             const k = this.terrain.k(u.x, u.y);
             const [sx, sy] = toScreen(u.x, u.y, u.z);
-            if (u.kind === 'boat') {
-              const [bx, by] = toScreen(u.x - Math.cos(u.a) * 13, u.y - Math.sin(u.a) * 13, 0);
+            if (isNaval(u.kind) || (u.kind === 'otter' && k === K.Water)) {
+              const back = UNIT[u.kind].r * 0.85;
+              const [bx, by] = toScreen(u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, 0);
               this.particles.push({ x: bx, y: by, vx: 0, vy: 0, life: 0, max: 1.6, kind: 'wake', size: 1 });
-            } else if (!foot && u.kind !== 'heli' && k !== K.Water && u.z === 0) {
-              const hw = u.kind === 'mcv' ? 7.5 : u.kind === 'heavy' ? 6 : u.kind === 'buggy' ? 4 : 5;
+            } else if (!foot && !isAir(u.kind) && k !== K.Water && u.z === 0) {
+              const hw = u.kind === 'mcv' ? 7.5 : u.kind === 'heavy' || u.kind === 'scorch' || u.kind === 'lumen' ? 6 : u.kind === 'buggy' ? 4 : 5;
               const px = -Math.sin(u.a) * hw;
               const py = Math.cos(u.a) * hw;
               const style = k === K.Road || k === K.Sand ? 'rgba(60,45,25,0.2)' : k === K.Pad ? 'rgba(30,30,30,0.08)' : 'rgba(25,22,12,0.16)';
@@ -3394,7 +3602,7 @@ export class IsoGame implements GameLike {
         const k = Math.min(1, KNOCK_EASE * dt);
         const dx = u.knock[0] * k;
         const dy = u.knock[1] * k;
-        if (u.kind === 'heli' || this.okAt(u, u.x + dx * 3, u.y + dy * 3)) {
+        if (isAir(u.kind) || this.okAt(u, u.x + dx * 3, u.y + dy * 3)) {
           u.x += dx;
           u.y += dy;
           if (!u.moving) {
@@ -3411,7 +3619,7 @@ export class IsoGame implements GameLike {
       u.z += (gz - u.z) * Math.min(1, dt * 8);
       if (Math.abs(gz - u.z) < 0.05) u.z = gz;
 
-      if (u.kind === 'light' || u.kind === 'heavy') {
+      if (TURRETED.has(u.kind)) {
         if (u.target) {
           // (fight() aims it)
         } else if (u.moving) u.turretGoal = u.a;
@@ -3427,7 +3635,7 @@ export class IsoGame implements GameLike {
       }
       // damaged vehicles smoke, more the worse they are
       if (u.hp < 0.66 && !foot) {
-        const [sx, sy] = toScreen(u.x, u.y, u.z + (u.kind === 'heli' ? HELI_ALT : 0) + MID[u.kind] + 2);
+        const [sx, sy] = toScreen(u.x, u.y, u.z + this.alt(u) + MID[u.kind] + 2);
         this.fx.damageSmoke(u.hp, sx, sy, dt);
       }
       if (u.moving || u.deploy || u.job || u.target) {
@@ -3494,6 +3702,7 @@ export class IsoGame implements GameLike {
           for (let i = 0; i < 3; i++) this.sparks.push({ x: sx, y: sy, vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, life: 0 });
         }
       }
+      if ((b.kind === 'depot' || b.kind === 'navy') && b.rise >= 1 && b.hp > 0) this.serviceAt(b, dt);
       const emit = (i: number, kind: 'smoke' | 'soot', rate: number) => {
         if (!b.art.fx[i] || Math.random() > dt * rate) return;
         const p = b.art.fx[i];
@@ -3510,7 +3719,7 @@ export class IsoGame implements GameLike {
         emit(0, 'smoke', 0.8);
         emit(1, 'smoke', 0.8);
       }
-      if (b.kind === 'tower') {
+      if (isDefense(b.kind) && b.rise >= 1) {
         this.towerFight(b, dt);
         if (!b.target && Math.random() < dt * 0.3) b.gunGoal = Math.random() * Math.PI * 2;
         const d = angDiff(b.gunGoal, b.gun);
@@ -3664,7 +3873,7 @@ export class IsoGame implements GameLike {
         break;
       case 'board': {
         const t = unit(cmd.t);
-        if (!t || t.kind !== 'apc') break;
+        if (!t || !TRANSPORT.has(t.kind)) break;
         for (const id of cmd.u) {
           const u = unit(id);
           if (!u || !RIDERS.has(u.kind)) continue;
@@ -3717,6 +3926,15 @@ export class IsoGame implements GameLike {
         for (const id of cmd.u) {
           const u = unit(id);
           if (!u?.cargo?.length || u.unloading) continue;
+          // a Heron has to come down on dry land to let them out
+          if (u.kind === 'heron' && !this.okAt(u.cargo[0], u.x, u.y)) {
+            this.tell(u.f, 'The Heron can only land on open ground');
+            continue;
+          }
+          if (u.kind === 'otter' && this.terrain.k(u.x, u.y) === K.Water) {
+            this.tell(u.f, 'The Otter has to come ashore to let them out');
+            continue;
+          }
           u.unloading = true;
           u.exitT = 0;
           // it stops to let them out
@@ -3754,6 +3972,9 @@ export class IsoGame implements GameLike {
         break;
       case 'place':
         this.placeBuilding(f, cmd.t, cmd.x, cmd.y);
+        break;
+      case 'para':
+        this.callPara(f, cmd.x, cmd.y);
         break;
     }
   }
@@ -3799,6 +4020,7 @@ export class IsoGame implements GameLike {
       o.job ? JOB_STATES.indexOf(o.job.st) : -1,
       (o.cargo ?? []).map((p) => `${p.id}:${p.kind}:${Math.round(p.hp * 1000) / 1000}`).join(','),
       o.unloading ? 1 : 0,
+      o.fly === undefined ? -1 : Math.round(o.fly * 100) + (o.ammo ?? 0) * 1000,
     ]);
     const b = this.buildings.map((o) => [
       o.id,
@@ -3825,6 +4047,7 @@ export class IsoGame implements GameLike {
         e.lowPower ? 1 : 0,
         [...e.jobs].map(([tab, j]): [string, string, number, number, number] => [tab, j.tech.id, Math.round(j.spent), j.paused ? 1 : 0, j.ready ? 1 : 0]),
         [...e.queue].map(([tab, q]): [string, string[]] => [tab, q.map((t) => t.id)]),
+        Math.ceil(e.paraT),
       ];
     });
     const snap: Snapshot = { t: r2(this.time), u, b, gone: this.gone, eco, told: this.told, out: [...this.out], br: this.bridges.map((o) => Math.round(o.hp * 1000) / 1000) };
@@ -3919,7 +4142,7 @@ export class IsoGame implements GameLike {
       }
     const seenU = new Set<number>();
     for (const e of s.u) {
-      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job, riders, unloading] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number, string?, number?];
+      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job, riders, unloading, air] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number, string?, number?, number?];
       seenU.add(id);
       let u = units.get(id);
       if (!u) {
@@ -3962,6 +4185,10 @@ export class IsoGame implements GameLike {
         u.target = target(tgt);
       }
       u.deploy = !!(flags & 2);
+      if (air !== undefined && (isAir(kind) || isFoot(kind))) {
+        u.fly = air < 0 ? undefined : (air % 1000) / 100;
+        u.ammo = air < 0 ? undefined : Math.floor(air / 1000);
+      }
       // who is riding in it
       if (riders || u.cargo?.length) {
         const had = new Map((u.cargo ?? []).map((p) => [p.id, p]));
@@ -4006,15 +4233,16 @@ export class IsoGame implements GameLike {
     // gun towers aim where the host's do
     for (const e of s.b) {
       const b = bldgs.get(e[0] as number);
-      if (b && b.kind === 'tower') b.target = target(e[14] as number);
+      if (b && isDefense(b.kind)) b.target = target(e[14] as number);
     }
     // your purse
     const mine = s.eco.find((e) => e[0] === this.me);
     if (mine) {
-      const [, credits, low, jobs, queue] = mine;
+      const [, credits, low, jobs, queue, paraT] = mine;
       const e = this.eco[this.me];
       e.credits = credits;
       e.lowPower = !!low;
+      if (paraT !== undefined) e.paraT = paraT;
       const tech = (id: string) => TECH.find((t) => t.id === id);
       const nj = new Map<Tab, Job>();
       for (const [tab, id, spent, paused, ready] of jobs) {
@@ -4066,8 +4294,7 @@ export class IsoGame implements GameLike {
       for (let i = 0; i < 14; i++) {
         const a = a0 + (i / 14) * Math.PI * 2;
         const [x, y] = this.fold(Math.round((cx + Math.cos(a) * r) / 4) * 4, Math.round((cy + Math.sin(a) * r) / 4) * 4);
-        const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
-        if (!this.placeWhy(pad, f)) return [x, y];
+        if (!this.placeWhy(padOf(t.building, art, x, y), f, t.building === 'navy')) return [x, y];
       }
     return null;
   }
@@ -4139,7 +4366,7 @@ export class IsoGame implements GameLike {
 
   // Units that stand guard: not boats (they keep to their lake) or haulers.
   private guard(u: Unit): boolean {
-    return u.f === ENEMY && u.kind !== 'boat' && u.kind !== 'hauler' && u.kind !== 'mcv';
+    return u.f === ENEMY && !isNaval(u.kind) && u.kind !== 'hauler' && u.kind !== 'mcv';
   }
 
   private sendTo(u: Unit, p: [number, number]): void {
@@ -4244,9 +4471,12 @@ export class IsoGame implements GameLike {
     if (!w || t.dead) return false;
     // (the Commando blows up buildings and bridges with a charge; a dog's
     // bite and her pistols only hurt foot soldiers)
-    if (isB(t)) return w.c4 ? true : !w.foot && w.ground;
+    if (isB(t)) return w.c4 ? true : !w.foot && !w.sea && w.ground;
     if (w.foot && !isFoot(t.kind)) return false;
-    return t.kind === 'heli' ? w.air : w.ground;
+    // torpedoes only find ships; a submarine under the water only depth charges find
+    if (w.sea && !isNaval(t.kind)) return false;
+    if (t.kind === 'sub' && this.under(t) && !w.deep) return false;
+    return this.aloft(t) && this.alt(t) > 4 ? w.air : w.ground;
   }
 
   // How far (x, y) is from target t: to a building's nearest wall.
@@ -4264,7 +4494,7 @@ export class IsoGame implements GameLike {
       const cy = Math.max(ty - t.art.ry * 0.6, Math.min(ty + t.art.ry * 0.6, y));
       return [cx, cy, 6];
     }
-    return [tx, ty, t.z + (t.kind === 'heli' ? HELI_ALT : 0) + MID[t.kind] * 0.7];
+    return [tx, ty, t.z + this.alt(t) + MID[t.kind] * 0.7];
   }
 
   // The nearest enemy of side f within range of (x, y) that weapon w can hit:
@@ -4282,7 +4512,7 @@ export class IsoGame implements GameLike {
     }
     if (best) return best;
     for (const b of this.buildings) {
-      if (b.f === f || b.kind !== 'tower' || b.rise < 1 || w.foot || !this.canHit(w, b)) continue;
+      if (b.f === f || !isDefense(b.kind) || b.rise < 1 || w.foot || !this.canHit(w, b)) continue;
       const d = this.reach(x, y, b);
       if (d <= bd) {
         bd = d;
@@ -4311,14 +4541,16 @@ export class IsoGame implements GameLike {
   // it and fire when loaded.
   private fight(u: Unit, dt: number): void {
     const w = this.weaponOf(u);
-    if (!w) return;
+    if (!w || this.noPick(u)) return;
     u.cool = Math.max(0, (u.cool ?? 0) - dt);
     let t = u.target;
     if (t && !this.canHit(w, t)) {
       t = u.target = undefined;
       u.forced = u.chase = false;
     }
-    if (!t && !u.moving && !u.deploy) {
+    // (a jet only goes looking with missiles left, and not from its pad)
+    const grounded = u.kind === 'jet' && (!u.ammo || (u.fly ?? 0) < 0.9);
+    if (!t && !u.moving && !u.deploy && !grounded) {
       u.scan = (u.scan ?? Math.random() * 0.4) - dt;
       if (u.scan <= 0) {
         u.scan = 0.4 + Math.random() * 0.3;
@@ -4367,7 +4599,7 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(u.x, u.y, t);
     const want = Math.atan2(ay - u.y, ax - u.x);
     let off: number;
-    if (u.kind === 'light' || u.kind === 'heavy') {
+    if (TURRETED.has(u.kind)) {
       u.turretGoal = want;
       off = angDiff(want, u.turret);
     } else {
@@ -4378,9 +4610,14 @@ export class IsoGame implements GameLike {
       off = angDiff(want, u.a);
     }
     if (Math.abs(off) > 0.12 || u.cool > 0) return;
+    if (u.kind === 'jet') {
+      // a pair of missiles each pass, until they are gone
+      if (!u.ammo || (u.fly ?? 0) < 0.9) return;
+      u.ammo--;
+    }
     u.cool = w.rof * (0.9 + Math.random() * 0.2);
     u.fired = this.time;
-    const z = u.z + (u.kind === 'heli' ? HELI_ALT + Math.sin(u.anim * 2) * 1.2 : 0) - (u.digK ? KNEEL_DROP : 0);
+    const z = u.z + (isAir(u.kind) ? this.alt(u) + Math.sin(u.anim * 2) * 1.2 * (u.fly ?? 1) : 0) - (u.digK ? KNEEL_DROP : 0);
     this.shoot(u, w, t, muzzles(u.kind, u.x, u.y, z, u.a, u.turret));
   }
 
@@ -4393,6 +4630,178 @@ export class IsoGame implements GameLike {
     t.c4 = this.time + C4_S;
     this.sound(t.x, t.y, 'build_place', 0.7, { rate: 1.9 });
     if (!isBridge(t)) this.tell(t.f, `Charge planted on your ${BNAME[t.kind]}!`);
+  }
+
+  // How high an aircraft is flying over the ground under it (0 for anything
+  // on the ground, or a jet sitting on its pad).
+  private alt(u: { kind: Kind; fly?: number }): number {
+    if (u.kind === 'heli') return HELI_ALT;
+    if (u.kind === 'heron') return HELI_ALT * (u.fly ?? 1);
+    if (u.kind === 'jet') return JET_ALT * (u.fly ?? 1);
+    if (u.kind === 'plane') return PLANE_ALT;
+    if (u.fly !== undefined && isFoot(u.kind)) return DROP_ALT * u.fly;
+    return 0;
+  }
+
+  // A submarine under the water: it comes up to fire, and stays up a moment after.
+  private under(u: { kind: Kind; fired?: number }): boolean {
+    return u.kind === 'sub' && this.time - (u.fired ?? -99) > SUB_UP;
+  }
+
+  // Can side f see submarine u under the water? Only with a ship, or one
+  // of its Destroyers' sonar, close by.
+  private sonar(u: Unit, f: number): boolean {
+    for (const o of this.units) {
+      if (o.f !== f || o.dead || !isNaval(o.kind)) continue;
+      const [ox, oy] = this.nearPoint(u.x, u.y, o.x, o.y);
+      if (Math.hypot(ox - u.x, oy - u.y) < (o.kind === 'destroyer' ? SONAR : 2.5 * CELL)) return true;
+    }
+    return false;
+  }
+
+  // Up in the air: an aircraft, or a paratrooper still on the way down.
+  private aloft(u: { kind: Kind; fly?: number }): boolean {
+    return isAir(u.kind) || (u.fly !== undefined && isFoot(u.kind));
+  }
+
+  // Can't be picked or given orders: the cargo plane, and paratroopers
+  // until they are down.
+  private noPick(u: Unit): boolean {
+    return u.kind === 'plane' || (u.fly !== undefined && isFoot(u.kind));
+  }
+
+  // The landing pad a jet belongs on: its Air command and where on it.
+  private padOfJet(u: Unit): [number, number] | null {
+    const b = this.buildings.find((o) => o.id === u.nest && !o.dead && o.f === u.f);
+    const p = b?.art.fx[1 + (u.padI ?? 0)];
+    if (!b || !p) return null;
+    return this.nearPoint(u.x, u.y, b.x + p.x, b.y + p.y);
+  }
+
+  // A free landing pad of side f's Air commands, for a new jet: [building, pad].
+  private freePad(f: number, only?: Building): [Building, number] | null {
+    for (const b of this.buildings) {
+      if (b.f !== f || b.kind !== 'radar' || b.rise < 1 || b.dead || (only && b !== only)) continue;
+      for (let i = 0; i < AIR_PADS; i++) if (!this.units.some((u) => u.kind === 'jet' && u.nest === b.id && u.padI === i && !u.dead)) return [b, i];
+    }
+    return null;
+  }
+
+  // Waiting for a tap on the map: where the paratroopers go.
+  private paraAim = false;
+
+  // Side f calls in its paratroopers on (x, y): a cargo plane comes in from
+  // the direction of its Air command, drops them over the spot and flies on.
+  private callPara(f: number, x: number, y: number): void {
+    const e = this.eco[f];
+    const airs = this.buildings.filter((b) => b.f === f && b.kind === 'radar' && b.rise >= 1 && !b.dead);
+    if (e.paraT > 0 || !airs.length) return;
+    const home = airs.reduce((a, b) => (Math.hypot(b.x - x, b.y - y) < Math.hypot(a.x - x, a.y - y) ? b : a));
+    let dx = x - home.x;
+    let dy = y - home.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1) [dx, dy] = [1, 0];
+    else [dx, dy] = [dx / d, dy / d];
+    const a = Math.atan2(dy, dx);
+    const p = this.newUnit('plane', f, x - dx * PARA_RUN, y - dy * PARA_RUN, a);
+    p.z = 0;
+    p.tx = x + dx * PARA_RUN;
+    p.ty = y + dy * PARA_RUN;
+    p.moving = true;
+    p.drops = PARA_N;
+    p.dropAt = [x, y];
+    e.paraT = PARA_S;
+    this.tell(f, 'Paratroopers on the way');
+  }
+
+  // A cargo plane on its run (dropping its soldiers near the spot, and gone
+  // once it is past), or a paratrooper coming down.
+  private paraDrop(u: Unit, dt: number): void {
+    if (u.kind !== 'plane') {
+      u.fly = Math.max(0, (u.fly ?? 0) - dt / DROP_S);
+      if (u.fly > 0 || this.net === 'client') return;
+      // down: a soldier again (and lost if he came down in the water)
+      u.fly = undefined;
+      u.z = this.terrain.elev(u.x, u.y);
+      u.tx = u.x;
+      u.ty = u.y;
+      if (!this.okAt(u, u.x, u.y)) this.kill(u, this.terrain.k(u.x, u.y) === K.Water);
+      return;
+    }
+    if (this.net === 'client') return;
+    if (u.drops && u.dropAt && Math.hypot(u.dropAt[0] - u.x, u.dropAt[1] - u.y) < 70 && (u.jumpT = (u.jumpT ?? 0) - dt) <= 0) {
+      // one jumps every moment, each where he can land
+      const side = (Math.random() - 0.5) * 14;
+      const jx = u.x - Math.sin(u.a) * side;
+      const jy = u.y + Math.cos(u.a) * side;
+      const s = this.newUnit('inf', u.f, jx, jy, u.a + Math.PI * 0.5);
+      if (this.okAt(s, jx, jy)) {
+        s.fly = 1;
+        u.drops--;
+        u.jumpT = 0.18;
+      } else this.units.splice(this.units.indexOf(s), 1);
+    }
+    if (!u.moving) {
+      this.units.splice(this.units.indexOf(u), 1);
+      this.gone.push([u.id, GONE_QUIET]);
+    }
+  }
+
+  // A paratrooper on the way down, under his canopy.
+  private drawChute(u: Unit): void {
+    const z = u.z + this.alt(u);
+    this.blit(this.footSprite(u), u.x, u.y, z);
+    const c = this.ctx;
+    const [sx, sy] = toScreen(u.x, u.y, z + 12);
+    const x = Math.round(sx);
+    const y = Math.round(sy);
+    c.fillStyle = 'rgba(40,40,40,0.55)';
+    pxLine(c, x - 3, y + 1, x - 0.5, y + 7);
+    pxLine(c, x + 3, y + 1, x + 0.5, y + 7);
+    c.fillStyle = '#e9e4d4';
+    c.fillRect(x - 2, y - 2, 5, 1);
+    c.fillRect(x - 3, y - 1, 7, 2);
+    c.fillStyle = '#b9b3a2';
+    c.fillRect(x - 3, y + 1, 2, 1);
+    c.fillRect(x + 2, y + 1, 2, 1);
+    c.fillRect(x, y - 1, 1, 2);
+  }
+
+  // Jets and Herons each frame: taking off and landing, and jets going home
+  // to rearm when they are out of missiles or have nothing to do.
+  private flyAbout(u: Unit, dt: number): void {
+    if (u.kind === 'heron') {
+      // it settles onto the ground to let its riders out
+      const want = u.unloading ? 0 : 1;
+      u.fly = (u.fly ?? 1) + Math.sign(want - (u.fly ?? 1)) * Math.min(Math.abs(want - (u.fly ?? 1)), dt * 0.8);
+      return;
+    }
+    const home = this.padOfJet(u);
+    const atHome = !!home && Math.hypot(home[0] - u.x, home[1] - u.y) < 2;
+    const busy = u.moving || !!u.target;
+    // up when it has somewhere to be; down on its pad
+    const up = busy || !atHome;
+    u.fly = Math.max(0, Math.min(1, (u.fly ?? 0) + (up ? 1 : -1) * dt * 0.7));
+    if (atHome && !busy && (u.fly ?? 0) < 0.05) {
+      // on its pad: rearm, one missile pair at a time
+      if ((u.ammo ?? 0) < JET_AMMO && (u.rearm = (u.rearm ?? JET_REARM) - dt) <= 0) {
+        u.ammo = (u.ammo ?? 0) + 1;
+        u.rearm = JET_REARM;
+      }
+      return;
+    }
+    if (this.net === 'client') return;
+    // out of missiles, or done and hanging about: back to its pad
+    if (!u.ammo && u.target) {
+      u.target = undefined;
+      u.forced = u.chase = false;
+    }
+    if (!busy) u.idleAir = (u.idleAir ?? 0) + dt;
+    else u.idleAir = 0;
+    if (home && !atHome && (!u.ammo || (u.idleAir ?? 0) > 1.5) && !u.moving) {
+      [u.tx, u.ty] = home;
+      u.moving = true;
+    }
   }
 
   // Is u swimming (the Commando, in the water off a bridge)?
@@ -4463,7 +4872,8 @@ export class IsoGame implements GameLike {
 
   // A gun tower picks the nearest enemy unit in range, turns and fires.
   private towerFight(b: Building, dt: number): void {
-    const w = WEAPON.tower!;
+    const kind = b.kind as DefenseKind;
+    const w = WEAPON[kind]!;
     const p = b.art.fx[0];
     const gx = b.x + p.x;
     const gy = b.y + p.y;
@@ -4480,17 +4890,66 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(gx, gy, t);
     const want = Math.atan2(ay - gy, ax - gx);
     b.gunGoal = want;
-    if (Math.abs(angDiff(want, b.gun)) > 0.1 || b.cool > 0) return;
+    // (a Lumen tower has nothing to turn: its crystal fires any way)
+    if ((kind !== 'prism' && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
     b.cool = w.rof * (0.9 + Math.random() * 0.2);
-    this.shoot(b, w, t, muzzles('tower', gx, gy, p.z, 0, b.gun));
+    const from = muzzles(kind, gx, gy, p.z, 0, b.gun);
+    this.shoot(b, kind === 'prism' ? this.prismBoost(b, w, from[0]) : w, t, from);
+  }
+
+  // A Lumen tower about to fire draws on the others of its side nearby that
+  // are free (not reloading and with nothing of their own to shoot): each
+  // beams its light into this one, using up its own shot, and adds to the
+  // blow. Returns the weapon to fire with.
+  private prismBoost(b: Building, w: Weapon, at: [number, number, number]): Weapon {
+    let n = 0;
+    const [ax, ay] = toScreen(...at);
+    for (const o of this.buildings) {
+      if (n >= PRISM_MAX || o === b || o.f !== b.f || o.kind !== 'prism' || o.dead || o.rise < 1 || (o.cool ?? 0) > 0 || o.target) continue;
+      const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
+      if (Math.hypot(ox - b.x, oy - b.y) > PRISM_LINK) continue;
+      o.cool = w.rof;
+      const q = o.art.fx[0];
+      const [sx, sy] = toScreen(ox + q.x, oy + q.y, q.z);
+      this.fx.beam(sx, sy, ax, ay, 0.5);
+      n++;
+    }
+    return n ? { ...w, dmg: w.dmg * (1 + n * PRISM_ADD) } : w;
+  }
+
+  // A Service depot mends one vehicle of its side standing on its pad at a
+  // time, a little each second, for credits (the host's call; a player's
+  // screen only shows the sparks).
+  private serviceAt(b: Building, dt: number): void {
+    const u = this.units.find((o) => {
+      if (o.f !== b.f || o.dead || o.hp >= 1 || isFoot(o.kind) || isAir(o.kind) || o.moving) return false;
+      // (the Naval yard mends ships, and the Otter, in its slip; the depot vehicles on its pad)
+      const wet = isNaval(o.kind) || o.kind === 'otter';
+      if (wet !== (b.kind === 'navy')) return false;
+      const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
+      return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 11 && Math.abs(oy - b.y) < 11;
+    });
+    if (!u) return;
+    if (Math.random() < dt * 6) {
+      const [sx, sy] = toScreen(u.x + (Math.random() - 0.5) * 6, u.y + (Math.random() - 0.5) * 6, u.z + MID[u.kind]);
+      this.fx.sparks(sx, sy, 3);
+    }
+    if (this.net === 'client') return;
+    const price = TECH.find((t) => t.unit === u.kind)?.cost ?? 500;
+    const add = Math.min(DEPOT_RATE * dt, 1 - u.hp);
+    const pay = add * price * DEPOT_COST;
+    const e = this.eco[b.f];
+    if (e.credits < pay) return;
+    e.credits -= pay;
+    u.hp += add;
   }
 
   // Rounds leave the muzzles (a flash at each) for t.
   private shoot(src: Unit | Building, w: Weapon, t: Target, from: [number, number, number][]): void {
-    this.gunSound(isB(src) ? 'tower' : src.kind, from[0], from.length);
+    this.gunSound(isB(src) ? (src.kind as DefenseKind) : src.kind, from[0], from.length);
     for (const m of from) {
       const [sx, sy] = toScreen(...m);
-      if (w.shot !== 'grenade') this.fx.muzzle(sx, sy, w.shot !== 'bullet');
+      if (w.shot !== 'grenade' && w.shot !== 'beam') this.fx.muzzle(sx, sy, w.shot !== 'bullet');
       let aim = this.aimPoint(m[0], m[1], t);
       let track: Shot['track'];
       if (w.shot === 'arc' || w.shot === 'grenade') {
@@ -4518,19 +4977,23 @@ export class IsoGame implements GameLike {
         track = () => {
           if (t.dead) return null;
           const p = this.aimPoint(m[0], m[1], t);
-          return [p[0] + ox, p[1] + oy, Math.max(p[2] - 6, p[2] + oz)];
+          return [p[0] + ox, p[1] + oy, w.shot === 'torpedo' ? 0 : Math.max(p[2] - 6, p[2] + oz)];
         };
         aim = track()!;
       }
       const shot = makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track);
       this.fx.fire(shot);
+      if (w.shot === 'beam') {
+        const [ex, ey] = toScreen(...aim);
+        this.fx.beam(sx, sy, ex, ey, w.dmg > 120 ? 1.5 : 1);
+      }
       // a lobbed shell whistles down the last moment or so of its flight
       if (w.shot === 'arc') this.sound(aim[0], aim[1], 'shell_whistle', 1, { delay: Math.max(0, shot.dur - 1.2), rate: 1.1 }, aim[2]);
     }
   }
 
   // The sound of a gun going off: kind is who is firing, at muzzle m, with n barrels.
-  private gunSound(kind: Kind | 'tower', m: [number, number, number], n: number): void {
+  private gunSound(kind: Kind | DefenseKind, m: [number, number, number], n: number): void {
     const [x, y, z] = m;
     const twin = (s: Sfx, rate: number, vol = 1) => {
       this.sound(x, y, s, vol, { rate }, z);
@@ -4558,8 +5021,23 @@ export class IsoGame implements GameLike {
         return twin('cannon_shot', 0.8, 1.1);
       case 'tower':
         return twin('cannon_shot', 0.92);
+      case 'scorch':
+        return this.sound(x, y, 'flame_burst', 1, { rate: 0.85 }, z);
+      case 'lumen':
+      case 'prism':
+        return this.sound(x, y, 'beam_fire', 1, { rate: kind === 'prism' ? 0.9 : 1.05 }, z);
+      case 'aa':
+        return twin('rocket_launch', 1.3, 0.9);
       case 'boat':
         return twin('cannon_shot', 1.2, 0.8);
+      case 'destroyer':
+        return twin('cannon_shot', 0.7, 1.1);
+      case 'cruiser':
+        return twin('rocket_launch', 0.9, 1);
+      case 'carrier':
+        return twin('rocket_launch', 1.6, 0.5);
+      case 'sub':
+        return this.sound(x, y, 'rocket_launch', 0.6, { rate: 0.55 }, z);
       case 'arty':
         return twin('howitzer_shot', 1);
       case 'rocket':
@@ -4575,6 +5053,7 @@ export class IsoGame implements GameLike {
       // a shell bursting: everything of the other side near it is hit, less further out
       const nade = w.shot === 'grenade';
       if (w.shot === 'flame') this.fx.scorch(sx, sy, w.splash * 0.7);
+      else if (w.shot === 'beam') this.fx.boom(sx, sy, 3);
       else {
         this.fx.boom(sx, sy, nade ? 4 : 6);
         if (nade) this.fx.dust(sx, sy, 6);
@@ -4582,7 +5061,7 @@ export class IsoGame implements GameLike {
       }
       const R = w.splash;
       for (const o of [...this.units]) {
-        if (o.f === src.f || o.kind === 'heli' || o.dead) continue;
+        if (o.f === src.f || isAir(o.kind) || o.dead) continue;
         const d = this.reach(s.x, s.y, o);
         if (d >= R) continue;
         this.shove(o, knockback(w, o.kind, 1 - d / R), o.x - s.x, o.y - s.y);
@@ -4600,6 +5079,8 @@ export class IsoGame implements GameLike {
       if (soft) this.fx.dust(sx, sy);
       else this.fx.sparks(sx, sy, 4);
       if (!soft) this.sound(s.x, s.y, 'bullet_hit', 0.8, { rate: 0.9 + Math.random() * 0.4 }, s.z);
+    } else if (w.shot === 'beam') {
+      this.fx.boom(sx, sy, 2.5);
     } else {
       this.fx.boom(sx, sy, w.shot === 'rocket' ? 3.5 : 3);
       this.fx.sparks(sx, sy, 6);
@@ -4774,7 +5255,7 @@ export class IsoGame implements GameLike {
       return;
     }
     const [tx, ty] = this.nearPoint(u.x, u.y, t.x, t.y);
-    if (Math.hypot(tx - u.x, ty - u.y) < UNIT.apc.r + 4) return this.embark(u, t);
+    if (Math.hypot(tx - u.x, ty - u.y) < UNIT[t.kind].r + 4) return this.embark(u, t);
     if (!u.moving) {
       // it stopped short (a dead end): try again a few times, then give up
       if ((u.boardTry = (u.boardTry ?? 0) + 1) > 3) {
@@ -4874,7 +5355,7 @@ export class IsoGame implements GameLike {
     this.gone.push([u.id, GONE_KILL]);
     if (u.f === this.me) announce('unit_lost');
     if (this.lastTap?.u === u) this.lastTap = null;
-    const air = u.kind === 'heli' ? HELI_ALT : 0;
+    const air = this.alt(u);
     const [sx, sy] = toScreen(u.x, u.y, u.z + air + MID[u.kind] * 0.5);
     const [, gy] = toScreen(u.x, u.y, u.z);
     this.fx.wreck(
@@ -4890,12 +5371,13 @@ export class IsoGame implements GameLike {
     if (!isFoot(u.kind)) {
       const r = BOOM[u.kind] ?? 6;
       // the blast hurts whatever is close by, on either side
-      if (u.kind !== 'heli') this.blast(u.x, u.y, 0, 0, CELL * (1 + r / 12), 18 + r * 1.5);
+      if (!isAir(u.kind)) this.blast(u.x, u.y, 0, 0, CELL * (1 + r / 12), 18 + r * 1.5);
       // the wreck burns where it stood (a copter falls and burns too; a boat sinks)
-      if (u.kind !== 'boat' && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
+      if (!isNaval(u.kind) && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
       // and a few of the crew crawl out, hurt
-      if (u.kind !== 'heli' && u.kind !== 'boat' && this.net !== 'client' && !drowned) this.survivors(u);
-      if (u.cargo?.length && this.net !== 'client' && !drowned) this.bailOut(u);
+      if (!isAir(u.kind) && !isNaval(u.kind) && this.net !== 'client' && !drowned) this.survivors(u);
+      // (nobody gets out of a transport shot down in the air)
+      if (u.cargo?.length && this.net !== 'client' && !drowned && this.alt(u) < 3) this.bailOut(u);
     }
     if (u.sel) this.emit();
   }
@@ -4904,7 +5386,7 @@ export class IsoGame implements GameLike {
     const z = u.z + air;
     if (u.kind === 'dog') return this.sound(u.x, u.y, 'dog_yelp', 1, { rate: 0.95 + Math.random() * 0.1 }, z);
     if (isFoot(u.kind)) return this.sound(u.x, u.y, 'infantry_death', 1, { rate: 0.9 + Math.random() * 0.25 }, z);
-    if (u.kind === 'buggy' || u.kind === 'arty' || u.kind === 'heli') {
+    if (u.kind === 'buggy' || u.kind === 'arty' || isAir(u.kind)) {
       this.sound(u.x, u.y, 'explosion_small', 1, { rate: 0.85 }, z);
     } else {
       // tracked armor cooks off in a string of blasts
@@ -4919,7 +5401,7 @@ export class IsoGame implements GameLike {
   // further out, and knocks soldiers off their feet.
   private blast(x: number, y: number, rx: number, ry: number, R: number, dmg: number): void {
     for (const o of [...this.units]) {
-      if (o.kind === 'heli' || o.dead) continue;
+      if (isAir(o.kind) || o.dead) continue;
       const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
       const d = Math.hypot(Math.max(0, Math.abs(ox - x) - rx), Math.max(0, Math.abs(oy - y) - ry));
       if (d >= R) continue;
@@ -5011,17 +5493,31 @@ export class IsoGame implements GameLike {
       case 'dog':
       case 'cmdo':
       case 'flamer':
-        return [[this.footSprite(u), u.x, u.y, u.z - (this.swimming(u) ? SWIM_DROP : 0)]];
+        return [[this.footSprite(u), u.x, u.y, u.z + this.alt(u) - (this.swimming(u) ? SWIM_DROP : 0)]];
       case 'light':
       case 'heavy':
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
         return [
-          [(u.kind === 'light' ? art.lightTank : art.heavyTank)[di], u.x, u.y, u.z],
-          [(u.kind === 'light' ? art.lightTurret : art.heavyTurret)[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z],
+          [hull[di], u.x, u.y, u.z],
+          [tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2, u.y - Math.sin(u.a) * 1.2, u.z],
         ];
+      }
       case 'heli':
         return [[art.heli[di], u.x, u.y, u.z + HELI_ALT]];
+      case 'heron':
+      case 'jet':
+      case 'plane':
+        return [[art[u.kind][di], u.x, u.y, u.z + this.alt(u)]];
       case 'boat':
-        return [[art.boat[di], u.x, u.y, 0]];
+      case 'destroyer':
+      case 'cruiser':
+      case 'carrier':
+      case 'sub':
+        return [[art[u.kind][di], u.x, u.y, 0]];
+      case 'otter':
+        return [[art.otter[di], u.x, u.y, u.z]];
       case 'hauler':
         return [[this.haulerSprite(u, di), u.x, u.y, u.z]];
       default:
@@ -5230,9 +5726,17 @@ export class IsoGame implements GameLike {
 
     // aircraft shadows on the ground
     for (const u of this.units) {
-      if (u.kind !== 'heli' || !seen(u.x, u.y)) continue;
-      const spr = this.art[u.f].heli[dirIndex(u.a, DIRS)];
-      const [sx, sy] = toScreen(u.x + 4, u.y - 2, u.z);
+      if (!this.aloft(u) || !seen(u.x, u.y)) continue;
+      if (!isAir(u.kind)) {
+        // a paratrooper's shadow, a dot that grows as he comes down
+        const [sx, sy] = toScreen(u.x, u.y, u.z);
+        c.fillStyle = `rgba(0,0,0,${0.35 - 0.2 * (u.fly ?? 0)})`;
+        c.fillRect(Math.round(sx) - 1, Math.round(sy), 2, 1);
+        continue;
+      }
+      const spr = this.art[u.f][u.kind as 'heli' | 'heron' | 'jet' | 'plane'][dirIndex(u.a, DIRS)];
+      const k = this.alt(u) / HELI_ALT;
+      const [sx, sy] = toScreen(u.x + 4 * k, u.y - 2 * k, u.z);
       if (spr.shadow) drawSprite(c, spr.shadow, spr, sx, sy);
     }
 
@@ -5280,7 +5784,7 @@ export class IsoGame implements GameLike {
       const spr = this.oreArt.lumps[n.v][oreSize(n)];
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
-    for (const u of this.units) if (u.kind !== 'heli' && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
+    for (const u of this.units) if (!this.aloft(u) && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
 
@@ -5292,7 +5796,7 @@ export class IsoGame implements GameLike {
     }
 
     this.fx.drawBelow(c);
-    for (const u of this.units) if (u.kind === 'heli' && seen(u.x, u.y, u.z)) this.drawUnit(u);
+    for (const u of this.units) if (this.aloft(u) && seen(u.x, u.y, u.z)) this.drawUnit(u);
     this.fx.drawAbove(c);
 
     for (const s of this.sparks) {
@@ -5604,12 +6108,14 @@ export class IsoGame implements GameLike {
       case 'cmdo':
       case 'flamer':
         if (this.swimming(u)) this.drawSwimmer(u);
+        else if (u.fly !== undefined) this.drawChute(u);
         else this.blit(this.footSprite(u), u.x, u.y, u.z);
         break;
       case 'light':
-      case 'heavy': {
-        const hull = u.kind === 'light' ? art.lightTank : art.heavyTank;
-        const tur = u.kind === 'light' ? art.lightTurret : art.heavyTurret;
+      case 'heavy':
+      case 'scorch':
+      case 'lumen': {
+        const [hull, tur] = tankParts(art, u.kind);
         this.blit(hull[di], u.x, u.y, u.z);
         this.blit(tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2 - Math.cos(u.turret) * kick, u.y - Math.sin(u.a) * 1.2 - Math.sin(u.turret) * kick, u.z);
         break;
@@ -5637,6 +6143,84 @@ export class IsoGame implements GameLike {
         c.fillStyle = 'rgba(28,28,28,0.45)';
         const s = Math.floor(u.anim * 20) % 2 ? 2 : 1;
         c.fillRect(Math.round(tx), Math.round(ty) - s, 1, s * 2 + 1);
+        break;
+      }
+      case 'heron': {
+        const z = u.z + this.alt(u) + Math.sin(u.anim * 2) * 1.2 * (u.fly ?? 1);
+        this.blit(art.heron[di], u.x, u.y, z);
+        // two rotors turning opposite ways, fore and aft
+        const c = this.ctx;
+        c.fillStyle = 'rgba(28,28,28,0.5)';
+        for (const [ru, rz, sg] of [[6, 8.4, 1], [-8.6, 10.2, -1]]) {
+          const hx = u.x + Math.cos(u.a) * ru;
+          const hy = u.y + Math.sin(u.a) * ru;
+          for (let b = 0; b < 3; b++) {
+            const ang = sg * u.anim * 24 + (b * Math.PI * 2) / 3;
+            const [x0, y0] = toScreen(hx, hy, z + rz);
+            const [x1, y1] = toScreen(hx + Math.cos(ang) * 9.5, hy + Math.sin(ang) * 9.5, z + rz);
+            pxLine(c, x0, y0, x1, y1);
+          }
+        }
+        break;
+      }
+      case 'jet': {
+        // a little wobble in the hover, none on its pad; a hot exhaust
+        const z = u.z + this.alt(u) + Math.sin(u.anim * 2.6) * 0.6 * (u.fly ?? 0);
+        this.blit(art.jet[di], u.x, u.y, z);
+        if ((u.fly ?? 0) > 0.02) {
+          const [ex, ey] = toScreen(u.x - Math.cos(u.a) * 9.6, u.y - Math.sin(u.a) * 9.6, z + 3.4);
+          const c = this.ctx;
+          c.fillStyle = Math.floor(u.anim * 30) % 2 ? '#ffd65a' : '#ff8a3a';
+          c.fillRect(Math.round(ex * 2) / 2, Math.round(ey * 2) / 2, 1, 0.5);
+        }
+        break;
+      }
+      case 'plane': {
+        const z = u.z + this.alt(u);
+        this.blit(art.plane[di], u.x, u.y, z);
+        // four props turning
+        const c = this.ctx;
+        c.fillStyle = 'rgba(28,28,28,0.45)';
+        const ca = Math.cos(u.a);
+        const sa = Math.sin(u.a);
+        for (const side of [-12.5, -6.5, 6.5, 12.5]) {
+          const [px, py] = toScreen(u.x + ca * 2.4 - sa * side, u.y + sa * 2.4 + ca * side, z + 3.2);
+          const s = Math.floor(u.anim * 24 + side) % 2 ? 2 : 1;
+          c.fillRect(Math.round(px) - s, Math.round(py), s * 2 + 1, 1);
+        }
+        break;
+      }
+      case 'destroyer':
+      case 'cruiser':
+      case 'carrier': {
+        // big ships roll slowly
+        this.blit(art[u.kind][di], u.x, u.y, Math.sin(u.anim * 1.4) * 0.4);
+        break;
+      }
+      case 'sub': {
+        // under the water only a dark shape shows (to its own side), with a
+        // ripple at the periscope; up, it rides low with the sea washing over it
+        const c = this.ctx;
+        const down = this.under(u);
+        c.globalAlpha = down ? 0.35 : 1;
+        this.blit(art.sub[di], u.x, u.y, down ? -2.4 : -0.6);
+        c.globalAlpha = 1;
+        if (down && u.moving && Math.floor(u.anim * 4) % 2) {
+          const [px, py] = toScreen(u.x + Math.cos(u.a) * 2.6, u.y + Math.sin(u.a) * 2.6, 0);
+          c.fillStyle = 'rgba(230,245,250,0.7)';
+          c.fillRect(Math.round(px), Math.round(py), 1, 0.5);
+        }
+        break;
+      }
+      case 'otter': {
+        // a hovercraft bobs on its cushion, on land or water, fans whirring
+        const z = u.z + Math.sin(u.anim * 5) * 0.25;
+        this.blit(art.otter[di], u.x, u.y, z);
+        if (u.moving && Math.random() < 0.3) {
+          const wet = this.terrain.k(u.x, u.y) === K.Water;
+          const [px, py] = toScreen(u.x - Math.cos(u.a) * 11 + (Math.random() - 0.5) * 6, u.y - Math.sin(u.a) * 11 + (Math.random() - 0.5) * 6, u.z + 1);
+          this.particles.push({ x: px, y: py, vx: (Math.random() - 0.5) * 6, vy: -3, life: 0, max: 0.6, kind: wet ? 'wake' : 'dust', size: 1 });
+        }
         break;
       }
       case 'boat': {
@@ -5672,7 +6256,7 @@ export class IsoGame implements GameLike {
     // in a group: its number just left of the health bar
     if (u.f === this.me && u.grp !== undefined) groupDigit(c, hx - 5, y - ry - 6, u.grp + 1);
     // a transport's seats under its health bar: lit for each soldier riding in it
-    if (u.kind === 'apc' && u.f === this.me) {
+    if (TRANSPORT.has(u.kind) && u.f === this.me) {
       const n = u.cargo?.length ?? 0;
       const px = Math.round(x - (CARGO * 3 - 1) / 2);
       const py = y - ry - 9;
@@ -5775,8 +6359,21 @@ export class IsoGame implements GameLike {
         this.blit(this.art[b.f].towerGun[dirIndex(b.gun, DIRS)], b.x + p.x, b.y + p.y, p.z);
         break;
       }
+      case 'aa': {
+        const p = b.art.fx[0];
+        this.blit(this.art[b.f].aaGun[dirIndex(b.gun, DIRS)], b.x + p.x, b.y + p.y, p.z);
+        break;
+      }
     }
   }
+}
+
+// The ground a building of this kind standing at (x, y) takes up: its
+// footprint and a margin round it (none for a wall segment, which lines up
+// with the next).
+function padOf(kind: BuildingKind, art: { rx: number; ry: number }, x: number, y: number): Rect {
+  const m = kind === 'wall' ? 0 : 3;
+  return { x: x - art.rx - m, y: y - art.ry - m, w: art.rx * 2 + m * 2, h: art.ry * 2 + m * 2 };
 }
 
 function angDiff(a: number, b: number): number {

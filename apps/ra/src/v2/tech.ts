@@ -29,10 +29,16 @@ export const TECH: Tech[] = [
   { id: 'refinery', name: 'Ore refinery', tab: 'base', cost: 1500, needs: ['power'], building: 'refinery', blurb: 'Turns ore into credits.' },
   { id: 'silo', name: 'Ore silo', tab: 'base', cost: 150, needs: ['refinery'], building: 'silo', blurb: 'Stores more credits.' },
   { id: 'factory', name: 'Vehicle works', tab: 'base', cost: 2000, needs: ['refinery'], building: 'factory', blurb: 'Builds vehicles.' },
-  { id: 'radar', name: 'Radar mast', tab: 'base', cost: 1000, needs: ['refinery'], building: 'radar', blurb: 'Opens up air power and artillery.' },
+  { id: 'radar', name: 'Air command', tab: 'base', cost: 1000, needs: ['refinery'], building: 'radar', blurb: 'Radar, four landing pads for Swift jets, and paratroopers every few minutes. Opens up artillery.' },
   { id: 'helipad', name: 'Helipad', tab: 'base', cost: 1000, needs: ['radar'], building: 'helipad', blurb: 'Builds copters.' },
   { id: 'lab', name: 'Tech lab', tab: 'base', cost: 1500, needs: ['factory', 'radar'], building: 'lab', blurb: 'Opens up the heaviest arms.' },
+  { id: 'depot', name: 'Service depot', tab: 'base', cost: 800, needs: ['factory'], building: 'depot', blurb: 'Repairs vehicles parked on its pad, for credits.' },
+  { id: 'navy', name: 'Naval yard', tab: 'base', cost: 1000, needs: ['power'], building: 'navy', blurb: 'Built out on open water next to your base. Makes ships, and mends ships parked in its slip, for credits.' },
+  { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; Cancel stops.' },
+  { id: 'uplink', name: 'Satellite uplink', tab: 'base', cost: 1500, needs: ['radar', 'lab'], building: 'uplink', blurb: 'Reveals the whole map once it is up.' },
   { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
+  { id: 'aa', name: 'Skyguard battery', tab: 'defense', cost: 1000, needs: ['barracks', 'radar'], building: 'aa', blurb: 'Missile launcher that shoots down aircraft. Can\'t hit anything on the ground.' },
+  { id: 'prism', name: 'Lumen tower', tab: 'defense', cost: 1500, needs: ['radar', 'lab'], building: 'prism', blurb: 'Long-range light beam. Lumen towers near one that fires beam their light into it and add to the blow.' },
 
   { id: 'inf', name: 'G.I.', tab: 'inf', cost: 100, needs: ['barracks'], unit: 'inf', from: 'barracks', blurb: 'Cheap foot soldier. Deploys behind sandbags to hold ground.' },
   { id: 'dog', name: 'Attack dog', tab: 'inf', cost: 200, needs: ['barracks'], unit: 'dog', from: 'barracks', blurb: 'Fast and sharp-eyed. Kills a soldier in one bite, but cannot hurt vehicles or buildings.' },
@@ -46,9 +52,18 @@ export const TECH: Tech[] = [
   { id: 'apc', name: 'Mule APC', tab: 'veh', cost: 600, needs: ['factory', 'barracks'], unit: 'apc', from: 'factory', blurb: 'Armored carrier for five foot soldiers.' },
   { id: 'light', name: 'Lancer tank', tab: 'veh', cost: 700, needs: ['factory'], unit: 'light', from: 'factory', blurb: 'The workhorse tank.' },
   { id: 'hauler', name: 'Ore hauler', tab: 'veh', cost: 1400, needs: ['factory', 'refinery'], unit: 'hauler', from: 'factory', blurb: 'Gathers ore for the refinery.' },
+  { id: 'scorch', name: 'Scorch tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'scorch', from: 'factory', blurb: 'Twin flame projectors: burns soldiers and buildings at short range.' },
   { id: 'arty', name: 'Howler artillery', tab: 'veh', cost: 800, needs: ['factory', 'radar'], unit: 'arty', from: 'factory', blurb: 'Long-range gun.' },
   { id: 'heavy', name: 'Bastion tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'heavy', from: 'factory', blurb: 'Heavy twin-gun tank.' },
+  { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },
   { id: 'heli', name: 'Kestrel copter', tab: 'veh', cost: 1200, needs: ['helipad', 'lab'], unit: 'heli', from: 'helipad', blurb: 'Rocket copter.' },
+  { id: 'heron', name: 'Heron transport', tab: 'veh', cost: 1200, needs: ['helipad', 'radar'], unit: 'heron', from: 'helipad', blurb: 'Twin-rotor copter that carries five soldiers over anything. Lands on open ground to let them out. Has a door gun.' },
+  { id: 'jet', name: 'Swift jet', tab: 'veh', cost: 1200, needs: ['radar'], unit: 'jet', from: 'radar', blurb: 'Jump jet with three pairs of missiles. Flies home to its Air command landing pad to rearm. One per pad.' },
+  { id: 'otter', name: 'Otter hovercraft', tab: 'veh', cost: 900, needs: ['navy'], unit: 'otter', from: 'navy', blurb: 'Unarmed hovercraft that carries five soldiers over land and water. Comes ashore to let them out.' },
+  { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
+  { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water until it fires torpedoes, which only hit ships. Only Destroyers can hit it submerged.' },
+  { id: 'cruiser', name: 'Sentinel cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Shoots down aircraft from far off with banks of missiles. Can\'t hit anything on the ground or water.' },
+  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Launches drones at targets on land or sea from very long range.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Foundry.' },
 ];
 
@@ -73,6 +88,11 @@ export const POWER: Partial<Record<BuildingKind, number>> = {
   helipad: -10,
   lab: -75,
   tower: -20,
+  prism: -75,
+  aa: -50,
+  depot: -25,
+  uplink: -100,
+  navy: -20,
 };
 
 // Credits you can hold: a little of your own, more per refinery and silo.

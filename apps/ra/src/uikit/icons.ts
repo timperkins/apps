@@ -6,7 +6,7 @@
 import { LINE, type IconName as AnyIcon } from '../line-icons';
 
 // the icons the kit shows (the game has a couple more)
-export type IconName = Exclude<AnyIcon, 'star' | 'pack' | 'unload'>;
+export type IconName = Exclude<AnyIcon, 'star' | 'pack' | 'unload' | 'chute'>;
 
 const R = (x: number, y: number, w: number, h: number) => `<rect x="${x}" y="${y}" width="${w}" height="${h}"/>`;
 
