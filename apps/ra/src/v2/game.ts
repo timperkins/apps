@@ -9,7 +9,7 @@ import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
 import { buildingArt as workerBuilding, constructionArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
-import { Subject, cameoFit, composeCameo, trimBox } from './cameo';
+import { cameoUrl, trimBox } from './cameo';
 import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
@@ -1151,37 +1151,10 @@ export class IsoGame implements GameLike {
     return TECH.filter((t) => t.needs.every((k) => have.has(k)));
   }
 
-  // The build menu's picture of something: a close-up of it in its own
-  // landscape (src/v2/cameo.ts). Those take a moment to draw, so they are made
-  // one at a time in the background, with a plain picture of the thing
-  // standing in until each is ready.
+  // The build menu's picture of something: a photo-like render of it, the
+  // same for every faction (src/v2/cameo.ts).
   private icon(t: Tech): string {
-    const url = this.icons.get(`cameo:${t.id}`);
-    if (url) return url;
-    if (!this.cameoQueue.includes(t)) {
-      this.cameoQueue.push(t);
-      this.pumpCameos();
-    }
-    return this.quickIcon(t);
-  }
-
-  private cameoQueue: Tech[] = [];
-  private cameoTimer = 0;
-  private pumpCameos(): void {
-    if (this.cameoTimer || !this.cameoQueue.length) return;
-    this.cameoTimer = window.setTimeout(() => {
-      this.cameoTimer = 0;
-      const t = this.cameoQueue.shift();
-      if (t && !this.icons.has(`cameo:${t.id}`)) {
-        try {
-          this.icons.set(`cameo:${t.id}`, this.makeCameo(t).toDataURL());
-        } catch (e) {
-          console.warn('build picture failed', t.id, e);
-          this.icons.set(`cameo:${t.id}`, this.quickIcon(t));
-        }
-      }
-      this.pumpCameos();
-    }, 40);
+    return cameoUrl(t.id);
   }
 
   // The model of a building or unit drawn at `scale` times its size on the map.
@@ -1191,20 +1164,6 @@ export class IsoGame implements GameLike {
     const unit = !TECH.some((x) => x.building === id) && !isFoot(id);
     const angle = unit ? (dirIndex(Math.PI * 0.62, DIRS) / DIRS) * Math.PI * 2 : 0;
     return renderStack(m.shape, { ...m.o, angle, scale });
-  }
-
-  private makeCameo(t: Tech): HTMLCanvasElement {
-    const id = t.building ?? (t.unit as string);
-    const kind: Subject['kind'] = t.building ? 'building' : isFoot(id) ? 'portrait' : id === 'heli' ? 'air' : 'vehicle';
-    // measure it at its own size, then draw it again at the size it is shown
-    const base = this.subjectSprite(id, 1)!;
-    const [, , tw, th] = trimBox(base.img);
-    const scale = cameoFit(kind, tw, th);
-    const spr = this.subjectSprite(id, scale)!;
-    const D = ART * scale;
-    const subject: Subject = { img: spr.img, kind };
-    if (id === 'heli') subject.rotor = [spr.cx * D, (spr.cy - 8.6) * D];
-    return composeCameo(t.id, subject, { trees: this.trees, rocks: this.rocks, bushes: this.bushes, ore: this.oreArt });
   }
 
   // A small picture of a tab's kind of thing for its button: a Power plant,
@@ -1222,56 +1181,6 @@ export class IsoGame implements GameLike {
     cv.width = w;
     cv.height = h;
     cv.getContext('2d')!.drawImage(spr.img, x, y, w, h, 0, 0, w, h);
-    url = cv.toDataURL();
-    this.icons.set(key, url);
-    return url;
-  }
-
-  // A plain picture of the building or unit, trimmed to its edges.
-  private quickIcon(t: Tech): string {
-    const key = `quick:${t.id}`;
-    let url = this.icons.get(key);
-    if (url) return url;
-    const layers: { img: HTMLCanvasElement; x: number; y: number }[] = [];
-    if (t.building) layers.push({ img: this.buildingArt(t.building, this.me).spr.img, x: 0, y: 0 });
-    else for (const s of this.unitLayers(t.unit as Kind)) layers.push({ img: s.img, x: -s.cx * ART, y: -s.cy * ART });
-    // put the layers together at the art's own size
-    const x0 = Math.min(...layers.map((l) => l.x));
-    const y0 = Math.min(...layers.map((l) => l.y));
-    const x1 = Math.max(...layers.map((l) => l.x + l.img.width));
-    const y1 = Math.max(...layers.map((l) => l.y + l.img.height));
-    const raw = document.createElement('canvas');
-    raw.width = Math.max(1, x1 - x0);
-    raw.height = Math.max(1, y1 - y0);
-    const rc = raw.getContext('2d', { willReadFrequently: true })!;
-    for (const l of layers) rc.drawImage(l.img, l.x - x0, l.y - y0);
-    // trim the empty edges
-    const px = rc.getImageData(0, 0, raw.width, raw.height).data;
-    let l = raw.width, r = -1, top = raw.height, bot = -1;
-    for (let y = 0; y < raw.height; y++)
-      for (let x = 0; x < raw.width; x++)
-        if (px[(y * raw.width + x) * 4 + 3] > 24) {
-          if (x < l) l = x;
-          if (x > r) r = x;
-          if (y < top) top = y;
-          if (y > bot) bot = y;
-        }
-    if (r < l) {
-      l = top = 0;
-      r = raw.width - 1;
-      bot = raw.height - 1;
-    }
-    const tw = r - l + 1;
-    const th = bot - top + 1;
-    const fit = Math.min(220 / tw, 150 / th);
-    const k = fit >= 1 ? Math.floor(fit) : fit;
-    const cv = document.createElement('canvas');
-    cv.width = Math.max(1, Math.round(tw * k));
-    cv.height = Math.max(1, Math.round(th * k));
-    const c = cv.getContext('2d')!;
-    c.imageSmoothingEnabled = k < 1;
-    c.imageSmoothingQuality = 'high';
-    c.drawImage(raw, l, top, tw, th, 0, 0, cv.width, cv.height);
     url = cv.toDataURL();
     this.icons.set(key, url);
     return url;
