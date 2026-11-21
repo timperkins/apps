@@ -4,6 +4,7 @@
 import { FACTIONS } from '../v1/sprites';
 import { BuildingKind, V2FactionArt, factionSet, makeBuilding, makeConstruction, makeDish, makeFactionArt } from './sprites';
 import { StackSprite } from './stack';
+import { bridgeFromKey } from './bridge-art';
 
 export type Job = { id: number; key: string; d: number };
 export interface SprMsg {
@@ -32,6 +33,13 @@ self.onmessage = (e: MessageEvent<Job>) => {
   try {
     // b:<kind>:<faction> is a building, bc:<kind>:<faction> the stages of it
     // going up, fa:... a unit's heading, dish the radar's
+    if (key.startsWith('br:')) {
+      // a bridge: its main picture and its near rail (which may be missing)
+      const [back, front] = bridgeFromKey(key);
+      const packed = [pack(back), ...(front ? [pack(front)] : [])];
+      (self as unknown as Worker).postMessage({ id, key, d, stages: packed.map((p) => p[0]) } satisfies Reply, packed.flatMap((p) => p[1]));
+      return;
+    }
     if (key.startsWith('bc:')) {
       const [, kind, f] = key.split(':');
       const packed = makeConstruction(kind as BuildingKind, FACTIONS[Number(f)]).map(pack);

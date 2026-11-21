@@ -168,6 +168,8 @@ export interface GameLike {
   // How far to shake the view this frame (map pixels), when something big
   // has just been destroyed near the middle of it.
   shake?(): [number, number];
+  // Ctrl or Cmd is held: a click fires on what is under it (a bridge) instead.
+  force?: boolean;
   // Where your home base is now, for the Home button.
   homeBase?(): { x: number; y: number };
 }

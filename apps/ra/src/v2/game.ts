@@ -13,10 +13,14 @@ import { cameoUrl, tabIconUrl } from './cameo';
 import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
+import { riversFor } from './rivers';
+import { planBridges } from './bridges';
+import { BRIDGE_Z, BridgeStyle, DECK_W, HUT_R, bridgeFromKey, bridgeKey, bridgeLen, deckTop, makeHut } from './bridge-art';
+import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, isFoot, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, isFoot, Fx, HELI_ALT, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -199,8 +203,43 @@ interface Unit {
   exitT?: number;
 }
 
-type Target = Unit | Building;
-const isB = (t: Target): t is Building => 'pad' in t;
+// A bridge (bridges.ts, bridge-art.ts): nobody's, but anyone can fire on it
+// (Ctrl or Cmd and click), and an Engineer at one of its huts mends it.
+// Destroyed it stays, broken, until it is mended. Its id is the same on
+// every screen (BRIDGE_ID + its place in the list).
+interface Bridge {
+  id: number;
+  kind: 'bridge';
+  f: number; // -1: nobody's
+  style: BridgeStyle;
+  axis: 0 | 1;
+  x: number; // its middle, on the first copy of the map
+  y: number;
+  n: number;
+  L: number;
+  art: { rx: number; ry: number }; // half its size each way (as a building's)
+  pad: Rect;
+  hp: number;
+  huts: [number, number][];
+  dead?: boolean; // broken
+  hitT?: number;
+  flashT?: number;
+  aimT?: number;
+  fellT?: number; // when it fell (for the splash and the smoke)
+}
+const BRIDGE_ID = 1_000_000;
+const BRIDGE_DEF: Record<BridgeStyle, { strength: number; armor: Armor }> = {
+  dirt: { strength: 500, armor: 'concrete' },
+  timber: { strength: 450, armor: 'wood' },
+  stone: { strength: 1400, armor: 'concrete' },
+  steel: { strength: 1100, armor: 'heavy' },
+};
+
+type Target = Unit | Building | Bridge;
+const isB = (t: Target): t is Building | Bridge => 'pad' in t;
+const isBridge = (t: Target): t is Bridge => t.kind === 'bridge';
+// A building's or a bridge's strength and armor.
+const structDef = (t: Building | Bridge) => (isBridge(t) ? BRIDGE_DEF[t.style] : BUILDING_DEF[t.kind]);
 // Milliseconds a frame may spend finding ways round cliffs and water.
 const ROUTE_MS = 6;
 // How far a unit chases whoever hit it before it gives up and goes back.
@@ -336,6 +375,10 @@ function artReady(set: StackSprite[], d: number): boolean {
 // The key of the BLOCK_CELL square of the map that (x, y) is in.
 const blockKey = (x: number, y: number) => (Math.floor(x / BLOCK_CELL) + 32768) * 65536 + (Math.floor(y / BLOCK_CELL) + 32768);
 
+// The key of the DECK_CELL square of the map that (x, y) is in (see refreshDecks).
+const DECK_CELL = 3;
+const deckKey = (x: number, y: number) => (Math.floor(x / DECK_CELL) + 32768) * 65536 + (Math.floor(y / DECK_CELL) + 32768);
+
 // Which click burst an order marker plays.
 function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean }): BurstKind {
   return m.foe ? 'attack' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
@@ -445,6 +488,7 @@ export interface Snapshot {
   ore?: number[]; // x, y, amount, variant, ...
   told: [number, string, string][];
   out: number[];
+  br?: number[]; // each bridge's health, in order (0: broken)
 }
 const r1 = (v: number) => Math.round(v * 10) / 10;
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -512,6 +556,10 @@ export class IsoGame implements GameLike {
   clutter = makeClutter();
   dish = makeDish();
   oreArt: OreArt = makeOre();
+  hutArt = makeHut();
+  bridges: Bridge[] = [];
+  // Ctrl or Cmd held (main.ts keeps it up to date): a click fires on a bridge
+  force = false;
   ore: OreNode[] = [];
   private oreGrid = new Map<number, OreNode[]>();
   time = 0;
@@ -730,6 +778,12 @@ export class IsoGame implements GameLike {
       const s = dirSet(arr);
       if (s) for (let d = 0; d < s.dirs; d++) if (!s.ready(d)) void prefetch(s.key, d);
     }
+    // the bridges near you now, the rest in the background
+    for (const b of this.bridges) {
+      const now = near(b.x, b.y);
+      const p = this.bridgeReady(b, false, now);
+      if (now) waits.push(p);
+    }
     // a hauler only ever tips its bed on a refinery's pad, facing out
     for (const arr of mine.haulerDump) {
       const s = dirSet(arr);
@@ -749,6 +803,10 @@ export class IsoGame implements GameLike {
     const rand = rng(this.seed * 7919 + 29);
     const def = mapDef(this.mapId);
     const T = (this.terrain = new IsoTerrain(w, h, this.seed, def));
+    const rivers = riversFor(def, this.seed, w, h);
+    T.setRivers(rivers);
+    this.bridges = [];
+    this.decks.clear();
     this.units = [];
     this.buildings = [];
     this.props = [];
@@ -838,7 +896,19 @@ export class IsoGame implements GameLike {
       }
     };
     if (sites.length > 1) for (let i = 0; i < (sites.length > 2 ? sites.length : 1); i++) road(sites[i], sites[(i + 1) % sites.length]);
-    T.setRoads(lines);
+    // bridges where the roads cross the rivers, and a few more
+    const planned = planBridges(T, rivers, lines, rand);
+    T.setRoads(planned.roads);
+    planned.bridges.forEach((p, i) => {
+      const L = bridgeLen(p.n);
+      const [x, y] = T.fold(p.x, p.y);
+      const rx = p.axis === 0 ? L / 2 : DECK_W;
+      const ry = p.axis === 0 ? DECK_W : L / 2;
+      const huts = p.huts.map(([hx, hy]): [number, number] => [x + hx - p.x, y + hy - p.y]);
+      for (const [hx, hy] of huts) T.markPad({ x: hx - HUT_R - 1, y: hy - HUT_R - 1, w: HUT_R * 2 + 2, h: HUT_R * 2 + 2 });
+      this.bridges.push({ id: BRIDGE_ID + i, kind: 'bridge', f: -1, style: p.style, axis: p.axis, x, y, n: p.n, L, art: { rx, ry }, pad: { x: x - rx, y: y - ry, w: rx * 2, h: ry * 2 }, hp: 1, huts });
+    });
+    this.refreshDecks();
 
     const pads: Rect[] = [];
     const place = (kinds: BuildingKind[], f: number, sx: number, sy: number) => {
@@ -2177,6 +2247,12 @@ export class IsoGame implements GameLike {
         // keep clear of building pads, more so in front of them where a tree would hide them
         if (kAt(wx + 5, wy) === K.Pad || kAt(wx - 9, wy) === K.Pad || kAt(wx, wy + 5) === K.Pad || kAt(wx, wy - 9) === K.Pad || kAt(wx - 8, wy - 8) === K.Pad || kAt(wx - 4, wy + 4) === K.Pad || kAt(wx + 4, wy - 4) === K.Pad) continue;
         if (this.oreNear(wx, wy, 12).length) continue;
+        // and clear of the bridges and their ends
+        if (this.bridges.some((b) => {
+          const [bx, by] = this.nearPoint(wx, wy, b.x, b.y);
+          return Math.abs(wx - bx) < b.art.rx + 12 && Math.abs(wy - by) < b.art.ry + 12;
+        }))
+          continue;
         const forest = (this.forestF.at(jx, jy) - 0.6) * 2.4;
         const roll = hash2(Math.floor(wx), Math.floor(wy), forestSeed + 1);
         let spr: StackSprite | null = null;
@@ -2195,7 +2271,8 @@ export class IsoGame implements GameLike {
     const w = this.terrain.k(x, y) === K.Water;
     if (u.kind === 'boat') return w;
     if (u.kind === 'heli') return !w;
-    if (w || this.terrain.cliff(x, y)) return false;
+    // (over the water on a bridge's deck)
+    if ((w && !this.deckAt(x, y)) || this.terrain.cliff(x, y)) return false;
     if (!this.blocks.size) return true;
     // (its body clear of them too, not just its middle; but the building it
     // is coming out of, or a hauler backing onto its refinery's pad, lets it in)
@@ -2268,6 +2345,8 @@ export class IsoGame implements GameLike {
 
   private groundZ(u: Unit): number {
     if (u.kind === 'boat') return 0;
+    const dz = this.deckZ(u.x, u.y);
+    if (dz >= 0) return dz;
     return this.terrain.elev(u.x, u.y);
   }
 
@@ -2308,6 +2387,145 @@ export class IsoGame implements GameLike {
     const py = u.home[1] + Math.sin(th) * r;
     if (!this.okAt(u, px, py) || this.buildings.some((b) => Math.abs(b.x - px) < b.art.rx + 1 && Math.abs(b.y - py) < b.art.ry + 1)) return;
     u.pace = [px, py];
+  }
+
+  // ---------- Bridges ----------
+
+  // Which bridge's deck covers each DECK_CELL square of the first copy of the
+  // map (standing ones only): there the water underneath doesn't stop anyone.
+  private decks = new Map<number, Bridge>();
+  private refreshDecks(): void {
+    this.decks.clear();
+    for (const b of this.bridges) {
+      if (b.dead) continue;
+      for (let s = -b.L / 2 + 1; s < b.L / 2; s += DECK_CELL / 2)
+        for (let c = -(DECK_W - 1.5); c <= DECK_W - 1.5; c += DECK_CELL / 2) {
+          const [x, y] = this.fold(b.x + (b.axis === 0 ? s : c), b.y + (b.axis === 0 ? c : s));
+          this.decks.set(deckKey(x, y), b);
+        }
+    }
+    // the way-finding grid's open cells have changed
+    this.landCells.clear();
+  }
+
+  // The standing bridge whose deck is at ground point (x, y), if any.
+  private deckAt(x: number, y: number): Bridge | undefined {
+    if (!this.decks.size) return undefined;
+    const [fx, fy] = this.fold(x, y);
+    return this.decks.get(deckKey(fx, fy));
+  }
+
+  // How high the deck is at (x, y) (it ramps up off each bank), or -1 off it.
+  private deckZ(x: number, y: number): number {
+    const b = this.deckAt(x, y);
+    if (!b) return -1;
+    const [bx, by] = this.nearPoint(x, y, b.x, b.y);
+    const s = (b.axis === 0 ? x - bx : y - by) + b.L / 2;
+    return deckTop(b.style, s, b.L);
+  }
+
+  // A bridge's pictures, intact or broken: drawn by a worker (or here, when
+  // there are none), and null until they are ready.
+  private bridgeSprites = new Map<string, [StackSprite, StackSprite | null] | null>();
+  private bridgeWait = new Map<string, Promise<unknown>>();
+  private bridgeSeen = new Map<string, number>(); // when each was first wanted on screen
+  private bridgePics(b: Bridge, broken = !!b.dead): [StackSprite, StackSprite | null] | null {
+    const key = bridgeKey(b.style, b.axis, b.n, broken);
+    const had = this.bridgeSprites.get(key);
+    if (had) return had;
+    void this.bridgeReady(b, broken, true);
+    // in view and still not back from the workers (they're busy): draw it here
+    const t = (this.bridgeSeen.get(key) ?? this.bridgeSeen.set(key, performance.now()).get(key))!;
+    if (performance.now() - t > 1500) this.bridgeSprites.set(key, bridgeFromKey(key));
+    return this.bridgeSprites.get(key) ?? null;
+  }
+  // Have a bridge's pictures drawn ahead of time; resolves when they're ready.
+  private bridgeReady(b: Bridge, broken: boolean, now: boolean): Promise<unknown> {
+    const key = bridgeKey(b.style, b.axis, b.n, broken);
+    if (this.bridgeSprites.get(key)) return Promise.resolve();
+    let p = this.bridgeWait.get(key);
+    if (!p) {
+      if (!pooled()) {
+        this.bridgeSprites.set(key, bridgeFromKey(key));
+        return Promise.resolve();
+      }
+      p = workerBridge(key, now).then((pics) => {
+        if (!this.bridgeSprites.get(key)) this.bridgeSprites.set(key, pics ?? bridgeFromKey(key));
+      });
+      this.bridgeWait.set(key, p);
+    }
+    return p;
+  }
+
+  // The bridge under screen point (x, y), on any copy of the map.
+  private bridgeAt(x: number, y: number): Bridge | null {
+    for (const b of this.bridges) {
+      const [bsx, bsy] = toScreen(b.x, b.y);
+      const lx = Math.round((x - bsx) / this.w) * this.w;
+      const ly = Math.round((y - bsy) / this.h) * this.h;
+      if (this.shroud && !this.shroud.seen(x, y)) continue;
+      for (let z = 0; z <= BRIDGE_Z[b.style] + 3; z += 1.5) {
+        const [wx, wy] = toWorld(x - lx, y - ly, z);
+        if (Math.abs(wx - b.x) <= b.art.rx && Math.abs(wy - b.y) <= b.art.ry) return b;
+      }
+    }
+    return null;
+  }
+
+  // A bridge comes down: it blows apart along its length into the water,
+  // and anything on it goes down with it.
+  // (quiet: just broken, as when a saved game is taken up again)
+  private breakBridge(b: Bridge, quiet = false): void {
+    if (b.dead) return;
+    b.dead = true;
+    b.hp = 0;
+    if (quiet) {
+      this.refreshDecks();
+      return;
+    }
+    b.fellT = this.time;
+    for (const u of [...this.units]) if (u.kind !== 'heli' && !u.exit && this.deckAt(u.x, u.y) === b && this.net !== 'client') this.kill(u, true);
+    this.refreshDecks();
+    const ex = b.axis === 0 ? 1 : 0;
+    const ey = 1 - ex;
+    const span = b.L / 2 - 10;
+    for (let i = 0; i < 9; i++) {
+      const t = (Math.random() * 2 - 1) * span;
+      const c = (Math.random() * 2 - 1) * DECK_W * 0.7;
+      const [sx, sy] = toScreen(b.x + ex * t + ey * c, b.y + ey * t + ex * c, BRIDGE_Z[b.style] + Math.random() * 3);
+      this.fx.boom(sx, sy, 5 + Math.random() * 5, i * 0.07);
+      this.fx.dust(sx, sy + 4, 6);
+    }
+    // spray where it hits the water
+    for (let i = 0; i < 16; i++) {
+      const t = (Math.random() * 2 - 1) * span;
+      const [sx, sy] = toScreen(b.x + ex * t, b.y + ey * t, 0);
+      this.particles.push({ x: sx + (Math.random() - 0.5) * 10, y: sy, vx: (Math.random() - 0.5) * 8, vy: -10 - Math.random() * 10, life: 0, max: 1 + Math.random(), kind: 'wake', size: 1 });
+    }
+    const [cx, cy] = toScreen(b.x, b.y, 4);
+    this.quake(cx, cy, 2.2);
+    this.sound(b.x, b.y, 'explosion_large', 1, { rate: 0.85 }, 4);
+    this.sound(b.x, b.y, 'building_collapse', 1, { delay: 0.25 }, 2);
+    this.notice('Bridge destroyed');
+    this.mapVersion++;
+  }
+
+  // A bridge mended (by an Engineer at one of its huts): it stands again, whole.
+  private mendBridge(b: Bridge): void {
+    const was = b.dead;
+    b.dead = false;
+    b.hp = 1;
+    b.fellT = undefined;
+    if (was) this.refreshDecks();
+    const ex = b.axis === 0 ? 1 : 0;
+    const ey = 1 - ex;
+    for (let i = 0; i < 8; i++) {
+      const t = (i / 7 - 0.5) * (b.L - 12);
+      const [sx, sy] = toScreen(b.x + ex * t, b.y + ey * t, BRIDGE_Z[b.style]);
+      this.fx.dust(sx, sy, 5);
+    }
+    this.sound(b.x, b.y, 'build_rise', 1, { rate: 1.1 }, 3);
+    this.mapVersion++;
   }
 
   // ---------- Input (screen coordinates) ----------
@@ -2353,8 +2571,15 @@ export class IsoGame implements GameLike {
 
   // What a tap at (x, y) would do, for the mouse cursor. Follows click().
   cursorAt(x: number, y: number): CursorAt {
+    this.hoverBridge = null;
     if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
     const mine = this.mine();
+    // Ctrl or Cmd held over a bridge: fire on it
+    const fb = this.forceBridge(x, y);
+    if (fb) {
+      this.hoverBridge = fb;
+      return 'attack';
+    }
     if (this.rideAt(x, y)) return 'enter';
     const hit = this.unitAt(x, y);
     // over a picked unit of yours that can deploy (a Foundry vehicle that
@@ -2384,6 +2609,17 @@ export class IsoGame implements GameLike {
 
   private mine(): Unit[] {
     return this.units.filter((u) => u.sel && u.f === this.me);
+  }
+
+  // The bridge (standing) under screen point (x, y) that your units would
+  // fire on, with Ctrl or Cmd held.
+  private hoverBridge: Bridge | null = null;
+  private forceBridge(x: number, y: number): Bridge | null {
+    if (!this.force) return null;
+    const sel = this.mine().filter((u) => !u.deploy);
+    if (!sel.length) return null;
+    const b = this.bridgeAt(x, y);
+    return b && !b.dead && sel.some((u) => this.canHit(WEAPON[u.kind], b)) ? b : null;
   }
 
   // Whether act('deploy') (F, Space or the deploy cursor) would do anything
@@ -2425,6 +2661,7 @@ export class IsoGame implements GameLike {
   // You command your own side. Enemy units and buildings can be tapped to
   // look at them (their health), but not ordered about.
   click(x: number, y: number, add: boolean): void {
+    if (this.forceBridge(x, y)) return this.order(x, y);
     // soldiers selected and a tap on a transport of yours: they get in
     const ride = add ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
@@ -2514,16 +2751,18 @@ export class IsoGame implements GameLike {
   order(x: number, y: number, shortest = false): void {
     let sel = this.units.filter((u) => u.sel && !u.deploy && u.f === this.me);
     if (!sel.length) return;
-    const ride = shortest ? null : this.rideAt(x, y);
-    if (ride) return this.boardOrder(ride);
+    // Ctrl or Cmd and a click on a bridge: everyone who can, fires on it
+    const fb = shortest ? null : this.forceBridge(x, y);
     // onto an enemy: everyone who can, attacks it
-    const foe = shortest ? null : this.enemyAt(x, y);
+    const foe = fb ?? (shortest ? null : this.enemyAt(x, y));
+    const ride = shortest || fb ? null : this.rideAt(x, y);
+    if (ride) return this.boardOrder(ride);
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
       this.command({ c: 'attack', u: sel.map((u) => u.id), t: foe.id });
       foe.aimT = this.time;
       if (this.moveMarks) {
         const [mx, my] = this.fold(foe.x, foe.y);
-        this.markers.push({ x: mx, y: my, z: isB(foe) ? 0 : foe.z, t: 0, foe: true });
+        this.markers.push({ x: mx, y: my, z: isBridge(foe) ? BRIDGE_Z[foe.style] : isB(foe) ? 0 : foe.z, t: 0, foe: true });
       }
       ui('order_confirm', 0.8);
       this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
@@ -3158,6 +3397,16 @@ export class IsoGame implements GameLike {
     }
     this.updateRuins(dt);
     this.updateFires(dt);
+    // a bridge badly hit smokes, and one just fallen smokes where it was
+    for (const b of this.bridges) {
+      const fell = b.dead && b.fellT !== undefined && this.time - b.fellT < 14;
+      if (!fell && (b.dead || b.hp >= 0.5)) continue;
+      const ex = b.axis === 0 ? 1 : 0;
+      for (const t of [-0.22, 0.2]) {
+        const [sx, sy] = toScreen(b.x + ex * t * b.L, b.y + (1 - ex) * t * b.L, BRIDGE_Z[b.style] + 1);
+        this.fx.damageSmoke(fell ? 0.05 : b.hp, sx, sy, dt);
+      }
+    }
     this.fx.step(dt);
     this.loopSounds();
 
@@ -3252,7 +3501,7 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'attack': {
-        const t: Target | undefined = this.units.find((o) => o.id === cmd.t) ?? this.buildings.find((o) => o.id === cmd.t);
+        const t: Target | undefined = this.units.find((o) => o.id === cmd.t) ?? this.buildings.find((o) => o.id === cmd.t) ?? this.bridges.find((o) => o.id === cmd.t);
         if (!t || t.f === f || t.dead) break;
         this.attack(cmd.u.map(unit).filter((u): u is Unit => !!u && !u.deploy), t);
         break;
@@ -3427,7 +3676,7 @@ export class IsoGame implements GameLike {
         [...e.queue].map(([tab, q]): [string, string[]] => [tab, q.map((t) => t.id)]),
       ];
     });
-    const snap: Snapshot = { t: r2(this.time), u, b, gone: this.gone, eco, told: this.told, out: [...this.out] };
+    const snap: Snapshot = { t: r2(this.time), u, b, gone: this.gone, eco, told: this.told, out: [...this.out], br: this.bridges.map((o) => Math.round(o.hp * 1000) / 1000) };
     // the ore, about once a second (it changes slowly)
     if (this.time - this.oreSentT > 1 || !this.oreSentT) {
       this.oreSentT = this.time || 1e-6;
@@ -3471,7 +3720,18 @@ export class IsoGame implements GameLike {
       }
     }
     this.gone = [];
-    const target = (id: number): Target | undefined => (id ? units.get(id) ?? bldgs.get(id) : undefined);
+    // the bridges: broken, mended, or hit
+    s.br?.forEach((hp, i) => {
+      const br = this.bridges[i];
+      if (!br) return;
+      if (hp <= 0) this.breakBridge(br, this.time < 1);
+      else {
+        if (br.dead) this.mendBridge(br);
+        br.hp = hp;
+      }
+    });
+    const bridge = (id: number) => (id >= BRIDGE_ID ? this.bridges[id - BRIDGE_ID] : undefined);
+    const target = (id: number): Target | undefined => (id ? units.get(id) ?? bldgs.get(id) ?? bridge(id) : undefined);
     // buildings first (units can be aiming at them)
     const seenB = new Set<number>();
     for (const e of s.b) {
@@ -4119,7 +4379,7 @@ export class IsoGame implements GameLike {
     }
     if (t.dead) return;
     if (!isB(t)) this.shove(t, knockback(w, t.kind), s.x1 - s.x0, s.y1 - s.y0);
-    const arm = isB(t) ? BUILDING_DEF[t.kind].armor : UNIT_DEF[t.kind].armor;
+    const arm = isB(t) ? structDef(t).armor : UNIT_DEF[t.kind].armor;
     this.damage(t, w.dmg * VERSUS[w.wh][arm], src);
   }
 
@@ -4171,14 +4431,20 @@ export class IsoGame implements GameLike {
       if (t.f === this.me && src && isB(t)) announce('base_under_attack');
       return;
     }
-    const max = isB(t) ? BUILDING_DEF[t.kind].strength : UNIT_DEF[t.kind].strength;
+    const max = isB(t) ? structDef(t).strength : UNIT_DEF[t.kind].strength;
     t.hp = Math.max(0, t.hp - amt / max);
     t.hitT = this.time;
     // a flash of light where a big round lands (buildings shrug off bullets)
     if (!isB(t) || amt >= 12) t.flashT = this.time;
     if (t.hp <= 0) {
-      if (isB(t)) this.raze(t);
+      if (isBridge(t)) this.breakBridge(t);
+      else if (isB(t)) this.raze(t);
       else this.kill(t);
+      return;
+    }
+    if (isBridge(t)) {
+      // (its broken look, ready for when it falls)
+      if (t.hp < 0.6) void this.bridgeReady(t, true, false);
       return;
     }
     if (t.f === this.me && src) {
@@ -4309,7 +4575,8 @@ export class IsoGame implements GameLike {
 
   // A unit is destroyed: it blows up and flies to pieces, which land round
   // where it was and fade away (a copter's rain down from the sky).
-  private kill(u: Unit): void {
+  // (drowned: it went down with a bridge, so nobody gets out)
+  private kill(u: Unit, drowned = false): void {
     u.dead = true;
     this.units.splice(this.units.indexOf(u), 1);
     this.gone.push([u.id, GONE_KILL]);
@@ -4335,8 +4602,8 @@ export class IsoGame implements GameLike {
       // the wreck burns where it stood (a copter falls and burns too; a boat sinks)
       if (u.kind !== 'boat' && this.terrain.k(u.x, u.y) !== K.Water) this.burn(u.x, u.y, u.z, r);
       // and a few of the crew crawl out, hurt
-      if (u.kind !== 'heli' && u.kind !== 'boat' && this.net !== 'client') this.survivors(u);
-      if (u.cargo?.length && this.net !== 'client') this.bailOut(u);
+      if (u.kind !== 'heli' && u.kind !== 'boat' && this.net !== 'client' && !drowned) this.survivors(u);
+      if (u.cargo?.length && this.net !== 'client' && !drowned) this.bailOut(u);
     }
     if (u.sel) this.emit();
   }
@@ -4684,6 +4951,28 @@ export class IsoGame implements GameLike {
         if (t) for (const p of t.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
       }
     for (const p of this.props) if (seen(p.x, p.y, p.z)) items.push({ k: p.x + p.y + p.z * 2, draw: () => this.blit(p.spr, p.x, p.y, p.z) });
+    // bridges: the deck and the far side before anything on it, the near rail after
+    for (const b of this.bridges) {
+      const ex = b.axis === 0 ? b.L / 2 : 0;
+      const ey = b.axis === 0 ? 0 : b.L / 2;
+      if (!seen(b.x - ex, b.y - ey) && !seen(b.x + ex, b.y + ey) && !seen(b.x, b.y)) continue;
+      // the huts' lamps blink while the bridge wants mending
+      const blink = b.hp < 1 && Math.floor(this.time * 2.5) % 2 === 0;
+      for (const [hx, hy] of b.huts) items.push({ k: hx + hy, draw: () => this.blit(this.hutArt[blink ? 1 : 0], hx, hy, 0) });
+      const pics = this.bridgePics(b);
+      if (!pics) continue;
+      const [back, front] = pics;
+      const k = b.x + b.y;
+      const r = b.art.rx + b.art.ry;
+      const draw = (spr: StackSprite) => () => {
+        this.lit = !b.dead && this.justHit(b) ? 0.55 : 0;
+        this.aimed = this.aimFlash(b);
+        this.blit(spr, b.x, b.y, 0);
+        this.lit = this.aimed = 0;
+      };
+      items.push({ k: k - r, draw: draw(back) });
+      if (front) items.push({ k: k + r, draw: draw(front) });
+    }
     for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
     for (const r of this.ruins) if (seen(r.x, r.y, 4)) items.push({ k: r.x + r.y + Math.min(r.states.ruin.rx, r.states.ruin.ry), draw: () => this.drawRuin(r) });
     for (const [i, f] of this.fires.entries()) if (seen(f.x, f.y, f.z)) items.push({ k: f.x + f.y + f.z * 2, draw: () => this.drawFire(f, i) });
@@ -4740,6 +5029,12 @@ export class IsoGame implements GameLike {
         healthBar(c, Math.round(x - bw / 2), y - ry - 4, bw, u.hp);
       }
     for (const b of this.buildings) if (!b.sel && this.time - (b.hitT ?? -9) < 2.5 && seen(b.x, b.y, 10)) this.buildingBar(b);
+    for (const b of this.bridges)
+      if (!b.dead && (this.time - (b.hitT ?? -9) < 2.5 || b === this.hoverBridge) && seen(b.x, b.y, 4)) {
+        const [sx, sy] = toScreen(b.x, b.y, BRIDGE_Z[b.style] + 9);
+        const bw = Math.max(16, Math.round(b.L * 0.5));
+        healthBar(c, Math.round(sx - bw / 2), Math.round(sy), bw, b.hp);
+      }
 
     // the building being placed: a see-through ghost over its footprint
     const gh = this.ghost;
