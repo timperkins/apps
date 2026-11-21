@@ -1070,9 +1070,9 @@ body.sheet-open #selBar {
 }
 
 #build .tabs button img {
+  /* the icons are drawn at twice this size (public/tabs/), shrunk smoothly */
   max-width: 34px;
   max-height: 28px;
-  image-rendering: pixelated;
   filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.45));
   pointer-events: none;
 }
