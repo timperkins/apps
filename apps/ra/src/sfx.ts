@@ -41,7 +41,10 @@ export type Sfx =
   | 'ui_error'
   | 'order_confirm'
   | 'ui_ready'
-  | 'whoosh_space';
+  | 'whoosh_space'
+  | 'flame_burst'
+  | 'dog_attack'
+  | 'dog_yelp';
 
 // (There was an always-on wind loop, ambient_land, too. Most of it was a
 // thin hiss around 10 kHz that played under everything as a high whine, so
@@ -49,6 +52,9 @@ export type Sfx =
 export type Loop = 'tracks_loop' | 'engine_loop' | 'rotor_loop' | 'boat_loop' | 'footsteps' | 'ore_dig' | 'surf_loop' | 'fire_loop';
 
 const SHOTS: Sfx[] = [
+  'flame_burst',
+  'dog_attack',
+  'dog_yelp',
   'rifle_shot',
   'cannon_shot',
   'howitzer_shot',
@@ -79,6 +85,9 @@ const LOOPS: Loop[] = ['tracks_loop', 'engine_loop', 'rotor_loop', 'boat_loop', 
 // same peak; this balances them against each other and the voices.
 const GAIN: Partial<Record<Sfx | Loop, number>> = {
   rifle_shot: 0.35,
+  flame_burst: 0.45,
+  dog_attack: 0.5,
+  dog_yelp: 0.45,
   cannon_shot: 0.5,
   howitzer_shot: 0.6,
   rocket_launch: 0.45,

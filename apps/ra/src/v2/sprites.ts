@@ -585,7 +585,7 @@ function heli(f: Faction): Shape {
 // as it is tall. frame: 0 standing at the ready, 1 and 2 the two strides of a
 // walk, 3 a grenadier's throw (an engineer's wrench swung up), 4 kneeling
 // (a G.I. dug in).
-export type Trooper = 'gi' | 'rocket' | 'gren' | 'eng';
+export type Trooper = 'gi' | 'rocket' | 'gren' | 'eng' | 'cmdo' | 'flame';
 type P3 = [number, number, number];
 
 // Distance from (u, v, z) to the segment a-b.
@@ -606,19 +606,23 @@ const BRASS = hex('#c9a24a');
 const GRENADE = hex('#4d5a36');
 const HARDHAT = hex('#d8b23a');
 const HAZARD = hex('#e0b52e');
+const FUEL = hex('#b8452f');
+const SUIT = hex('#b8a27a');
+const MASK = hex('#4a4a44');
 
 // Where each kind holds its weapon (standing; kneeling drops it KNEEL_DROP),
 // for the muzzle flash in combat.ts.
 export const KNEEL_DROP = 1.8;
 const BAG_H = 3.45;
-export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4], eng: [1.2, -1, 9.6] };
+export const TROOPER_MUZZLE: Record<Trooper, P3> = { gi: [3.9, 0.65, 7.1], rocket: [3.7, 1.05, 8.5], gren: [-0.3, 1.3, 10.4], eng: [1.2, -1, 9.6], cmdo: [3.3, 0.85, 7.45], flame: [3.6, 0.6, 6.75] };
 
 // bags: how far up the sandbags round a dug-in G.I. have been stacked (0 to 1).
 export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Shape {
-  const body = kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : kind === 'eng' ? mix(f.main, KHAKI, 0.6) : f.main;
+  const body =
+    kind === 'rocket' ? mix(f.main, OLIVE, 0.4) : kind === 'gren' ? mix(f.main, KHAKI, 0.5) : kind === 'eng' ? mix(f.main, KHAKI, 0.6) : kind === 'cmdo' ? mix(f.main, BLACK, 0.55) : kind === 'flame' ? mix(f.main, SUIT, 0.55) : f.main;
   const bodyD = shade(body, -0.2);
   const trouser = shade(f.dark, -0.08);
-  const helmet = kind === 'rocket' ? OLIVE_D : kind === 'eng' ? HARDHAT : shade(f.dark, 0.05);
+  const helmet = kind === 'rocket' ? OLIVE_D : kind === 'eng' ? HARDHAT : kind === 'cmdo' ? hex('#2a2622') : kind === 'flame' ? hex('#7a7a6e') : shade(f.dark, 0.05);
   const vest = mix(OLIVE_D, body, 0.25);
   const kneel = frame === 4;
   const dz = kneel ? -KNEEL_DROP : 0;
@@ -645,6 +649,14 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
   } else if (kind === 'rocket') {
     armR = [sh(1), [0.2, 1.55, 6.9], [0.9, 1.05, 7.7]];
     armL = [sh(-1), [0.9, -1.2, 7], [1.9, 0.6, 7.9]];
+  } else if (kind === 'cmdo') {
+    // a pistol held out in each hand
+    armR = [sh(1), [0.9, 1.4, 7.05 + dz], [2.1, 0.85, 7.35 + dz]];
+    armL = [sh(-1), [0.9, -1.4, 7.05 + dz], [2.1, -0.85, 7.35 + dz]];
+  } else if (kind === 'flame') {
+    // both hands on the flame wand, held low and forward
+    armR = [sh(1), [0.3, 1.45, 6.5], [1.3, 0.75, 6.35]];
+    armL = [sh(-1), [0.9, -1.15, 6.8], [2.3, 0.45, 6.55]];
   } else if (kind === 'eng') {
     // the right hand carries the toolbox; the left swings, or holds the
     // wrench up to work (frame 3)
@@ -696,6 +708,18 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       }
       if (inBox(u, v, z, 0.6, 1.4, y - 0.95, y - 0.45, h - 0.2, h + 0.45)) return u > 1.2 ? GLASS : GUN_D; // the sight
       if (segD(u, v, z, [0.9, y, h - 0.4], [0.8, y, h - 1]) < 0.25) return GUN_D; // grip
+    } else if (kind === 'cmdo') {
+      // a pistol in each fist, barrel forward
+      for (const arm of [armL, armR]) {
+        const [hu, hv, hz] = arm[2];
+        if (segD(u, v, z, [hu + 0.1, hv, hz + 0.05], [hu + 1.15, hv, hz + 0.1]) < 0.27) return u > hu + 0.95 ? BLACK : z > hz + 0.15 ? GUN_L : GUN_D;
+        if (segD(u, v, z, [hu, hv, hz], [hu - 0.1, hv, hz - 0.5]) < 0.22) return GUN_D;
+      }
+    } else if (kind === 'flame') {
+      // the wand: a steel tube with a nozzle and a pilot flame, its hose back to the tanks
+      if (segD(u, v, z, [0.7, 0.6, 6.2], [3.35, 0.6, 6.7]) < 0.27) return u > 3 ? BLACK : u < 1.2 ? GUN_D : mod(Math.floor(u * 2), 3) === 0 ? GUN : METAL_D;
+      if ((u - 3.55) ** 2 + (v - 0.6) ** 2 + (z - 6.75) ** 2 < 0.07) return hex('#ffb347');
+      if (segD(u, v, z, [0.7, 0.6, 6.1], [-1.1, 0.7, 5.6]) < 0.18) return BLACK;
     } else if (kind === 'eng') {
       // a striped steel toolbox in the right hand, its handle in the fist
       const bu = armR[2][0];
@@ -727,6 +751,11 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
         const r = Math.hypot(u - 0.05, v);
         if (z < hz + 0.25 && r < 1.2) return shade(helmet, -0.18);
         if (r * r + ((z - hz - 0.15) / 0.85) ** 2 < 1.0) return Math.abs(v) < 0.12 ? shade(helmet, 0.22) : z > hz + 0.7 ? shade(helmet, 0.14) : helmet;
+      } else if (kind === 'cmdo') {
+        // a beret, pulled down to one side
+        const r2 = (u + 0.05) ** 2 + v * v;
+        if (r2 < 1.05 && z < hz + 0.55 - v * 0.12) return z > hz + 0.35 - v * 0.12 ? shade(helmet, 0.12) : helmet;
+        if (r2 < 1.05 && z < hz + 0.75 && Math.abs(u + 0.1) < 0.3 && Math.abs(v + 0.5) < 0.3) return hex('#c9a24a'); // its badge
       } else if (kind === 'gren') {
         if (z < hz + 0.8 && (u - 0.05) ** 2 + v * v < 0.95) return z > hz + 0.55 ? shade(helmet, 0.12) : helmet;
         if (z < hz + 0.3 && u > 0.5 && u < 1.25 && av < 0.6) return shade(helmet, -0.2); // its peak
@@ -736,8 +765,14 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
         if (r2 < 1.12) return z > hz + 0.75 ? shade(helmet, 0.14) : Math.abs(z - hz - 0.35) < 0.12 ? shade(helmet, -0.15) : helmet;
       }
     }
+    if (kind === 'flame' && hr2 < 0.8 && u > 0.15) {
+      // a gas mask: goggles and a filter on the chin
+      if (u > 0.45 && z > hz - 0.05 && z < hz + 0.35 && av > 0.12 && av < 0.5) return GLASS_D;
+      return MASK;
+    }
+    if (kind === 'flame' && (u - 0.95) ** 2 + v * v + (z - hz + 0.45) ** 2 < 0.13) return GUN_D;
     if (hr2 < 0.74) {
-      if (u < -0.2) return kind === 'gren' || kind === 'eng' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
+      if (u < -0.2) return kind === 'gren' || kind === 'eng' || kind === 'cmdo' ? hex('#4a3322') : shade(helmet, -0.1); // back of the head
       if (u > 0.45 && z > hz && z < hz + 0.3 && av > 0.15 && av < 0.45) return BLACK; // eyes
       return z < hz - 0.45 ? shade(SKIN, -0.12) : SKIN;
     }
@@ -749,6 +784,15 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     } else if (kind === 'gi') {
       if (inBox(u, v, z, -1.45, -0.6, -0.75, 0.75, 6.1 + dz, 8 + dz)) return z > 7.7 + dz ? shade(OLIVE, 0.12) : Math.abs(z - 7 - dz) < 0.15 ? OLIVE_D : OLIVE;
       if ((u + 1.05) ** 2 + (z - 8.3 - dz) ** 2 < 0.2 && av < 0.85) return SAND_BAG; // bedroll
+    } else if (kind === 'flame') {
+      // twin fuel tanks on the back, banded, with valves on top
+      for (const pv of [-0.55, 0.55]) {
+        const d2 = (u + 1.35) ** 2 + (v - pv) ** 2;
+        if (d2 < 0.3 && z > 4.9 && z < 8.7) return z > 8.3 ? GUN_D : Math.abs(z - 7.7) < 0.2 ? HAZ : d2 < 0.1 && u < -1.5 ? shade(FUEL, 0.15) : FUEL;
+      }
+      if (inBox(u, v, z, -1.3, -0.7, -0.9, 0.9, 5.4, 8)) return GUN_D; // the frame
+    } else if (kind === 'cmdo') {
+      if (inBox(u, v, z, -1.3, -0.6, -0.6, 0.6, 6.4, 7.8 + dz)) return shade(body, -0.1);
     } else if (kind === 'eng') {
       if (inBox(u, v, z, -1.35, -0.6, -0.7, 0.7, 6.2, 7.9)) return z > 7.6 ? shade(KHAKI, -0.05) : shade(KHAKI, -0.22); // a tool pack
     } else {
@@ -763,12 +807,16 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
       if (dd < 1) {
         if (zz < 5.5) return u > 0.5 && av < 0.25 ? BRASS : BLACK; // belt and buckle
         if (zz > 8.1) return bodyD; // collar
+        if (kind === 'cmdo' && u > 0 && (Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.22 || Math.abs(zz - (8 - (1.1 - v) * 0.7)) < 0.22)) {
+          // crossed bandoliers
+          return mod(Math.floor((v + u) * 2.5), 2) ? BRASS : BLACK;
+        }
         if (kind === 'gren' && u > 0 && Math.abs(zz - (8 - (v + 1.1) * 0.7)) < 0.3) {
           // a bandolier of grenades across the chest
           return mod(Math.floor(v * 2), 2) ? GRENADE : OLIVE_D;
         }
         if (Math.abs(av - 0.6) < 0.18 && zz > 6.6) return shade(OLIVE_D, -0.15); // shoulder straps
-        if (u > 0.3 && zz > 5.6 && zz < 6.7 && kind !== 'gren') return mod(Math.floor(v * 2 + 0.5), 2) ? shade(vest, 0.1) : vest; // pouches
+        if (u > 0.3 && zz > 5.6 && zz < 6.7 && kind !== 'gren' && kind !== 'flame') return mod(Math.floor(v * 2 + 0.5), 2) ? shade(vest, 0.1) : vest; // pouches
         if (zz > 7.6 && av > 0.8) return shade(body, 0.1); // the lit tops of the shoulders
         return g(body, u, v, z, 0.05);
       }
@@ -787,6 +835,51 @@ export function soldier(f: Faction, kind: Trooper, frame: number, bags = 0): Sha
     }
     return null;
   }
+}
+
+// An attack dog: a big shepherd in a collar of its side's color. frame: 0
+// standing, 1 and 2 the two beats of a gallop, 3 lunging, jaws open.
+const FUR = hex('#8a6438');
+const FUR_D = hex('#2e241c');
+const FUR_L = hex('#b58c5a');
+function dog(f: Faction, frame: number): Shape {
+  const run = frame === 1 ? 1 : frame === 2 ? -1 : 0;
+  const lunge = frame === 3;
+  const lift = lunge ? 0.9 : Math.abs(run) * 0.3;
+  // legs: shoulder or hip, and paw
+  const legs: [P3, P3][] = [];
+  for (const side of [-1, 1]) {
+    const fr = lunge ? 1.4 : run * 0.9;
+    legs.push([[1.7, side * 0.55, 3.2 + lift], [1.7 + fr + (lunge ? 0.6 : 0), side * 0.55, lunge ? 1.6 : 0.35]]);
+    legs.push([[-1.8, side * 0.5, 3.3], [-1.8 - run * 0.9 - (lunge ? 0.5 : 0), side * 0.5, 0.35]]);
+  }
+  const hx = 3 + (lunge ? 0.5 : 0);
+  const hz = 5 + lift * 0.8;
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    // the head and muzzle, ears up; open jaws when it lunges
+    const hd = (u - hx) ** 2 + v * v * 1.3 + (z - hz) ** 2;
+    if (hd < 0.75) return u > hx + 0.45 && z > hz && av > 0.15 && av < 0.45 ? BLACK : z > hz + 0.4 ? FUR_D : FUR;
+    if (u > hx && u < hx + 1.5 && av < 0.4 && z > hz - 0.75 && z < hz - 0.05 + (u - hx) * -0.15) {
+      if (lunge && z > hz - 0.5 && z < hz - 0.3) return hex('#9a2a24'); // its mouth
+      return u > hx + 1.25 ? BLACK : z > hz - 0.3 ? FUR_D : FUR_L;
+    }
+    for (const side of [-1, 1]) if (Math.abs(v - side * 0.42) < 0.2 && Math.abs(u - (hx - 0.3)) < 0.3 - (z - hz - 0.6) * 0.3 && z > hz + 0.5 && z < hz + 1.4) return FUR_D;
+    // the collar, in its side's color
+    if (Math.abs(u - (hx - 0.9)) < 0.25 && av < 0.75 && Math.abs(z - (hz - 0.6)) < 0.75) return mod(Math.floor(v * 3), 3) === 0 ? STEEL : f.main;
+    // the neck
+    if (segD(u, v, z, [1.6, 0, 3.9 + lift * 0.5], [hx - 0.5, 0, hz - 0.4]) < 0.7) return z > hz - 0.6 ? FUR_D : FUR;
+    // the body: deep in the chest, a dark saddle over the back
+    const pitch = lunge ? 0.25 : 0;
+    const bz = 3.7 + u * pitch;
+    const e = (u / 2.6) ** 2 + (v / 0.95) ** 2 + ((z - bz) / (u > 0.6 ? 1.15 : 0.95)) ** 2;
+    if (e < 1) return z > bz + 0.45 ? FUR_D : z < bz - 0.6 ? FUR_L : FUR;
+    // the tail, up behind it
+    if (segD(u, v, z, [-2.4, 0, 4.1], [-3.5, 0, 4.9 + Math.abs(run) * 0.4]) < 0.28) return FUR_D;
+    // legs, dark at the paw
+    for (const [a, b] of legs) if (segD(u, v, z, a, b) < 0.36) return z < 0.8 ? FUR_D : av > 0.6 ? FUR : FUR_L;
+    return null;
+  };
 }
 
 // The Mobile Foundry: a long tracked carrier with a cab, a boxy works module
@@ -888,6 +981,9 @@ export interface V2FactionArt {
   rocket: StackSprite[][];
   gren: StackSprite[][]; // and a throw
   eng: StackSprite[][]; // and a wrench held up to work
+  cmdo: StackSprite[][];
+  flamer: StackSprite[][];
+  dog: StackSprite[][]; // standing, two beats of a gallop, and a lunge
   infantryDug: StackSprite[][]; // [how far dug in][dir]: a G.I. kneeling in a ring of sandbags
 }
 
@@ -923,6 +1019,9 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     rocket: inf('rocket', 'rocket', [0, 1, 2]),
     gren: inf('gren', 'gren', [0, 1, 2, 3]),
     eng: inf('eng', 'eng', [0, 1, 2, 3]),
+    cmdo: inf('cmdo', 'cmdo', [0, 1, 2]),
+    flamer: inf('flame', 'flamer', [0, 1, 2]),
+    dog: [0, 1, 2, 3].map((fr) => renderDirs(dog(f, fr), 16, { r: 5, zmax: 8, step: 0.5, bakeShadow: true }, k(`dog:${fr}`))),
     infantryDug: [1, 2, 3].map((n, i) => renderDirs(soldier(f, 'gi', 4, n / 3), 16, { r: 4.8, zmax: 10, step: 0.5, bakeShadow: true }, k(`infantryDug:${i}`))),
   };
 }
