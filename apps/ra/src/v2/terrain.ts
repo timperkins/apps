@@ -11,6 +11,7 @@
 import { ART, RGB, WorldField, WrapNoise, fbm, hash2, hex, mix, rng, shade, vnoise, wrapNoise } from '../gfx';
 import { CH, Roads, canvasOf } from '../tiles';
 import { toScreen, toWorld } from './stack';
+import { type River, riverIndex } from './rivers';
 
 export const enum K {
   Grass = 0,
@@ -183,12 +184,57 @@ export class IsoTerrain {
   }
 
   private mask: MaskField | null = null;
+  // the rivers and the streams, as distances in their half-widths (see rivers.ts)
+  private bigR: Roads | null = null;
+  private smallR: Roads | null = null;
 
   // How wet the ground is at screen point (sx, sy): water above wThr, beach
   // just below it.
   wat(sx: number, sy: number): number {
-    return this.mask ? this.lakeF.at(sx, sy) + this.mask.at(sx, sy) : this.lakeF.at(sx, sy);
+    const v = this.mask ? this.lakeF.at(sx, sy) + this.mask.at(sx, sy) : this.lakeF.at(sx, sy);
+    if (!this.bigR) return v;
+    return Math.max(v, this.riverWet(sx, sy));
   }
+
+  // The rivers' share of the wetness at screen point (sx, sy): a channel
+  // deepest down its middle, with a sandy bank either side. (Their banks
+  // wobble a little, as the roads' edges do.)
+  private riverWet(sx: number, sy: number): number {
+    const [wx, wy] = toWorld(sx, sy, 0);
+    const jx = (this.jitX.at(sx, sy) - 0.5) * 12;
+    const jy = (this.jitY.at(sx, sy) - 0.5) * 12;
+    const range = this.wMax - this.wThr;
+    const beach = this.wThr - this.sandThr;
+    let v = -1e9;
+    const b = this.bigR!.dist(wx + jx, wy + jy);
+    if (b < 1.5) v = b < 1 ? this.wThr + (1 - b) * range * 0.32 + 1e-4 : this.wThr - ((b - 1) / 0.3) * beach;
+    const s = this.smallR!.dist(wx + jx * 0.6, wy + jy * 0.6);
+    if (s < 1.6) v = Math.max(v, s < 1 ? this.wThr + (1 - s) * range * 0.1 + 1e-4 : this.wThr - ((s - 1) / 0.45) * beach);
+    return v;
+  }
+
+  // Lay the map's rivers (rivers.ts) into the land.
+  setRivers(rivers: River[]): void {
+    this.rivers = rivers;
+    this.bigR = riverIndex(
+      rivers.filter((r) => r.big),
+      this.w,
+      this.h,
+      this.bx0,
+      this.by0,
+      this.bs,
+    );
+    this.smallR = riverIndex(
+      rivers.filter((r) => !r.big),
+      this.w,
+      this.h,
+      this.bx0,
+      this.by0,
+      this.bs,
+    );
+    this.cache.clear();
+  }
+  rivers: River[] = [];
 
   // Is screen point (sx, sy) under water?
   isWater(sx: number, sy: number): boolean {

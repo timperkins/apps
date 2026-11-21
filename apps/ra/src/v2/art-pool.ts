@@ -77,7 +77,7 @@ function onReply(w: Worker, r: Reply): void {
   busy.set(w, (busy.get(w) ?? 1) - 1);
   const job = waiting.get(r.id);
   waiting.delete(r.id);
-  if (r.spr && !r.key.startsWith('b:')) deliver(r.key, r.d, unpack(r.spr));
+  if (r.spr && !r.key.startsWith('b:') && !r.key.startsWith('br:')) deliver(r.key, r.d, unpack(r.spr));
   job?.resolve?.(r.err ? null : r);
   pump();
 }
@@ -170,6 +170,15 @@ export function constructionArt(kind: string, f: number, now = true): Promise<St
   return new Promise((res) => {
     if (!workers.length) return res(null);
     (now ? urgent : later).push({ key: `bc:${kind}:${f}`, d: 0, resolve: (r) => res(r?.stages ? r.stages.map(unpack) : null) });
+    pump();
+  });
+}
+
+/** A bridge's two pictures (bridge-art.ts), drawn by a worker (null if there are no workers). */
+export function bridgeArt(key: string, now = true): Promise<[StackSprite, StackSprite | null] | null> {
+  return new Promise((res) => {
+    if (!workers.length) return res(null);
+    (now ? urgent : later).push({ key, d: 0, resolve: (r) => res(r?.stages ? [unpack(r.stages[0]), r.stages[1] ? unpack(r.stages[1]) : null] : null) });
     pump();
   });
 }

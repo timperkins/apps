@@ -1536,6 +1536,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   if (!down || e.pointerId !== down.id) return;
   const p = toMap(e.clientX, e.clientY);
   const add = e.shiftKey || e.ctrlKey || e.metaKey;
+  game.force = e.ctrlKey || e.metaKey;
   if (!cancel && placingNow()) {
     if (!dragging) {
       moveGhost(p.x, p.y);
@@ -1583,7 +1584,11 @@ function clicked(): void {
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType === 'mouse') mouse = { x: e.clientX, y: e.clientY };
+  if (game) game.force = e.ctrlKey || e.metaKey;
 });
+// Ctrl or Cmd held: clicks fire on bridges (see GameLike.force)
+for (const ev of ['keydown', 'keyup'] as const) window.addEventListener(ev, (e) => game && (game.force = e.ctrlKey || e.metaKey));
+window.addEventListener('blur', () => game && (game.force = false));
 canvas.addEventListener('pointerleave', () => (mouse = null));
 function hoverNow(now: number): void {
   const m = mouse && toMap(mouse.x, mouse.y);

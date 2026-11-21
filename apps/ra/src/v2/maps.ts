@@ -5,6 +5,8 @@
 import { RGB, WrapNoise, hex, mix, rng, wrapNoise } from '../gfx';
 import { CH } from '../tiles';
 import { HIGH_CELL, LAKE_CELL } from './terrain';
+import { RIVER_HALF, STREAM_HALF, riverIndex, riversFor } from './rivers';
+import { toWorld } from './stack';
 
 // Shapes the land: added to the lake field at screen point (sx, sy), so higher
 // means wetter. N is seamless noise over the map.
@@ -561,8 +563,9 @@ const P_GRASS = hex('#3d5f2d');
 const P_HIGH = hex('#5f6b3a');
 
 // The land a seed would make on a coarse pw x ph grid: 0 water, 1 beach,
-// 2 grass, 3 plateau, with each water cell's depth (0..1).
-export function landGrid(def: MapDef, seed: number, w: number, h: number, pw: number, ph: number): { kind: Uint8Array; depth: Float32Array } {
+// 2 grass, 3 plateau, with each water cell's depth (0..1), and which water
+// cells are rivers (which bridges cross).
+export function landGrid(def: MapDef, seed: number, w: number, h: number, pw: number, ph: number): { kind: Uint8Array; depth: Float32Array; river: Uint8Array } {
   const N = wrapNoise(w, h);
   const n = pw * ph;
   const wet = new Float32Array(n);
@@ -585,7 +588,26 @@ export function landGrid(def: MapDef, seed: number, w: number, h: number, pw: nu
     if (v > wThr) depth[q] = Math.min(1, ((v - wThr) / Math.max(1e-6, wMax - wThr)) * 1.6);
     kind[q] = v > wThr ? 0 : v > sThr ? 1 : hi[q] > hThr ? 3 : 2;
   }
-  return { kind, depth };
+  const river = new Uint8Array(n);
+  const rivers = riversFor(def, seed, w, h);
+  // (thick enough to show at the grid's size)
+  const cellW = (w / pw) * 0.75;
+  for (const big of [true, false]) {
+    const rs = rivers.filter((r) => r.big === big);
+    if (!rs.length) continue;
+    const idx = riverIndex(rs, w, h, -64, -w / 2 - 64, w / 2 + h + 140);
+    const lim = Math.max(1, (cellW * 0.5) / (big ? RIVER_HALF : STREAM_HALF));
+    for (let j = 0; j < ph; j++)
+      for (let i = 0; i < pw; i++) {
+        const q = j * pw + i;
+        if (idx.dist(...toWorld(((i + 0.5) / pw) * w, ((j + 0.5) / ph) * h)) < lim) {
+          if (kind[q] !== 0) depth[q] = big ? 0.3 : 0.12;
+          kind[q] = 0;
+          river[q] = 1;
+        }
+      }
+  }
+  return { kind, depth, river };
 }
 
 // The colors players' start dots are drawn in on the previews (a start's

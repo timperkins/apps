@@ -26,7 +26,7 @@ function nearestLand(kind: Uint8Array, u: number, v: number): number {
 }
 
 // Which land cells can be driven to from cell q (the map wraps both ways).
-function reachable(kind: Uint8Array, q: number): Uint8Array {
+function reachable(kind: Uint8Array, q: number, river: Uint8Array): Uint8Array {
   const seen = new Uint8Array(PW * PH);
   const stack = [q];
   seen[q] = 1;
@@ -36,7 +36,7 @@ function reachable(kind: Uint8Array, q: number): Uint8Array {
     const j = (c - i) / PW;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = (((j + dj) % PH) + PH) % PH * PW + ((((i + di) % PW) + PW) % PW);
-      if (!seen[n] && kind[n] !== 0) {
+      if (!seen[n] && (kind[n] !== 0 || river[n])) {
         seen[n] = 1;
         stack.push(n);
       }
@@ -62,10 +62,11 @@ describe('maps', () => {
       const n = m.players[1];
       const { w: W, h: H } = worldOf(m, W0, H0);
       for (const seed of SEEDS) {
-        const { kind } = landGrid(m, seed, W, H, PW, PH);
+        // (rivers are crossed by bridges and fords)
+        const { kind, river } = landGrid(m, seed, W, H, PW, PH);
         const cells = startsFor(m, n).map(([u, v]) => nearestLand(kind, u, v));
         expect(cells.every((c) => c >= 0), `${m.id} seed ${seed}: a start with no land near`).toBe(true);
-        const seen = reachable(kind, cells[0]);
+        const seen = reachable(kind, cells[0], river);
         cells.forEach((c, i) => expect(seen[c], `${m.id} seed ${seed}: start ${i} cut off`).toBe(1));
         // and not far out at sea: the land is within a screen or so of the start
         startsFor(m, n).forEach(([u, v], i) => {
