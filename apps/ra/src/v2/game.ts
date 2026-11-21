@@ -166,6 +166,17 @@ const CARGO = 5;
 const TRANSPORT = new Set<Kind>(['apc', 'heron', 'otter']);
 const EXIT_S = 0.22;
 const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren', 'eng', 'dog', 'cmdo', 'flamer']);
+// The Otter hovercraft is bigger: OTTER_SEATS seats, and it takes vehicles
+// too, each one filling HAUL_SEATS of them (so 12 soldiers, or 3 vehicles).
+const OTTER_SEATS = 12;
+const HAUL_SEATS = 4;
+const HAULED = new Set<Kind>(['mcv', 'light', 'heavy', 'buggy', 'arty', 'scorch', 'lumen']);
+// The seats transport t has, the seats u takes up, and whether u can ride in t
+const seatsOf = (t: { kind: Kind }): number => (t.kind === 'otter' ? OTTER_SEATS : CARGO);
+const seatOf = (u: { kind: Kind }): number => (RIDERS.has(u.kind) ? 1 : HAUL_SEATS);
+const canRide = (u: { kind: Kind }, t: { kind: Kind }): boolean => RIDERS.has(u.kind) || (t.kind === 'otter' && HAULED.has(u.kind));
+const seatsUsed = (t: { cargo?: { kind: Kind }[] }): number => (t.cargo ?? []).reduce((n, p) => n + seatOf(p), 0);
+const hasRoom = (t: { kind: Kind; cargo?: { kind: Kind }[] }, u: { kind: Kind }): boolean => seatsUsed(t) + seatOf(u) <= seatsOf(t);
 
 interface Unit {
   id: number; // the same on every player's screen in a multiplayer game
@@ -281,6 +292,7 @@ interface Unit {
   idleAir?: number;
   unloading?: boolean;
   exitT?: number;
+  exitN?: number; // how many have come out so far this unload (fans them out)
 }
 
 // A bridge (bridges.ts, bridge-art.ts): nobody's, but anyone can fire on it
@@ -1261,11 +1273,21 @@ export class IsoGame implements GameLike {
       this.looked.set(u, [u.x, u.y]);
       sh.reveal(...this.spot(u), SIGHT[u.kind] * CELL);
     }
-    // a Satellite uplink, once up, shows you the whole world for good
-    if (!this.satUp && this.buildings.some((b) => b.f === this.me && b.kind === 'uplink' && b.rise >= 1 && !b.dead)) {
-      this.satUp = true;
-      sh.revealAll();
-      this.notice('Satellite uplink online: the whole map is revealed');
+    // a Satellite uplink shows you the whole world while it stands; lose
+    // the last one and the shroud comes back over what you can't see now
+    const sat = this.buildings.some((b) => b.f === this.me && b.kind === 'uplink' && b.rise >= 1 && !b.dead);
+    if (sat !== this.satUp) {
+      this.satUp = sat;
+      if (sat) {
+        sh.revealAll();
+        this.notice('Satellite uplink online: the whole map is revealed');
+      } else {
+        sh.hideAgain();
+        this.looked = new WeakMap();
+        this.lookedB = new WeakSet();
+        this.notice('Satellite uplink lost: the map goes dark');
+        return this.lookAround();
+      }
     }
     for (const b of this.buildings) {
       if (b.f !== this.me || this.lookedB.has(b)) continue;
@@ -1665,7 +1687,7 @@ export class IsoGame implements GameLike {
     // countdown stops while the power is short
     if (have.has('radar') && !e.lowPower && e.paraT > 0 && (e.paraT -= dt) <= 0) {
       e.paraT = 0;
-      this.tell(f, 'Paratroopers ready: pick your Air command to call them in');
+      this.tell(f, 'Paratroopers ready: pick your Air command to call them in', 'para_ready');
     }
     let paid = false;
     for (const j of [...e.jobs.values()]) {
@@ -2217,7 +2239,8 @@ export class IsoGame implements GameLike {
     const loaded = this.loaded();
     if (loaded.length) {
       const n = loaded.reduce((s, u) => s + (u.cargo?.length ?? 0), 0);
-      acts.push({ id: 'unload', label: 'Unload', icon: 'unload', title: `Let ${n === 1 ? 'the soldier' : `all ${n} soldiers`} out (F or Space)` });
+      const who = loaded.some((u) => u.cargo?.some((p) => !RIDERS.has(p.kind))) ? (n === 1 ? 'the vehicle' : `all ${n}`) : n === 1 ? 'the soldier' : `all ${n} soldiers`;
+      acts.push({ id: 'unload', label: 'Unload', icon: 'unload', title: `Let ${who} out (F or Space)` });
     }
     const gis = this.selected().filter((u) => u.kind === 'inf' && u.f === this.me);
     if (gis.length)
@@ -2946,13 +2969,13 @@ export class IsoGame implements GameLike {
   private rideAt(x: number, y: number): Unit | null {
     const hit = this.unitAt(x, y);
     const t = hit?.u;
-    if (!t || t.f !== this.me || !TRANSPORT.has(t.kind) || (t.cargo?.length ?? 0) >= CARGO) return null;
-    return this.mine().some((u) => RIDERS.has(u.kind)) ? t : null;
+    if (!t || t.f !== this.me || !TRANSPORT.has(t.kind)) return null;
+    return this.mine().some((u) => u !== t && canRide(u, t) && hasRoom(t, u)) ? t : null;
   }
 
   // Send the soldiers you have selected to get into transport t.
   private boardOrder(t: Unit): void {
-    const go = this.mine().filter((u) => RIDERS.has(u.kind));
+    const go = this.mine().filter((u) => u !== t && canRide(u, t));
     this.command({ c: 'board', u: go.map((u) => u.id), t: t.id });
     t.aimT = this.time;
     if (this.moveMarks) {
@@ -3876,7 +3899,7 @@ export class IsoGame implements GameLike {
         if (!t || !TRANSPORT.has(t.kind)) break;
         for (const id of cmd.u) {
           const u = unit(id);
-          if (!u || !RIDERS.has(u.kind)) continue;
+          if (!u || u === t || !canRide(u, t)) continue;
           u.board = t.id;
           u.boardTry = 0;
           u.dug = false;
@@ -3937,6 +3960,7 @@ export class IsoGame implements GameLike {
           }
           u.unloading = true;
           u.exitT = 0;
+          u.exitN = -1;
           // it stops to let them out
           u.moving = false;
           u.tx = u.x;
@@ -5245,7 +5269,7 @@ export class IsoGame implements GameLike {
   // is close (or gives up if the transport is gone or full, or it can't get there).
   private boarding(u: Unit): void {
     const t = this.units.find((o) => o.id === u.board && !o.dead);
-    if (!t || t.f !== u.f || (t.cargo?.length ?? 0) >= CARGO || t.unloading) {
+    if (!t || t.f !== u.f || !hasRoom(t, u) || t.unloading) {
       u.board = undefined;
       if (u.moving) {
         u.moving = false;
@@ -5255,7 +5279,8 @@ export class IsoGame implements GameLike {
       return;
     }
     const [tx, ty] = this.nearPoint(u.x, u.y, t.x, t.y);
-    if (Math.hypot(tx - u.x, ty - u.y) < UNIT[t.kind].r + 4) return this.embark(u, t);
+    const reach = UNIT[t.kind].r + 4 + (RIDERS.has(u.kind) ? 0 : UNIT[u.kind].r);
+    if (Math.hypot(tx - u.x, ty - u.y) < reach) return this.embark(u, t);
     if (!u.moving) {
       // it stopped short (a dead end): try again a few times, then give up
       if ((u.boardTry = (u.boardTry ?? 0) + 1) > 3) {
@@ -5297,9 +5322,11 @@ export class IsoGame implements GameLike {
       return;
     }
     if ((t.exitT = (t.exitT ?? 0) - dt) > 0) return;
-    t.exitT = EXIT_S;
     const s = cargo.shift()!;
-    const i = CARGO - 1 - cargo.length;
+    const big = !RIDERS.has(s.kind);
+    // a vehicle takes longer to drive off than a soldier takes to hop out
+    t.exitT = big ? EXIT_S * 4 : EXIT_S;
+    const i = (t.exitN = (t.exitN ?? -1) + 1);
     const back = t.a + Math.PI;
     // the ramp, or the middle of it if the back is up against water or a cliff
     let [rx, ry] = [t.x + Math.cos(back) * 9, t.y + Math.sin(back) * 9];
@@ -5309,7 +5336,7 @@ export class IsoGame implements GameLike {
     const fan = [0, -0.55, 0.55, -1.1, 1.1][i % 5];
     for (const k of [0, 0.9, -0.9, 1.8, -1.8, 2.7, -2.7, Math.PI]) {
       const a = back + fan + k;
-      const d = 18 + (i % 2) * 4;
+      const d = big ? 26 + UNIT[s.kind].r * 1.5 : 18 + (i % 2) * 4;
       const p: [number, number] = [t.x + Math.cos(a) * d, t.y + Math.sin(a) * d];
       if (this.okAt(s, ...p) && clearLine((x, y) => this.okAt(s, x, y), rx, ry, ...p)) {
         spot = p;
@@ -6257,12 +6284,13 @@ export class IsoGame implements GameLike {
     if (u.f === this.me && u.grp !== undefined) groupDigit(c, hx - 5, y - ry - 6, u.grp + 1);
     // a transport's seats under its health bar: lit for each soldier riding in it
     if (TRANSPORT.has(u.kind) && u.f === this.me) {
-      const n = u.cargo?.length ?? 0;
-      const px = Math.round(x - (CARGO * 3 - 1) / 2);
+      const n = seatsUsed(u);
+      const seats = seatsOf(u);
+      const px = Math.round(x - (seats * 3 - 1) / 2);
       const py = y - ry - 9;
       c.fillStyle = '#111';
-      c.fillRect(px - 1, py - 1, CARGO * 3 + 1, 4);
-      for (let i = 0; i < CARGO; i++) {
+      c.fillRect(px - 1, py - 1, seats * 3 + 1, 4);
+      for (let i = 0; i < seats; i++) {
         c.fillStyle = i < n ? '#ffd93b' : '#3a3d36';
         c.fillRect(px + i * 3, py, 2, 2);
       }

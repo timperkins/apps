@@ -4,6 +4,7 @@
 // has gathered against the nearest enemy base. It only acts through the same
 // orders a player gives (IsoGame.exec), one decision every couple of seconds.
 import type { BuildingKind } from './sprites';
+import { isAir, isNaval } from './combat';
 import { toScreen } from './stack';
 import { TECH } from './tech';
 import type { IsoGame } from './game';
@@ -30,24 +31,24 @@ const LEVELS: Record<BotLevel, Level> = {
     army: 4,
     firstAttack: 420,
     every: 180,
-    order: ['power', 'barracks', 'refinery', 'power', 'factory'],
-    units: ['inf', 'inf', 'buggy', 'inf', 'light'],
+    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'power', 'radar'],
+    units: ['inf', 'inf', 'buggy', 'dog', 'light'],
   },
   normal: {
     think: 2.5,
     army: 6,
     firstAttack: 300,
     every: 120,
-    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'refinery'],
-    units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'inf'],
+    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'refinery', 'radar', 'power', 'navy', 'aa', 'depot'],
+    units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'dog', 'jet', 'destroyer', 'flamer', 'light', 'sub', 'inf'],
   },
   hard: {
     think: 1.5,
     army: 8,
     firstAttack: 210,
     every: 90,
-    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower'],
-    units: ['light', 'rocket', 'gren', 'light', 'arty', 'light', 'inf'],
+    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower', 'navy', 'aa', 'power', 'lab', 'power', 'prism', 'depot', 'uplink', 'power', 'prism', 'aa'],
+    units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'sub', 'cruiser', 'lumen', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
   },
 };
 
@@ -70,6 +71,7 @@ export class Bot {
   private attackAt: number;
   private wave = new Set<number>(); // units out on an attack
   private moved = 0; // tries at finding somewhere to deploy
+  private wet: boolean | undefined; // is there water by its base for a Naval yard?
 
   constructor(
     private g: IsoGame,
@@ -92,9 +94,11 @@ export class Bot {
     if (!mine.length && !base.length) return; // out
     const yard = base.find((b) => b.kind === 'yard');
     if (!yard) return this.deploy(mine);
+    this.sail(mine.filter((u) => isNaval(u.kind)));
     // one thing a turn, like a person tapping: place, build, train or send
     if (this.place(yard)) return;
-    if (this.build()) return;
+    if (this.drop(yard)) return;
+    if (this.build(yard)) return;
     if (this.train()) return;
     this.fight(mine, yard);
   }
@@ -118,14 +122,27 @@ export class Bot {
     const e = this.g.eco[this.f];
     const j = e.jobs.get('base')?.ready ? e.jobs.get('base') : e.jobs.get('defense')?.ready ? e.jobs.get('defense') : undefined;
     if (!j) return false;
-    const spot = this.g.findSite(this.f, j.tech.id, yard.x, yard.y);
+    const spot = this.site(j.tech.id, yard);
     if (spot) this.g.exec(this.f, { c: 'place', t: j.tech.id, x: spot[0], y: spot[1] });
     else this.g.exec(this.f, { c: 'cancel', t: j.tech.id });
     return true;
   }
 
+  // Somewhere to put building `id`: near the Foundry, or (for a Naval yard,
+  // which needs water) near whichever of its buildings is closest to some.
+  private site(id: string, yard: Building): [number, number] | null {
+    const spot = this.g.findSite(this.f, id, yard.x, yard.y);
+    if (spot || id !== 'navy') return spot;
+    for (const b of this.g.buildings) {
+      if (b.f !== this.f || b.dead || b === yard) continue;
+      const s = this.g.findSite(this.f, id, b.x, b.y);
+      if (s) return s;
+    }
+    return null;
+  }
+
   // The next building on its list, once it can afford it.
-  private build(): boolean {
+  private build(yard: Building): boolean {
     const e = this.g.eco[this.f];
     const have = this.g.standing(this.f);
     const counts = new Map<BuildingKind, number>();
@@ -134,6 +151,8 @@ export class Bot {
     const want = new Map<string, number>();
     let id: string | undefined;
     for (const t of this.lv.order) {
+      // a Naval yard only with water near enough to put one on
+      if (t === 'navy' && !(this.wet ??= !!this.site('navy', yard))) continue;
       want.set(t, (want.get(t) ?? 0) + 1);
       if ((counts.get(t as BuildingKind) ?? 0) < want.get(t)!) {
         id = t;
@@ -144,10 +163,9 @@ export class Bot {
     const pw = this.g.power(this.f);
     if (pw.used > pw.made - 10 && id && id !== 'power' && have.has('yard')) id = 'power';
     if (!id) return false;
-    const tab = id === 'tower' ? 'defense' : 'base';
-    if (e.jobs.get(tab)) return false; // busy with it already
     const t = TECH.find((q) => q.id === id);
-    if (!t || !t.needs.every((k) => have.has(k)) || e.credits < Math.min(t.cost, 600)) return false;
+    if (!t || e.jobs.get(t.tab)) return false; // busy with that tab already
+    if (!t.needs.every((k) => have.has(k)) || e.credits < Math.min(t.cost, 600)) return false;
     this.g.exec(this.f, { c: 'build', t: id });
     return true;
   }
@@ -169,10 +187,30 @@ export class Bot {
     return false;
   }
 
+  // Paratroopers ready: drop them on the nearest enemy base.
+  private drop(yard: Building): boolean {
+    if (this.g.eco[this.f].paraT > 0 || !this.g.standing(this.f).has('radar')) return false;
+    const t = this.targetNear(yard.x, yard.y, true);
+    if (!t) return false;
+    this.g.exec(this.f, { c: 'para', x: t.x, y: t.y });
+    return true;
+  }
+
+  // Ships hunt on their own: each idle one goes for the nearest thing it can
+  // shoot (Submarines only ships, Cruisers only aircraft).
+  private sail(fleet: Unit[]): void {
+    for (const u of fleet) {
+      if (u.target || u.moving) continue;
+      const only = u.kind === 'sub' ? (k: string) => isNaval(k) || k === 'otter' : u.kind === 'cruiser' ? isAir : null;
+      const t = only ? this.unitNear(u.x, u.y, only) : this.targetNear(u.x, u.y);
+      if (t && apart(this.g, u.x, u.y, t.x, t.y) < 1600) this.g.exec(this.f, { c: 'attack', u: [u.id], t: t.id });
+    }
+  }
+
   // Gather an army, and every so often send it at the nearest enemy base.
   private fight(mine: Unit[], yard: Building): void {
     const g = this.g;
-    const army = mine.filter((u) => u.kind !== 'mcv' && u.kind !== 'hauler');
+    const army = mine.filter((u) => u.kind !== 'mcv' && u.kind !== 'hauler' && u.kind !== 'otter' && u.kind !== 'heron' && u.kind !== 'plane' && !isNaval(u.kind) && !u.fly);
     for (const id of [...this.wave]) if (!army.some((u) => u.id === id)) this.wave.delete(id);
     // the ones out on an attack: on to the next target once they're done with theirs
     const out = army.filter((u) => this.wave.has(u.id));
@@ -187,7 +225,15 @@ export class Bot {
     const home = army.filter((u) => !this.wave.has(u.id));
     if (this.t < this.attackAt || home.length < this.lv.army) {
       // the rest wait in front of the base
-      const loose = home.filter((u) => !u.moving && !u.target && apart(g, u.x, u.y, yard.x, yard.y) > 220);
+      // (aircraft wait on their pads; soldiers who came down by parachute
+      // near an enemy go for it instead)
+      const loose = home.filter((u) => !isAir(u.kind) && !u.moving && !u.target && apart(g, u.x, u.y, yard.x, yard.y) > 220);
+      const near = loose.map((u) => [u, this.targetNear(u.x, u.y)] as const).filter(([u, t]) => t && apart(g, u.x, u.y, t.x, t.y) < 400);
+      for (const [u, t] of near) {
+        this.wave.add(u.id);
+        g.exec(this.f, { c: 'attack', u: [u.id], t: t!.id });
+      }
+      if (near.length) return;
       if (loose.length) g.exec(this.f, { c: 'move', m: loose.map((u) => [u.id, yard.x + 50 + Math.random() * 40, yard.y + 50 + Math.random() * 40]) });
       return;
     }
@@ -199,9 +245,9 @@ export class Bot {
   }
 
   // The nearest enemy building (or, with none left nearby, unit) to (x, y).
-  private targetNear(x: number, y: number, buildingsOnly = false): { id: number } | null {
+  private targetNear(x: number, y: number, buildingsOnly = false): { id: number; x: number; y: number } | null {
     const g = this.g;
-    let best: { id: number } | null = null;
+    let best: { id: number; x: number; y: number } | null = null;
     let bd = Infinity;
     const out = g.out;
     for (const b of g.buildings) {
@@ -211,8 +257,20 @@ export class Bot {
     }
     if (best && (buildingsOnly || bd < 900)) return best;
     for (const u of g.units) {
-      if (u.f === this.f || u.dead || u.kind === 'heli' || u.kind === 'boat') continue;
+      if (u.f === this.f || u.dead || isAir(u.kind) || isNaval(u.kind) || u.fly) continue;
       const d = apart(g, x, y, u.x, u.y);
+      if (d < bd) [best, bd] = [u, d];
+    }
+    return best;
+  }
+
+  // The nearest enemy unit to (x, y) of the kinds `only` says.
+  private unitNear(x: number, y: number, only: (k: string) => boolean): Unit | null {
+    let best: Unit | null = null;
+    let bd = Infinity;
+    for (const u of this.g.units) {
+      if (u.f === this.f || u.dead || this.g.out.has(u.f) || !only(u.kind) || u.kind === 'plane') continue;
+      const d = apart(this.g, x, y, u.x, u.y);
       if (d < bd) [best, bd] = [u, d];
     }
     return best;

@@ -115,10 +115,25 @@ export class Shroud {
       for (let tx = t0; tx <= t1; tx++) this.dirty[this.tile(tx, ty)] = 1;
   }
 
-  // Lift the whole shroud at once (a Satellite uplink).
+  // Lift the whole shroud at once (a Satellite uplink). What was seen before
+  // is kept, so that losing the uplink can bring the shroud back (hideAgain).
+  private before: [Uint8Array, Uint8Array] | null = null;
   revealAll(): void {
+    this.before ??= [this.g.slice(), this.v.slice()];
     this.g.fill(255);
     this.v.fill(255);
+    this.dirty.fill(1);
+    this.version++;
+    this.box = [0, 0, this.w, this.h];
+  }
+
+  // The uplink is gone: the shroud comes back over all but what was seen
+  // before it went up (the caller then lifts it round what you have now).
+  hideAgain(): void {
+    if (!this.before) return;
+    this.g.set(this.before[0]);
+    this.v.set(this.before[1]);
+    this.before = null;
     this.dirty.fill(1);
     this.version++;
     this.box = [0, 0, this.w, this.h];
