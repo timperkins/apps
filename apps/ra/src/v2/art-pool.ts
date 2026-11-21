@@ -175,6 +175,15 @@ export function constructionArt(kind: string, f: number, now = true): Promise<St
 }
 
 /** A bridge's two pictures (bridge-art.ts), drawn by a worker (null if there are no workers). */
+/** The light in a building's windows (makeBuildingGlow): null without workers, [] when it has none. */
+export function glowArt(kind: string, f: number, now = false): Promise<StackSprite[] | null> {
+  return new Promise((res) => {
+    if (!workers.length) return res(null);
+    (now ? urgent : later).push({ key: `bg:${kind}:${f}`, d: 0, resolve: (r) => res(r?.stages ? r.stages.map(unpack) : null) });
+    pump();
+  });
+}
+
 export function bridgeArt(key: string, now = true): Promise<[StackSprite, StackSprite | null] | null> {
   return new Promise((res) => {
     if (!workers.length) return res(null);

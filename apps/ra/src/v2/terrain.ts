@@ -662,7 +662,9 @@ export class IsoTerrain {
           const cj = Math.max(0, Math.min(rh - 1, Math.floor(wy) - R.y0));
           const kc = R.kind[cj * rw + ci] as K;
           const rd = wv > sandThr ? 99 : bl(R.road, wx, wy);
-          const k: K = wv > wThr ? K.Water : wv > sandThr ? K.Sand : kc === K.Pad ? K.Pad : rd < 1 ? K.Road : K.Grass;
+          // (a building's pad still keeps the ground clear round it, but is drawn
+          // as the ground it lies on: the buildings stand straight on the grass)
+          const k: K = wv > wThr ? K.Water : wv > sandThr ? K.Sand : rd < 1 && kc !== K.Pad ? K.Road : K.Grass;
           switch (k) {
             case K.Water: {
               // bands of depth, dithered where they meet, with the sandy bed showing in the shallows
@@ -721,32 +723,6 @@ export class IsoTerrain {
               else if (r2 > 0.988) c = shade(ROCK, 0.05 + (rnd - 0.5) * 0.3);
               else if (r2 < 0.012) c = shade(c, -0.22);
               if (fine > 0.74 && rd < 0.62) c = fine > 0.77 ? shade(mix(RUT, W_SHALLOW, 0.5), rnd > 0.93 ? 0.3 : -0.1) : shade(RUT, -0.2); // puddles
-              break;
-            }
-            case K.Pad: {
-              // concrete slabs: joints every 8 units, lit along one side, with
-              // hairline cracks, stains and a kerb
-              const mx = ((wx % 8) + 8) % 8;
-              const my = ((wy % 8) + 8) % 8;
-              const slab = hash2(Math.floor(wx / 8), Math.floor(wy / 8), seed + 9);
-              c = shade(CONC, (slab - 0.5) * 0.12 + (nFine(px, py) - 0.5) * 0.14 + (rnd - 0.5) * 0.06);
-              if (mx < 0.5 || my < 0.5) c = CONC_D;
-              else if (mx < 1 || my < 1) c = shade(c, 0.1);
-              else {
-                const cr = this.noise(wx, wy, 7, seed + 24 + Math.floor(slab * 3), 2);
-                if (slab > 0.6 && Math.abs(cr - 0.5) < 0.012) c = shade(c, -0.25);
-                const r2 = hash2(ix >> 1, iy >> 1, seed + 25);
-                if (r2 > 0.992) c = shade(c, -0.28); // oil
-                else if (slab < 0.12 && (mx - 4) ** 2 + (my - 4) ** 2 < 2.2) c = (mx - 4) ** 2 + (my - 4) ** 2 < 1.2 && (Math.floor(mx * 2) + Math.floor(my * 2)) % 2 ? shade(CONC_D, -0.3) : CONC_D; // drain
-              }
-              const pad = (x: number, y: number) => {
-                const i = Math.floor(x) - R.x0;
-                const j = Math.floor(y) - R.y0;
-                return i >= 0 && j >= 0 && i < rw && j < rh && R.kind[j * rw + i] === K.Pad;
-              };
-              if (!pad(wx + 0.6, wy) || !pad(wx, wy + 0.6)) c = shade(CONC_D, -0.2);
-              else if (!pad(wx - 0.6, wy) || !pad(wx, wy - 0.6)) c = shade(CONC, 0.2);
-              else if (!pad(wx + 1.6, wy) || !pad(wx, wy + 1.6) || !pad(wx - 1.6, wy) || !pad(wx, wy - 1.6)) c = shade(CONC, 0.06);
               break;
             }
             default: {

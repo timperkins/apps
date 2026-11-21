@@ -22,21 +22,21 @@ What is used now, so a new one can be different:
 
 | id | subject | main color | setting |
 |---|---|---|---|
-| power | two cooling towers and a turbine hall | off-white concrete | dusk, grass |
+| power | tall cooling tower, domed reactor with glowing ports, barrel-roofed hall | off-white concrete, amber glow | dusk, grass |
 | barracks | Quonset hut, sandbags, flagpole | olive drab | pine forest |
-| refinery | long hall, smokestack, unloading pad, gold ore | grey, rusty steel | ore field, mesas |
-| silo | two ribbed metal tanks on a pad | aluminium | desert highlands |
-| factory | wide saw-tooth-roof hall, big striped bay door | gunmetal | smoky battlefield |
-| radar | control bunker with lattice radar mast, walkway to four landing pads | sand concrete, asphalt, yellow marks | dry plateau airfield, midday |
-| uplink | huge white dish on a pylon over an equipment block, beam into the sky | white, steel grey | frosty tundra, starry night |
+| refinery | domed drum with chimney, ore tank, vaulted bay, conveyor, unloading pad, gold ore | off-white, rusty steel | ore field, mesas |
+| silo | tall domed tank and a small one, glowing gauge windows, catwalk | aluminium, amber glow | desert highlands |
+| factory | huge arched barrel-vault hangar, big striped door, rounded wings with stacks | gunmetal, off-white | smoky battlefield |
+| radar | round domed hall with control tower and dish, walkway to four round landing pads | sand concrete, asphalt, yellow marks | dry plateau airfield, midday |
+| uplink | huge white dish on a tall pylon over a domed drum, beam into the sky | white, steel grey | frosty tundra, starry night |
 | helipad | round pad with a yellow H, windsock | asphalt | lakeshore |
-| lab | building with a big geodesic dome | white panels | summer meadow |
-| tower | octagonal bunker with a twin-gun turret | concrete, gunmetal | forest edge |
-| depot | asphalt repair pad, wrench mark, steel gantry and hoist | orange girders, asphalt | industrial yard, dusk, floodlights |
+| lab | one great geodesic glass dome glowing from inside | clear glass, silver, warm white light | summer meadow, dusk |
+| tower | tall round bunker with firing slits and a twin-gun turret | pale concrete, gunmetal | forest edge |
+| depot | round repair pad, four arched orange pylons meeting in a ring, hoist | orange girders, asphalt | industrial yard, dusk, floodlights |
 | wall | run of crenellated concrete block wall with a corner | grey concrete | autumn hills |
 | aa | four-tube missile launcher tilted up, firing, sandbagged pad | khaki, olive | steppe, big cloudy sky |
-| prism | slender ribbed tower with a glowing crystal on top | pale concrete, steel | coastal headland, twilight |
-| navy | U-shaped concrete dock, orange gantry crane over the slip | grey concrete, orange girders | misty harbor, morning |
+| prism | very tall spire with four swept fins, claw cradle, blazing crystal | pale concrete, steel | coastal headland, twilight |
+| navy | piers with rounded ends, domed control tower, tall arched gantry crane | grey concrete, orange girders | misty harbor, morning |
 | inf | rifleman, chest up | olive drab | burning ruins |
 | gren | grenadier throwing, waist up | desert tan | mountain ridge |
 | rocket | soldier aiming a shoulder launcher | grey urban camo | dusk |
@@ -51,7 +51,7 @@ What is used now, so a new one can be different:
 | arty | tracked howitzer, barrel raised, firing | desert camo | mountain ridge |
 | heavy | huge tank, two guns at the viewer | charcoal gunmetal | battlefield |
 | scorch | dome-turret tank spraying two jets of fire | dark olive | burning wheat field, sunset |
-| lumen | light tank with a glowing crystal turret firing a beam | off-white, grey | snowy mountain pass, night |
+| lumen | tank with a tall finned emitter mast holding a crystal high, firing a beam | off-white, grey | snowy mountain pass, night |
 | heli | attack copter, rocket pods | olive drab | over a lake |
 | heron | tandem-rotor transport, ramp open, door gun | khaki tan, olive stripes | red canyon, golden dust |
 | jet | jump jet hovering, missiles launching | light gunmetal, off-white | stormy sea coast |

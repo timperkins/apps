@@ -2,7 +2,7 @@
 // shapes as the game (makeFactionArt, makeBuilding, makeDish) and draws the
 // one asked for, sending it back as bitmaps.
 import { FACTIONS } from '../v1/sprites';
-import { BuildingKind, V2FactionArt, factionSet, makeBuilding, makeConstruction, makeDish, makeFactionArt } from './sprites';
+import { BuildingKind, V2FactionArt, factionSet, makeBuilding, makeBuildingGlow, makeConstruction, makeDish, makeFactionArt } from './sprites';
 import { StackSprite } from './stack';
 import { bridgeFromKey } from './bridge-art';
 
@@ -32,7 +32,7 @@ self.onmessage = (e: MessageEvent<Job>) => {
   const { id, key, d } = e.data;
   try {
     // b:<kind>:<faction> is a building, bc:<kind>:<faction> the stages of it
-    // going up, fa:... a unit's heading, dish the radar's
+    // going up, bg:<kind>:<faction> the light in its windows, fa:... a unit's heading, dish the radar's
     if (key.startsWith('br:')) {
       // a bridge: its main picture and its near rail (which may be missing)
       const [back, front] = bridgeFromKey(key);
@@ -43,6 +43,14 @@ self.onmessage = (e: MessageEvent<Job>) => {
     if (key.startsWith('bc:')) {
       const [, kind, f] = key.split(':');
       const packed = makeConstruction(kind as BuildingKind, FACTIONS[Number(f)]).map(pack);
+      (self as unknown as Worker).postMessage({ id, key, d, stages: packed.map((p) => p[0]) } satisfies Reply, packed.flatMap((p) => p[1]));
+      return;
+    }
+    if (key.startsWith('bg:')) {
+      // the light in a building's windows, if it has any (see makeBuildingGlow)
+      const [, kind, f] = key.split(':');
+      const g = makeBuildingGlow(kind as BuildingKind, FACTIONS[Number(f)]);
+      const packed = g ? [pack(g)] : [];
       (self as unknown as Worker).postMessage({ id, key, d, stages: packed.map((p) => p[0]) } satisfies Reply, packed.flatMap((p) => p[1]));
       return;
     }
