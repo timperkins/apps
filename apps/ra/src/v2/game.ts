@@ -3017,7 +3017,8 @@ export class IsoGame implements GameLike {
   // What a tap at (x, y) would do, for the mouse cursor. Follows click().
   cursorAt(x: number, y: number): CursorAt {
     this.hoverBridge = null;
-    if (this.ghost) return this.ghost.why ? 'blocked' : 'build';
+    // placing a building: the plain arrow, as the ghost itself shows where it goes
+    if (this.ghost) return null;
     if (this.paraAim) return 'move';
     if (this.mode) return this.modeAt(x, y) ? (this.mode === 'repair' ? 'fix' : 'sell') : 'blocked';
     const mine = this.mine();
