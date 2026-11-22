@@ -54,3 +54,44 @@ export const BOLT = pixels(
   { O: OUT, Y: '#ffe45c' },
   'bolt',
 );
+
+// A steel wrench, for the build menu's Repair button.
+export const WRENCH = pixels(
+  [
+    '........OO.OO.', //
+    '.......OHO.OHO',
+    '.......OHSOOSO',
+    '.......OHSSSSO',
+    '......OHSSSDO.',
+    '.....OHSSDOO..',
+    '....OHSSDO....',
+    '...OHSSDO.....',
+    '..OHSSDO......',
+    '.OHSSDO.......',
+    'OHSSDO........',
+    'OSSDO.........',
+    '.OOO..........',
+  ],
+  { O: OUT, H: '#f1f4f2', S: '#b9c2c4', D: '#7c8689' },
+  'wrench',
+);
+
+// A dollar sign, for the build menu's Sell button.
+export const DOLLAR = pixels(
+  [
+    '....OO....', //
+    '..OOYYOO..',
+    '.OYYYYYYO.',
+    'OYYOYYOYYO',
+    'OYYOYYOOO.',
+    '.OYYYYYO..',
+    '..OOYYYYO.',
+    '.OOOYYOYYO',
+    'OYYOYYOYYO',
+    '.OYYYYYYO.',
+    '..OOYYOO..',
+    '....OO....',
+  ],
+  { O: OUT, Y: '#ffd75e' },
+  'dollar',
+);

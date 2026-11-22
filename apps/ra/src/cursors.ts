@@ -14,10 +14,11 @@
 // onto its refinery) is three yellow triangles stacked one over another,
 // pointing down at the spot, a light running down them, with a gold burst
 // when clicked. The repair cursor (an engineer onto a damaged bridge's
-// blockhouse or a damaged building of yours) is a steel wrench, rocking as
-// if turning a nut, with a gold burst when clicked.
+// blockhouse or a damaged building of yours, or the Repair button down) is
+// a steel wrench, rocking as if turning a nut, with a gold burst when
+// clicked. The sell cursor (the Sell button down) is a gold dollar sign.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair' | 'sell';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -162,6 +163,28 @@ const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' 
       '................',
     ],
   },
+  // the Sell button is down, over a building of yours: a gold dollar sign
+  sell: {
+    hot: [7, 7],
+    rows: [
+      '......kk........',
+      '....kkyykk......',
+      '...kYYyyyyk.....',
+      '..kYykyykyyk....',
+      '..kyykyykkk.....',
+      '..kyykyyk.......',
+      '...kyyyyykk.....',
+      '....kkyyyyyk....',
+      '.....kyykyyk....',
+      '..kkkkyykyyk....',
+      '..kyykyykyyk....',
+      '...kyyyyyyk.....',
+      '....kkyykk......',
+      '......kk........',
+      '................',
+      '................',
+    ],
+  },
   // putting a building down: the corners of its plot
   build: {
     hot: [7, 7],
@@ -198,6 +221,7 @@ const FALLBACK: Record<CursorKind, string> = {
   deploy: 'crosshair',
   enter: 'pointer',
   repair: 'pointer',
+  sell: 'pointer',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',

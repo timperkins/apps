@@ -1181,7 +1181,7 @@ function puffSite(s: Scene, b: V2BuildingArt): void {
 }
 
 const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
-  { kind: 'yard', name: 'Foundry', blurb: 'Where your base starts: builds everything else. Packs up into an MCU (mobile construction unit).' },
+  { kind: 'yard', name: 'Construction yard', blurb: 'Where your base starts: builds everything else. Packs up into an MCU (mobile construction unit).' },
   { kind: 'power', name: 'Power plant' },
   { kind: 'barracks', name: 'Barracks' },
   { kind: 'refinery', name: 'Ore refinery' },
@@ -1197,7 +1197,6 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'tower', name: 'Gun tower' },
   { kind: 'aa', name: 'Skyguard battery' },
   { kind: 'prism', name: 'Lumen tower' },
-  { kind: 'hq', name: 'Command post', blurb: 'The heart of an enemy base.' },
 ];
 
 // The building's moving parts and smoke, as the game draws them.
@@ -1226,9 +1225,6 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
         const [sx, sy] = toScreen(b.fx[1].x, b.fx[1].y, b.fx[1].z - 1);
         for (let i = 0; i < 3; i++) s.puff(sx, sy, 'spark', { vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, max: 0.5 });
       }
-      break;
-    case 'hq':
-      blink(1.5);
       break;
     case 'lab': {
       // the dome's panes brighten and dim with the light inside

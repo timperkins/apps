@@ -1,5 +1,5 @@
 // What you can build, what it costs, and what you need first: the tech tree.
-// Building something new opens up more of it, starting from the Foundry.
+// Building something new opens up more of it, starting from the Construction yard.
 import type { BuildingKind } from './sprites';
 
 export type Tab = 'base' | 'defense' | 'inf' | 'veh';
@@ -29,12 +29,12 @@ export const TECH: Tech[] = [
   { id: 'refinery', name: 'Ore refinery', tab: 'base', cost: 1500, needs: ['power'], building: 'refinery', blurb: 'Turns ore into credits.' },
   { id: 'silo', name: 'Ore silo', tab: 'base', cost: 150, needs: ['refinery'], building: 'silo', blurb: 'Stores more credits.' },
   { id: 'factory', name: 'Vehicle works', tab: 'base', cost: 2000, needs: ['refinery'], building: 'factory', blurb: 'Builds vehicles.' },
-  { id: 'radar', name: 'Air command', tab: 'base', cost: 1000, needs: ['refinery'], building: 'radar', blurb: 'Radar, four landing pads for Swift jets, and paratroopers every few minutes. Opens up artillery.' },
+  { id: 'radar', name: 'Air command', tab: 'base', cost: 1000, needs: ['refinery'], building: 'radar', blurb: 'Radar, a runway, a hangar and four stands for planes: Swift jets and a Paratrooper plane. Comes with no planes. Opens up artillery.' },
   { id: 'helipad', name: 'Helipad', tab: 'base', cost: 1000, needs: ['radar'], building: 'helipad', blurb: 'Builds copters.' },
   { id: 'lab', name: 'Tech lab', tab: 'base', cost: 1500, needs: ['factory', 'radar'], building: 'lab', blurb: 'Opens up the heaviest arms.' },
   { id: 'depot', name: 'Service depot', tab: 'base', cost: 800, needs: ['factory'], building: 'depot', blurb: 'Repairs vehicles parked on its pad, for credits.' },
   { id: 'navy', name: 'Naval yard', tab: 'base', cost: 1000, needs: ['power'], building: 'navy', blurb: 'Built out on open water next to your base. Makes ships, and mends ships parked in its slip, for credits.' },
-  { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; Cancel stops.' },
+  { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; tap Wall again (or Esc) to stop.' },
   { id: 'uplink', name: 'Satellite uplink', tab: 'base', cost: 1500, needs: ['radar', 'lab'], building: 'uplink', blurb: 'Reveals the whole map while it stands.' },
   { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
   { id: 'aa', name: 'Skyguard battery', tab: 'defense', cost: 1000, needs: ['barracks', 'radar'], building: 'aa', blurb: 'Missile launcher that shoots down aircraft. Can\'t hit anything on the ground.' },
@@ -58,13 +58,14 @@ export const TECH: Tech[] = [
   { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },
   { id: 'heli', name: 'Kestrel copter', tab: 'veh', cost: 1200, needs: ['helipad', 'lab'], unit: 'heli', from: 'helipad', blurb: 'Rocket copter.' },
   { id: 'heron', name: 'Heron transport', tab: 'veh', cost: 1200, needs: ['helipad', 'radar'], unit: 'heron', from: 'helipad', blurb: 'Twin-rotor copter that carries five soldiers over anything. Lands on open ground to let them out. Has a door gun.' },
-  { id: 'jet', name: 'Swift jet', tab: 'veh', cost: 1200, needs: ['radar'], unit: 'jet', from: 'radar', blurb: 'Jump jet with three pairs of missiles. Flies home to its Air command landing pad to rearm. One per pad.' },
+  { id: 'jet', name: 'Swift jet', tab: 'veh', cost: 1200, needs: ['radar'], unit: 'jet', from: 'radar', blurb: 'Jump jet with three pairs of missiles. Rolls out of the Air command hangar, and flies home to its stand there to rearm. Four planes to an Air command.' },
+  { id: 'plane', name: 'Paratrooper plane', tab: 'veh', cost: 1500, needs: ['radar'], unit: 'plane', from: 'radar', blurb: 'Carries eight paratroopers. Waits on its Air command stand until they are ready, then you call them in from the top of the Defense tab. One at a time: lose it and you need a new one.' },
   { id: 'otter', name: 'Otter hovercraft', tab: 'veh', cost: 900, needs: ['navy'], unit: 'otter', from: 'navy', blurb: 'Unarmed hovercraft that carries twelve soldiers, or three vehicles, over land and water. Comes ashore to let them out.' },
   { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
   { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water until it fires torpedoes, which only hit ships. Only Destroyers can hit it submerged.' },
   { id: 'cruiser', name: 'Sentinel cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Shoots down aircraft from far off with banks of missiles. Can\'t hit anything on the ground or water.' },
   { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Launches drones at targets on land or sea from very long range.' },
-  { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Foundry.' },
+  { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Construction yard.' },
 ];
 
 // Most of one unit you can have waiting in a queue.

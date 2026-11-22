@@ -23,7 +23,9 @@ export interface Action {
 // What a tap at a map point would do, for the mouse cursor (harvest: send
 // the selected ore haulers to dig there; deploy: the selected Foundry
 // vehicle deploys; enter: the selected soldiers get into the transport there).
-export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'build' | 'blocked' | 'repair' | null;
+// fix and sell: the build menu's Repair or Sell button is down, over a
+// building of yours it would repair or sell.
+export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'build' | 'blocked' | 'repair' | 'fix' | 'sell' | null;
 
 export interface UnitType {
   kind: string;
@@ -58,6 +60,7 @@ export interface BuildItem {
   count: number; // how many queued (units)
   isNew: boolean;
   blocked?: string; // why it can't be started right now
+  aiming?: boolean; // tapped, and waiting for a tap on the map (the paratroopers)
 }
 
 export interface BuildMenu {
@@ -147,6 +150,13 @@ export interface GameLike {
   // placeAt (map coordinates); act('place') puts it down.
   placing?(): boolean;
   placeAt?(x: number, y: number): void;
+  // The build menu's Repair and Sell buttons: which is down (a tap on a
+  // building of yours repairs or sells it), and putting one down or up.
+  buildMode?(): 'repair' | 'sell' | null;
+  setBuildMode?(m: 'repair' | 'sell' | null): void;
+  // Waiting for a tap on the map (Repair, Sell, or where paratroopers drop):
+  // on a phone the build menu gets out of the way meanwhile.
+  targeting?(): boolean;
   // Maps to pick from before generate(), with a small picture of each for
   // the current seed; mapId is the one generate() makes.
   maps?(): { id: string; name: string; blurb: string; players?: [number, number] }[];
