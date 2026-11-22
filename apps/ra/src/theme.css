@@ -1,20 +1,20 @@
 /* Soft Pixel in the Night ops colors: the look Tim picked on the UI kit page
    (/ui/). style.css lays the interface out; this file, loaded after it, gives
    everything its look: rounded pixel frames (border-images made in theme.ts
-   from the eight colors, as --fr-*), Jersey 15 for headings and DotGothic16
+   from the eight colors, as --fr-*), Jersey 15 for headings and Handjet
    for all other text, and the colors as variables. */
 
 :root {
-  --f-text: 'DotGothic16', ui-monospace, monospace;
-  --f-head: 'Jersey 15', 'DotGothic16', ui-monospace, monospace;
+  --f-text: 'Handjet', ui-sans-serif, sans-serif;
+  --f-head: 'Jersey 15', 'Handjet', ui-sans-serif, sans-serif;
   --gold: #ffd98a;
   --panel: var(--panel-solid);
   --edge: var(--line);
   font-synthesis: none;
 }
 
-/* DotGothic16 runs small next to the old Silkscreen: grow it so its small
-   letters are as tall as Silkscreen's were, and every size in style.css
+/* Size the text font (Handjet) so its small letters are as tall as the
+   old Silkscreen's were, and every size in style.css
    still reads the same. Headings opt out and set their own sizes. */
 html {
   font-size-adjust: ex-height 0.63;

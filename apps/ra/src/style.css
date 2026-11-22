@@ -1248,6 +1248,10 @@ body.sheet-open #selBar {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  /* Room below the line so overflow: hidden doesn't cut off descenders
+     (the tail of the y in "refinery"), without moving anything. */
+  padding-bottom: 0.25em;
+  margin-bottom: -0.25em;
 }
 
 #build .item .cost {

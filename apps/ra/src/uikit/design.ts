@@ -97,7 +97,7 @@ export interface Design {
 }
 
 export const DEFAULT: Design = {
-  fonts: { d: 'Jersey 15', b: 'DotGothic16', l: 'DotGothic16', n: 'DotGothic16' },
+  fonts: { d: 'Jersey 15', b: 'Handjet', l: 'Handjet', n: 'Handjet' },
   icons: 'line',
   colors: { ...NIGHT_OPS },
 };
