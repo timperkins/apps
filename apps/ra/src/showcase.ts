@@ -1201,6 +1201,7 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
 
 // The building's moving parts and smoke, as the game draws them.
 const labGlow: (StackSprite | null)[] = [];
+const yardGlow: (StackSprite | null)[] = [];
 function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art: V2FactionArt, dish: StackSprite[], phase: number, dt: number, gun: number): void {
   const c = s.c;
   const f = FACTIONS[fi];
@@ -1219,13 +1220,23 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
     c.fillRect(x, y, 1, 1);
   };
   switch (kind) {
-    case 'yard':
+    case 'yard': {
+      // the small lights in the side's color pulse
+      const glow = (yardGlow[fi] ??= makeBuildingGlow('yard', f));
+      if (glow) {
+        c.save();
+        c.globalCompositeOperation = 'lighter';
+        c.globalAlpha = 0.22 + 0.2 * Math.sin(phase * 3.9);
+        s.blit(glow, 0, 0, 0);
+        c.restore();
+      }
       blink(1.2);
       if (b.fx[1] && Math.random() < dt * 1.5) {
         const [sx, sy] = toScreen(b.fx[1].x, b.fx[1].y, b.fx[1].z - 1);
         for (let i = 0; i < 3; i++) s.puff(sx, sy, 'spark', { vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 15, max: 0.5 });
       }
       break;
+    }
     case 'lab': {
       // the dome's panes brighten and dim with the light inside
       const glow = (labGlow[fi] ??= makeBuildingGlow('lab', f));

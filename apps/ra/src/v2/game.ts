@@ -6797,6 +6797,16 @@ export class IsoGame implements GameLike {
     };
     switch (b.kind) {
       case 'yard': {
+        // the small lights in the side's color pulse
+        const glow = hurt ? null : this.glowOf('yard', b.f);
+        if (glow) {
+          const [sx, sy] = toScreen(b.x, b.y, 0);
+          c.save();
+          c.globalCompositeOperation = 'lighter';
+          c.globalAlpha = 0.22 + 0.2 * Math.sin(b.phase * 3.9);
+          drawSprite(c, glow.img, glow, sx, sy);
+          c.restore();
+        }
         if (Math.floor(b.phase * 1.2) % 2 === 0) {
           const [x, y] = fx(0);
           c.fillStyle = 'rgba(255,90,60,0.35)';
