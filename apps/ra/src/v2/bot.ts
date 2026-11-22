@@ -40,7 +40,7 @@ const LEVELS: Record<BotLevel, Level> = {
     firstAttack: 300,
     every: 120,
     order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'refinery', 'radar', 'power', 'navy', 'aa', 'depot'],
-    units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'dog', 'jet', 'destroyer', 'flamer', 'light', 'sub', 'inf'],
+    units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'dog', 'jet', 'plane', 'destroyer', 'flamer', 'light', 'sub', 'inf'],
   },
   hard: {
     think: 1.5,
@@ -48,7 +48,7 @@ const LEVELS: Record<BotLevel, Level> = {
     firstAttack: 210,
     every: 90,
     order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower', 'navy', 'aa', 'power', 'lab', 'power', 'prism', 'depot', 'uplink', 'power', 'prism', 'aa'],
-    units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'sub', 'cruiser', 'lumen', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
+    units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'plane', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'sub', 'cruiser', 'lumen', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
   },
 };
 
@@ -189,7 +189,7 @@ export class Bot {
 
   // Paratroopers ready: drop them on the nearest enemy base.
   private drop(yard: Building): boolean {
-    if (this.g.eco[this.f].paraT > 0 || !this.g.standing(this.f).has('radar')) return false;
+    if (!this.g.paraReady(this.f)) return false;
     const t = this.targetNear(yard.x, yard.y, true);
     if (!t) return false;
     this.g.exec(this.f, { c: 'para', x: t.x, y: t.y });

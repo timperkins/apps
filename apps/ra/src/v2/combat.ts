@@ -103,7 +103,7 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
 export const DUG_WEAPON: Weapon = { name: 'Rifle, dug in', dmg: 22, rof: 0.7, range: 4.5 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true };
 export const DUG_ARMOR = 0.5;
 // Seconds to dig in (or to climb out and pick up the bags).
-export const DIG_S = 1.2;
+export const DIG_S = 0.18;
 
 export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   inf: { strength: 50, armor: 'none' },
@@ -136,7 +136,6 @@ export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
 
 export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor }> = {
   yard: { strength: 1000, armor: 'heavy' },
-  hq: { strength: 1000, armor: 'heavy' },
   factory: { strength: 1000, armor: 'heavy' },
   power: { strength: 400, armor: 'wood' },
   barracks: { strength: 500, armor: 'wood' },

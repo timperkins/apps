@@ -27,7 +27,7 @@ What is used now, so a new one can be different:
 | refinery | domed drum with chimney, ore tank, vaulted bay, conveyor, unloading pad, gold ore | off-white, rusty steel | ore field, mesas |
 | silo | tall domed tank and a small one, glowing gauge windows, catwalk | aluminium, amber glow | desert highlands |
 | factory | huge arched barrel-vault hangar, big striped door, rounded wings with stacks | gunmetal, off-white | smoky battlefield |
-| radar | round domed hall with control tower and dish, walkway to four round landing pads | sand concrete, asphalt, yellow marks | dry plateau airfield, midday |
+| radar | long runway in front, apron with parked jets, barrel-vault hangar with open lit door, control tower with dish, fuel tanks | off-white concrete, asphalt, yellow marks | dry grassland, late afternoon |
 | uplink | huge white dish on a tall pylon over a domed drum, beam into the sky | white, steel grey | frosty tundra, starry night |
 | helipad | round pad with a yellow H, windsock | asphalt | lakeshore |
 | lab | one great geodesic glass dome glowing from inside | clear glass, silver, warm white light | summer meadow, dusk |
@@ -55,6 +55,8 @@ What is used now, so a new one can be different:
 | heli | attack copter, rocket pods | olive drab | over a lake |
 | heron | tandem-rotor transport, ramp open, door gun | khaki tan, olive stripes | red canyon, golden dust |
 | jet | jump jet hovering, missiles launching | light gunmetal, off-white | stormy sea coast |
+| plane | big high-winged four-engined propeller transport in flight, rear door open | olive drab, khaki | golden wheat-field valley, hazy evening |
+| para | (the paratroopers, top of the Defense tab) five round parachutes with soldiers drifting down, a tiny plane far off | off-white canopies, olive drab | green farmland from high up, morning cumulus |
 | mcv | long tracked truck carrying a folded base | grey, hazard stripes | pine forest |
 | otter | hovercraft on a black skirt coming up a beach | sand tan, black | tropical beach |
 | destroyer | lean warship at speed, bow gun firing | haze grey | rough ocean, sunset |
