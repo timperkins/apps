@@ -251,7 +251,7 @@ export function muzzles(kind: UnitKind | DefenseKind, x: number, y: number, z: n
     case 'scorch':
       return [at(px, py, tur, 9.2, 1.3, 6.6), at(px, py, tur, 9.2, -1.3, 6.6)];
     case 'lumen':
-      return [at(px, py, tur, 0, 0, 15.6)]; // the crystal (LUMEN_Z in sprites.ts)
+      return [at(px, py, tur, 0, 0, 19.1)]; // the coil's ball (LUMEN_Z in sprites.ts)
     case 'tower':
       return [at(x, y, tur, 11.2, 1.15, 1.45), at(x, y, tur, 11.2, -1.15, 1.45)];
     case 'prism':

@@ -35,7 +35,7 @@ What is used now, so a new one can be different:
 | depot | round repair pad, four arched orange pylons meeting in a ring, hoist | orange girders, asphalt | industrial yard, dusk, floodlights |
 | wall | run of crenellated concrete block wall with a corner | grey concrete | autumn hills |
 | aa | four-tube missile launcher tilted up, firing, sandbagged pad | khaki, olive | steppe, big cloudy sky |
-| prism | very tall spire with four swept fins, claw cradle, blazing crystal | pale concrete, steel | coastal headland, twilight |
+| prism | very tall spire with four swept fins, ring coil topped by a blazing ball | pale concrete, steel, copper | coastal headland, twilight |
 | navy | piers with rounded ends, domed control tower, tall arched gantry crane | grey concrete, orange girders | misty harbor, morning |
 | inf | rifleman, chest up | olive drab | burning ruins |
 | gren | grenadier throwing, waist up | desert tan | mountain ridge |
@@ -51,7 +51,7 @@ What is used now, so a new one can be different:
 | arty | tracked howitzer, barrel raised, firing | desert camo | mountain ridge |
 | heavy | huge tank, two guns at the viewer | charcoal gunmetal | battlefield |
 | scorch | dome-turret tank spraying two jets of fire | dark olive | burning wheat field, sunset |
-| lumen | tank with a tall finned emitter mast holding a crystal high, firing a beam | off-white, grey | snowy mountain pass, night |
+| lumen | tank with a tall finned mast, ring coil and blazing ball firing a beam | off-white, grey, copper | snowy mountain pass, night |
 | heli | attack copter, rocket pods | olive drab | over a lake |
 | heron | tandem-rotor transport, ramp open, door gun | khaki tan, olive stripes | red canyon, golden dust |
 | jet | jump jet hovering, missiles launching | light gunmetal, off-white | stormy sea coast |
