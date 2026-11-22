@@ -296,7 +296,7 @@ function render() {
       <div class="pg-num">Your pick · now in the game</div>
       <h1 class="pg-name">Soft Pixel</h1>
       <p class="pg-tag">The game’s look</p>
-      <p class="pg-blurb">Bigger, rounder stepped corners, Night ops colors, Jersey 15 headings, DotGothic16 for everything else and smooth line icons: what the game now uses. The Tweak panel still tries other fonts, icons and colors, and the address keeps what you pick, so a link shows exactly what you chose.</p>
+      <p class="pg-blurb">Bigger, rounder stepped corners, Night ops colors, Jersey 15 headings, Handjet for everything else and smooth line icons: what the game now uses. The Tweak panel still tries other fonts, icons and colors, and the address keeps what you pick, so a link shows exactly what you chose.</p>
       <ul class="pg-traits" data-traits></ul>
     </div>
     <div class="pg-intro-side">
