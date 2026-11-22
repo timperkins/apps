@@ -1559,7 +1559,7 @@ const finish = (e: PointerEvent, cancel: boolean) => {
         clicked();
         const what = game.cursorAt?.(down.x, down.y);
         if (what === 'move' || what === 'attack' || what === 'harvest' || what === 'enter' || what === 'repair' || (locked && what === 'pick')) sendTo(down.x, down.y);
-        else if (what === 'deploy') game.act?.('deploy');
+        else if (what === 'deploy' || what === 'unfold') game.act?.('deploy');
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);
     } else if (!down.pan && !locked) game.boxSelect(down.x, down.y, p.x, p.y, add);
@@ -1609,6 +1609,8 @@ function hoverNow(now: number): void {
     const what = game.cursorAt?.(m.x, m.y);
     if (what === 'pick') k = locked ? 'move' : 'corners';
     else if (what === 'fix') k = 'repair';
+    // a selected Foundry vehicle that can deploy: the enter cursor's triangles
+    else if (what === 'unfold') k = 'enter';
     else if (what) k = what;
   } else if (planet) k = 'grab';
   const burst = Math.floor((now - movedAt) / 55);
