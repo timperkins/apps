@@ -488,32 +488,39 @@ function scorchTurret(f: Faction): Shape {
   };
 }
 
-// Lumen crystal colors: a pale lens that lights white-hot as it fires.
-const LENS = hex('#bfe6f2');
-const LENS_D = hex('#6aa9c4');
-const LENS_L = hex('#f2fbff');
-
-// A faceted crystal (two pyramids base to base) centered on (cu, cv, cz).
-function crystal(u: number, v: number, z: number, cu: number, cv: number, cz: number, rad: number, half: number): RGB | null {
-  const du = u - cu;
-  const dv = v - cv;
-  const dz = z - cz;
-  const r = Math.max(Math.abs(du), Math.abs(dv), (Math.abs(du) + Math.abs(dv)) * 0.72);
-  if (Math.abs(dz) / half + r / rad > 1) return null;
-  const face = Math.floor((Math.atan2(dv, du) + Math.PI) / (Math.PI / 4)) % 8;
-  if (r / rad > 1 - Math.abs(dz) / half - 0.14) return face % 2 ? (dz > 0 ? LENS : LENS_D) : dz > 0 ? LENS_L : LENS;
-  return LENS_D;
+// The Lumen emitter, on the tower and the tank: a stack of rings narrowing
+// up a glowing rod to a bright ball, which the beam leaves from. Its foot is
+// at `foot`, drawn s times the tank's size; the ball's middle is COIL_BALL * s
+// above the foot.
+const COIL_BALL = 6.3;
+function coil(f: Faction, u: number, v: number, z: number, foot: number, s: number): RGB | null {
+  const x = u / s;
+  const y = v / s;
+  const w = (z - foot) / s;
+  if (w < 0 || w > COIL_BALL + 1.6 || Math.abs(x) > 2.6 || Math.abs(y) > 2.6) return null;
+  const glow = glowOf(f);
+  const core = mix(glow, WHITE, 0.6);
+  const d = Math.hypot(x, y);
+  const ball = Math.hypot(x, y, w - COIL_BALL);
+  if (ball < 1.5) return ball < 0.9 || (x > 0.2 && w > COIL_BALL + 0.3) ? core : glow;
+  if (w < 5.4) {
+    if (d < 0.6) return glow;
+    const k = Math.floor(w / 0.9);
+    if (w - k * 0.9 < 0.45 && d < 2.5 - k * 0.22) return d > 2.1 - k * 0.22 ? f.light : k % 2 ? COPPER : GUN_L;
+  }
+  return null;
 }
 
 // The Lumen tank's turret: a turntable carrying a tall emitter mast, braced
-// by two fins of the side's color, with a big crystal held up high in a
-// cradle at its top (which the beam leaves from: LUMEN_Z).
-export const LUMEN_Z = 15.6;
+// by two fins of the side's color, with the emitter coil standing on a collar
+// at its top (its ball, which the beam leaves from, is LUMEN_Z up).
+const LUMEN_FOOT = 12.8;
+export const LUMEN_Z = LUMEN_FOOT + COIL_BALL;
 function lumenTurret(f: Faction): Shape {
   const glow = glowOf(f);
   return (u, v, z) => {
     if (z < 5) return null;
-    const c = crystal(u, v, z, 0, 0, LUMEN_Z, 2.8, 3.8);
+    const c = coil(f, u, v, z, LUMEN_FOOT, 1);
     if (c) return c;
     const d = Math.hypot(u + 0.3, v);
     const av = Math.abs(v);
@@ -532,14 +539,8 @@ function lumenTurret(f: Faction): Shape {
     // the two fins either side, sweeping up from the turntable to the cradle
     const fo = 3.6 - (z - 6.8) * 0.42;
     if (z < 12.4 && Math.abs(av - Math.max(1.2, fo)) < 0.45 && Math.abs(u + (z - 6.8) * 0.15) < 1.8 - (z - 6.8) * 0.18) return z > 11.6 ? f.light : g(f.main, u, v, z);
-    // the cradle: a collar and four prongs round the crystal
-    if (z >= 12 && z < 13 && Math.hypot(u, v) < 2.2) return z > 12.6 ? f.light : GUN_D;
-    if (z >= 13 && z < 17.4) {
-      const pr = 1.8 + (z - 13) * 0.5 - Math.max(0, z - 15.8) * 1.2;
-      const ph = mod(Math.atan2(v, u) / (Math.PI / 2) + 0.5, 1);
-      const r = Math.hypot(u, v);
-      if (Math.abs(r - pr) < 0.45 && Math.min(ph, 1 - ph) * (Math.PI / 2) * r < 0.5) return GUN_L;
-    }
+    // the collar the coil stands on
+    if (z >= 12 && z < LUMEN_FOOT && Math.hypot(u, v) < 2.2) return z > 12.5 ? f.light : GUN_D;
     // a counterweight box behind
     if (u < -2.4 && u > -5 && av < 2 && z < 8) return z > 7.5 ? mix(f.main, f.light, 0.4) : f.main;
     return null;
@@ -1544,7 +1545,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     scorchTank: renderDirs(tankHull(f, 17, 12.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('scorchTank')),
     scorchTurret: renderDirs(scorchTurret(f), DIRS, { r: 10, zmax: 10 }, k('scorchTurret')),
     lumenTank: renderDirs(tankHull(f, 17, 13.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('lumenTank')),
-    lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 20 }, k('lumenTurret')),
+    lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 21 }, k('lumenTurret')),
     aaGun: renderDirs(aaLauncher(f), DIRS, { r: 7.5, zmax: 10 }, k('aaGun')),
     heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
     jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
@@ -2309,9 +2310,10 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
     }
     case 'prism': {
       // Lumen tower: a stepped round plinth, a tall column braced by four
-      // fins of the side's color that sweep up into it, an emitter cradle and
-      // a big crystal at the very top, which the beam leaves from.
-      const CZ = 40;
+      // fins of the side's color that sweep up into it, and the emitter coil
+      // at the very top, whose ball the beam leaves from.
+      const FOOT = 34.4;
+      const S = 1.75;
       const shape: Shape = (u, v, z) => {
         const d = Math.hypot(u, v);
         const a = Math.atan2(v, u);
@@ -2321,7 +2323,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
           if (z > 4.2 && z < 5.2) return mod(a * 8 / Math.PI, 1) < 0.25 ? f.dark : glow;
           return z > 5.6 ? PLAS_L : g(PLAS_D, u, v, z);
         }
-        const c = crystal(u, v, z, 0, 0, CZ, 4.4, 6.2);
+        const c = coil(f, u, v, z, FOOT, S);
         if (c) return c;
         // the column, tapering as it rises, with glowing slits between the fins
         if (z >= 6.4 && z < 34) {
@@ -2338,16 +2340,11 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
           const w = Math.min(ph, 1 - ph) * (Math.PI / 2) * d; // distance across the blade
           if (w < 0.7 && d < fr) return d > fr - 0.8 ? f.light : z < 9 ? f.dark : g(f.main, u, v, z);
         }
-        // collars at the top of the column and the cradle's four prongs
-        if (z >= 32.4 && z < 34.4 && d < 3.8) return z < 33 ? GUN_D : z > 33.8 ? f.light : g(f.main, u, v, z);
-        if (z >= 34.4 && z < 44) {
-          const pr = 2.6 + (z - 34.4) * 0.5 - Math.max(0, z - 40.5) * 1.1;
-          const ph = mod(a / (Math.PI / 2), 1);
-          if (Math.abs(d - pr) < 0.55 && Math.min(ph, 1 - ph) * (Math.PI / 2) * d < 0.6) return z > 42 ? f.light : GUN;
-        }
+        // the collar at the top of the column, which the coil stands on
+        if (z >= 32.4 && z < FOOT && d < 3.8) return z < 33 ? GUN_D : z > 33.8 ? f.light : g(f.main, u, v, z);
         return null;
       };
-      return { shape, rx: 8, ry: 8, zmax: 47, fx: [{ x: 0, y: 0, z: CZ }] };
+      return { shape, rx: 8, ry: 8, zmax: 49, fx: [{ x: 0, y: 0, z: FOOT + COIL_BALL * S }] };
     }
     case 'aa': {
       // Skyguard battery: a round raised emplacement with the launcher's
