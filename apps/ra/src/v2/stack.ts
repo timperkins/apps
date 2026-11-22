@@ -241,6 +241,7 @@ interface DirSet {
   key: string;
   dirs: number;
   cache: (StackSprite | undefined)[];
+  proxy: StackSprite[];
 }
 const sets = new Map<string, DirSet>();
 const setOf = new WeakMap<object, DirSet>();
@@ -258,7 +259,14 @@ export function dirSet(arr: StackSprite[]): { key: string; dirs: number; ready: 
 }
 
 // `key` names the set so a worker can make the same one (see art-worker.ts).
+// A key always names the same headings, so asking for one again (a new game
+// makes its art afresh) gives back the set already made. A second set under
+// the same key would never be sent its headings: the worker draws each one
+// only once, so every unit would be stuck showing the one heading it was
+// first drawn at.
 export function renderDirs(shape: Shape, dirs: number, o: StackOpts, key?: string): StackSprite[] {
+  const had = key ? sets.get(key) : undefined;
+  if (had && had.dirs === dirs) return had.proxy;
   let hmap: ColumnMap | undefined;
   const cache: (StackSprite | undefined)[] = new Array(dirs);
   const now = (d: number): StackSprite => {
@@ -284,7 +292,7 @@ export function renderDirs(shape: Shape, dirs: number, o: StackOpts, key?: strin
     },
   });
   if (key) {
-    const s = { key, dirs, cache };
+    const s = { key, dirs, cache, proxy };
     sets.set(key, s);
     setOf.set(proxy, s);
   }
