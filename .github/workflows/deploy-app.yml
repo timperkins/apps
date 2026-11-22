@@ -147,6 +147,36 @@ jobs:
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
             --project "$FIREBASE_PROJECT" --force
 
+      # Firebase caps preview channels per site, and each branch push makes one that lives 7 days.
+      # Before deploying, delete channels whose branch has no open PR (merged or abandoned branches),
+      # keeping live, latest and this branch's channel. Failures here only warn.
+      - name: Prune old preview channels
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && !inputs.latest_only
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SITE: ${{ steps.app.outputs.site }}
+          CURRENT: ${{ steps.app.outputs.channel }}
+        run: |
+          max=$(( 50 - ${#SITE} ))
+          keep=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --paginate --jq '.[].head.ref' |
+            tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-$max | sed -E 's/-+$//')
+          keep=$(printf '%s\n' live latest "$CURRENT" $keep | sort -u)
+          npx -y "$FIREBASE_TOOLS" hosting:channel:list --project "$FIREBASE_PROJECT" --json > "$RUNNER_TEMP/channels.json" || {
+            echo "::warning::Could not list preview channels: $(grep -v '^npm warn' "$RUNNER_TEMP/channels.json" | tail -c 500 | tr '\n' ' ')"; exit 0; }
+          ids=$(jq -r '.result.channels[]?.name | split("/") | last' "$RUNNER_TEMP/channels.json")
+          echo "Channels: $(echo $ids | wc -w)"
+          n=0
+          for id in $ids; do
+            grep -qxF "$id" <<< "$keep" && continue
+            if npx -y "$FIREBASE_TOOLS" hosting:channel:delete "$id" --project "$FIREBASE_PROJECT" --force > /dev/null 2>&1; then
+              n=$((n + 1))
+            else
+              echo "::warning::Could not delete preview channel $id"
+            fi
+          done
+          echo "::notice title=Preview channels::$(echo $ids | wc -w) on the site, deleted $n"
+
       - name: Deploy preview channel
         id: hosting_preview
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && !inputs.latest_only
@@ -154,12 +184,16 @@ jobs:
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
             --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" 2> "$RUNNER_TEMP/channel.err" || {
             cat "$RUNNER_TEMP/channel.json" "$RUNNER_TEMP/channel.err"
-            msg=$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" 2>/dev/null)
+            msg=$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" 2>/dev/null || true)
             [ -n "$msg" ] || msg=$(grep -v '^npm warn' "$RUNNER_TEMP/channel.err" | tail -n 20)
             echo "::error title=hosting:channel:deploy failed::$(echo "${msg:-no output}" | tr '\n' ' ')"
             exit 1
           }
-          url=$(jq -r '.result | to_entries[0].value.url' "$RUNNER_TEMP/channel.json")
+          url=$(jq -r '.result | to_entries[0].value.url // empty' "$RUNNER_TEMP/channel.json" 2>/dev/null || true)
+          if [ -z "$url" ]; then
+            echo "::error title=No preview URL in hosting:channel:deploy output::$(head -c 1500 "$RUNNER_TEMP/channel.json" | tr '\n' ' ') $(grep -v '^npm warn' "$RUNNER_TEMP/channel.err" | tail -n 10 | tr '\n' ' ')"
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # The same build also goes to a fixed "latest" channel, so each app has one preview link that
