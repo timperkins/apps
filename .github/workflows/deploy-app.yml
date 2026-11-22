@@ -147,35 +147,43 @@ jobs:
           "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.own_database }}' \
             --project "$FIREBASE_PROJECT" --force
 
-      # Firebase caps preview channels per site, and each branch push makes one that lives 7 days.
-      # Before deploying, delete channels whose branch has no open PR (merged or abandoned branches),
-      # keeping live, latest and this branch's channel. Failures here only warn.
+      # Firebase caps preview channels (the quota counts every site in the project), and each branch
+      # push makes one that lives 7 days. Before deploying, delete expiring channels on every site whose
+      # branch has no open PR (merged or abandoned branches), keeping live, latest and this branch's
+      # channel. Uses the REST API, since hosting:channel:list misses most channels. Failures only warn.
       - name: Prune old preview channels
         if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && !inputs.latest_only
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          SITE: ${{ steps.app.outputs.site }}
           CURRENT: ${{ steps.app.outputs.channel }}
         run: |
-          max=$(( 50 - ${#SITE} ))
-          keep=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --paginate --jq '.[].head.ref' |
-            tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-$max | sed -E 's/-+$//')
-          keep=$(printf '%s\n' live latest "$CURRENT" $keep | sort -u)
-          npx -y "$FIREBASE_TOOLS" hosting:channel:list --project "$FIREBASE_PROJECT" --json > "$RUNNER_TEMP/channels.json" || {
-            echo "::warning::Could not list preview channels: $(grep -v '^npm warn' "$RUNNER_TEMP/channels.json" | tail -c 500 | tr '\n' ' ')"; exit 0; }
-          ids=$(jq -r '.result.channels[]?.name | split("/") | last' "$RUNNER_TEMP/channels.json")
-          echo "Channels: $(echo $ids | wc -w)"
-          n=0
-          for id in $ids; do
-            grep -qxF "$id" <<< "$keep" && continue
-            if npx -y "$FIREBASE_TOOLS" hosting:channel:delete "$id" --project "$FIREBASE_PROJECT" --force > /dev/null 2>&1; then
-              n=$((n + 1))
-            else
-              echo "::warning::Could not delete preview channel $id"
-            fi
+          api=https://firebasehosting.googleapis.com/v1beta1
+          token=$(gcloud auth print-access-token) || { echo "::warning::No access token for pruning"; exit 0; }
+          get() { curl -sS -H "Authorization: Bearer $token" -H "x-goog-user-project: $FIREBASE_PROJECT" "$1"; }
+          refs=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" --paginate --jq '.[].head.ref')
+          sites=$(get "$api/projects/$FIREBASE_PROJECT/sites?pageSize=100" | jq -r '.sites[]?.name | split("/") | last')
+          total=0; n=0; summary=""
+          for site in $sites; do
+            max=$(( 50 - ${#site} ))
+            keep=$(printf '%s\n' $refs | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//' | cut -c1-$max | sed -E 's/-+$//')
+            keep=$(printf '%s\n' live latest "$CURRENT" $keep)
+            ids=""; page=""
+            while :; do
+              get "$api/sites/$site/channels?pageSize=100${page:+&pageToken=$page}" > "$RUNNER_TEMP/channels.json"
+              ids="$ids $(jq -r '.channels[]? | select(.expireTime) | .name | split("/") | last' "$RUNNER_TEMP/channels.json")"
+              page=$(jq -r '.nextPageToken // empty' "$RUNNER_TEMP/channels.json")
+              [ -n "$page" ] || break
+            done
+            count=$(echo $ids | wc -w); total=$((total + count)); summary="$summary $site:$count"
+            for id in $ids; do
+              grep -qxF "$id" <<< "$keep" && continue
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $token" \
+                -H "x-goog-user-project: $FIREBASE_PROJECT" "$api/sites/$site/channels/$id")
+              if [ "$code" = 200 ]; then n=$((n + 1)); else echo "::warning::Could not delete channel $site/$id (HTTP $code)"; fi
+            done
           done
-          echo "::notice title=Preview channels::$(echo $ids | wc -w) on the site, deleted $n"
+          echo "::notice title=Preview channels::$total expiring channels ($summary ), deleted $n"
 
       - name: Deploy preview channel
         id: hosting_preview
@@ -183,7 +191,7 @@ jobs:
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy '${{ steps.app.outputs.channel }}' \
             --project "$FIREBASE_PROJECT" --expires 7d --json > "$RUNNER_TEMP/channel.json" 2> "$RUNNER_TEMP/channel.err" || {
-            cat "$RUNNER_TEMP/channel.json" "$RUNNER_TEMP/channel.err"
+            cat "$RUNNER_TEMP/channel.json" "$RUNNER_TEMP/channel.err"; echo
             msg=$(jq -r '.error // empty' "$RUNNER_TEMP/channel.json" 2>/dev/null || true)
             [ -n "$msg" ] || msg=$(grep -v '^npm warn' "$RUNNER_TEMP/channel.err" | tail -n 20)
             echo "::error title=hosting:channel:deploy failed::$(echo "${msg:-no output}" | tr '\n' ' ')"
