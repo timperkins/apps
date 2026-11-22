@@ -10,7 +10,7 @@ import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, to
 import { buildingArt as workerBuilding, constructionArt, glowArt, pooled, prefetch } from './art-pool';
 import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { cameoUrl, tabIconUrl } from './cameo';
-import { BURST_CENTER, BURST_FRAME, CHEV_TIP, burstFrames, chevronFrames, type BurstKind } from '../cursors';
+import { BURST_CENTER, BURST_FRAME, burstFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
 import { clearLine, findPath } from './path';
 import { riversFor } from './rivers';
@@ -3037,9 +3037,10 @@ export class IsoGame implements GameLike {
     const hit = this.unitAt(x, y);
     // over a picked unit of yours that can deploy (a Foundry vehicle that
     // can unfold here, a G.I. to dig in or climb out, a transport with
-    // soldiers in it): deploy it
+    // soldiers in it): deploy it. A Foundry vehicle gets the three falling
+    // triangles ('unfold'); the rest get the orange deploy cursor.
     const h = hit?.u;
-    if (h && h.sel && h.f === this.me && this.deploysNow(h)) return 'deploy';
+    if (h && h.sel && h.f === this.me && this.deploysNow(h)) return h.kind === 'mcv' ? 'unfold' : 'deploy';
     if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
@@ -6369,18 +6370,6 @@ export class IsoGame implements GameLike {
     for (const [bx, by] of ends) c.fillRect(Math.round(bx) - 1, Math.round(by) - 1, 2, 2);
     c.restore();
 
-    // until your first Foundry is up, the harvest cursor's triangles float
-    // over a Foundry vehicle that could deploy where it is, pointing it out
-    if (!this.buildings.some((b) => b.f === this.me && b.kind === 'yard')) {
-      const frames = chevronFrames();
-      const img = frames[Math.floor(this.time * 4) % frames.length];
-      for (const u of this.units) {
-        if (u.kind !== 'mcv' || u.f !== this.me || u.sel || u.deploy || !this.deployable(u)) continue;
-        const [sx, sy] = toScreen(u.x, u.y, u.z + 22);
-        if (!inView(sx, sy)) continue;
-        c.drawImage(img, Math.round(sx) - CHEV_TIP[0], Math.round(sy) - CHEV_TIP[1]);
-      }
-    }
     // order markers: the cursor's click burst, on top of everything
     for (const m of this.markers) {
       const frames = burstFrames(markKind(m));

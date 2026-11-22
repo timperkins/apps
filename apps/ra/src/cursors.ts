@@ -572,17 +572,6 @@ export function repairRingFrames(): string[] {
   return repairRing;
 }
 
-// The enter cursor's triangles as pictures for the map (a grid pixel to a
-// map pixel), through one run of their light: the lowest tip is at
-// (CHEV_TIP[0], CHEV_TIP[1]) in them. They float over a Foundry vehicle that
-// has yet to deploy, pointing it out.
-const chevMap: HTMLCanvasElement[] = [];
-export const CHEV_TIP: [number, number] = [8, 14];
-export function chevronFrames(): HTMLCanvasElement[] {
-  if (!chevMap.length) for (let i = 0; i < CHEV_STEPS; i++) chevMap.push(gridCanvas(chevronRows(i), 1));
-  return chevMap;
-}
-
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
 // on the map where you tapped (gold for digging and deploying, the triangles
