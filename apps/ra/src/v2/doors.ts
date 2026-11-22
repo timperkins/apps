@@ -1,8 +1,8 @@
-// Doors that new units come out of: the Vehicle works' garage door, which
-// rolls up, and the Barracks' pair of doors, which swing in. The doors are
+// Doors that new units come out of: the Vehicle works' garage door and the
+// Air command's hangar door, which roll up, and the Barracks' pair of doors, which swing in. The doors are
 // part of the buildings' pictures; these draw them open, and limit a unit
 // still coming out to what shows through the doorway.
-import { BARRACKS_DOOR, BuildingKind, FACTORY_DOOR } from './sprites';
+import { BARRACKS_DOOR, BuildingKind, FACTORY_DOOR, HANGAR_DOOR } from './sprites';
 import { toScreen } from './stack';
 
 export interface Door {
@@ -21,6 +21,7 @@ export const DOOR_S = 0.4;
 /** The door of a building that units come out of, or null. */
 export function doorOf(kind: BuildingKind): Door | null {
   if (kind === 'factory') return { x: FACTORY_DOOR[0], y: 18, nx: 0, ny: 1, hw: FACTORY_DOOR[1], top: FACTORY_DOOR[2], roll: true };
+  if (kind === 'radar') return { x: HANGAR_DOOR[0], y: HANGAR_DOOR[1], nx: 0, ny: 1, hw: HANGAR_DOOR[2], top: HANGAR_DOOR[3], roll: true };
   if (kind === 'barracks') return { x: 14, y: BARRACKS_DOOR[0], nx: 1, ny: 0, hw: BARRACKS_DOOR[1], top: BARRACKS_DOOR[2], roll: false };
   return null;
 }

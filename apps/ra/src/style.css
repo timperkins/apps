@@ -1056,6 +1056,74 @@ body.sheet-open #selBar {
   gap: 6px;
 }
 
+/* Repair and Sell, above the tabs: wide wooden keys with a pixel wrench
+   and dollar sign. The one that is down glows gold and its icon blinks
+   while it waits for you to pick a building. */
+#build .tools {
+  display: flex;
+  gap: 5px;
+  padding: 1px;
+}
+
+#build .tool {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--cream);
+  text-shadow: 1px 1px 0 #24170b;
+  background: var(--wood);
+  border: 2px solid;
+  border-color: var(--wood-hi) var(--wood-lo) var(--wood-lo) var(--wood-hi);
+  box-shadow: 0 0 0 1px #24170b;
+  cursor: var(--cur-hand);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#build .tool svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  filter: drop-shadow(1px 1px 0 rgba(0, 0, 0, 0.35));
+}
+
+#build .tool svg.dollar {
+  width: 10px;
+  height: 12px;
+}
+
+#build .tool:active {
+  border-color: var(--wood-lo) var(--wood-hi) var(--wood-hi) var(--wood-lo);
+}
+
+#build .tool[aria-pressed='true'] {
+  color: #24170b;
+  text-shadow: none;
+  background: #e9c27a;
+  border-color: #fff0c4 #a8752e #a8752e #fff0c4;
+  transform: translateY(1px);
+}
+
+#build .tool[aria-pressed='true'] svg {
+  animation: blink 0.8s steps(2) infinite;
+}
+
+/* the paratroopers, waiting for you to pick where they drop */
+#build .item.aiming {
+  border-color: #b8ff9c #4fd84a #4fd84a #b8ff9c;
+  animation: none;
+}
+
+#build .item.aiming .state {
+  color: #b8ff9c;
+}
+
 #build .tabs {
   display: flex;
   gap: 5px;

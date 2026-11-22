@@ -86,6 +86,7 @@ body {
 #selBar button,
 #build .close,
 #build .tabs button,
+#build .tool,
 #build .item,
 #picker .head button,
 #picker .head a,
@@ -117,6 +118,7 @@ body {
   #selBar button:hover:not(:disabled),
   #build .close:hover,
   #build .tabs button:hover:not(:disabled),
+  #build .tool:hover,
   #build .item:hover,
   #picker .head button:hover,
   #picker .head a:hover,
@@ -142,6 +144,8 @@ body {
 #toolbar button[aria-pressed='true'],
 #selBar button.type[aria-pressed='true'],
 #build .tabs button[aria-selected='true'],
+#build .tool[aria-pressed='true'],
+#build .item.aiming,
 #picker .stages .seg button[aria-checked='true'],
 #lobby .map[aria-pressed='true'] {
   color: var(--on-ink);
@@ -150,8 +154,15 @@ body {
   border-image-source: var(--fr-on);
   box-shadow: none;
 }
-#build .tabs button[aria-selected='true'] {
+#build .tabs button[aria-selected='true'],
+#build .tool[aria-pressed='true'] {
   transform: none;
+}
+#build .item.aiming {
+  animation: none;
+}
+#build .item.aiming .state {
+  color: var(--ok);
 }
 
 /* Main actions */
@@ -472,6 +483,17 @@ body {
   height: 16px;
   fill: none;
   filter: none;
+}
+#build .tools {
+  gap: 4px;
+}
+#build .tool {
+  height: 34px;
+  font-size: 12px;
+  text-shadow: none;
+}
+#build .tool[aria-pressed='true'] {
+  color: var(--on-ink);
 }
 #build .tabs {
   gap: 4px;

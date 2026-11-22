@@ -443,7 +443,7 @@ function placeDeploy(): void {
   if (key !== deployKey) {
     deployKey = key;
     deployBtn.disabled = !d.ok;
-    deployBtn.title = d.ok ? 'Deploy into a Foundry (F or Space)' : 'Needs open, level ground: move somewhere clear';
+    deployBtn.title = d.ok ? 'Deploy into a Construction yard (F or Space)' : 'Needs open, level ground: move somewhere clear';
   }
   const r = canvas.getBoundingClientRect();
   const lift = 22 * scale;
@@ -459,6 +459,12 @@ okBtn.addEventListener('click', () => {
 // Send the selection to map point (x, y) (or attack what is there) and lock
 // it as a group. A locked group goes onto its own units too, rather than
 // picking them.
+// Put the Repair or Sell button back up, or put off the paratroopers.
+function stopTargeting(): void {
+  game.setBuildMode?.(null);
+  game.act?.('unpara');
+}
+
 function sendTo(x: number, y: number): void {
   if (locked && game.cursorAt?.(x, y) === 'pick') game.order(x, y);
   else game.click(x, y, false);
@@ -1279,8 +1285,9 @@ const build = initBuild(() => game);
 const placingNow = () => !planet && !!game?.placing?.();
 // The ghost of the building being placed, in map pixels (on the copy of the
 // map in view). Mice move it by hovering and put it down with a click; on a
-// touch screen a tap moves it, a drag that starts on it carries it, and the
-// Place button puts it down.
+// touch screen a drag that starts on it carries it, and a tap puts it down
+// where you tapped. Esc, a right-click or a tap on its picture in the build
+// menu puts it away.
 let ghostP: { x: number; y: number } | null = null;
 function moveGhost(x: number, y: number): void {
   ghostP = { x, y };
@@ -1458,6 +1465,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (e.button === 2) {
     if (planet) spaceTap(e, true);
+    else if (!planet && game.targeting?.()) stopTargeting();
     else {
       clicked();
       game.order(p.x, p.y);
@@ -1538,9 +1546,10 @@ const finish = (e: PointerEvent, cancel: boolean) => {
   const add = e.shiftKey || e.ctrlKey || e.metaKey;
   game.force = e.ctrlKey || e.metaKey;
   if (!cancel && placingNow()) {
+    // a tap or click puts it down there (if it can go there)
     if (!dragging) {
       moveGhost(p.x, p.y);
-      if (e.pointerType === 'mouse') game.act?.('place');
+      game.act?.('place');
     }
   } else if (!cancel) {
     if (planet) {
@@ -1599,6 +1608,7 @@ function hoverNow(now: number): void {
   else if (m && !planet && !(dragging && box) && picker.hidden) {
     const what = game.cursorAt?.(m.x, m.y);
     if (what === 'pick') k = locked ? 'move' : 'corners';
+    else if (what === 'fix') k = 'repair';
     else if (what) k = what;
   } else if (planet) k = 'grab';
   const burst = Math.floor((now - movedAt) / 55);
@@ -1675,6 +1685,7 @@ window.addEventListener('keydown', (e) => {
     else if (menu.classList.contains('keys-open')) setKeysOpen(false);
     else if (!menu.hidden) setMenu(false);
     else if (placingNow()) game.act?.('unplace');
+    else if (game.targeting?.()) stopTargeting();
     else if (pending) setPending(null);
     else if (lastNames.length) game.deselect();
     else setSelOpen(false);

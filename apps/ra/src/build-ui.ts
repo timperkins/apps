@@ -3,9 +3,13 @@
 // side. On a phone it is a sheet above the toolbar that the Build button opens;
 // on a wide screen it is a sidebar that is always open. Tap an item to start it,
 // tap again to put it on hold or take it off; long-press (or right-click) to
-// cancel and get your credits back. A finished building is tapped to place it.
+// cancel and get your credits back. A finished building is tapped to place it
+// (and tapped again to put it away). Above the tabs, Repair and Sell: with one
+// down, a tap on a building of yours repairs or sells it. While you have a
+// Paratrooper plane, the paratroopers top the Defense tab: tap them when
+// they are ready, then where they should drop.
 import type { BuildItem, BuildMenu, GameLike } from './types';
-import { BOLT, COIN } from './pixel-icons';
+import { BOLT, COIN, DOLLAR, WRENCH } from './pixel-icons';
 
 const LONG_MS = 480;
 
@@ -42,6 +46,21 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   const pwrUse = pwr.querySelector<HTMLDivElement>('.use')!;
   for (const el of document.querySelectorAll('.coinIco')) el.outerHTML = COIN;
   pwr.querySelector('.boltIco')!.outerHTML = BOLT;
+  panel.querySelector('.wrenchIco')!.outerHTML = WRENCH;
+  panel.querySelector('.dollarIco')!.outerHTML = DOLLAR;
+  const tools = [...panel.querySelectorAll<HTMLButtonElement>('.tool')];
+  for (const t of tools)
+    t.addEventListener('click', () => {
+      const g = getGame();
+      const m = t.dataset.mode as 'repair' | 'sell';
+      g?.setBuildMode?.(g.buildMode?.() === m ? null : m);
+      last = 0;
+      // on a phone the sheet gets out of the way while you pick
+      if (g?.buildMode?.() && narrow() && open) {
+        reopen = true;
+        setOpen(false);
+      }
+    });
   const hudNum = creditsEl.querySelector<HTMLSpanElement>('.num')!;
   const panelCredits = panel.querySelector<HTMLElement>('.credits')!;
   const panelNum = panelCredits.querySelector<HTMLSpanElement>('.num')!;
@@ -91,6 +110,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     el.querySelector('img')!.src = it.icon;
     el.querySelector('.name')!.textContent = it.name;
     el.querySelector('.cost span')!.textContent = String(it.cost);
+    // (the paratroopers cost nothing: they come with the plane)
+    if (it.cost <= 0) el.querySelector<HTMLElement>('.cost')!.style.display = 'none';
     // tap, long-press to cancel, right-click to cancel
     let timer = 0;
     let longFired = false;
@@ -119,8 +140,9 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
       const g = getGame();
       g?.buildTap?.(it.id);
       last = 0;
-      // a ready building goes on the map: get the sheet out of the way
-      if (g?.placing?.() && narrow() && open) {
+      // a ready building goes on the map (or the paratroopers are to be
+      // dropped): get the sheet out of the way
+      if ((g?.placing?.() || g?.targeting?.()) && narrow() && open) {
         reopen = true;
         setOpen(false);
       }
@@ -145,6 +167,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
     creditsEl.classList.toggle('low', low);
     creditsEl.title = low ? 'Low power: building at half speed' : 'Credits';
     btn.classList.toggle('alert', menu.items.some((i) => i.isNew || i.state === 'ready'));
+    const mode = g?.buildMode?.() ?? null;
+    for (const t of tools) t.setAttribute('aria-pressed', String(t.dataset.mode === mode));
     if (panel.hidden) return;
     panelNum.textContent = String(menu.credits);
     panelCredits.title = menu.store ? `Credits (you can hold ${menu.store})` : 'Credits';
@@ -222,16 +246,17 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
       }
       c.building = building;
       if (it.state === 'paused') c.rate = 0;
-      const key = `${it.state}|${it.isNew}|${it.blocked ?? ''}|${it.count}`;
+      const key = `${it.state}|${it.isNew}|${it.blocked ?? ''}|${it.count}|${it.aiming ? 1 : 0}`;
       if (key === c.key) return;
       c.key = key;
       const el = c.el;
       el.dataset.state = it.state;
       el.classList.toggle('blocked', !!it.blocked && it.state === 'idle');
       el.classList.toggle('fresh', it.isNew);
+      el.classList.toggle('aiming', !!it.aiming);
       el.title = it.blocked ?? `${it.name}: ${it.blurb}`;
       el.querySelector('.state')!.textContent =
-        it.state === 'ready' ? 'Ready' : it.state === 'paused' ? 'On hold' : it.state === 'building' ? '' : it.blocked && !it.blocked.startsWith('Busy') ? it.blocked : '';
+        it.aiming ? 'Pick a spot' : it.state === 'ready' ? 'Ready' : it.state === 'paused' ? 'On hold' : it.state === 'building' ? '' : it.blocked && !it.blocked.startsWith('Busy') ? it.blocked : '';
       el.querySelector('.count')!.textContent = it.count > 1 ? `×${it.count}` : '';
     });
   }
@@ -274,7 +299,7 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   return {
     update(now: number) {
       const g = getGame();
-      const placing = !!g?.placing?.();
+      const placing = !!g?.placing?.() || !!g?.targeting?.();
       if (wasPlacing && !placing && reopen) {
         reopen = false;
         setOpen(true);
