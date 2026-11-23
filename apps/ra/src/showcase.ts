@@ -2,7 +2,7 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { TECH } from './v2/tech';
@@ -460,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -599,7 +599,9 @@ function combatCells(o: Fighter): Cell[] {
     const [ux, uy] = [-12, -12];
     const ha = A + (o.hullOff ?? 0);
     const moved: Box = { l: still.l, r: still.r, u: still.u + 12, d: still.d - 12 };
-    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: 0, d: far + 6 }), (s, t, kick) => o.draw(s, ux, uy, ha, A, t, kick), () => muzzles(o.kind, ux, uy, z, ha, A), [far, far, 0]));
+    // anti-air only: it shoots up at the sky
+    const sky = w.air && !w.ground;
+    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: sky ? 40 : 0, d: far + 6 }), (s, t, kick) => o.draw(s, ux, uy, ha, A, t, kick), () => muzzles(o.kind, ux, uy, z, ha, A), sky ? [far * 1.5, far * 1.5, 60] : [far, far, 0]));
   }
   const bar = { x: 0, y: -still.u - 3, w: Math.max(10, Math.round((still.l + still.r) * 0.6)) };
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
@@ -832,10 +834,10 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   ]);
 
   // tanks: a hull and a turret that turns on its own
-  const TANK_NAMES = { light: 'Lancer tank', heavy: 'Bastion tank', scorch: 'Scorch tank', lumen: 'Lumen tank' };
-  for (const kind of ['light', 'heavy', 'scorch', 'lumen'] as const) {
-    const hull = (art: V2FactionArt) => ({ light: art.lightTank, heavy: art.heavyTank, scorch: art.scorchTank, lumen: art.lumenTank })[kind];
-    const tur = (art: V2FactionArt) => ({ light: art.lightTurret, heavy: art.heavyTurret, scorch: art.scorchTurret, lumen: art.lumenTurret })[kind];
+  const TANK_NAMES = { light: 'Lancer tank', heavy: 'Bastion tank', scorch: 'Scorch tank', lumen: 'Lumen tank', skyguard: 'Skyguard tank' };
+  for (const kind of ['light', 'heavy', 'scorch', 'lumen', 'skyguard'] as const) {
+    const hull = (art: V2FactionArt) => ({ light: art.lightTank, heavy: art.heavyTank, scorch: art.scorchTank, lumen: art.lumenTank, skyguard: art.skyguardTank })[kind];
+    const tur = (art: V2FactionArt) => ({ light: art.lightTurret, heavy: art.heavyTurret, scorch: art.scorchTurret, lumen: art.lumenTurret, skyguard: art.skyguardTurret })[kind];
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a, _t, turret) => {
@@ -1138,16 +1140,22 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     ['otter', 'Otter hovercraft', 18],
     ['destroyer', 'Destroyer', 26],
     ['sub', 'Submarine', 22],
-    ['cruiser', 'Sentinel cruiser', 26],
+    ['cruiser', 'Skyguard cruiser', 26],
     ['carrier', 'Carrier', 34],
   ] as const) {
     const draw =
       (art: V2FactionArt): Draw =>
-      (s, x, y, a, t) =>
-        s.blit(art[kind][di(a)], x, y, kind === 'sub' ? -0.6 : kind === 'otter' ? Math.sin(t * 5) * 0.25 : Math.sin(t * 1.4) * 0.4);
+      (s, x, y, a, t, turret) => {
+        const z = kind === 'sub' ? -0.6 : kind === 'otter' ? Math.sin(t * 5) * 0.25 : Math.sin(t * 1.4) * 0.4;
+        // the cruiser's launchers turn on their own
+        if (kind === 'cruiser') for (const [p, px, py, pz] of cruiserParts(art, x, y, z, a, turret === undefined || turret === 1 ? a : turret)) s.blit(p, px, py, pz);
+        else s.blit(art[kind][di(a)], x, y, z);
+      };
     const spr = me[kind][0];
-    const box = union(boxOf(spr, 0, 0, 1), boxOf(spr, 0, 0, -1));
+    let box = union(boxOf(spr, 0, 0, 1), boxOf(spr, 0, 0, -1));
+    if (kind === 'cruiser') box = union(box, boxOf(me.cruiserTop[0], 0, 0, 1), boxOf(me.cruiserTop[0], 0, 0, -1));
     const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, a, t) }));
+    if (kind === 'cruiser') cells.push({ label: 'Launchers turn', box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, Math.PI / 4 + t * 1.4) });
     cells.push({
       label: 'Sail',
       box: union(circleBox(spr, R + 4, 1), { l: R * 1.42 + 22, r: R * 1.42 + 22, u: 26, d: R * 0.71 + 10 }),
