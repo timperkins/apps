@@ -16,8 +16,6 @@ export const MAX_SWIMMERS = 8;
 export const MAX_PLAYERS = MAX_RAIDERS + MAX_SWIMMERS;
 
 export const ROUND_S = 180;
-// In the last minute the line reaches the Deep.
-export const DEEP_LINE_AT_S = 60;
 export const COUNTDOWN_S = 3;
 
 // ---- Swimmers ----
@@ -84,7 +82,6 @@ export const HOOK_SINK = 70;
 export const HOOK_REEL = 95;
 export const HOOK_FOLLOW = 3;
 export const HOOK_RADIUS = 5;
-export const LINE_MIDWATER = 250;
 export const LINE_DEEP = SEABED - 4;
 
 // ---- Tug-of-war ----

@@ -5,6 +5,46 @@ import { COLORS, NAME_MAX, isColor, isKind, isRole, type FishKind, type Role } f
 import type { Action, DisplayMessage, RaiderStatus, SwimmerStatus } from '../net/protocol';
 import { seeded } from '../render/pix';
 import { CREWS, boatGrid, clownLook, fishGrid, playerLook } from '../render/sprites';
+import { UPGRADES, upgradeCost, type Levels, type UpgradeId } from '../game/upgrades';
+
+export interface StoreControl {
+  open: boolean;
+  toggle: () => void;
+  buy: (item: UpgradeId) => void;
+}
+
+// The upgrades store: every item can be bought again, each level costs more.
+export function StorePanel({ role, coins, ups, store }: { role: Role; coins: number; ups: Levels; store: StoreControl }) {
+  return (
+    <section className="store">
+      <header>
+        <b>Store</b>
+        <span>
+          Coins <b>{coins}</b>
+        </span>
+        <button className="link" onClick={store.toggle}>
+          Close
+        </button>
+      </header>
+      {UPGRADES[role].map((u, i) => {
+        const level = ups[u.id] ?? 0;
+        const cost = upgradeCost(level);
+        return (
+          <button key={u.id} className="store-item" disabled={coins < cost} onClick={() => store.buy(u.id)}>
+            <span className="key">{i + 1}</span>
+            <span className="what">
+              <b>
+                {u.name} {level > 0 && <span className="lvl">lv {level}</span>}
+              </b>
+              <span className="small">{u.desc}</span>
+            </span>
+            <span className="cost">{cost}</span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
 
 // Pieces shared by the phone controller and a display that is also a player.
 
@@ -227,7 +267,9 @@ export function RaiderPad({
   hold,
   act,
   hostNow,
+  store,
 }: {
+  store?: StoreControl;
   you: RaiderStatus;
   info: GameInfo;
   padEl: React.RefObject<HTMLDivElement | null>;
@@ -261,6 +303,8 @@ export function RaiderPad({
         <span>Catches {you.catches}</span>
       </div>
       {you.hook === 'fight' && <KnotBar knot={you.knot} mine="raider" />}
+      {store?.open && <StorePanel role="raider" coins={you.coins} ups={you.ups} store={store} />}
+      <div className="keys-hint">{KEY_HELP.raider}</div>
       <div className="controls">
         <div ref={padEl} className="pad stick-pad">
           <StickView stick={stick} hint={you.hook === 'ready' ? 'Slide left or right to sail' : 'Slide to drag the line'} />
@@ -296,6 +340,11 @@ export function RaiderPad({
                 Sell meat
               </button>
             )}
+            {store && (
+              <button className="store-btn" onClick={store.toggle}>
+                Store · {you.coins}
+              </button>
+            )}
             <button onClick={() => act('find')}>Find me</button>
           </div>
         </div>
@@ -309,7 +358,9 @@ export function SwimmerPad({
   padEl,
   stick,
   act,
+  store,
 }: {
+  store?: StoreControl;
   you: SwimmerStatus;
   padEl: React.RefObject<HTMLDivElement | null>;
   stick: StickState;
@@ -360,6 +411,8 @@ export function SwimmerPad({
           <div style={{ width: `${Math.round(you.food * 100)}%` }} />
         </div>
       </div>
+      {store?.open && <StorePanel role="swimmer" coins={you.coins} ups={you.ups} store={store} />}
+      <div className="keys-hint">{KEY_HELP.swimmer}</div>
       <div className="controls">
         <div ref={padEl} className="pad stick-pad">
           <StickView stick={stick} hint="Touch and drag to swim. Eat smaller fish, dodge bigger ones and hooks." />
@@ -380,10 +433,119 @@ export function SwimmerPad({
                 Taunt
               </button>
             )}
+            {store && (
+              <button className="store-btn" onClick={store.toggle}>
+                Store · {you.coins}
+              </button>
+            )}
             <button onClick={() => act('find')}>Find me</button>
           </div>
         </div>
       </div>
     </>
   );
+}
+
+// ---- Keyboard: arrow keys move, D casts and reels; other keys match the buttons. ----
+
+export const KEY_HELP = {
+  raider: 'Arrows sail · D cast, hold D to reel, tap D in a fight · S sell · F find me · B store, 1-4 buy',
+  swimmer: 'Arrows swim · Space dash · E egg · T taunt · F find me · when hooked: tap D, R thrash · B store, 1-4 buy',
+} as const;
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
+// Calls onMove with the arrow direction and whether D is held, and act for key presses.
+// `you` is read through a ref so the listeners always see the latest status.
+export function useKeyboard(
+  you: RaiderStatus | SwimmerStatus | null,
+  hostNow: () => number,
+  onMove: (x: number, y: number, hold: boolean) => void,
+  act: (a: Action) => void,
+  store?: StoreControl,
+): boolean {
+  const youRef = useRef(you);
+  youRef.current = you;
+  const cb = useRef({ onMove, act, store });
+  cb.current = { onMove, act, store };
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!you) return;
+    const down = new Set<string>();
+    const push = () => {
+      let x = 0;
+      let y = 0;
+      for (const k of down) {
+        const a = ARROWS[k];
+        if (a) {
+          x += a[0];
+          y += a[1];
+        }
+      }
+      const m = Math.hypot(x, y) || 1;
+      cb.current.onMove(x / m, y / m, down.has('d'));
+      setActive(down.size > 0);
+    };
+    const press = (k: string) => {
+      const me = youRef.current;
+      if (!me) return;
+      if (k === 'b') return cb.current.store?.toggle();
+      if ('1234'.includes(k)) {
+        const u = UPGRADES[me.role][Number(k) - 1];
+        if (u) cb.current.store?.buy(u.id);
+        return;
+      }
+      if (me.role === 'raider') {
+        if (k === 'd' && me.hook === 'ready') cb.current.act('cast');
+        else if (k === 'd' && me.hook === 'fight') cb.current.act(inHeaveWindow(hostNow(), me.fightStart) ? 'heave' : 'tap');
+        else if (k === 's') cb.current.act('sell');
+        else if (k === 'f') cb.current.act('find');
+      } else if (me.hooked) {
+        if (k === 'd' || k === ' ') cb.current.act('pull');
+        else if (k === 'r') cb.current.act('thrash');
+      } else {
+        if (k === ' ') cb.current.act('dash');
+        else if (k === 'e') cb.current.act('egg');
+        else if (k === 't') cb.current.act('taunt');
+        else if (k === 'f') cb.current.act('find');
+      }
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (!(k in ARROWS) && !'dsfetrb1234 '.includes(k)) return;
+      e.preventDefault();
+      if (e.repeat) return;
+      down.add(k);
+      press(k);
+      push();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (down.delete(k)) push();
+    };
+    const clear = () => {
+      if (down.size) {
+        down.clear();
+        push();
+      }
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', clear);
+      clear();
+    };
+  }, [!!you, hostNow]);
+
+  return active;
 }

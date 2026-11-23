@@ -6,7 +6,7 @@ import { ensureUser } from '../net/firebase';
 import type { Action } from '../net/protocol';
 import { joinRoom, watchRoom, type Room } from '../net/rooms';
 import { connectToDisplay, type ControllerLink } from '../net/rtc';
-import { JoinPanel, RaiderPad, SwimmerPad, buzz, clock, loadLook, saveLook, useHostClock, type GameInfo, type Look } from './controls';
+import { JoinPanel, RaiderPad, SwimmerPad, buzz, clock, loadLook, saveLook, useHostClock, useKeyboard, type StoreControl, type GameInfo, type Look } from './controls';
 
 type Status = 'intro' | 'connecting' | 'missing' | 'unreachable' | 'lost' | 'connected';
 
@@ -150,6 +150,23 @@ export default function Play() {
     setEditing(false);
   }
 
+  const [storeOpen, setStoreOpen] = useState(false);
+  const store: StoreControl = {
+    open: storeOpen,
+    toggle: () => setStoreOpen((o) => !o),
+    buy: (item) => linkRef.current?.sendControl({ t: 'buy', item }),
+  };
+
+  useKeyboard(
+    playing ? you : null,
+    hostNow,
+    (x, y, hold) => {
+      input.current = { x, y, hold };
+    },
+    act,
+    store,
+  );
+
   const hold = (on: boolean) => (e: ReactPointerEvent) => {
     e.preventDefault();
     input.current.hold = on;
@@ -232,9 +249,9 @@ export default function Play() {
       )}
 
       {playing && you?.role === 'raider' && (
-        <RaiderPad you={you} info={info!} padEl={padEl} stick={stick} hold={hold} act={act} hostNow={hostNow} />
+        <RaiderPad you={you} info={info!} padEl={padEl} stick={stick} hold={hold} act={act} hostNow={hostNow} store={store} />
       )}
-      {playing && you?.role === 'swimmer' && <SwimmerPad you={you} padEl={padEl} stick={stick} act={act} />}
+      {playing && you?.role === 'swimmer' && <SwimmerPad you={you} padEl={padEl} stick={stick} act={act} store={store} />}
 
       {playing && between && (
         <button className="link change" onClick={() => setEditing(true)}>

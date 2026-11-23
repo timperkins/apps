@@ -5,9 +5,11 @@ A pirate fishing party game. One screen (TV, laptop) shows the sea in pixel art;
 - **The Crew** (up to 4): each Raider has their own boat in their own color. Slide to sail along the surface, **Cast**, hold to reel the line in, and when something bites, tap to win the tug-of-war. Tapping just as the gold ring closes is a **Heave** and pulls much harder. A catch pays coins, or sometimes meat, which Gristle Pete buys when his boat comes by ("Hot diggity dog, do you have any meat?").
 - **The School** (up to 8): each Swimmer is a fish in their own color. Drag to swim, eat smaller fish to grow, dodge bigger ones and hooks, and **Dash**. When hooked, tap fast to pull free, and **Thrash** once per fight. Ramming a boat damages it; a sunk boat is fixed after 8 seconds. Swimmers can lay eggs that hatch into babies that follow them, and clownfish can **Taunt** ("You can't catch me, I'm the gingerbread man").
 
-Computer fish fill the sea. A round lasts 3 minutes; in the last minute the lines reach the seabed. The team with the bigger total wins (the Crew's total is scaled by how many Swimmers there are per Raider, so uneven teams stay fair).
+Computer fish fill the sea. A round lasts 3 minutes; lines reach all the way to the seabed. The team with the bigger total wins (the Crew's total is scaled by how many Swimmers there are per Raider, so uneven teams stay fair).
 
-Not built yet: the upgrades shop, drawing your own fish, extra customization and Frenzy mode.
+Spend coins in the **Store** (B on a keyboard, then 1-4) on upgrades for your boat (sails, hull, reel, line) or fish (fins, dash, strength, ram). Every upgrade can be bought again; each level costs more. Upgrades reset each round.
+
+Not built yet: drawing your own fish, extra customization and Frenzy mode.
 
 ## How it works
 

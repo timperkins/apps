@@ -1,5 +1,6 @@
 import type { Phase } from './rooms';
 import type { FishKind, Role } from '../game/looks';
+import type { Levels, UpgradeId } from '../game/upgrades';
 
 // Controller to display. Stick input goes over the unreliable channel, the rest over the reliable one.
 export type Action = 'cast' | 'tap' | 'heave' | 'pull' | 'thrash' | 'dash' | 'egg' | 'taunt' | 'sell' | 'find';
@@ -7,7 +8,8 @@ export type Action = 'cast' | 'tap' | 'heave' | 'pull' | 'thrash' | 'dash' | 'eg
 export type ControllerMessage =
   | { t: 'in'; x: number; y: number; hold: boolean }
   | { t: 'join'; role: Role; name: string; color: string; kind: FishKind }
-  | { t: 'act'; a: Action };
+  | { t: 'act'; a: Action }
+  | { t: 'buy'; item: UpgradeId };
 
 export interface RaiderStatus {
   role: 'raider';
@@ -25,6 +27,7 @@ export interface RaiderStatus {
   knot: number;
   fightStart: number;
   depth: number;
+  ups: Levels;
 }
 
 export interface SwimmerStatus {
@@ -45,6 +48,7 @@ export interface SwimmerStatus {
   eggIn: number;
   tauntIn: number;
   diedBy: string | null;
+  ups: Levels;
 }
 
 export type YouStatus = RaiderStatus | SwimmerStatus;

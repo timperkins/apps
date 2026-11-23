@@ -194,3 +194,33 @@ describe('teams', () => {
     expect(teamTotals(w).crew).toBe(200);
   });
 });
+
+describe('store', () => {
+  it('spends coins, raises the level and costs more each time', async () => {
+    const { upgradeCost } = await import('./upgrades');
+    const w = new World(() => 0.5);
+    w.reset();
+    const b = w.addRaider('r', 'R', '#ff4f4f');
+    b.coins = 100;
+    expect(w.buy('r', 'speed')).toBe(true);
+    expect(b.ups.speed).toBe(1);
+    expect(b.coins).toBe(100 - upgradeCost(0));
+    expect(upgradeCost(1)).toBeGreaterThan(upgradeCost(0));
+    // A boat can't buy fish upgrades, and nobody can buy without coins.
+    expect(w.buy('r', 'fins')).toBe(false);
+    b.coins = 0;
+    expect(w.buy('r', 'hull')).toBe(false);
+  });
+
+  it('a hull upgrade raises max health and heals', async () => {
+    const { maxHealth } = await import('./world');
+    const w = new World(() => 0.5);
+    w.reset();
+    const b = w.addRaider('r', 'R', '#ff4f4f');
+    b.coins = 100;
+    const before = maxHealth(b);
+    w.buy('r', 'hull');
+    expect(maxHealth(b)).toBeGreaterThan(before);
+    expect(b.health).toBeCloseTo(maxHealth(b));
+  });
+});
