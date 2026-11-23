@@ -65,6 +65,7 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   flamer: { name: 'Flame trooper', speed: 8, turn: 99, r: 4, hp: 1 },
   scorch: { name: 'Scorch tank', speed: 20, turn: 2.8, r: 7.5, hp: 1 },
   lumen: { name: 'Lumen tank', speed: 18, turn: 2.6, r: 7.5, hp: 1 },
+  comet: { name: 'Comet launcher', speed: 11, turn: 1.6, r: 8.5, hp: 1 },
   skyguard: { name: 'Skyguard tank', speed: 21, turn: 2.8, r: 7.5, hp: 1 },
   heron: { name: 'Heron transport', speed: 30, turn: 2.6, r: 9, hp: 1 },
   jet: { name: 'Swift jet', speed: 52, turn: 3.2, r: 8, hp: 1 },
@@ -124,6 +125,7 @@ const VOICE: Record<Kind, UnitVoice> = {
   flamer: 'flamer',
   scorch: 'tank',
   lumen: 'tank',
+  comet: 'tank',
   skyguard: 'tank',
   heron: 'pilot',
   plane: 'pilot',
@@ -134,6 +136,8 @@ const VOICE: Record<Kind, UnitVoice> = {
   sub: 'navy',
   jet: 'pilot',
 };
+// A Comet launcher's rocket shows on its rail this many seconds before it can fire.
+const COMET_SHOW = 0.6;
 // How far (world units) a new building may stand from the rest of your base.
 const BUILD_GAP = 30;
 const PACK_S = 1.2;
@@ -192,7 +196,7 @@ const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren', 'eng', 'dog', 'cmdo', 'fl
 // too, each one filling HAUL_SEATS of them (so 12 soldiers, or 3 vehicles).
 const OTTER_SEATS = 12;
 const HAUL_SEATS = 4;
-const HAULED = new Set<Kind>(['mcv', 'light', 'heavy', 'buggy', 'arty', 'scorch', 'lumen', 'skyguard']);
+const HAULED = new Set<Kind>(['mcv', 'light', 'heavy', 'buggy', 'arty', 'scorch', 'lumen', 'comet', 'skyguard']);
 // The seats transport t has, the seats u takes up, and whether u can ride in t
 const seatsOf = (t: { kind: Kind }): number => (t.kind === 'otter' ? OTTER_SEATS : CARGO);
 const seatOf = (u: { kind: Kind }): number => (RIDERS.has(u.kind) ? 1 : HAUL_SEATS);
@@ -527,10 +531,10 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -560,6 +564,7 @@ const GARRISON: [Kind, number][] = [
   ['flamer', 2],
   ['scorch', 2],
   ['lumen', 2],
+  ['comet', 1],
   ['skyguard', 2],
 ];
 // The walk and stand frames of each kind of foot soldier.
@@ -569,7 +574,7 @@ const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] =>
 const TURRETED: ReadonlySet<Kind> = new Set<Kind>(['light', 'heavy', 'scorch', 'lumen', 'skyguard', 'cruiser']);
 const tankParts = (art: V2FactionArt, k: Kind): [StackSprite[], StackSprite[]] =>
   k === 'heavy' ? [art.heavyTank, art.heavyTurret] : k === 'scorch' ? [art.scorchTank, art.scorchTurret] : k === 'lumen' ? [art.lumenTank, art.lumenTurret] : k === 'skyguard' ? [art.skyguardTank, art.skyguardTurret] : [art.lightTank, art.lightTurret];
-const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', skyguard: 'factory', buggy: 'factory', arty: 'factory', heli: 'helipad' };
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', skyguard: 'factory', buggy: 'factory', arty: 'factory', comet: 'factory', heli: 'helipad' };
 // ...and it waits in groups of this many at each of its posts round its base.
 const SQUAD = 4;
 const POSTS = 6;
@@ -935,6 +940,8 @@ export class IsoGame implements GameLike {
         return [[art[u.kind], di]];
       case 'hauler':
         return art.haulerLoad.map((s): [StackSprite[], number] => [s, di]);
+      case 'comet':
+        return [[art.comet, di], [art.cometEmpty, di]];
       case 'buggy':
         return [[art.buggy, di]];
       case 'apc':
@@ -975,7 +982,7 @@ export class IsoGame implements GameLike {
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.skyguardTank, mine.skyguardTurret, mine.buggy, mine.apc, mine.artillery, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.skyguardTank, mine.skyguardTurret, mine.buggy, mine.apc, mine.artillery, mine.comet, mine.cometEmpty, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
@@ -1500,7 +1507,7 @@ export class IsoGame implements GameLike {
         ? cruiserParts(art, 0, 0, 0, a, a).map(([s]) => s)
         : TURRETED.has(kind)
         ? tankParts(art, kind).map((s) => s[di])
-        : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, heli: art.heli, heron: art.heron, jet: art.jet, plane: art.plane, boat: art.boat, otter: art.otter, destroyer: art.destroyer, cruiser: art.cruiser, carrier: art.carrier, sub: art.sub }[kind as 'mcv'][di]];
+        : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, comet: art.comet, heli: art.heli, heron: art.heron, jet: art.jet, plane: art.plane, boat: art.boat, otter: art.otter, destroyer: art.destroyer, cruiser: art.cruiser, carrier: art.carrier, sub: art.sub }[kind as 'mcv'][di]];
   }
 
   // A unit kind's picture: the unit itself, facing down and to the left,
@@ -2383,6 +2390,13 @@ export class IsoGame implements GameLike {
   // The hauler's picture at heading di: tipping its bed, its scoop lifting
   // as it digs, or just its load (a picture not drawn yet is asked for, and
   // the plain one stands in for it meanwhile).
+  // A Comet launcher shows its rocket on the rail once it is loaded (just
+  // before it can fire again), and the bare rail while it loads.
+  private cometSprites(u: Unit): StackSprite[] {
+    const art = this.art[u.f];
+    return (u.cool ?? 0) <= COMET_SHOW ? art.comet : art.cometEmpty;
+  }
+
   private haulerSprite(u: Unit, di: number): StackSprite {
     const art = this.art[u.f];
     const fill = haulerFill(u.load);
@@ -4765,7 +4779,7 @@ export class IsoGame implements GameLike {
     for (const o of this.units) {
       if (o.f === f || !this.canHit(w, o)) continue;
       const d = this.reach(x, y, o);
-      if (d <= bd) {
+      if (d <= bd && d >= (w.min ?? 0)) {
         bd = d;
         best = o;
       }
@@ -4774,7 +4788,7 @@ export class IsoGame implements GameLike {
     for (const b of this.buildings) {
       if (b.f === f || !isDefense(b.kind) || b.rise < 1 || w.foot || !this.canHit(w, b)) continue;
       const d = this.reach(x, y, b);
-      if (d <= bd) {
+      if (d <= bd && d >= (w.min ?? 0)) {
         bd = d;
         best = b;
       }
@@ -4856,6 +4870,11 @@ export class IsoGame implements GameLike {
       u.ty = u.y;
     }
     if (c4) return this.plant(u, t as Building | Bridge);
+    if (w.min && d < w.min) {
+      // too close to fire on: let it go (one it was told to hit, it waits on)
+      if (!u.forced) u.target = undefined;
+      return;
+    }
     const [ax, ay] = this.aimPoint(u.x, u.y, t);
     const want = Math.atan2(ay - u.y, ax - u.x);
     let off: number;
@@ -5435,7 +5454,12 @@ export class IsoGame implements GameLike {
       if (w.shot !== 'grenade' && w.shot !== 'beam') this.fx.muzzle(sx, sy, w.shot !== 'bullet');
       let aim = this.aimPoint(m[0], m[1], t);
       let track: Shot['track'];
-      if (w.shot === 'arc' || w.shot === 'grenade') {
+      if (w.shot === 'missile') {
+        // smoke billows round the launcher as the rocket goes
+        this.fx.dust(sx, sy + 4, 10);
+        this.fx.muzzle(sx + (Math.random() - 0.5) * 4, sy + 3, true);
+      }
+      if (w.shot === 'arc' || w.shot === 'grenade' || w.shot === 'missile') {
         // a shell lobbed at where the target is now, landing near it
         const sc = w.scatter ?? 0;
         const ang = Math.random() * Math.PI * 2;
@@ -5471,7 +5495,7 @@ export class IsoGame implements GameLike {
         this.fx.beam(sx, sy, ex, ey, w.dmg > 120 ? 1.5 : 1);
       }
       // a lobbed shell whistles down the last moment or so of its flight
-      if (w.shot === 'arc') this.sound(aim[0], aim[1], 'shell_whistle', 1, { delay: Math.max(0, shot.dur - 1.2), rate: 1.1 }, aim[2]);
+      if (w.shot === 'arc' || w.shot === 'missile') this.sound(aim[0], aim[1], 'shell_whistle', 1, { delay: Math.max(0, shot.dur - 1.2), rate: w.shot === 'missile' ? 0.75 : 1.1 }, aim[2]);
     }
   }
 
@@ -5524,6 +5548,10 @@ export class IsoGame implements GameLike {
         return this.sound(x, y, 'rocket_launch', 0.6, { rate: 0.55 }, z);
       case 'arty':
         return twin('howitzer_shot', 1);
+      case 'comet':
+        // a deep roar as the big rocket lifts off its rail
+        this.sound(x, y, 'rocket_launch', 1.2, { rate: 0.5 }, z);
+        return this.sound(x, y, 'howitzer_shot', 0.6, { rate: 0.7, delay: 0.04 }, z);
       case 'rocket':
         return twin('rocket_launch', 1);
       case 'heli':
@@ -5538,7 +5566,18 @@ export class IsoGame implements GameLike {
       const nade = w.shot === 'grenade';
       if (w.shot === 'flame') this.fx.scorch(sx, sy, w.splash * 0.7);
       else if (w.shot === 'beam') this.fx.boom(sx, sy, 3);
-      else {
+      else if (w.shot === 'missile') {
+        // the Comet's rocket: one huge blast, a ring of smaller ones, the ground shaking
+        this.fx.boom(sx, sy, 14);
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2 + Math.random();
+          this.fx.boom(sx + Math.cos(a) * 9, sy + Math.sin(a) * 4.5, 5 + Math.random() * 3, 0.08 + i * 0.05);
+        }
+        this.fx.dust(sx, sy, 14);
+        this.fx.scorch(sx, sy, 9);
+        this.quake(sx, sy, 2.4);
+        this.sound(s.x, s.y, 'explosion_large', 1, { rate: 0.75 }, s.z);
+      } else {
         this.fx.boom(sx, sy, nade ? 4 : 6);
         if (nade) this.fx.dust(sx, sy, 6);
         this.sound(s.x, s.y, nade ? 'explosion_small' : 'explosion_large', nade ? 0.9 : 0.8, nade ? { rate: 0.9 + Math.random() * 0.2 } : {}, s.z);
@@ -6009,6 +6048,8 @@ export class IsoGame implements GameLike {
         return [[art.otter[di], u.x, u.y, u.z]];
       case 'hauler':
         return [[this.haulerSprite(u, di), u.x, u.y, u.z]];
+      case 'comet':
+        return [[this.cometSprites(u)[di], u.x, u.y, u.z]];
       default:
         return [[{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery }[u.kind][di], u.x, u.y, u.z]];
     }
@@ -6724,6 +6765,12 @@ export class IsoGame implements GameLike {
       case 'boat': {
         const bob = Math.sin(u.anim * 2.2) * 0.6;
         this.blit(art.boat[di], u.x, u.y, bob);
+        break;
+      }
+      case 'comet': {
+        // it rocks back on its tracks as the rocket goes
+        const back = this.time - (u.fired ?? -9) < 0.25 ? 1 : 0;
+        this.blit(this.cometSprites(u)[di], u.x - Math.cos(u.a) * back, u.y - Math.sin(u.a) * back, u.z);
         break;
       }
       default: {

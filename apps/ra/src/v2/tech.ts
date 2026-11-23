@@ -54,6 +54,7 @@ export const TECH: Tech[] = [
   { id: 'hauler', name: 'Ore hauler', tab: 'veh', cost: 1400, needs: ['factory', 'refinery'], unit: 'hauler', from: 'factory', blurb: 'Gathers ore for the refinery.' },
   { id: 'scorch', name: 'Scorch tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'scorch', from: 'factory', blurb: 'Twin flame projectors: burns soldiers and buildings at short range.' },
   { id: 'arty', name: 'Howler artillery', tab: 'veh', cost: 800, needs: ['factory', 'radar'], unit: 'arty', from: 'factory', blurb: 'Long-range gun.' },
+  { id: 'comet', name: 'Comet launcher', tab: 'veh', cost: 1300, needs: ['factory', 'radar'], unit: 'comet', from: 'factory', blurb: 'Slow rocket carrier that fires one huge rocket at a time, from further off than anything else on land, and takes a long while to load the next. Can\'t fire on anything close: keep it guarded.' },
   { id: 'skyguard', name: 'Skyguard tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'skyguard', from: 'factory', blurb: 'Tank carrying a Skyguard missile launcher: shoots down aircraft and keeps up with your army. Can\'t hit anything on the ground.' },
   { id: 'heavy', name: 'Bastion tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'heavy', from: 'factory', blurb: 'Heavy twin-gun tank.' },
   { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },

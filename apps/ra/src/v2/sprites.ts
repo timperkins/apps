@@ -621,6 +621,72 @@ function artillery(f: Faction): Shape {
   };
 }
 
+// The Comet launcher: a long tracked chassis with an armored cab up front
+// and, along its back, an erector rail tipped up at the sky on two rams. While
+// it is loaded one huge rocket lies on the rail (off-white with a band of the
+// side's color, hazard stripes and cross fins); fired, the rail stands bare
+// until the next is loaded. The rocket leaves from its nose, COMET_NOSE
+// (forward, up) from the middle.
+const COMET_PIVOT: [number, number] = [-6.8, 7];
+const COMET_TILT = 0.4;
+const COMET_LEN = 16;
+const COMET_LIFT = 2; // the rocket's middle above the rail's top
+export const COMET_NOSE: [number, number] = [
+  COMET_PIVOT[0] + COMET_LEN * Math.cos(COMET_TILT) - COMET_LIFT * Math.sin(COMET_TILT),
+  COMET_PIVOT[1] + COMET_LEN * Math.sin(COMET_TILT) + COMET_LIFT * Math.cos(COMET_TILT),
+];
+function comet(f: Faction, loaded: boolean): Shape {
+  const hull = tankHull(f, 18, 12, false);
+  const ct = Math.cos(COMET_TILT);
+  const st = Math.sin(COMET_TILT);
+  const [pu, pz] = COMET_PIVOT;
+  const roof = mix(f.main, f.light, 0.5);
+  // where each ram meets the rail's underside
+  const ramTop = (side: number): P3 => [pu + 6.5 * ct + 0.9 * st, side * 1.7, pz + 6.5 * st - 0.9 * ct];
+  return (u, v, z) => {
+    const av = Math.abs(v);
+    // along (s) and up off (n) the rail
+    const s = (u - pu) * ct + (z - pz) * st;
+    const n = -(u - pu) * st + (z - pz) * ct;
+    if (loaded && s > -0.6 && s < COMET_LEN) {
+      const nn = n - COMET_LIFT;
+      const R = 1.55;
+      const r = s > COMET_LEN - 3.6 ? R * Math.sqrt(Math.max(0, 1 - ((s - (COMET_LEN - 3.6)) / 3.6) ** 2)) : s < 0 ? 0.95 : R;
+      if (v * v + nn * nn < r * r + 0.1) {
+        if (s < 0) return GUN_D; // the nozzle
+        if (s > COMET_LEN - 0.9) return GUN_D; // the nose tip
+        if (s > 9.4 && s < 10.4) return f.main; // the side's band
+        if (s > 1.6 && s < 3.4) return hazard(s * 1.6, Math.atan2(nn, v) * 1.4);
+        return g(nn > 0.7 ? hex('#f1eee4') : nn < -0.6 ? shade(WHITE, -0.14) : WHITE, u, v, z, 0.04);
+      }
+      // four fins in a cross at the tail
+      if (s < 2.4 && ((av < 0.3 && Math.abs(nn) < 3) || (Math.abs(nn) < 0.3 && av < 3))) return s > 2 ? shade(f.dark, 0.15) : f.dark;
+    }
+    // the rail: a girder with a lip either side and two saddles for the rocket
+    if (s > -1 && s < 15.4 && n > -0.9 && n < 0.6) {
+      if (av < 1.1 && n <= 0) return n > -0.4 ? (mod(Math.floor(s * 1.2), 4) ? GUN_L : GUN) : GUN_D;
+      if (av >= 1.1 && av < 1.6 && n < 0.3) return n > -0.1 ? f.light : f.dark;
+      if (av < 1.6 && (Math.abs(s - 4) < 0.6 || Math.abs(s - 11) < 0.6) && n < 0.6) return HAZ;
+    }
+    // the rams lifting it, and the pivot block at the back
+    for (const side of [1, -1]) if (segD(u, v, z, [-1, side * 1.7, 5], ramTop(side)) < 0.55) return z > 7 ? STEEL : METAL_D;
+    if (u > pu - 1.3 && u < pu + 1.6 && av < 2.4 && z >= 5 && z < pz + 0.4) return z > pz - 0.3 ? GUN : av > 1.8 ? GUN_D : f.dark;
+    // the armored cab at the front, its front sloping back to a vision slit
+    if (u > 3.2 && u < 8.4 && av < 3.5 && z >= 5) {
+      const zt = 8.8 - Math.max(0, u - 6.2) * 1.15;
+      if (z <= zt) {
+        if (z > zt - 0.5) return Math.abs(u - 4.2) < 0.3 ? WHITE : g(roof, u, v, z);
+        if (u > 6.2 && z > 6.6 && z < 7.5 && av < 2.9) return GLASS_D;
+        if (av > 3 && Math.abs(u - 5) < 0.8 && z > 6.6 && z < 7.8) return GLASS_D;
+        return g(z < 5.6 ? f.dark : f.main, u, v, z);
+      }
+      // an aerial on the cab's back corner
+      if (Math.abs(u - 3.7) < 0.35 && Math.abs(v + 2.8) < 0.35 && z < 13) return z > 12.4 ? RED : GUN_D;
+    }
+    return hull(u, v, z);
+  };
+}
+
 function boat(f: Faction): Shape {
   const hull = hex('#a8aeb0');
   const deck = hex('#74797b');
@@ -1528,6 +1594,8 @@ export interface V2FactionArt {
   // tipped up a little, more, and all the way (HAULER_TILTS)
   haulerDump: StackSprite[][];
   artillery: StackSprite[];
+  comet: StackSprite[]; // loaded, a rocket on the rail
+  cometEmpty: StackSprite[]; // fired, the rail bare
   boat: StackSprite[];
   heli: StackSprite[];
   towerGun: StackSprite[];
@@ -1583,6 +1651,8 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     haulerDig,
     haulerDump,
     artillery: renderDirs(artillery(f), DIRS, { r: 13.5, zmax: 13, bakeShadow: true }, k('artillery')),
+    comet: renderDirs(comet(f, true), DIRS, { r: 12, zmax: 17, bakeShadow: true }, k('comet')),
+    cometEmpty: renderDirs(comet(f, false), DIRS, { r: 12, zmax: 15, bakeShadow: true }, k('cometEmpty')),
     boat: renderDirs(boat(f), DIRS, { r: 15.5, zmax: 13, bakeShadow: true, shadowAlpha: 0.2 }, k('boat')),
     heli: renderDirs(heli(f), DIRS, { r: 15.5, zmax: 10 }, k('heli')),
     towerGun: renderDirs(turretShape(f, 4, 0, 2, 11), DIRS, { r: 11.5, zmax: 9 }, k('towerGun')),

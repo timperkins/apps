@@ -460,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -476,7 +476,10 @@ function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: numb
 // What a round does where it lands.
 function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
   const [sx, sy] = toScreen(s.x, s.y, s.z);
-  if (kind === 'arc' || kind === 'grenade') {
+  if (kind === 'missile') {
+    fx.boom(sx, sy, 14);
+    fx.dust(sx, sy, 14);
+  } else if (kind === 'arc' || kind === 'grenade') {
     fx.boom(sx, sy, kind === 'grenade' ? 4 : 6);
     fx.dust(sx, sy, kind === 'grenade' ? 6 : 4);
   } else if (kind === 'bullet') {
@@ -595,13 +598,13 @@ function combatCells(o: Fighter): Cell[] {
   const cells: Cell[] = [];
   const w = WEAPON[o.kind];
   if (w) {
-    const far = w.shot === 'arc' ? 24 : 12;
+    const far = w.shot === 'arc' || w.shot === 'missile' ? 24 : 12;
     const [ux, uy] = [-12, -12];
     const ha = A + (o.hullOff ?? 0);
     const moved: Box = { l: still.l, r: still.r, u: still.u + 12, d: still.d - 12 };
     // anti-air only: it shoots up at the sky
     const sky = w.air && !w.ground;
-    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: sky ? 40 : 0, d: far + 6 }), (s, t, kick) => o.draw(s, ux, uy, ha, A, t, kick), () => muzzles(o.kind, ux, uy, z, ha, A), sky ? [far * 1.5, far * 1.5, 60] : [far, far, 0]));
+    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: sky || w.shot === 'missile' ? 40 : 0, d: far + 6 }), (s, t, kick) => o.draw(s, ux, uy, ha, A, t, kick), () => muzzles(o.kind, ux, uy, z, ha, A), sky ? [far * 1.5, far * 1.5, 60] : [far, far, 0]));
   }
   const bar = { x: 0, y: -still.u - 3, w: Math.max(10, Math.round((still.l + still.r) * 0.6)) };
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
@@ -746,7 +749,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   }
 
   // plain vehicles: one sprite each
-  const plain = (name: string, kind: 'buggy' | 'apc' | 'arty' | 'hauler' | 'mcv', pick: (a: V2FactionArt) => StackSprite[], R: number, speed: number, more: (draw: Draw) => Cell[] = () => []) => {
+  const plain = (name: string, kind: 'buggy' | 'apc' | 'arty' | 'comet' | 'hauler' | 'mcv', pick: (a: V2FactionArt) => StackSprite[], R: number, speed: number, more: (draw: Draw) => Cell[] = () => []) => {
     const draw =
       (art: V2FactionArt): Draw =>
       (s, x, y, a) =>
@@ -756,7 +759,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       spr: pick(me)[0],
       // (the howitzer rolls back on its tracks as it fires)
       draw: (s, x, y, a, _tur, t, kick) => {
-        const back = kind === 'arty' && kick ? 1 : 0;
+        const back = (kind === 'arty' || kind === 'comet') && kick ? 1 : 0;
         s.blit(pick(me)[di(a)], x - Math.cos(a) * back, y - Math.sin(a) * back, 0);
         if (kind === 'buggy') drawBuggyLights(s.c, x, y, 0, a, t);
       },
@@ -880,6 +883,11 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
   }
 
   plain('Howler artillery', 'arty', (a) => a.artillery, 18, 13, idleShuffle(me.artillery, 2));
+  // the Comet launcher with its rocket on the rail, and bare while it loads the next
+  plain('Comet launcher', 'comet', (a) => a.comet, 19, 11, (draw) => {
+    void draw;
+    return [{ label: 'Loading', box: boxOf(me.cometEmpty[di(A)]), draw: (s: Scene) => s.blit(me.cometEmpty[di(A)], 0, 0, 0) }];
+  });
 
   // the hauler also digs ore, and its bed shows how full it is; at a
   // refinery it backs onto the pad and tips its load into the intake
