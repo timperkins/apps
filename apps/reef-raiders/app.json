@@ -1,7 +1,7 @@
 {
   "name": "reef-raiders",
   "type": "hosting",
-  "domain": "reef-raiders.trom.dev",
+  "domain": "fish.trom.dev",
   "hostingSite": "trom-reef-raiders",
   "firestore": {
     "prod": "reef-raiders",
