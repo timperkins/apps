@@ -465,3 +465,66 @@ button {
   line-height: 1.45;
   padding-left: 20px;
 }
+
+/* 2 players */
+#friend {
+  z-index: 30;
+}
+.friendBtn {
+  font-size: 20px;
+  padding: 11px 34px;
+  background: #80deea;
+  box-shadow: 0 6px 0 #00838f;
+  margin-top: 0;
+}
+.friendBtn:active {
+  box-shadow: 0 2px 0 #00838f;
+}
+#friendBody {
+  text-align: center;
+  padding-top: 6px;
+}
+#friendBody p {
+  font-size: 15px;
+  line-height: 1.4;
+  margin: 8px 4px;
+}
+.joinCode {
+  font-size: 54px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: var(--ink);
+}
+.qr {
+  width: min(230px, 70vw);
+  margin: 4px auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 6px;
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.codeIn {
+  font: inherit;
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  width: 6.5em;
+  text-align: center;
+  border: 3px solid #90a4ae;
+  border-radius: 14px;
+  padding: 6px 0;
+  color: var(--ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.friendStatus {
+  font-weight: 800;
+  min-height: 22px;
+}
+.friendStatus.bad {
+  color: #c62828;
+}

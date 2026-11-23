@@ -19,9 +19,10 @@ An isometric cartoon heist game at [od.trom.dev](https://od.trom.dev). Built fro
 - **Army:** at 4 stars military buses drop off troops: **Greniders** (throw grenades), **Heaters** (flamethrowers) and **Lazors** (laser blasters). At 5 stars, tanks.
 - **Ship:** walk down the dock, beat the captain and his sailors, then take the wheel and sail.
 - **Phone:** map with your location (zoomed in, or the whole city), outfits, your car and help.
+- **2 players:** tap **Play with a friend** and the other phone scans the QR code (or taps **Join a friend's game** and types the 4 number code). You share money, stars and shop stuff; Player 2 wears the red shirt. Going into the bank takes you both in. Invite later from the phone's Car tab.
 
-Progress (money, items, upgrades, car, play time) is saved in the browser.
+Progress (money, items, upgrades, car, play time) is saved in the browser. In 2 player mode the host's phone runs the game and keeps the save; the friend's phone keeps its own save untouched.
 
 ## Code
 
-Plain TypeScript + Canvas 2D, no game engine. `src/map.ts` builds the city and bank, `src/game.ts` is the simulation, `src/draw.ts` the isometric renderer, `src/main.ts` input, HUD and menus. `npm test` runs a few map and rule checks.
+Plain TypeScript + Canvas 2D, no game engine. `src/map.ts` builds the city and bank, `src/game.ts` is the simulation, `src/draw.ts` the isometric renderer, `src/main.ts` input, HUD and menus. `src/net.ts` is 2 player mode: PeerJS (WebRTC) between the phones, with the host sending what is near the friend about 20 times a second. `npm test` runs a few map and rule checks.

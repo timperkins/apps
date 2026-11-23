@@ -198,7 +198,7 @@ function angDiff(a: number, b: number) {
   return d;
 }
 
-function makePerson(kind: PersonKind, x: number, y: number, mult = 1): Person {
+export function makePerson(kind: PersonKind, x: number, y: number, mult = 1): Person {
   const p: Person = {
     id: nextId++,
     kind,
@@ -293,7 +293,7 @@ function makePerson(kind: PersonKind, x: number, y: number, mult = 1): Person {
   return p;
 }
 
-function makeVehicle(kind: VehicleKind, x: number, y: number, angle: number): Vehicle {
+export function makeVehicle(kind: VehicleKind, x: number, y: number, angle: number): Vehicle {
   const v: Vehicle = {
     id: nextId++,
     kind,
@@ -388,13 +388,102 @@ function corners(v: Vehicle, x = v.x, y = v.y, angle = v.angle) {
   return out;
 }
 
+/** One robber. In 2 player mode there are two; the Game's player/vehicle/... fields point at the selected one. */
+export interface Hero {
+  id: number; // 0 = this phone (or the host), 1 = the friend
+  player: Person;
+  vehicle: Vehicle | null;
+  inVent: boolean;
+  lift: { t: number; driver: Person; car: Vehicle } | null;
+  invuln: number;
+  flameT: number;
+  ground: number; // the height the player would land on
+  regen: number;
+  hint: Hint | null;
+  wearing: string | null;
+  overlay: { title: string; sub: string; t: number } | null;
+  menuReq: 'shop' | 'lot' | null; // a menu the friend's phone should open
+}
+
+export const IDLE: Input = { mx: 0, my: 0, mag: 0, punch: false, fire: false, jump: false, use: false };
+
+function makeHero(id: number, x: number, y: number): Hero {
+  const p = makePerson('player', x, y);
+  p.shirt = id === 0 ? '#222' : '#c62828';
+  p.pants = id === 0 ? '#30343c' : '#1a237e';
+  p.skin = id === 0 ? '#f2c9a0' : '#c98d5f';
+  return { id, player: p, vehicle: null, inVent: false, lift: null, invuln: 0, flameT: 0, ground: 0, regen: 0, hint: null, wearing: null, overlay: null, menuReq: null };
+}
+
 export class Game {
   city: Scene;
   bank: Scene;
   scene: Scene;
-  player: Person;
-  vehicle: Vehicle | null = null;
-  inVent = false;
+  heroes: Hero[];
+  cur: Hero;
+  get player() {
+    return this.cur.player;
+  }
+  get vehicle() {
+    return this.cur.vehicle;
+  }
+  set vehicle(v: Vehicle | null) {
+    this.cur.vehicle = v;
+  }
+  get inVent() {
+    return this.cur.inVent;
+  }
+  set inVent(v: boolean) {
+    this.cur.inVent = v;
+  }
+  get lift() {
+    return this.cur.lift;
+  }
+  set lift(v: Hero['lift']) {
+    this.cur.lift = v;
+  }
+  get invuln() {
+    return this.cur.invuln;
+  }
+  set invuln(v: number) {
+    this.cur.invuln = v;
+  }
+  get flameT() {
+    return this.cur.flameT;
+  }
+  set flameT(v: number) {
+    this.cur.flameT = v;
+  }
+  get ground() {
+    return this.cur.ground;
+  }
+  set ground(v: number) {
+    this.cur.ground = v;
+  }
+  get regen() {
+    return this.cur.regen;
+  }
+  set regen(v: number) {
+    this.cur.regen = v;
+  }
+  get hint() {
+    return this.cur.hint;
+  }
+  set hint(v: Hint | null) {
+    this.cur.hint = v;
+  }
+  get wearing() {
+    return this.cur.wearing;
+  }
+  set wearing(v: string | null) {
+    this.cur.wearing = v;
+  }
+  get overlay() {
+    return this.cur.overlay;
+  }
+  set overlay(v: Hero['overlay']) {
+    this.cur.overlay = v;
+  }
   ship: Vehicle;
   captainDown = false;
   money = 250;
@@ -405,7 +494,6 @@ export class Game {
   shownLevel = 1;
   owned = new Set<string>();
   upgrades: Record<string, number> = { shoes: 0, gloves: 0, vest: 0 };
-  wearing: string | null = null;
   disguiseCd = 0;
   ownsCar = false;
   myCar: Vehicle | null = null;
@@ -413,14 +501,9 @@ export class Game {
   bankId = '';
   bankReturn = { x: 0, y: 0 };
   alarm = false;
-  hint: Hint | null = null;
   banners: { text: string; t: number; color: string }[] = [];
-  overlay: { title: string; sub: string; t: number } | null = null;
-  lift: { t: number; driver: Person; car: Vehicle } | null = null;
-  invuln = 0;
-  flameT = 0;
-  ground = 0; // the height the player would land on
-  regen = 0;
+  /** Fx and sounds made this frame, so the host can pass them to the friend's phone. */
+  fxLog: Fx[] | null = null;
   copT = 0;
   armyT = 10;
   tankT = 0;
@@ -433,10 +516,8 @@ export class Game {
     this.bank = { map: buildBank(), people: [], vehicles: [], shots: [], fx: [] };
     this.scene = this.city;
     const s = this.city.map.spawns.player[0];
-    this.player = makePerson('player', s.x, s.y);
-    this.player.shirt = '#222';
-    this.player.pants = '#30343c';
-    this.player.skin = '#f2c9a0';
+    this.cur = makeHero(0, s.x, s.y);
+    this.heroes = [this.cur];
     if (save) {
       this.money = save.money;
       save.owned.forEach((o) => this.owned.add(o));
@@ -467,7 +548,7 @@ export class Game {
       money: Math.floor(this.money),
       owned: [...this.owned],
       upgrades: this.upgrades,
-      wearing: this.wearing,
+      wearing: this.heroes[0].wearing,
       ownsCar: this.ownsCar,
       time: this.time,
     };
@@ -490,8 +571,108 @@ export class Game {
   }
 
   applyUpgrades() {
-    this.player.speed = 4 + this.upgrades.shoes * 0.9;
-    this.player.maxHp = 100 + this.upgrades.vest * 50;
+    for (const h of this.heroes) {
+      h.player.speed = 4 + this.upgrades.shoes * 0.9;
+      h.player.maxHp = 100 + this.upgrades.vest * 50;
+    }
+  }
+
+  // ---------- heroes (2 player) ----------
+
+  get multi() {
+    return this.heroes.length > 1;
+  }
+
+  select(h: Hero) {
+    this.cur = h;
+  }
+
+  /** Run fn as hero h, then switch back. */
+  as<T>(h: Hero, fn: () => T): T {
+    const prev = this.cur;
+    this.cur = h;
+    try {
+      return fn();
+    } finally {
+      this.cur = prev;
+    }
+  }
+
+  heroPos(h: Hero) {
+    return h.vehicle ?? h.player;
+  }
+
+  nearestHero(x: number, y: number): Hero {
+    let best = this.heroes[0];
+    let bd = Infinity;
+    for (const h of this.heroes) {
+      if (h.overlay) continue;
+      const p = this.heroPos(h);
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bd) {
+        bd = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  /** Distance to the closest robber. */
+  heroDist(o: { x: number; y: number }) {
+    let bd = Infinity;
+    for (const h of this.heroes) bd = Math.min(bd, dist(this.heroPos(h), o));
+    return bd;
+  }
+
+  heroOf(p: Person): Hero | undefined {
+    return this.heroes.find((h) => h.player === p);
+  }
+
+  isCarried(p: Person) {
+    return this.heroes.some((h) => h.lift?.driver === p);
+  }
+
+  /** The friend joins next to player 1. */
+  addHero(): Hero {
+    const p0 = this.heroes[0].player;
+    const h = makeHero(1, p0.x, p0.y);
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [0, 0],
+    ]) {
+      if (this.canWalk(h.player, p0.x + dx, p0.y + dy)) {
+        h.player.x = p0.x + dx;
+        h.player.y = p0.y + dy;
+        break;
+      }
+    }
+    this.heroes.push(h);
+    this.applyUpgrades();
+    h.player.hp = h.player.maxHp;
+    this.banner('Player 2 joined!', '#80deea');
+    return h;
+  }
+
+  removeHero(h: Hero) {
+    if (h.id === 0) return;
+    this.as(h, () => {
+      if (this.vehicle) {
+        this.vehicle.driver = 'none';
+        this.vehicle.speed = 0;
+      }
+      if (this.lift) this.lift.driver.gone = true;
+    });
+    this.heroes = this.heroes.filter((x) => x !== h);
+    this.cur = this.heroes[0];
+    this.banner('Player 2 left.', '#ffcc80');
+  }
+
+  openMenu(m: 'shop' | 'lot') {
+    if (this.cur.id === 0) this.menu = m;
+    else this.cur.menuReq = m;
   }
 
   banner(text: string, color = '#fff') {
@@ -500,7 +681,9 @@ export class Game {
   }
 
   fx(kind: Fx['kind'], x: number, y: number, z: number, text = '', color = '#fff', life = 0.8, size = 1) {
-    this.scene.fx.push({ kind, x, y, z, t: 0, life, text, color, size });
+    const f: Fx = { kind, x, y, z, t: 0, life, text, color, size };
+    this.scene.fx.push(f);
+    this.fxLog?.push(f);
   }
 
   say(p: Person, text: string, t = 2.2) {
@@ -632,7 +815,7 @@ export class Game {
   canWalk(p: Person, x: number, y: number): boolean {
     const r = 0.26;
     const m = this.scene.map;
-    const inVent = p.kind === 'player' && this.inVent;
+    const inVent = p.kind === 'player' && !!this.heroOf(p)?.inVent;
     const ship = this.scene === this.city ? this.ship : null;
     for (const [ox, oy] of [
       [-r, -r],
@@ -798,7 +981,7 @@ export class Game {
       v.color = '#26a69a';
     }
     this.city.vehicles.push(v);
-    this.menu = null;
+    if (this.cur.id === 0) this.menu = null;
     this.enterVehicle(v);
     this.onSave?.();
     return '';
@@ -1046,10 +1229,12 @@ export class Game {
       this.fx('boom', v.x, v.y, 0.5, '', '#ffb74d', 0.8, 1.4);
       this.fx('text', v.x, v.y, 1.6, v.kind === 'tank' ? 'TANK DOWN!' : 'CLUNK!', '#ffcc80', 1.2, 1.2);
       sfx('boom');
-      if (this.vehicle === v) {
-        this.exitVehicle();
-        this.banner('Your ride broke down!', '#ffab91');
-      }
+      const rider = this.heroes.find((h) => h.vehicle === v);
+      if (rider)
+        this.as(rider, () => {
+          this.exitVehicle();
+          this.banner(this.multi ? `Player ${rider.id + 1}'s ride broke down!` : 'Your ride broke down!', '#ffab91');
+        });
       if (v.driver === 'cop' || v.driver === 'army') {
         v.driver = 'none';
         v.leaving = false;
@@ -1082,17 +1267,16 @@ export class Game {
     this.money -= lose;
     this.overlay = {
       title: busted ? 'BUSTED!' : 'KNOCKED OUT!',
-      sub: lose > 0 ? `You dropped $${lose}. Back home you go.` : 'Back home you go.',
+      sub: lose > 0 ? `${this.multi ? 'Your team' : 'You'} dropped $${lose}. Back home you go.` : 'Back home you go.',
       t: 3,
     };
+    if (this.multi) this.banner(`Player ${this.cur.id + 1} got ${busted ? 'busted' : 'knocked out'}!`, '#ffab91');
     sfx('busted');
-    if (this.vehicle) this.exitVehicle();
-    this.vehicle = null;
-    this.lift = null;
-    this.inVent = false;
-    this.scene = this.city;
+    // in 2 player mode the friend gets kicked out of the bank too
+    if (this.scene === this.bank) this.leaveBank(false);
+    this.dropHero(this.cur);
     const s = this.city.map.spawns.player[0];
-    this.player.x = s.x;
+    this.player.x = s.x + (this.cur.id ? 1 : 0);
     this.player.y = s.y;
     this.player.hp = this.player.maxHp;
     this.player.ko = 0;
@@ -1101,6 +1285,36 @@ export class Game {
     this.city.vehicles = this.city.vehicles.filter((v) => !(v.driver === 'cop' || v.driver === 'army' || (v.kind === 'tank' && v.broken === 0)));
     this.city.shots = [];
     this.onSave?.();
+  }
+
+  /** Let go of cars, drivers and vents before a robber is moved somewhere else. */
+  dropHero(h: Hero) {
+    if (h.vehicle) {
+      h.vehicle.driver = 'none';
+      h.vehicle.speed = 0;
+      h.vehicle = null;
+    }
+    if (h.lift) {
+      h.lift.driver.z = 0;
+      h.lift.driver.flee = 4;
+      h.lift = null;
+    }
+    h.inVent = false;
+    h.player.z = 0;
+    h.player.vz = 0;
+    h.player.kx = h.player.ky = 0;
+    h.ground = 0;
+  }
+
+  /** Put every robber at (x, y), side by side. */
+  placeHeroes(x: number, y: number) {
+    this.heroes.forEach((h, i) => {
+      this.dropHero(h);
+      h.player.x = x + (i ? 0.8 : 0);
+      h.player.y = y;
+      if (i && !this.canWalk(h.player, h.player.x, y)) h.player.x = x;
+    });
+    this.cam = { x, y };
   }
 
   enterBank(doorX: number, doorY: number) {
@@ -1120,25 +1334,19 @@ export class Game {
       this.bank.people.push(p);
     }
     this.alarm = false;
-    this.inVent = false;
     this.scene = this.bank;
     const e = this.bank.map.spawns.entry[0];
-    this.player.x = e.x;
-    this.player.y = e.y;
-    this.cam = { x: e.x, y: e.y };
+    this.placeHeroes(e.x, e.y);
     sfx('door');
     this.banner(this.vaultT > 0 ? 'The vault is empty right now. Come back later.' : 'Sneak past the guards, then jump across the crates. Don\'t touch the lasers!', '#fff59d');
   }
 
-  leaveBank() {
+  leaveBank(cops = true) {
     this.scene = this.city;
-    this.inVent = false;
     const e = this.bankReturn;
-    this.player.x = e.x;
-    this.player.y = e.y;
-    this.cam = { x: e.x, y: e.y };
+    this.placeHeroes(e.x, e.y);
     sfx('door');
-    if (this.wanted > 0) for (let i = 0; i < 2; i++) this.spawnCop();
+    if (cops && this.wanted > 0) for (let i = 0; i < 2; i++) this.spawnCop();
   }
 
   robVault() {
@@ -1190,8 +1398,8 @@ export class Game {
         const place = m.places.get(i);
         if (place === 'bank') return { text: 'The Bank', label: 'Go in', act: () => this.enterBank(near.x, near.y) };
         if (place === 'exit') return { text: 'Leave the bank', label: 'Go out', act: () => this.leaveBank() };
-        if (place === 'shop') return { text: 'Tools, disguises and upgrades', label: 'Shop', act: () => (this.menu = 'shop') };
-        if (place === 'lot') return { text: 'Rent or buy a car', label: 'Car lot', act: () => (this.menu = 'lot') };
+        if (place === 'shop') return { text: 'Tools, disguises and upgrades', label: 'Shop', act: () => this.openMenu('shop') };
+        if (place === 'lot') return { text: 'Rent or buy a car', label: 'Car lot', act: () => this.openMenu('lot') };
         if (place === 'home')
           return {
             text: 'Home sweet home',
@@ -1234,6 +1442,7 @@ export class Game {
     // ship wheel
     if (this.scene === this.city && dist(pl, this.helmPos()) < 1.3) {
       if (!this.captainDown) return { text: 'Defeat the captain to take the ship!', label: '', act: null };
+      if (this.ship.driver === 'player') return { text: 'Your friend is steering!', label: '', act: null };
       return { text: 'The ship wheel', label: 'Drive ship', act: () => this.enterVehicle(this.ship) };
     }
     // vehicles
@@ -1241,7 +1450,7 @@ export class Game {
     let carD = 1.9;
     for (const v of this.scene.vehicles) {
       if (v.gone || v.kind === 'ship' || v.kind === 'tank' || v.broken > 0) continue;
-      if (v.driver === 'cop' || v.driver === 'army') continue;
+      if (v.driver === 'cop' || v.driver === 'army' || v.driver === 'player') continue;
       const d = inRect(v, pl.x, pl.y, 0.9) ? 0.5 : dist(v, pl);
       if (d < carD) {
         car = v;
@@ -1299,17 +1508,19 @@ export class Game {
 
   // ---------- update ----------
 
-  update(dt: number, input: Input) {
-    if (this.menu) return;
-    if (this.overlay) {
-      this.overlay.t -= dt;
-      if (this.overlay.t <= 0) this.overlay = null;
+  /** inputs[i] belongs to heroes[i]. One player: a single input. */
+  update(dt: number, inputs: Input | Input[]) {
+    const ins = Array.isArray(inputs) ? inputs : [inputs];
+    if (this.menu && !this.multi) return;
+    const solo = this.heroes[0];
+    if (!this.multi && solo.overlay) {
+      solo.overlay.t -= dt;
+      if (solo.overlay.t <= 0) solo.overlay = null;
       return;
     }
     this.time += dt;
     this.crimeCd = Math.max(0, this.crimeCd - dt);
     this.disguiseCd = Math.max(0, this.disguiseCd - dt);
-    this.invuln = Math.max(0, this.invuln - dt);
     for (const k in this.vaults) this.vaults[k] = Math.max(0, this.vaults[k] - dt);
     for (const b of this.banners) b.t -= dt;
     this.banners = this.banners.filter((b) => b.t > 0);
@@ -1321,23 +1532,45 @@ export class Game {
       sfx('siren');
     }
 
-    this.updatePlayer(dt, input);
-    for (const p of this.scene.people) this.updatePerson(p, dt);
-    for (const v of this.scene.vehicles) this.updateVehicle(v, dt);
+    this.heroes.forEach((h, i) => {
+      this.select(h);
+      if (h.overlay) {
+        h.overlay.t -= dt;
+        if (h.overlay.t <= 0) h.overlay = null;
+        return;
+      }
+      if (h.id === 0 && this.menu) return; // shopping
+      this.invuln = Math.max(0, this.invuln - dt);
+      this.updatePlayer(dt, ins[i] ?? IDLE);
+    });
+    for (const p of this.scene.people) {
+      this.select(this.nearestHero(p.x, p.y));
+      this.updatePerson(p, dt);
+    }
+    for (const v of this.scene.vehicles) {
+      this.select(this.nearestHero(v.x, v.y));
+      this.updateVehicle(v, dt);
+    }
     this.updateShots(dt);
     this.updateFx(dt);
     this.runOvers();
-    if (this.scene === this.city) this.spawner(dt);
+    if (this.scene === this.city) {
+      this.select(pick(this.heroes));
+      this.spawner(dt);
+    }
     this.scene.people = this.scene.people.filter((p) => !p.gone);
     this.scene.vehicles = this.scene.vehicles.filter((v) => !v.gone);
 
-    // regenerate health slowly
-    this.regen += dt;
-    if (this.regen > 5) this.player.hp = Math.min(this.player.maxHp, this.player.hp + dt * 4);
+    for (const h of this.heroes) {
+      // regenerate health slowly
+      h.regen += dt;
+      if (h.regen > 5) h.player.hp = Math.min(h.player.maxHp, h.player.hp + dt * 4);
+    }
 
-    // wanted cools down when no one is close
+    // wanted cools down when no one is close to any robber
     if (this.wanted > 0 && this.scene === this.city) {
-      if (this.hostilesNear(13) === 0) this.calm += dt;
+      const seen = this.heroes.some((h) => this.as(h, () => this.hostilesNear(13) > 0));
+      if (!seen) this.calm += dt;
       else this.calm = Math.max(0, this.calm - dt * 0.5);
       if (this.calm > 18) {
         this.wanted--;
@@ -1349,9 +1582,17 @@ export class Game {
       }
     }
 
-    this.hint = this.computeHint();
-    if (input.use && this.hint?.act) this.hint.act();
+    this.heroes.forEach((h, i) => {
+      this.select(h);
+      if (h.overlay || (h.id === 0 && this.menu)) {
+        h.hint = null;
+        return;
+      }
+      this.hint = this.computeHint();
+      if (ins[i]?.use && this.hint?.act) this.hint.act();
+    });
 
+    this.select(this.heroes[0]);
     const c = this.vehicle ?? this.player;
     const k = Math.min(1, dt * 6);
     this.cam.x += (c.x - this.cam.x) * k;
@@ -1401,6 +1642,12 @@ export class Game {
         }
       }
       return;
+    }
+    // knocked back by a punch or a bonk
+    if (Math.abs(pl.kx) + Math.abs(pl.ky) > 0.05) {
+      this.movePerson(pl, pl.kx * dt, pl.ky * dt);
+      pl.kx *= Math.pow(0.02, dt);
+      pl.ky *= Math.pow(0.02, dt);
     }
     if (input.punch) this.punch();
     if (input.fire) this.fireFlamer(dt);
@@ -1481,7 +1728,16 @@ export class Game {
     } else {
       v.speed -= Math.sign(v.speed) * Math.min(Math.abs(v.speed), 7 * dt);
     }
+    const bx = v.x;
+    const by = v.y;
     this.moveVehicle(v, dt, true);
+    // a friend standing on the deck sails along
+    if (v.kind === 'ship')
+      for (const h of this.heroes)
+        if (h !== this.cur && !h.vehicle && inRect({ ...v, x: bx, y: by }, h.player.x, h.player.y, 0.3)) {
+          h.player.x += v.x - bx;
+          h.player.y += v.y - by;
+        }
   }
 
   moveVehicle(v: Vehicle, dt: number, isPlayer: boolean) {
@@ -1523,12 +1779,13 @@ export class Game {
   runOvers() {
     for (const v of this.scene.vehicles) {
       if (v.gone || v.kind === 'ship' || Math.abs(v.speed) < 2.2) continue;
-      for (const p of this.scene.people) {
-        if (p.ko > 0 || p.gone || p.onShip || p.z > 0.8) continue;
-        if (p === this.player && p.z > 0.35) continue; // jumped over it!
+      const driver = v.driver === 'player' ? this.heroes.find((h) => h.vehicle === v) : undefined;
+      // robbers on foot get bonked by traffic (but not by their friend's car)
+      for (const h of this.heroes) {
+        const p = h.player;
+        if (h.vehicle || h.inVent || h.overlay || h.lift || driver || p.z > 0.35) continue; // jumped over it!
         if (!inRect(v, p.x, p.y, 0.25)) continue;
-        if (p === this.player) {
-          if (this.vehicle) continue;
+        this.as(h, () => {
           const big = v.kind === 'bus' || v.kind === 'army' || v.kind === 'tank';
           if (this.invuln <= 0) {
             this.fx('text', p.x, p.y, 1.6, big ? 'BONK!!' : 'BONK!', '#ff8a65', 1, 1.2);
@@ -1541,14 +1798,19 @@ export class Game {
           const s = (p.x - v.x) * sx + (p.y - v.y) * sy > 0 ? 1 : -1;
           p.kx = sx * s * 6;
           p.ky = sy * s * 6;
-          continue;
-        }
-        if (v.driver === 'player') {
-          this.fx('text', p.x, p.y, 1.6, 'BONK!', '#ff8a65');
-          sfx('crash');
-          this.hitPerson(p, 45, v.x, v.y, false);
-          if (p.kind === 'ped' || p.kind === 'driver') this.crime(1, 'Watch where you drive!');
-          if (p.kind === 'cop') this.crime(1, 'You bumped a cop!');
+        });
+      }
+      for (const p of this.scene.people) {
+        if (p.ko > 0 || p.gone || p.onShip || p.z > 0.8) continue;
+        if (!inRect(v, p.x, p.y, 0.25)) continue;
+        if (driver) {
+          this.as(driver, () => {
+            this.fx('text', p.x, p.y, 1.6, 'BONK!', '#ff8a65');
+            sfx('crash');
+            this.hitPerson(p, 45, v.x, v.y, false);
+            if (p.kind === 'ped' || p.kind === 'driver') this.crime(1, 'Watch where you drive!');
+            if (p.kind === 'cop') this.crime(1, 'You bumped a cop!');
+          });
         } else if (p.kind === 'ped' || p.kind === 'bully' || p.kind === 'driver') {
           // traffic just shoves people out of the way
           const side = local(v, 0, 1);
@@ -1567,7 +1829,7 @@ export class Game {
     p.attackCd = Math.max(0, p.attackCd - dt);
     p.sayT = Math.max(0, p.sayT - dt);
     p.sayCd = Math.max(0, p.sayCd - dt);
-    if (this.lift?.driver === p) return;
+    if (this.isCarried(p)) return;
     // knockback
     if (Math.abs(p.kx) + Math.abs(p.ky) > 0.05) {
       this.movePerson(p, p.kx * dt, p.ky * dt);
@@ -1903,7 +2165,7 @@ export class Game {
       v.broken += dt;
       v.speed = 0;
       if (Math.random() < dt * 3) this.fx('smoke', v.x, v.y, v.hgt + 0.3, '', '#9e9e9e', 1.2);
-      if (v.broken > 25 && dist(v, this.player) > 14) v.gone = true;
+      if (v.broken > 25 && this.heroDist(v) > 14) v.gone = true;
       return;
     }
     if (v.driver === 'player') return;
@@ -1976,7 +2238,7 @@ export class Game {
     }
     const ta = Math.atan2(v.dir.y, v.dir.x);
     v.angle += clamp(angDiff(v.angle, ta), -6 * dt, 6 * dt);
-    if (dist(v, this.player) > 34) v.gone = true;
+    if (this.heroDist(v) > 34) v.gone = true;
   }
 
   chaseAI(v: Vehicle, dt: number) {
@@ -2061,8 +2323,6 @@ export class Game {
   }
 
   updateShots(dt: number) {
-    const pl = this.player;
-    const target = this.vehicle ?? pl;
     const m = this.scene.map;
     for (const s of this.scene.shots) {
       s.t -= dt;
@@ -2087,17 +2347,22 @@ export class Game {
         s.t = 0;
         continue;
       }
-      const hitR = this.vehicle ? Math.max(this.vehicle.wid, 0.8) * 0.6 : 0.45;
-      if (dist(s, target) < hitR && !this.inVent) {
+      let hit = false;
+      for (const h of this.heroes) {
+        const target = this.heroPos(h);
+        const hitR = h.vehicle ? Math.max(h.vehicle.wid, 0.8) * 0.6 : 0.45;
+        if (h.overlay || h.inVent || dist(s, target) >= hitR) continue;
         if (s.kind === 'shell') this.explode(s.x, s.y, 1.6, s.dmg);
-        else {
-          this.damagePlayer(s.dmg, s.kind === 'laser');
-          if (s.kind === 'laser') this.fx('text', target.x, target.y, 1.5, 'ZAP!', '#80deea');
-        }
+        else
+          this.as(h, () => {
+            this.damagePlayer(s.dmg, s.kind === 'laser');
+            if (s.kind === 'laser') this.fx('text', target.x, target.y, 1.5, 'ZAP!', '#80deea');
+          });
         s.t = 0;
-        continue;
+        hit = true;
+        break;
       }
-      if (s.t <= 0 && s.kind === 'shell') this.explode(s.x, s.y, 1.6, s.dmg);
+      if (!hit && s.t <= 0 && s.kind === 'shell') this.explode(s.x, s.y, 1.6, s.dmg);
     }
     this.scene.shots = this.scene.shots.filter((s) => s.t > 0);
   }
@@ -2106,10 +2371,12 @@ export class Game {
     this.fx('boom', x, y, 0.2, '', '#ffb74d', 0.7, r);
     this.fx('text', x, y, 1.4, 'BOOM!', '#ffcc80', 0.9, 1.2);
     sfx('boom');
-    const target = this.vehicle ?? this.player;
-    if (dist(target, { x, y }) < r + (this.vehicle ? 0.6 : 0) && !this.inVent) this.damagePlayer(dmg);
+    for (const h of this.heroes) {
+      const target = this.heroPos(h);
+      if (!h.inVent && dist(target, { x, y }) < r + (h.vehicle ? 0.6 : 0)) this.as(h, () => this.damagePlayer(dmg));
+    }
     for (const p of this.scene.people) {
-      if (p === this.player || p.ko > 0) continue;
+      if (p.ko > 0) continue;
       if (dist(p, { x, y }) < r && (p.kind === 'ped' || p.kind === 'bully' || p.kind === 'driver')) {
         p.flee = 4;
         const d = dist(p, { x, y }) || 1;
@@ -2125,10 +2392,9 @@ export class Game {
   }
 
   spawner(dt: number) {
-    const c = this.vehicle ?? this.player;
     const people = this.city.people;
     const peds = people.filter((p) => p.kind === 'ped' || p.kind === 'bully' || p.kind === 'driver');
-    for (const p of peds) if (dist(p, c) > 30) p.gone = true;
+    for (const p of peds) if (this.heroDist(p) > 30) p.gone = true;
     if (peds.length < 24 && Math.random() < dt * 3) this.spawnPed();
 
     const traffic = this.city.vehicles.filter((v) => v.driver === 'ai');
