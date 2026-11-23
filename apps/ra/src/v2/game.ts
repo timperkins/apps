@@ -73,7 +73,7 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   otter: { name: 'Otter hovercraft', speed: 26, turn: 2.4, r: 10, hp: 1 },
   destroyer: { name: 'Destroyer', speed: 22, turn: 1.4, r: 15, hp: 1 },
   cruiser: { name: 'Skyguard cruiser', speed: 19, turn: 1.3, r: 15, hp: 1 },
-  carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 22, hp: 1 },
+  carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 31, hp: 1 },
   sub: { name: 'Submarine', speed: 20, turn: 1.7, r: 12, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
@@ -531,7 +531,7 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
 const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };

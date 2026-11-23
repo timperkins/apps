@@ -460,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -1149,7 +1149,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     ['destroyer', 'Destroyer', 26],
     ['sub', 'Submarine', 22],
     ['cruiser', 'Skyguard cruiser', 26],
-    ['carrier', 'Carrier', 34],
+    ['carrier', 'Carrier', 46],
   ] as const) {
     const draw =
       (art: V2FactionArt): Draw =>

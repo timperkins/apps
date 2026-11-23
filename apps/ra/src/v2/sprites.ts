@@ -1066,9 +1066,19 @@ function cruiser(f: Faction, part: 'hull' | 'top'): Shape {
   };
 }
 
+// How much bigger the carrier is drawn than the shape below is modelled:
+// it is the largest ship afloat and should look it beside a destroyer.
+export const CARRIER_SCALE = 1.4;
+
 // The carrier: a long flat flight deck over a broad hull, an island tower
 // on the starboard side, deck markings and drones parked along the edge.
 function carrier(f: Faction): Shape {
+  const at = carrierAt(f);
+  const s = 1 / CARRIER_SCALE;
+  return (u, v, z) => at(u * s, v * s, z * s);
+}
+
+function carrierAt(f: Faction): Shape {
   const H = 4.6;
   const DK = hex('#55595b');
   return (u, v, z) => {
@@ -1660,7 +1670,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
     cruiser: renderDirs(cruiser(f, 'hull'), DIRS, { r: 20.5, zmax: 6, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
     cruiserTop: renderDirs(cruiser(f, 'top'), DIRS, { r: 7, zmax: 16 }, k('cruiserTop')),
-    carrier: renderDirs(carrier(f), DIRS, { r: 29, zmax: 17, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
+    carrier: renderDirs(carrier(f), DIRS, { r: 41, zmax: 24, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
     sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
     drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
