@@ -154,6 +154,8 @@ export class World {
   eggs: Egg[] = [];
   coins: Coin[] = [];
   npcTarget = K.NPC_TARGET;
+  // Off by default: School players are teammates and can't eat each other.
+  schoolEats = false;
   peteHere = false;
   peteSince = 0;
   peteNext = K.PETE_FIRST_S;
@@ -658,6 +660,7 @@ export class World {
         const lv = fishLen(v);
         // Babies are tiny, so they can only manage minnows.
         if (a.baby ? v.player || v.level > 0 : la < lv * K.EAT_RATIO) continue;
+        if (v.player && !this.schoolEats) continue;
         if (Math.hypot(m.x - v.x, m.y - v.y) > la * 0.25 + lv * 0.3 + (a.baby ? 3 : 0)) continue;
         const food = v.player ? 2 + v.level * 2 : Math.max(1, v.level);
         parent.eats += 1;

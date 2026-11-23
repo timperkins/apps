@@ -12,8 +12,25 @@ function quietWorld(): World {
 }
 
 describe('swimmers', () => {
+  it('School players are teammates unless the host turns on fish-eat-fish', () => {
+    const w = quietWorld();
+    const big = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    const small = w.addSwimmer('b', 'B', '#ffd23f', 'fish');
+    big.level = 5;
+    big.safeUntil = small.safeUntil = 0;
+    big.dir = 1;
+    big.x = 200;
+    big.y = 200;
+    const m = mouthOf(big);
+    small.x = m.x;
+    small.y = m.y;
+    expect(w.step(K.STEP, none, none).some((e) => e.type === 'eat')).toBe(false);
+    expect(small.alive).toBe(true);
+  });
+
   it('a bigger fish eats a smaller one and grows', () => {
     const w = quietWorld();
+    w.schoolEats = true;
     const big = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
     const small = w.addSwimmer('b', 'B', '#ffd23f', 'fish');
     big.level = 5;

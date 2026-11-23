@@ -268,6 +268,10 @@ export default function Host() {
               <input type="checkbox" checked={view.botsOn} onChange={(e) => sessionRef.current?.setBots(e.target.checked)} />
               Easy bot fills an empty side
             </label>
+            <label className="check small">
+              <input type="checkbox" checked={view.schoolEats} onChange={(e) => sessionRef.current?.setSchoolEats(e.target.checked)} />
+              School fish can eat each other (off: the School is one team)
+            </label>
             <button onClick={() => setPicking(true)}>{me ? 'Change your side or look' : 'Play on this screen too'}</button>
             <p className="small dim">Everyone can practice now. Rounds last {K.ROUND_S / 60} minutes.</p>
             <button className="primary wide" onClick={() => sessionRef.current?.start()} disabled={rows.length === 0}>
