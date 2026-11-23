@@ -1,0 +1,154 @@
+.ew {
+  position: fixed; inset: 0; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none; touch-action: none;
+  color: #fdf3e1; font: 15px/1.4 ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif; background: #12161f;
+}
+.ew-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+.ew button { font: inherit; color: inherit; }
+.ew-ui { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.ew-ui > * { pointer-events: auto; }
+.ew-ico { width: 24px; height: 24px; vertical-align: middle; image-rendering: auto; }
+
+/* HUD */
+.ew-hud { position: absolute; left: 0; right: 0; top: 0; padding: 8px 10px; pointer-events: none; }
+.ew-top { display: flex; align-items: flex-start; gap: 8px; }
+.ew-hearts { display: flex; flex-wrap: wrap; gap: 2px; max-width: 60%; filter: drop-shadow(0 2px 0 rgba(0,0,0,.5)); }
+.ew-heart { width: 22px; height: 20px; display: inline-block; background: #3a2028;
+  clip-path: path('M11 19 C 3 13 0 9 0 5.5 C 0 2 2.6 0 5.5 0 C 8 0 10 1.6 11 3.6 C 12 1.6 14 0 16.5 0 C 19.4 0 22 2 22 5.5 C 22 9 19 13 11 19 Z'); }
+.ew-heart.full { background: #ff4f6a; }
+.ew-heart.half { background: linear-gradient(90deg, #ff4f6a 50%, #3a2028 50%); }
+.ew-btns { margin-left: auto; display: flex; gap: 6px; pointer-events: auto; }
+.ew-ib { width: 40px; height: 40px; border-radius: 12px; border: 2px solid #6b5636; background: rgba(28,22,14,.85); cursor: pointer; font-size: 18px; }
+.ew-ib:hover { border-color: #ffb347; }
+.ew-stam { width: 150px; height: 9px; margin-top: 6px; border-radius: 6px; background: rgba(0,0,0,.5); overflow: hidden; border: 1px solid rgba(255,255,255,.25); }
+.ew-stam i { display: block; height: 100%; width: calc(var(--s, 1) * 100%); background: linear-gradient(90deg, #6fe08a, #c8ff8a); }
+.ew-stam.tired i { background: #ff7a5a; }
+.ew-info { margin-top: 6px; display: inline-block; font-size: 13px; font-weight: 700; background: rgba(10,10,20,.55); border-radius: 10px; padding: 2px 10px; }
+.ew-goal { margin-top: 6px; display: flex; align-items: center; gap: 8px; max-width: min(520px, calc(100% - 180px)); font-size: 13px; color: #ffe8b8;
+  background: rgba(30,18,8,.7); border: 1px solid rgba(255,179,71,.4); border-radius: 10px; padding: 4px 10px; }
+.ew-compass { display: inline-block; color: #ffb347; font-size: 18px; flex: none; transition: transform .15s; }
+
+.ew-toast { position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%); max-width: min(520px, calc(100% - 32px)); background: rgba(22,16,10,.92);
+  border: 2px solid #ffb347; border-radius: 12px; padding: 8px 14px; text-align: center; pointer-events: none; z-index: 3; }
+.ew-banner { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; pointer-events: none; z-index: 3;
+  background: linear-gradient(180deg, rgba(60,30,10,.92), rgba(30,14,6,.92)); border: 2px solid #ffb347; border-radius: 16px; padding: 12px 24px;
+  box-shadow: 0 0 40px rgba(255,150,50,.4); animation: ew-pop .4s ease-out; }
+.ew-banner b { display: block; font-size: 26px; color: #ffd27a; letter-spacing: .5px; }
+.ew-banner span { font-size: 14px; color: #ffe8c8; }
+@keyframes ew-pop { from { transform: translateX(-50%) scale(.8); opacity: 0; } }
+
+/* hotbar */
+.ew-bar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 4px; background: rgba(18,14,10,.85);
+  border: 2px solid #5e4a2e; border-radius: 14px; padding: 4px; max-width: calc(100% - 16px); z-index: 2; }
+.ew-slot { position: relative; width: 48px; height: 48px; flex: 0 1 48px; min-width: 30px; border-radius: 10px; border: 2px solid #3f3222; background: #261d14; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0; }
+.ew-slot .ew-ico { width: 34px; height: 34px; }
+.ew-slot.on { border-color: #ffd27a; background: #4a3416; box-shadow: 0 0 10px rgba(255,200,100,.5); }
+.ew-slot.empty .ew-ico { opacity: .3; }
+.ew-slot b { position: absolute; right: 3px; bottom: 0; font-size: 12px; color: #fff; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
+.ew-slot em { position: absolute; left: 4px; top: 1px; font-size: 10px; font-style: normal; color: rgba(255,240,210,.55); }
+.ew-dir span { display: inline-block; font-size: 22px; color: #8dff9a; transition: transform .1s; }
+
+/* touch */
+.ew-touch { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+.ew-stick { position: absolute; left: 22px; bottom: 90px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.12);
+  border: 2px solid rgba(255,255,255,.3); pointer-events: auto; touch-action: none; }
+.ew-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px; border-radius: 50%; background: rgba(255,230,190,.55); }
+.ew-tbtns { position: absolute; right: 14px; bottom: 84px; display: grid; grid-template-columns: repeat(3, 58px); gap: 8px; pointer-events: auto; }
+.ew-tbtns button { width: 58px; height: 58px; border-radius: 50%; border: 2px solid rgba(255,220,160,.5); background: rgba(30,20,10,.7); font-size: 24px; touch-action: none; }
+.ew-tbtns button.on { background: rgba(80,160,90,.8); }
+
+/* screens and panels */
+.ew-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px;
+  text-align: center; background: radial-gradient(ellipse at center, rgba(20,14,30,.35), rgba(8,6,14,.7)); overflow: auto; }
+.ew-logo { display: flex; flex-direction: column; align-items: center; }
+.ew-logo-art { width: min(260px, 60vw); filter: drop-shadow(0 6px 20px rgba(255,140,40,.35)); }
+.ew-logo h1 { margin: 4px 0 0; font-size: clamp(42px, 9vw, 72px); letter-spacing: 2px; color: #ffd27a;
+  text-shadow: 0 3px 0 #8a3a10, 0 0 30px rgba(255,140,40,.6); }
+.ew-tag { max-width: 560px; margin: 0; color: #f4e4c8; }
+.ew-note { max-width: 460px; margin: 0; font-size: 13px; color: #d8c8a8; }
+.ew-menu { display: flex; flex-direction: column; gap: 8px; width: min(320px, 100%); }
+.ew-btn { padding: 10px 16px; border-radius: 12px; border: 2px solid #b07a30; background: linear-gradient(#5a3a1a, #3e2610); cursor: pointer; font-weight: 800; font-size: 16px; }
+.ew-btn:hover:not(:disabled) { border-color: #ffd27a; }
+.ew-btn.big { font-size: 19px; padding: 12px 18px; background: linear-gradient(#e07a2a, #a84a14); border-color: #ffd27a; }
+.ew-btn.ghost { background: transparent; border-color: #6b5636; }
+.ew-btn.sm { padding: 4px 12px; font-size: 14px; }
+.ew-btn:disabled { opacity: .4; cursor: default; }
+.ew-btn small { display: block; font-weight: 600; font-size: 12px; opacity: .85; }
+.ew-keys { font-size: 13px; color: #e8dcc4; display: grid; gap: 3px; max-width: 600px; text-align: left; background: rgba(0,0,0,.3); border-radius: 12px; padding: 8px 12px; }
+.ew-keys b { color: #ffd27a; }
+
+.ew-dim { position: absolute; inset: 0; background: rgba(6,6,12,.6); display: flex; align-items: center; justify-content: center; padding: 12px; }
+.ew-side { position: absolute; right: 10px; top: 60px; bottom: 74px; display: flex; align-items: flex-start; max-width: calc(100% - 20px); }
+.ew-panel { position: relative; background: linear-gradient(#2e2418, #1e170f); border: 2px solid #8a6430; border-radius: 18px; padding: 16px 18px;
+  max-width: 560px; width: 100%; max-height: 100%; overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.6); }
+.ew-side .ew-panel { width: min(400px, calc(100vw - 20px)); }
+.ew-panel.wide { max-width: 760px; max-height: calc(100vh - 24px); }
+.ew-panel.map { max-width: none; width: auto; text-align: center; }
+.ew-panel h2 { margin: 0 0 8px; color: #ffd27a; display: flex; align-items: center; gap: 8px; }
+.ew-panel h2 .ew-ico { width: 30px; height: 30px; }
+.ew-panel h3 { margin: 12px 0 6px; font-size: 15px; color: #ffcf8a; }
+.ew-panel.win { text-align: center; }
+.ew-dim.win .ew-panel { text-align: center; }
+.ew-dim.win .ew-menu { margin: 10px auto 0; }
+.ew-x { position: absolute; right: 10px; top: 10px; width: 32px; height: 32px; border-radius: 10px; border: 2px solid #6b5636; background: #2a1e12; cursor: pointer; }
+.ew-sub { margin: 4px 0 10px; font-size: 13px; color: #d8c8a8; }
+.ew-faint { color: #9a8a70; font-size: 13px; }
+.ew-tabs { display: flex; gap: 6px; margin-bottom: 10px; padding-right: 40px; }
+.ew-tab { padding: 6px 14px; border-radius: 10px; border: 2px solid #5e4a2e; background: #261d14; cursor: pointer; font-weight: 800; }
+.ew-tab.on { border-color: #ffd27a; background: #4a3416; }
+
+.ew-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.ew-cell { position: relative; border-radius: 10px; border: 2px solid #3f3222; background: #261d14; padding: 6px 4px 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; }
+.ew-cell:hover { border-color: #ffd27a; }
+.ew-cell .ew-ico { width: 36px; height: 36px; }
+.ew-cell b { position: absolute; right: 5px; top: 3px; font-size: 13px; }
+.ew-cell span { font-size: 11px; color: #d8c8a8; text-align: center; line-height: 1.15; }
+.ew-gear { display: flex; flex-wrap: wrap; gap: 6px; }
+.ew-gear span { background: #261d14; border: 1px solid #3f3222; border-radius: 8px; padding: 2px 8px; font-size: 13px; }
+.ew-gear .relic { border-color: #ffd27a; color: #ffe8a8; }
+
+.ew-recipes { display: grid; gap: 5px; }
+.ew-rec { display: grid; grid-template-columns: minmax(130px, 1.1fr) 2fr auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 10px; background: rgba(0,0,0,.25); opacity: .72; }
+.ew-rec.ok { opacity: 1; background: rgba(90,140,60,.18); }
+.ew-rec-out { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.ew-rec-out .ew-ico { width: 30px; height: 30px; }
+.ew-rec-in { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; align-items: center; }
+.ew-rec-in span { display: inline-flex; align-items: center; gap: 2px; }
+.ew-rec-in .miss { color: #ff9a8a; }
+.ew-rec-in em { font-size: 12px; color: #ffcf8a; }
+.ew-rec-btns { display: flex; gap: 4px; }
+@media (max-width: 560px) { .ew-rec { grid-template-columns: 1fr auto; } .ew-rec-in { grid-column: 1 / -1; grid-row: 2; } }
+
+.ew-mrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.ew-mrow > b { min-width: 52px; color: #ffcf8a; }
+.ew-mrow .ew-prog { flex: 1; min-width: 80px; }
+.ew-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ew-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 9px; border: 2px solid #4a3a26; background: #261d14; cursor: pointer; font-size: 13px; }
+.ew-chip:hover:not(:disabled) { border-color: #ffd27a; }
+.ew-chip.on { border-color: #8dff9a; background: #22402a; }
+.ew-chip.fuel { border-color: #7a4a20; }
+.ew-chip:disabled { cursor: default; opacity: .55; }
+.ew-prog { height: 10px; border-radius: 6px; background: rgba(0,0,0,.45); overflow: hidden; margin: 6px 0; }
+.ew-prog i { display: block; height: 100%; background: linear-gradient(90deg, #ffb347, #ffe27a); }
+
+.ew-journal { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.ew-jb { background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px 10px; border: 1px solid #3f3222; }
+.ew-jb.lit { border-color: #ffb347; background: rgba(120,60,10,.25); }
+.ew-jb h3 { margin: 0 0 4px; }
+.ew-jb h3 small { font-weight: 600; color: #b8a888; font-size: 12px; }
+.ew-jb p { margin: 4px 0 0; font-size: 13px; color: #d8c8a8; }
+.ew-wants { display: flex; gap: 10px; font-size: 13px; }
+.ew-tips { margin: 0 0 10px; padding-left: 20px; font-size: 13px; color: #e8dcc4; }
+.ew-loot { text-align: left; margin: 6px 0 14px; padding-left: 20px; }
+
+.ew-map { border-radius: 12px; border: 2px solid #8a6430; image-rendering: pixelated; cursor: pointer; display: block; margin: 0 auto; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 3px 0 10px; vertical-align: middle; }
+.dot.me { background: #ff4f6a; } .dot.bc { background: #ffb347; } .dot.ws { background: #6fd8ff; } .dot.tr { background: #ffe27a; }
+
+@media (max-width: 640px) {
+  .ew-goal { max-width: calc(100% - 20px); }
+  .ew-side { top: auto; bottom: 70px; left: 10px; right: 10px; max-height: 55%; }
+  .ew-side .ew-panel { width: 100%; }
+  .ew-slot { width: 38px; height: 38px; }
+  .ew-slot .ew-ico { width: 26px; height: 26px; }
+}
