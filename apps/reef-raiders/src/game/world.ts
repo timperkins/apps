@@ -40,6 +40,8 @@ export interface Fish {
   nextSurviveCoin: number;
   // Babies follow their parent and feed it.
   baby: boolean;
+  // What a baby is swimming after.
+  snack?: { x: number; y: number } | null;
   owner: string | null;
   diesAt: number;
   nextFeed: number;
@@ -462,20 +464,28 @@ export class World {
     }
   }
 
-  // A coin or minnow close to a baby and not too far from its parent.
-  private nearestSnack(f: Fish, parent: Fish | undefined): { x: number; y: number } | null {
+  // The boat a fish has rammed in the last few seconds, if it is still afloat.
+  private boatUnderAttack(parent: Fish): Boat | undefined {
+    if (!parent.alive) return undefined;
+    return this.boats.find((b) => !b.sunk && this.time - (b.hits.get(parent.id) ?? -Infinity) < K.BABY_ATTACK_S);
+  }
+
+  // The nearest coin or minnow anywhere in the sea that a sibling isn't already going for.
+  private nearestSnack(f: Fish): { x: number; y: number } | null {
+    const claimed = new Set<{ x: number; y: number }>();
+    for (const o of this.fish) {
+      if (o !== f && o.baby && o.owner === f.owner && o.snack) claimed.add(o.snack);
+    }
     let best: { x: number; y: number } | null = null;
-    let bestD = K.BABY_REACH;
-    const near = (x: number, y: number) => !parent?.alive || Math.hypot(x - parent.x, y - parent.y) < K.BABY_LEASH;
-    for (const c of this.coins) {
-      const d = Math.hypot(c.x - f.x, c.y - f.y);
-      if (d < bestD && near(c.x, c.y)) [best, bestD] = [c, d];
-    }
-    for (const v of this.fish) {
-      if (v.player || v.baby || v.level > 0 || !v.alive || v.hookedBy) continue;
-      const d = Math.hypot(v.x - f.x, v.y - f.y);
-      if (d < bestD && near(v.x, v.y)) [best, bestD] = [v, d];
-    }
+    let bestD = Infinity;
+    const consider = (t: { x: number; y: number }) => {
+      if (claimed.has(t)) return;
+      const d = Math.hypot(t.x - f.x, t.y - f.y);
+      if (d < bestD) [best, bestD] = [t, d];
+    };
+    for (const c of this.coins) consider(c);
+    for (const v of this.fish) if (!v.player && !v.baby && v.level === 0 && v.alive && !v.hookedBy) consider(v);
+    f.snack = best;
     return best;
   }
 
@@ -483,8 +493,13 @@ export class World {
   private npcSteer(f: Fish): { x: number; y: number } {
     if (f.baby) {
       const parent = f.owner ? this.get(f.owner) : undefined;
-      const snack = this.nearestSnack(f, parent);
-      if (snack) {
+      const target = parent ? this.boatUnderAttack(parent) : undefined;
+      const snack = target ? null : this.nearestSnack(f);
+      if (target) {
+        // Join in: ram the boat the parent is ramming.
+        f.tx = target.x + ((Number(f.id.split('-').pop()) % 5) - 2) * 12;
+        f.ty = K.SURF + 4;
+      } else if (snack) {
         f.tx = snack.x;
         f.ty = snack.y;
       } else if (parent?.alive) {
@@ -696,16 +711,19 @@ export class World {
 
   private ramming(): void {
     for (const f of this.fish) {
-      if (!f.player || !f.alive || f.hookedBy || f.y > K.SURF + K.SURFACE_BAND) continue;
+      if (!(f.player || f.baby) || !f.alive || f.hookedBy || f.y > K.SURF + K.SURFACE_BAND) continue;
       if (this.time < f.ramReadyAt) continue;
+      // A baby's ram counts for its parent.
+      const by = f.baby ? (f.owner ? this.get(f.owner) : undefined) : f;
+      if (!by) continue;
       for (const b of this.boats) {
         if (b.sunk || Math.abs(f.x - b.x) > K.BOAT_HALF_W + fishLen(f) * 0.3) continue;
         f.ramReadyAt = this.time + K.RAM_COOLDOWN_S;
         f.vy = 70;
-        b.health -= K.ramDamage(f.level) * boost(f.ups, 'ram');
-        b.hits.set(f.id, this.time);
-        this.events.push({ type: 'ram', boat: b.id, by: f.id, x: f.x });
-        if (b.health <= 0) this.sink(b, f);
+        b.health -= f.baby ? K.BABY_RAM_DAMAGE * boost(by.ups, 'ram') : K.ramDamage(f.level) * boost(f.ups, 'ram');
+        if (!f.baby) b.hits.set(f.id, this.time);
+        this.events.push({ type: 'ram', boat: b.id, by: by.id, x: f.x });
+        if (b.health <= 0) this.sink(b, by);
         break;
       }
     }

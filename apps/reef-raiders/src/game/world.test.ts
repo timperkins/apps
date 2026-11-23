@@ -87,6 +87,38 @@ describe('swimmers', () => {
     expect(w.fish.filter((x) => x.baby).length).toBe(K.BABIES_PER_EGG);
   });
 
+  it('babies swim across the map for a coin', () => {
+    const w = quietWorld();
+    const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    f.x = 40;
+    f.y = 200;
+    w.layEgg('a');
+    for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, new Map([['a', { x: 0, y: 0 }]]), none);
+    w.coins = [];
+    w.coins.push({ id: 'far', x: 600, y: 250, restUntil: Infinity, phase: 0 } as (typeof w.coins)[number]);
+    const coins = f.coins;
+    for (let t = 0; t < 20 && f.coins === coins; t += K.STEP) w.step(K.STEP, new Map([['a', { x: 0, y: 0 }]]), none);
+    expect(f.coins).toBe(coins + 1);
+  });
+
+  it("babies help ram the boat their parent is ramming, and it counts for the parent", () => {
+    const w = quietWorld();
+    const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    const b = w.addRaider('r', 'R', '#45e3ff');
+    w.layEgg('a');
+    for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, none, none);
+    b.hits.set('a', w.time);
+    const rams: string[] = [];
+    for (let t = 0; t < 10; t += K.STEP) {
+      b.hits.set('a', w.time);
+      f.x = 20;
+      f.y = 300;
+      for (const e of w.step(K.STEP, none, none)) if (e.type === 'ram') rams.push(e.by);
+    }
+    expect(rams.length).toBeGreaterThan(0);
+    expect(rams.every((id) => id === 'a')).toBe(true);
+  });
+
   it('a parent has at most MAX_BABIES', () => {
     const w = quietWorld();
     w.addSwimmer('a', 'A', '#ff4f4f', 'fish');

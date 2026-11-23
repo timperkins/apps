@@ -47,9 +47,9 @@ export const EGG_HATCH_S = 10;
 export const BABIES_PER_EGG = 2;
 // Babies stay until they are caught; a parent can have at most this many.
 export const MAX_BABIES = 6;
-// Babies go for coins and minnows this close to them, as long as it is this close to their parent.
-export const BABY_REACH = 60;
-export const BABY_LEASH = 90;
+// Babies join in on a boat their parent rammed within this many seconds.
+export const BABY_ATTACK_S = 4;
+export const BABY_RAM_DAMAGE = 2;
 
 // ---- Computer fish ----
 export const NPC_TARGET = 26;
