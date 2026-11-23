@@ -326,7 +326,7 @@ export class World {
 
   step(dt: number, fishInputs: Map<string, FishInput>, boatInputs: Map<string, BoatInput>): WorldEvent[] {
     this.time += dt;
-    this.events = [];
+    // Events from actions since the last step (cast, taunt, sell…) are kept and returned too.
     this.respawn();
     this.moveBoats(dt, boatInputs);
     this.moveFish(dt, fishInputs);
@@ -342,7 +342,9 @@ export class World {
       this.npcTimer = K.NPC_RESPAWN_S;
       this.fillNpcs(false);
     }
-    return this.events;
+    const out = this.events;
+    this.events = [];
+    return out;
   }
 
   private respawn(): void {
@@ -745,7 +747,8 @@ export class World {
     const add = all ? missing : Math.min(2, missing);
     for (let i = 0; i < add; i++) {
       const r = this.rand();
-      const level = r < 0.45 ? 1 : r < 0.7 ? 2 : r < 0.85 ? 3 : r < 0.95 ? 5 : 8;
+      // Level 0 minnows are the only thing a brand-new player fish is big enough to eat.
+      const level = r < 0.45 ? 0 : r < 0.65 ? 1 : r < 0.8 ? 2 : r < 0.9 ? 3 : r < 0.97 ? 5 : 8;
       const f = this.newFish(`npc-${this.serial++}`, false, 'npc', Math.floor(this.rand() * NPC_SPECIES), '', '', level);
       if (all) {
         f.x = 20 + this.rand() * (K.SCENE_W - 40);

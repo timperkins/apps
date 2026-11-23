@@ -1,8 +1,9 @@
 import { play } from '../audio/sound';
+import { Bot } from '../game/bot';
 import * as K from '../game/constants';
 import { COLORS, defaultName, type FishKind, type Role } from '../game/looks';
 import { World, teamTotals, type BoatInput, type FishInput, type WorldEvent } from '../game/world';
-import type { ControllerMessage, DisplayMessage, YouStatus } from '../net/protocol';
+import type { Action, ControllerMessage, DisplayMessage, YouStatus } from '../net/protocol';
 import { updateRoom, type Phase } from '../net/rooms';
 import { DisplayHub } from '../net/rtc';
 
@@ -10,6 +11,10 @@ const STATUS_EVERY_S = 0.2;
 const VIEW_EVERY_S = 0.5;
 // A phone that stays away this long loses its boat or fish.
 const DROP_AFTER_S = 120;
+// The player who uses the display itself (a phone hosting and playing at once).
+export const LOCAL_ID = 'local';
+const BOT_IDS: Record<Role, string> = { raider: 'bot-raider', swimmer: 'bot-swimmer' };
+const BOT_NAMES: Record<Role, string> = { raider: 'Bot Barnacle', swimmer: 'Bot Guppy' };
 
 export interface PlayerRow {
   id: string;
@@ -17,6 +22,8 @@ export interface PlayerRow {
   color: string;
   role: Role;
   connected: boolean;
+  bot: boolean;
+  local: boolean;
   score: number;
   detail: string;
 }
@@ -30,6 +37,7 @@ export interface HostView {
   crew: number;
   school: number;
   winner: 'crew' | 'school' | 'tie' | null;
+  botsOn: boolean;
 }
 
 interface Player {
@@ -43,6 +51,7 @@ interface Player {
   input: { x: number; y: number; hold: boolean };
   diedBy: string | null;
   thrashedFight: number;
+  bot?: Bot;
 }
 
 // Owns everything the display does: players, the WebRTC hub, round phases and the world.
@@ -58,6 +67,9 @@ export class HostSession {
   private hub: DisplayHub;
   private lastView = '';
   private soundGate = new Map<string, number>();
+  private botsOn = true;
+  // Status for the local player, who has no data channel.
+  onLocalStatus: ((msg: DisplayMessage) => void) | null = null;
 
   constructor(
     private code: string,
@@ -75,6 +87,70 @@ export class HostSession {
 
   dispose(): void {
     this.hub.close();
+  }
+
+  // ---- The local player and bots ----
+
+  local(msg: ControllerMessage): void {
+    if (!this.players.has(LOCAL_ID)) {
+      this.connect(LOCAL_ID);
+    }
+    this.handleMessage(LOCAL_ID, msg);
+  }
+
+  setBots(on: boolean): void {
+    this.botsOn = on;
+    this.syncBots();
+    this.emit(true);
+  }
+
+  // With bots on, an easy bot fills in for a side that has no people.
+  private syncBots(): void {
+    const humans = [...this.players.values()].filter((p) => p.role && !p.bot);
+    for (const role of ['raider', 'swimmer'] as Role[]) {
+      const id = BOT_IDS[role];
+      const want = this.botsOn && humans.length > 0 && !humans.some((p) => p.role === role);
+      const have = this.players.has(id);
+      if (want && !have) {
+        const taken = this.takenColors(id);
+        const color = COLORS.find((c) => !taken.includes(c)) ?? COLORS[0];
+        const p: Player = {
+          uid: id,
+          connected: true,
+          goneSince: 0,
+          role,
+          name: BOT_NAMES[role],
+          color,
+          kind: 'fish',
+          input: { x: 0, y: 0, hold: false },
+          diedBy: null,
+          thrashedFight: -1,
+          bot: new Bot(id),
+        };
+        this.players.set(id, p);
+        if (role === 'raider') this.world.addRaider(id, p.name, color);
+        else this.world.addSwimmer(id, p.name, color, 'fish');
+      } else if (!want && have) {
+        this.world.removePlayer(id);
+        this.players.delete(id);
+      } else if (have) {
+        const p = this.players.get(id)!;
+        const used = [...this.players.values()].filter((o) => o !== p && o.role).map((o) => o.color);
+        if (used.includes(p.color)) {
+          p.color = COLORS.find((c) => !used.includes(c)) ?? p.color;
+          this.world.setLook(id, p.name, p.color);
+        }
+      }
+    }
+  }
+
+  private runBots(): void {
+    for (const p of this.players.values()) {
+      if (!p.bot) continue;
+      const out = p.bot.step(this.world);
+      p.input = { x: out.x, y: out.y, hold: out.hold };
+      for (const a of out.acts) this.act(p, a);
+    }
   }
 
   start(): void {
@@ -103,6 +179,7 @@ export class HostSession {
       if (!p.connected && this.world.time - p.goneSince > DROP_AFTER_S) {
         this.world.removePlayer(p.uid);
         this.players.delete(p.uid);
+        this.syncBots();
         this.emit(true);
       }
     }
@@ -121,6 +198,7 @@ export class HostSession {
     }
     if (this.phase === 'over') return;
 
+    this.runBots();
     const humans = this.players.size;
     this.world.npcTarget = Math.max(K.NPC_MIN, Math.round(K.NPC_TARGET - humans * K.NPC_PER_PLAYER));
     const events = this.world.step(dt, this.fishInputs(), this.boatInputs());
@@ -259,12 +337,15 @@ export class HostSession {
     if (!p) return;
     p.connected = false;
     p.goneSince = this.world.time;
-    if (!p.role) this.players.delete(uid);
+    if (!p.role) {
+      this.players.delete(uid);
+      this.syncBots();
+    }
     this.emit(true);
   }
 
   private count(role: Role, except?: string): number {
-    return [...this.players.values()].filter((p) => p.role === role && p.uid !== except).length;
+    return [...this.players.values()].filter((p) => p.role === role && p.uid !== except && !p.bot).length;
   }
 
   private handleMessage(uid: string, msg: ControllerMessage): void {
@@ -292,14 +373,19 @@ export class HostSession {
         if (role === 'raider') this.world.addRaider(uid, name, color);
         else this.world.addSwimmer(uid, name, color, msg.kind);
       } else this.world.setLook(uid, name, color);
+      this.syncBots();
       this.broadcast();
       this.emit(true);
       return;
     }
-    // Actions.
+    this.act(p, msg.a);
+  }
+
+  private act(p: Player, a: Action): void {
     if (this.phase === 'countdown' || this.phase === 'over') return;
     const w = this.world;
-    switch (msg.a) {
+    const uid = p.uid;
+    switch (a) {
       case 'cast':
         w.cast(uid);
         break;
@@ -340,7 +426,8 @@ export class HostSession {
   }
 
   private takenColors(except: string): string[] {
-    return [...this.players.values()].filter((p) => p.uid !== except && p.role && p.color).map((p) => p.color);
+    // Bots give way: their color changes if a person picks it.
+    return [...this.players.values()].filter((p) => p.uid !== except && p.role && p.color && !p.bot).map((p) => p.color);
   }
 
   private setPhase(phase: HostView['phase']): void {
@@ -417,11 +504,14 @@ export class HostSession {
   }
 
   private sendStatus(uid: string): void {
-    if (this.players.get(uid)?.connected) this.hub.send(uid, this.message(uid));
+    const p = this.players.get(uid);
+    if (!p?.connected || p.bot) return;
+    if (uid === LOCAL_ID) this.onLocalStatus?.(this.message(uid));
+    else this.hub.send(uid, this.message(uid));
   }
 
   private broadcast(): void {
-    for (const p of this.players.values()) if (p.connected) this.hub.send(p.uid, this.message(p.uid));
+    for (const p of this.players.values()) this.sendStatus(p.uid);
   }
 
   private emit(force = false): void {
@@ -437,6 +527,8 @@ export class HostSession {
         color: p.color,
         role: p.role,
         connected: p.connected,
+        bot: !!p.bot,
+        local: p.uid === LOCAL_ID,
         score: b?.score ?? f?.score ?? 0,
         detail: b ? `${b.catches} caught` : f ? `level ${f.best}, ${f.eats} eaten` : '',
       });
@@ -452,6 +544,7 @@ export class HostSession {
       crew: totals.crew,
       school: totals.school,
       winner: this.winner,
+      botsOn: this.botsOn,
     };
     const key = JSON.stringify(view);
     if (!force && key === this.lastView) return;

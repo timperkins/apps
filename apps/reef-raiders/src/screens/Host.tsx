@@ -1,6 +1,8 @@
 import QRCode from 'qrcode';
-import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { IDLE, Stick, type StickState } from '../controller/stick';
+import { cleanName } from '../game/looks';
 import { audioUnlocked, isMuted, setMuted, unlockAudio } from '../audio/sound';
 import * as K from '../game/constants';
 import { startLoop } from '../game/loop';
@@ -8,6 +10,7 @@ import { ensureUser } from '../net/firebase';
 import { watchRoom } from '../net/rooms';
 import { Scene } from '../render/draw';
 import { loadPixelFont } from '../render/text';
+import { JoinPanel, RaiderPad, SwimmerPad, loadLook, saveLook, useHostClock, type GameInfo, type Look } from './controls';
 import { HostSession, type HostView, type PlayerRow } from './hostSession';
 
 type Status = 'loading' | 'hosting' | 'missing' | 'not-host' | 'error';
@@ -25,6 +28,7 @@ function Roster({ rows, title, max }: { rows: PlayerRow[]; title: string; max: n
             <span className="swatch" style={{ background: r.color }} />
             <span className="name">
               {r.name}
+              {r.local && ' (this screen)'}
               {!r.connected && ' (away)'}
             </span>
             <span className="num">{r.score}</span>
@@ -47,6 +51,42 @@ export default function Host() {
   const [soundOn, setSoundOn] = useState(audioUnlocked());
   const [muted, setMutedState] = useState(isMuted());
   const joinUrl = `${location.origin}/play/${code}`;
+  const solo = useSearchParams()[0].has('solo');
+  // The person at this screen can play too, with touch controls drawn over the sea.
+  const [localInfo, setLocalInfo] = useState<GameInfo | null>(null);
+  const [look, setLook] = useState<Look>(loadLook);
+  const [picking, setPicking] = useState(solo);
+  const [lobbyOpen, setLobbyOpen] = useState(false);
+  const [stick, setStick] = useState<StickState>(IDLE);
+  const padEl = useRef<HTMLDivElement>(null);
+  const hostNow = useHostClock(localInfo);
+  const me = localInfo?.you ?? null;
+
+  useEffect(() => saveLook(look), [look]);
+
+  useEffect(() => {
+    if (!me || picking || !padEl.current) return;
+    const st = new Stick(padEl.current, me.role === 'raider' ? 'x' : 'xy', setStick);
+    return () => {
+      st.dispose();
+      setStick(IDLE);
+    };
+  }, [me?.role, picking]);
+
+  const holdRef = useRef(false);
+  useEffect(() => {
+    sessionRef.current?.local({ t: 'in', x: stick.x, y: stick.y, hold: holdRef.current });
+  }, [stick]);
+  const hold = (on: boolean) => (e: ReactPointerEvent) => {
+    e.preventDefault();
+    holdRef.current = on;
+    sessionRef.current?.local({ t: 'in', x: stick.x, y: stick.y, hold: on });
+  };
+
+  const joinHere = () => {
+    sessionRef.current?.local({ t: 'join', role: look.role, name: cleanName(look.name, ''), color: look.color, kind: look.kind });
+    setPicking(false);
+  };
 
   // Only the device that created the room may act as its display.
   useEffect(() => {
@@ -81,6 +121,7 @@ export default function Host() {
       if (cancelled) return;
       const scene = new Scene();
       const s = new HostSession(code, setView, (e) => scene.event(e, s.world));
+      s.onLocalStatus = setLocalInfo;
       session = s;
       sessionRef.current = s;
       const ctx = canvasRef.current!.getContext('2d')!;
@@ -129,14 +170,61 @@ export default function Host() {
   }
 
   const rows = view?.players ?? [];
+  const playingHere = !!me && !picking;
   const crew = rows.filter((r) => r.role === 'raider');
   const school = rows.filter((r) => r.role === 'swimmer');
 
   return (
-    <div className="host">
+    <div className={`host${playingHere ? ' local' : ''}`}>
       <canvas ref={canvasRef} className="scene" width={K.SCENE_W} height={K.SCENE_H} />
 
-      {view?.phase === 'lobby' && (
+      {playingHere && view?.phase !== 'over' && (
+        <div className={`local-controls ${me.role}`} style={{ ['--me' as string]: me.color }}>
+          {me.role === 'raider' ? (
+            <RaiderPad
+              you={me}
+              info={localInfo!}
+              padEl={padEl}
+              stick={stick}
+              hold={hold}
+              act={(a) => sessionRef.current?.local({ t: 'act', a })}
+              hostNow={hostNow}
+            />
+          ) : (
+            <SwimmerPad you={me} padEl={padEl} stick={stick} act={(a) => sessionRef.current?.local({ t: 'act', a })} />
+          )}
+        </div>
+      )}
+      {playingHere && <div className="turn-hint">Turn your phone sideways</div>}
+
+      {picking && (
+        <div className="overlay dimmed picker">
+          <section className="card">
+            <h2>{solo ? 'Play solo' : 'Play on this screen'}</h2>
+            <JoinPanel look={look} info={localInfo} joined={!!me} onChange={(p) => setLook((l) => ({ ...l, ...p }))} onJoin={joinHere} />
+            <p className="small dim">An easy bot plays the other side until a friend joins it.</p>
+            {(me || !solo) && (
+              <button className="link" onClick={() => setPicking(false)}>
+                Cancel
+              </button>
+            )}
+          </section>
+        </div>
+      )}
+
+      {view?.phase === 'lobby' && !picking && playingHere && !lobbyOpen && (
+        <div className="lobby-bar">
+          <span>
+            Room <b>{code}</b>
+          </span>
+          <button className="primary" onClick={() => sessionRef.current?.start()}>
+            Start round
+          </button>
+          <button onClick={() => setLobbyOpen(true)}>Invite & settings</button>
+        </div>
+      )}
+
+      {view?.phase === 'lobby' && !picking && (!playingHere || lobbyOpen) && (
         <div className="lobby">
           <section className="card join-card">
             <h1 className="logo">Reef Raiders</h1>
@@ -155,10 +243,20 @@ export default function Host() {
               <Roster rows={school} title="School" max={K.MAX_SWIMMERS} />
             </div>
             {view.waiting > 0 && <p className="small dim">{view.waiting} picking a side…</p>}
+            <label className="check small">
+              <input type="checkbox" checked={view.botsOn} onChange={(e) => sessionRef.current?.setBots(e.target.checked)} />
+              Easy bot fills an empty side
+            </label>
+            <button onClick={() => setPicking(true)}>{me ? 'Change your side or look' : 'Play on this screen too'}</button>
             <p className="small dim">Everyone can practice now. Rounds last {K.ROUND_S / 60} minutes.</p>
             <button className="primary wide" onClick={() => sessionRef.current?.start()} disabled={rows.length === 0}>
               Start round
             </button>
+            {lobbyOpen && (
+              <button className="link" onClick={() => setLobbyOpen(false)}>
+                Close
+              </button>
+            )}
           </section>
         </div>
       )}
@@ -169,7 +267,7 @@ export default function Host() {
         </div>
       )}
 
-      {view?.phase === 'over' && (
+      {view?.phase === 'over' && !picking && (
         <div className="overlay dimmed">
           <section className="card results">
             <h1 className="winner">{view.winner ? WINNER_TEXT[view.winner] : 'Round over'}</h1>

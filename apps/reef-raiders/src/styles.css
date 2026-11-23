@@ -683,3 +683,205 @@ input {
   gap: 12px;
   text-align: center;
 }
+
+/* ---- A display that is also a player (a phone hosting, or solo) ---- */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.picker {
+  overflow-y: auto;
+  align-items: flex-start;
+  padding: 16px;
+}
+
+.picker .card {
+  width: min(460px, 100%);
+  margin: auto;
+}
+
+.lobby-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(26, 16, 48, 0.85);
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.lobby-bar button {
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.local-controls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 72%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.local-controls > *,
+.local-controls .controls > * {
+  pointer-events: auto;
+}
+
+.local-controls .row-info,
+.local-controls .knot-bar {
+  align-self: center;
+  width: min(420px, 60%);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(26, 16, 48, 0.6);
+  font-size: 12px;
+}
+
+.local-controls .controls {
+  pointer-events: none;
+}
+
+.local-controls .pad {
+  background: transparent;
+  border: 0;
+}
+
+.local-controls .pad-help {
+  align-items: flex-end;
+  text-shadow: 0 1px 2px #000;
+}
+
+.local-controls .buttons {
+  flex: 0 0 min(170px, 30%);
+  justify-content: flex-end;
+}
+
+.local-controls .action {
+  flex: 0 0 auto;
+  min-height: 72px;
+  font-size: 17px;
+  opacity: 0.9;
+}
+
+.local-controls .small-buttons button {
+  font-size: 11px;
+  padding: 6px 8px;
+  opacity: 0.9;
+}
+
+.local-controls .heave-ring {
+  width: 64px;
+  height: 64px;
+}
+
+.local-controls .big-state {
+  pointer-events: none;
+  text-shadow: 0 2px 3px #000;
+}
+
+.local-controls .pull-zone {
+  flex: 1;
+  opacity: 0.85;
+}
+
+.local-controls .action.thrash {
+  min-height: 48px;
+}
+
+.turn-hint {
+  display: none;
+}
+
+@media (orientation: portrait) and (max-width: 700px) {
+  .host.local .turn-hint {
+    display: block;
+    position: absolute;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(26, 16, 48, 0.85);
+    font-family: var(--pixel);
+    white-space: nowrap;
+  }
+}
+
+/* Short screens (a phone on its side): shrink the lobby so it fits. */
+@media (max-height: 560px) {
+  .lobby {
+    overflow-y: auto;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .logo {
+    font-size: 22px;
+  }
+
+  .room-code {
+    font-size: 28px;
+  }
+
+  .qr {
+    width: 120px;
+    height: 120px;
+  }
+
+  .winner {
+    font-size: 24px;
+  }
+
+  .countdown {
+    font-size: 96px;
+  }
+
+  .rosters {
+    margin: 6px 0;
+  }
+}
+
+.host.local .corner {
+  top: 8px;
+  bottom: auto;
+  right: 50%;
+  transform: translateX(50%);
+}
+
+.host.local .lobby-bar {
+  top: 44px;
+}
+
+.local-controls .row-info,
+.local-controls .knot-bar {
+  width: min(300px, 42%);
+  background: rgba(26, 16, 48, 0.45);
+  font-size: 11px;
+}
+
+.local-controls .pad-help {
+  font-size: 12px;
+  justify-content: flex-start;
+}
