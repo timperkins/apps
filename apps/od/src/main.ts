@@ -196,6 +196,12 @@ $('newBtn').addEventListener('click', () => {
 
 // ---------- phone ----------
 let phoneTab = 'map';
+let mapNear = true;
+$('mapZoom').addEventListener('click', () => {
+  mapNear = !mapNear;
+  $('mapZoom').textContent = mapNear ? 'Show whole city' : 'Zoom in on me';
+  if (game) drawMinimap($<HTMLCanvasElement>('minimap'), game, mapNear);
+});
 function togglePhone() {
   if (!game) return;
   const ph = $('phone');
@@ -235,7 +241,7 @@ function renderPhone() {
   document.querySelectorAll<HTMLElement>('.tab').forEach((p) => (p.hidden = p.dataset.pane !== phoneTab));
   const pane = document.querySelector<HTMLElement>(`[data-pane="${phoneTab}"]`)!;
   if (phoneTab === 'map') {
-    drawMinimap($<HTMLCanvasElement>('minimap'), g);
+    drawMinimap($<HTMLCanvasElement>('minimap'), g, mapNear);
     $('where').textContent = g.scene === g.bank ? "You're inside the Bank." : g.vehicle?.kind === 'ship' ? "You're sailing the ship!" : 'The red dot is you.';
   } else if (phoneTab === 'outfits') {
     const ds = SHOP_ITEMS.filter((i) => i.kind === 'disguise');
@@ -370,7 +376,7 @@ function frame(now: number) {
     phoneT += dt;
     if (paused && phoneTab === 'map' && phoneT > 0.1) {
       phoneT = 0;
-      drawMinimap($<HTMLCanvasElement>('minimap'), g);
+      drawMinimap($<HTMLCanvasElement>('minimap'), g, mapNear);
     }
     $('phoneClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     saveT += dt;

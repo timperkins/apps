@@ -401,7 +401,9 @@ export class Game {
   disguiseCd = 0;
   ownsCar = false;
   myCar: Vehicle | null = null;
-  vaultT = 0;
+  vaults: Record<string, number> = {}; // seconds until each bank's vault refills
+  bankId = '';
+  bankReturn = { x: 0, y: 0 };
   alarm = false;
   hint: Hint | null = null;
   banners: { text: string; t: number; color: string }[] = [];
@@ -459,6 +461,14 @@ export class Game {
       ownsCar: this.ownsCar,
       time: this.time,
     };
+  }
+
+  get vaultT() {
+    return this.vaults[this.bankId] ?? 0;
+  }
+
+  set vaultT(v: number) {
+    this.vaults[this.bankId] = v;
   }
 
   get mult() {
@@ -544,7 +554,7 @@ export class Game {
       if (ROAD_BASES.some((b) => Math.abs(along - (b + 1)) < 2)) continue;
       const d = Math.hypot(x - c.x, y - c.y);
       if (!anywhere && (d < 14 || d > 30)) continue;
-      if (anywhere && d < 5) continue;
+      if (anywhere && (d < 5 || d > 30)) continue;
       if (this.city.vehicles.some((o) => Math.hypot(o.x - x, o.y - y) < 5)) continue;
       const v = makeVehicle(kind, x, y, Math.atan2(dir.y, dir.x));
       v.driver = 'ai';
@@ -558,7 +568,7 @@ export class Game {
 
   spawnCop(onRoad = false) {
     const c = this.vehicle ?? this.player;
-    const police = this.city.map.spawns.police[0];
+    const police = this.city.map.spawns.police.reduce((a, b) => (dist(a, c) < dist(b, c) ? a : b));
     let pos = this.randomSidewalk(9, 15);
     if (!pos || Math.random() < 0.2) pos = dist(police, c) < 25 ? police : pos;
     if (!pos) return;
@@ -751,7 +761,8 @@ export class Game {
     if (this.money < price) return 'Not enough money!';
     this.money -= price;
     sfx('cash');
-    const drop = this.city.map.spawns.lotDrop[0];
+    const pl = this.player;
+    const drop = this.city.map.spawns.lotDrop.reduce((a, b) => (dist(a, pl) < dist(b, pl) ? a : b));
     const v = makeVehicle(kind === 'buy' ? 'sports' : 'car', drop.x, drop.y, 0);
     if (kind === 'buy') {
       v.mine = true;
@@ -1005,7 +1016,12 @@ export class Game {
     this.onSave?.();
   }
 
-  enterBank() {
+  enterBank(doorX: number, doorY: number) {
+    // banks have two door tiles side by side; name the bank by its left one
+    const m = this.city.map;
+    const left = m.places.get(idx(m, doorX - 1, doorY)) === 'bank' ? doorX - 1 : doorX;
+    this.bankId = `${left},${doorY}`;
+    this.bankReturn = { x: left + 1, y: doorY + 1.5 };
     this.bank = { map: buildBank(), people: [], vehicles: [], shots: [], fx: [] };
     for (const g of this.bank.map.spawns.guards) {
       const p = makePerson('guard', g.x, g.y);
@@ -1030,7 +1046,7 @@ export class Game {
   leaveBank() {
     this.scene = this.city;
     this.inVent = false;
-    const e = this.city.map.spawns.bankExit[0];
+    const e = this.bankReturn;
     this.player.x = e.x;
     this.player.y = e.y;
     this.cam = { x: e.x, y: e.y };
@@ -1085,7 +1101,7 @@ export class Game {
       const i = idx(m, near.x, near.y);
       if (near.t === T.Door) {
         const place = m.places.get(i);
-        if (place === 'bank') return { text: 'The Bank', label: 'Go in', act: () => this.enterBank() };
+        if (place === 'bank') return { text: 'The Bank', label: 'Go in', act: () => this.enterBank(near.x, near.y) };
         if (place === 'exit') return { text: 'Leave the bank', label: 'Go out', act: () => this.leaveBank() };
         if (place === 'shop') return { text: 'Tools, disguises and upgrades', label: 'Shop', act: () => (this.menu = 'shop') };
         if (place === 'lot') return { text: 'Rent or buy a car', label: 'Car lot', act: () => (this.menu = 'lot') };
@@ -1207,7 +1223,7 @@ export class Game {
     this.crimeCd = Math.max(0, this.crimeCd - dt);
     this.disguiseCd = Math.max(0, this.disguiseCd - dt);
     this.invuln = Math.max(0, this.invuln - dt);
-    this.vaultT = Math.max(0, this.vaultT - dt);
+    for (const k in this.vaults) this.vaults[k] = Math.max(0, this.vaults[k] - dt);
     for (const b of this.banners) b.t -= dt;
     this.banners = this.banners.filter((b) => b.t > 0);
 

@@ -9,7 +9,7 @@ An isometric cartoon heist game at [od.trom.dev](https://od.trom.dev). Built fro
 
 ## What's in it
 
-- **City** with roads, traffic (cars and buses that can bonk you), townspeople who say "Hi", "Hello" and "Didn't see you there", and bullies who try to punch you.
+- **Big city:** 14 x 14 blocks with 4 banks, 5 shops, 3 car lots, 4 police stations, parks, a beach and a sea with little islands. Roads, traffic (cars and buses that can bonk you), townspeople who say "Hi", "Hello" and "Didn't see you there", and bullies who try to punch you.
 - **Steal cars:** walk up to a car and Use to pick the driver up, put them on the ground and drive off.
 - **Car lot:** rent a car ($100 for 3 minutes), buy a sports car ($1500, call it from your phone any time) or steal one off the lot.
 - **Shop:** screwdriver, wrench, sandwich, upgrades (fast shoes, boxing gloves, padded vest) and disguises (cap & shades, fake mustache, cowboy hat, clown wig, top hat & suit).
@@ -17,7 +17,7 @@ An isometric cartoon heist game at [od.trom.dev](https://od.trom.dev). Built fro
 - **Cops:** wanted stars go up for crimes. Cops chase on foot and in cars, get tired after chasing too long ("You too fast") and slow down. Every 10 minutes of play they get 25% tougher. Stars cool down when nobody is close, or change your disguise on the phone while no one is looking.
 - **Army:** at 4 stars military buses drop off troops: **Greniders** (throw grenades), **Heaters** (flamethrowers) and **Lazors** (laser blasters). At 5 stars, tanks.
 - **Ship:** walk down the dock, beat the captain and his sailors, then take the wheel and sail.
-- **Phone:** map with your location, outfits, your car and help.
+- **Phone:** map with your location (zoomed in, or the whole city), outfits, your car and help.
 
 Progress (money, items, upgrades, car, play time) is saved in the browser.
 

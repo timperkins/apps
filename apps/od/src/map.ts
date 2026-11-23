@@ -58,7 +58,9 @@ export const PALETTE: [string, string, string][] = [
   ['#a07850', '#80603e', '#664c30'], // 11 wood counter
 ];
 
-export const ROAD_BASES = [2, 14, 26, 38, 50];
+// 14 x 14 city blocks, 12 tiles apart (about 10 times the area of the first version).
+export const BLOCKS = 14;
+export const ROAD_BASES = Array.from({ length: BLOCKS + 1 }, (_, i) => 2 + i * 12);
 
 export function idx(m: GameMap, x: number, y: number): number {
   return y * m.w + x;
@@ -119,36 +121,83 @@ function rect(m: GameMap, x0: number, y0: number, x1: number, y1: number, t: num
     }
 }
 
-export const CITY_W = 66;
-export const CITY_H = 54;
-export const SHIP_START = { x: 60, y: 27, angle: Math.PI / 2 };
+const LAST_ROAD = 2 + BLOCKS * 12;
+const BEACH = LAST_ROAD + 2; // first sand column
+const SEA = BEACH + 3; // first water column
+export const CITY_W = SEA + 30;
+export const CITY_H = LAST_ROAD + 4;
+const DOCK_Y = ROAD_BASES[Math.floor(BLOCKS / 2)];
+export const SHIP_START = { x: SEA + 5, y: DOCK_Y + 1, angle: Math.PI / 2 };
+
+// What goes in special blocks (block column, block row). Everything else is ordinary city or park.
+const SPECIAL: Record<string, string> = {
+  '0,0': 'home',
+  '1,0': 'shop',
+  '2,0': 'lot',
+  '3,0': 'police',
+  '1,1': 'bank',
+  '7,5': 'bank',
+  '11,10': 'bank',
+  '3,11': 'bank',
+  '6,3': 'shop',
+  '10,7': 'shop',
+  '4,9': 'shop',
+  '12,2': 'shop',
+  '8,9': 'lot',
+  '12,12': 'lot',
+  '5,6': 'police',
+  '11,3': 'police',
+  '2,7': 'police',
+  '9,12': 'police',
+  '2,2': 'park',
+  '0,3': 'park',
+  '6,0': 'park',
+  '8,6': 'park',
+  '4,4': 'park',
+  '13,8': 'park',
+  '1,12': 'park',
+  '10,1': 'park',
+};
 
 export function buildCity(): GameMap {
   const m = blank('city', CITY_W, CITY_H, T.Grass);
   const r = rng(7);
-  const last = ROAD_BASES[ROAD_BASES.length - 1];
+  const last = LAST_ROAD;
+  for (const k of ['police', 'lotCars', 'lotDrop', 'lots']) m.spawns[k] = [];
 
   // Trees around the edge.
   for (let y = 0; y < m.h; y++)
-    for (let x = 0; x < 52; x++) {
-      const edge = x < 2 || y < 2 || y > last + 1;
+    for (let x = 0; x < BEACH; x++) {
+      const edge = x < 2 || y < 2 || y > last + 1 || x > last + 1;
       if (edge && r() < 0.55) rect(m, x, y, x, y, T.Tree, 1.4);
     }
 
-  // Beach and sea.
-  rect(m, 52, 0, 54, m.h - 1, T.Sand);
-  rect(m, 55, 0, m.w - 1, m.h - 1, T.Water);
+  // Beach and sea, with a few little islands to sail around.
+  rect(m, BEACH, 0, SEA - 1, m.h - 1, T.Sand);
+  rect(m, SEA, 0, m.w - 1, m.h - 1, T.Water);
+  for (const [ix, iy, rad] of [
+    [SEA + 16, 25, 4],
+    [SEA + 22, 120, 5],
+    [SEA + 12, 150, 3],
+    [SEA + 20, 60, 3],
+  ]) {
+    for (let y = iy - rad; y <= iy + rad; y++)
+      for (let x = ix - rad; x <= ix + rad; x++) {
+        const d = Math.hypot(x - ix, y - iy);
+        if (d <= rad) rect(m, x, y, x, y, d < rad - 1.5 && r() < 0.5 ? T.Tree : T.Sand, 1.4);
+      }
+  }
 
   // Blocks: sidewalk ring, then contents.
-  for (let i = 0; i < ROAD_BASES.length - 1; i++)
-    for (let j = 0; j < ROAD_BASES.length - 1; j++) {
+  for (let i = 0; i < BLOCKS; i++)
+    for (let j = 0; j < BLOCKS; j++) {
       const x0 = ROAD_BASES[i] + 2;
       const x1 = ROAD_BASES[i + 1] - 1;
       const y0 = ROAD_BASES[j] + 2;
       const y1 = ROAD_BASES[j + 1] - 1;
       rect(m, x0, y0, x1, y1, T.Sidewalk);
       rect(m, x0 + 1, y0 + 1, x1 - 1, y1 - 1, T.Grass);
-      fillBlock(m, i, j, x0 + 1, y0 + 1, x1 - 1, y1 - 1, r);
+      fillBlock(m, SPECIAL[`${i},${j}`] ?? (r() < 0.1 ? 'park' : ''), x0 + 1, y0 + 1, x1 - 1, y1 - 1, r);
     }
 
   // Roads on top.
@@ -158,8 +207,8 @@ export function buildCity(): GameMap {
   }
 
   // The dock reaches out to the ship.
-  rect(m, 52, 26, 58, 27, T.Dock);
-  m.labels.push({ x: 55, y: 25.5, z: 1.4, text: 'DOCK', color: '#7a4f2a' });
+  rect(m, BEACH, DOCK_Y, SHIP_START.x - 2, DOCK_Y + 1, T.Dock);
+  m.labels.push({ x: BEACH + 3, y: DOCK_Y - 0.5, z: 1.4, text: 'DOCK', color: '#7a4f2a' });
   m.spawns.player = [{ x: 8.5, y: 12.5 }];
   return m;
 }
@@ -169,51 +218,48 @@ function addDoor(m: GameMap, x: number, y: number, place: string) {
   m.places.set(idx(m, x, y), place);
 }
 
-function fillBlock(m: GameMap, i: number, j: number, x0: number, y0: number, x1: number, y1: number, r: () => number) {
-  const key = `${i},${j}`;
-  switch (key) {
-    case '0,0': // home
+function fillBlock(m: GameMap, kind: string, x0: number, y0: number, x1: number, y1: number, r: () => number) {
+  switch (kind) {
+    case 'home':
       rect(m, x0 + 1, y0 + 1, x0 + 4, y0 + 3, T.Building, 1.3, 7);
       addDoor(m, x0 + 2, y0 + 4, 'home');
       m.labels.push({ x: x0 + 3, y: y0 + 2, z: 2.2, text: 'HOME', color: '#9c3d3d' });
       trees(m, x0 + 5, y0, x1, y1, r, 0.25);
       return;
-    case '1,0': // shop
+    case 'shop':
       rect(m, x0, y0, x1, y1, T.Plaza);
       rect(m, x0 + 1, y0 + 1, x1 - 1, y0 + 4, T.Building, 1.6, 4);
       addDoor(m, x0 + 3, y0 + 5, 'shop');
       addDoor(m, x0 + 4, y0 + 5, 'shop');
       m.labels.push({ x: x0 + 4, y: y0 + 3, z: 2.6, text: 'SHOP', color: '#b06d00' });
       return;
-    case '2,0': // car lot
+    case 'lot':
       rect(m, x0, y0, x1, y1, T.Lot);
       rect(m, x1 - 1, y0, x1, y0 + 1, T.Building, 1.1, 3);
       addDoor(m, x1 - 1, y0 + 2, 'lot');
       m.labels.push({ x: x1 - 0.5, y: y0 + 1, z: 2, text: 'CARS', color: '#2e7d32' });
-      m.spawns.lotCars = [
+      m.spawns.lotCars.push(
         { x: x0 + 1.5, y: y0 + 1.5 },
         { x: x0 + 1.5, y: y0 + 4.5 },
         { x: x0 + 4.5, y: y0 + 1.5 },
         { x: x0 + 4.5, y: y0 + 4.5 },
-      ];
-      m.spawns.lotDrop = [{ x: x0 + 3, y: y1 - 0.5 }];
+      );
+      m.spawns.lotDrop.push({ x: x0 + 3, y: y1 - 0.5 });
       return;
-    case '3,0': // police
+    case 'police':
       rect(m, x0, y0, x1, y1, T.Plaza);
       rect(m, x0 + 1, y0, x1 - 1, y0 + 4, T.Building, 2, 6);
       m.labels.push({ x: x0 + 4, y: y0 + 2, z: 3, text: 'POLICE', color: '#1f4fa0' });
-      m.spawns.police = [{ x: x0 + 4, y: y0 + 6 }];
+      m.spawns.police.push({ x: x0 + 4, y: y0 + 6 });
       return;
-    case '1,1': // bank
+    case 'bank':
       rect(m, x0, y0, x1, y1, T.Plaza);
       rect(m, x0, y0, x1, y0 + 4, T.Building, 2.4, 5);
       addDoor(m, x0 + 3, y0 + 5, 'bank');
       addDoor(m, x0 + 4, y0 + 5, 'bank');
       m.labels.push({ x: x0 + 4, y: y0 + 2.5, z: 3.4, text: 'BANK', color: '#8a6d00' });
-      m.spawns.bankExit = [{ x: x0 + 4, y: y0 + 6.5 }];
       return;
-    case '2,2':
-    case '0,3': // parks
+    case 'park':
       trees(m, x0, y0, x1, y1, r, 0.3);
       return;
   }

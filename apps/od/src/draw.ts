@@ -806,8 +806,14 @@ export function render(ctx: Ctx, g: Game, W: number, H: number, zoom: number, ti
   const pl = g.player;
   const pd = pl.x + pl.y;
   const pdx = pl.x - pl.y;
-  for (let y = 0; y < m.h; y++)
-    for (let x = 0; x < m.w; x++) {
+  // Only look at tiles near the camera; the city is big.
+  const R = (halfW / (TW / 2) + (halfH + 4 * ZH + TH) / (TH / 2)) / 2 + 2;
+  const xs = Math.max(0, Math.floor(g.cam.x - R));
+  const xe = Math.min(m.w - 1, Math.ceil(g.cam.x + R));
+  const ys = Math.max(0, Math.floor(g.cam.y - R));
+  const ye = Math.min(m.h - 1, Math.ceil(g.cam.y + R));
+  for (let y = ys; y <= ye; y++)
+    for (let x = xs; x <= xe; x++) {
       if (!visible(x, y)) continue;
       const t = m.tiles[y * m.w + x];
       drawGround(ctx, m, x, y, t, time, ventOpen(x, y));
@@ -989,43 +995,75 @@ const MAP_COLORS: Record<number, string> = {
   [T.Door]: '#c0563c',
 };
 
-export function drawMinimap(canvas: HTMLCanvasElement, g: Game) {
-  const ctx = canvas.getContext('2d')!;
-  const m = g.city.map;
-  const W = canvas.width;
-  const H = canvas.height;
-  ctx.fillStyle = '#4a97dc';
-  ctx.fillRect(0, 0, W, H);
-  // iso diamond map so "up" matches the game
-  const span = m.w + m.h;
-  const s = Math.min(W / (span * 0.5 * 2), H / (span * 0.5));
-  const tw = s * 2;
-  const th = s;
-  const ox = W / 2 - ((m.w - m.h) * tw) / 4;
-  const oy = H / 2 - ((m.w + m.h) * th) / 4;
-  const P = (x: number, y: number) => ({ x: ox + ((x - y) * tw) / 2, y: oy + ((x + y) * th) / 2 });
-  for (let y = 0; y < m.h; y++)
-    for (let x = 0; x < m.w; x++) {
+function drawMapTiles(
+  ctx: Ctx,
+  m: GameMap,
+  P: (x: number, y: number) => { x: number; y: number },
+  tw: number,
+  th: number,
+  cx: number,
+  cy: number,
+  r: number,
+) {
+  for (let y = Math.max(0, Math.floor(cy - r)); y < Math.min(m.h, cy + r); y++)
+    for (let x = Math.max(0, Math.floor(cx - r)); x < Math.min(m.w, cx + r); x++) {
       const t = m.tiles[y * m.w + x];
+      if (t === T.Water) continue;
       const c = t === T.Building ? PALETTE[m.pal[y * m.w + x]][0] : MAP_COLORS[t] ?? '#999';
       const p = P(x, y);
       ctx.fillStyle = c;
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x + tw / 2, p.y + th / 2);
-      ctx.lineTo(p.x, p.y + th);
-      ctx.lineTo(p.x - tw / 2, p.y + th / 2);
+      ctx.lineTo(p.x + tw / 2 + 0.3, p.y + th / 2);
+      ctx.lineTo(p.x, p.y + th + 0.3);
+      ctx.lineTo(p.x - tw / 2 - 0.3, p.y + th / 2);
       ctx.fill();
     }
+}
+
+let mapCache: { map: GameMap; img: HTMLCanvasElement } | null = null;
+
+export function drawMinimap(canvas: HTMLCanvasElement, g: Game, near: boolean) {
+  const ctx = canvas.getContext('2d')!;
+  const m = g.city.map;
+  const W = canvas.width;
+  const H = canvas.height;
+  const me = g.scene === g.city ? g.vehicle ?? g.player : g.bankReturn;
+  // iso diamond map so "up" matches the game
+  const span = m.w + m.h;
+  const s = near ? 5 : Math.min(W / (span * 0.5 * 2), H / (span * 0.5));
+  const tw = s * 2;
+  const th = s;
+  const ox = near ? W / 2 - ((me.x - me.y) * tw) / 2 : W / 2 - ((m.w - m.h) * tw) / 4;
+  const oy = near ? H / 2 - ((me.x + me.y) * th) / 2 : H / 2 - ((m.w + m.h) * th) / 4;
+  const P = (x: number, y: number) => ({ x: ox + ((x - y) * tw) / 2, y: oy + ((x + y) * th) / 2 });
+  if (near) {
+    ctx.fillStyle = '#4a97dc';
+    ctx.fillRect(0, 0, W, H);
+    drawMapTiles(ctx, m, P, tw, th, me.x, me.y, 60);
+  } else {
+    if (!mapCache || mapCache.map !== m || mapCache.img.width !== W) {
+      const img = document.createElement('canvas');
+      img.width = W;
+      img.height = H;
+      const ictx = img.getContext('2d')!;
+      ictx.fillStyle = '#4a97dc';
+      ictx.fillRect(0, 0, W, H);
+      drawMapTiles(ictx, m, P, tw, th, m.w / 2, m.h / 2, span);
+      mapCache = { map: m, img };
+    }
+    ctx.drawImage(mapCache.img, 0, 0);
+  }
   const pin = (x: number, y: number, label: string, color: string) => {
     const p = P(x, y);
     ctx.fillStyle = color;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, near ? 7 : 4.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+    if (!near && label !== 'Ship') return;
     ctx.font = 'bold 11px system-ui';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;
@@ -1049,8 +1087,7 @@ export function drawMinimap(canvas: HTMLCanvasElement, g: Game) {
     if (n) pin(x + 0.5, y + 0.5, n[0], n[1]);
   }
   pin(g.ship.x, g.ship.y, 'Ship', '#00838f');
-  const pol = m.spawns.police[0];
-  pin(pol.x, pol.y - 2, 'Police', '#1e40af');
+  for (const pol of m.spawns.police) pin(pol.x, pol.y - 2, 'Police', '#1e40af');
   for (const p of g.city.people)
     if (p.hostile && p.ko === 0 && p.kind !== 'bully') {
       const q = P(p.x, p.y);
@@ -1062,7 +1099,6 @@ export function drawMinimap(canvas: HTMLCanvasElement, g: Game) {
     ctx.fillStyle = '#d81b60';
     ctx.fillRect(q.x - 3, q.y - 3, 6, 6);
   }
-  const me = g.scene === g.city ? g.vehicle ?? g.player : m.spawns.bankExit[0];
   const q = P(me.x, me.y);
   const pulse = 7 + Math.sin(performance.now() / 150) * 2;
   ctx.fillStyle = 'rgba(255,23,68,0.3)';
