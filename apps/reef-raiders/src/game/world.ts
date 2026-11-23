@@ -61,6 +61,8 @@ export interface Hook {
   knot: number;
   fightStart: number;
   fightY0: number;
+  // Reeling in by itself after a tap on Reel in.
+  auto?: boolean;
 }
 
 export interface Boat {
@@ -316,6 +318,12 @@ export class World {
     return true;
   }
 
+  // Reels the line all the way in by itself, so the Raider can cast again.
+  reelIn(id: string): void {
+    const b = this.boat(id);
+    if (b && b.hook.state === 'down') b.hook.auto = true;
+  }
+
   // A Raider's tap during a tug-of-war. Heave taps land in the gold window and pull harder.
   reelTap(id: string, heave: boolean): void {
     const b = this.boat(id);
@@ -407,7 +415,8 @@ export class World {
       if (b.hook.state === 'ready' && Math.abs(input.x) > 0.2) b.dir = input.x > 0 ? 1 : -1;
       // Holding Reel raises the hook.
       if (b.hook.state === 'down') {
-        if (input.reel) b.hook.y -= K.HOOK_REEL * boost(b.ups, 'reel') * dt;
+        if (b.hook.auto) b.hook.y -= K.HOOK_REEL * K.AUTO_REEL_MULT * boost(b.ups, 'reel') * dt;
+        else if (input.reel) b.hook.y -= K.HOOK_REEL * boost(b.ups, 'reel') * dt;
         else b.hook.y = Math.min(this.lineDepth(), b.hook.y + K.HOOK_SINK * boost(b.ups, 'line') * dt);
         if (b.hook.y <= K.SURF) b.hook.state = 'ready';
       }

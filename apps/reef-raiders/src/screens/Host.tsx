@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { IDLE, Stick, type StickState } from '../controller/stick';
+import { IDLE, type StickState } from '../controller/stick';
 import { cleanName } from '../game/looks';
 import { audioUnlocked, isMuted, setMuted, unlockAudio } from '../audio/sound';
 import * as K from '../game/constants';
@@ -58,20 +58,11 @@ export default function Host() {
   const [picking, setPicking] = useState(solo);
   const [lobbyOpen, setLobbyOpen] = useState(false);
   const [stick, setStick] = useState<StickState>(IDLE);
-  const padEl = useRef<HTMLDivElement>(null);
   const hostNow = useHostClock(localInfo);
   const me = localInfo?.you ?? null;
 
   useEffect(() => saveLook(look), [look]);
 
-  useEffect(() => {
-    if (!me || picking || !padEl.current) return;
-    const st = new Stick(padEl.current, me.role === 'raider' ? 'x' : 'xy', setStick);
-    return () => {
-      st.dispose();
-      setStick(IDLE);
-    };
-  }, [me?.role, picking]);
 
   const holdRef = useRef(false);
   useEffect(() => {
@@ -204,7 +195,7 @@ export default function Host() {
             <RaiderPad
               you={me}
               info={localInfo!}
-              padEl={padEl}
+              onStick={setStick}
               stick={stick}
               hold={hold}
               act={(a) => sessionRef.current?.local({ t: 'act', a })}
@@ -212,7 +203,7 @@ export default function Host() {
               store={store}
             />
           ) : (
-            <SwimmerPad you={me} padEl={padEl} stick={stick} act={(a) => sessionRef.current?.local({ t: 'act', a })} store={store} />
+            <SwimmerPad you={me} onStick={setStick} stick={stick} act={(a) => sessionRef.current?.local({ t: 'act', a })} store={store} />
           )}
         </div>
       )}

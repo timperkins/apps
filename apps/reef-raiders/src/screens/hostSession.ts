@@ -402,6 +402,9 @@ export class HostSession {
       case 'cast':
         w.cast(uid);
         break;
+      case 'reelin':
+        w.reelIn(uid);
+        break;
       case 'tap':
         w.reelTap(uid, false);
         break;

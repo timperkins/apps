@@ -82,6 +82,8 @@ export const ROD_DX = 47;
 export const ROD_DY = -32;
 export const HOOK_SINK = 70;
 export const HOOK_REEL = 95;
+// A tap on Reel in brings the line up this much faster than holding.
+export const AUTO_REEL_MULT = 2.5;
 export const HOOK_FOLLOW = 3;
 export const HOOK_RADIUS = 5;
 // The hook can't catch anything in the top this-many pixels of water.

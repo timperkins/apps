@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { IDLE, Stick, type StickState } from '../controller/stick';
+import { IDLE, type StickState } from '../controller/stick';
 import { cleanName } from '../game/looks';
 import { ensureUser } from '../net/firebase';
 import type { Action } from '../net/protocol';
@@ -34,7 +34,6 @@ export default function Play() {
   const [editing, setEditing] = useState(true);
   const [stick, setStick] = useState<StickState>(IDLE);
   const linkRef = useRef<ControllerLink | null>(null);
-  const padEl = useRef<HTMLDivElement>(null);
   const input = useRef({ x: 0, y: 0, hold: false });
   const wakeLock = useRef<WakeLockSentinel | null>(null);
   const lookRef = useRef(look);
@@ -59,16 +58,6 @@ export default function Play() {
     if (you && you.color !== look.color) setLook((l) => ({ ...l, color: you.color }));
   }, [you?.color]);
 
-  // The joystick: sideways only for a boat, all directions for a fish.
-  const axis = you?.role === 'raider' ? 'x' : 'xy';
-  useEffect(() => {
-    if (!playing || !padEl.current) return;
-    const s = new Stick(padEl.current, axis, setStick);
-    return () => {
-      s.dispose();
-      setStick(IDLE);
-    };
-  }, [playing, axis]);
 
   useEffect(() => {
     input.current.x = stick.x;
@@ -249,9 +238,9 @@ export default function Play() {
       )}
 
       {playing && you?.role === 'raider' && (
-        <RaiderPad you={you} info={info!} padEl={padEl} stick={stick} hold={hold} act={act} hostNow={hostNow} store={store} />
+        <RaiderPad you={you} info={info!} onStick={setStick} stick={stick} hold={hold} act={act} hostNow={hostNow} store={store} />
       )}
-      {playing && you?.role === 'swimmer' && <SwimmerPad you={you} padEl={padEl} stick={stick} act={act} store={store} />}
+      {playing && you?.role === 'swimmer' && <SwimmerPad you={you} onStick={setStick} stick={stick} act={act} store={store} />}
 
       {playing && between && (
         <button className="link change" onClick={() => setEditing(true)}>

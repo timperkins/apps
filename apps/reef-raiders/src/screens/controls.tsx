@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { StickState } from '../controller/stick';
+import { IDLE, Stick, type StickState } from '../controller/stick';
 import * as K from '../game/constants';
 import { COLORS, NAME_MAX, isColor, isKind, isRole, type FishKind, type Role } from '../game/looks';
 import type { Action, DisplayMessage, RaiderStatus, SwimmerStatus } from '../net/protocol';
@@ -248,6 +248,26 @@ export function KnotBar({ knot, mine }: { knot: number; mine: 'raider' | 'swimme
 }
 
 
+// The touch area for the stick. It creates its own Stick, so when the pad is swapped out
+// (a boat sinks, a fish is eaten or hooked) and comes back, the new pad works again.
+export function StickPad({ axis, stick, onStick, hint }: { axis: 'x' | 'xy'; stick: StickState; onStick: (s: StickState) => void; hint: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const cb = useRef(onStick);
+  cb.current = onStick;
+  useEffect(() => {
+    const st = new Stick(ref.current!, axis, (s) => cb.current(s));
+    return () => {
+      st.dispose();
+      cb.current(IDLE);
+    };
+  }, [axis]);
+  return (
+    <div ref={ref} className="pad stick-pad">
+      <StickView stick={stick} hint={hint} />
+    </div>
+  );
+}
+
 export function StickView({ stick, hint }: { stick: StickState; hint: string }) {
   return stick.active ? (
     <>
@@ -262,8 +282,8 @@ export function StickView({ stick, hint }: { stick: StickState; hint: string }) 
 export function RaiderPad({
   you,
   info,
-  padEl,
   stick,
+  onStick,
   hold,
   act,
   hostNow,
@@ -272,7 +292,7 @@ export function RaiderPad({
   store?: StoreControl;
   you: RaiderStatus;
   info: GameInfo;
-  padEl: React.RefObject<HTMLDivElement | null>;
+  onStick: (s: StickState) => void;
   stick: StickState;
   hold: (on: boolean) => (e: ReactPointerEvent) => void;
   act: (a: Action) => void;
@@ -306,9 +326,7 @@ export function RaiderPad({
       {store?.open && <StorePanel role="raider" coins={you.coins} ups={you.ups} store={store} />}
       <div className="keys-hint">{KEY_HELP.raider}</div>
       <div className="controls">
-        <div ref={padEl} className="pad stick-pad">
-          <StickView stick={stick} hint={you.hook === 'ready' ? 'Slide left or right to sail' : 'Slide to drag the line'} />
-        </div>
+        <StickPad axis="x" stick={stick} onStick={onStick} hint={you.hook === 'ready' ? 'Slide left or right to sail' : 'Slide to drag the line'} />
         <div className="buttons">
           {you.hook === 'ready' && (
             <button className="action cast" onClick={() => act('cast')}>
@@ -318,12 +336,15 @@ export function RaiderPad({
           {you.hook === 'down' && (
             <button
               className="action reel"
-              onPointerDown={hold(true)}
+              onPointerDown={(e) => {
+                act('reelin');
+                hold(true)(e);
+              }}
               onPointerUp={hold(false)}
               onPointerCancel={hold(false)}
               onPointerLeave={hold(false)}
             >
-              Hold to reel
+              Reel in
               <span className="small">Line {you.depth}% deep</span>
             </button>
           )}
@@ -355,14 +376,14 @@ export function RaiderPad({
 
 export function SwimmerPad({
   you,
-  padEl,
   stick,
+  onStick,
   act,
   store,
 }: {
   store?: StoreControl;
   you: SwimmerStatus;
-  padEl: React.RefObject<HTMLDivElement | null>;
+  onStick: (s: StickState) => void;
   stick: StickState;
   act: (a: Action) => void;
 }) {
@@ -414,9 +435,7 @@ export function SwimmerPad({
       {store?.open && <StorePanel role="swimmer" coins={you.coins} ups={you.ups} store={store} />}
       <div className="keys-hint">{KEY_HELP.swimmer}</div>
       <div className="controls">
-        <div ref={padEl} className="pad stick-pad">
-          <StickView stick={stick} hint="Touch and drag to swim. Eat smaller fish, dodge bigger ones and hooks." />
-        </div>
+        <StickPad axis="xy" stick={stick} onStick={onStick} hint="Touch and drag to swim. Eat smaller fish, dodge bigger ones and hooks." />
         <div className="buttons">
           <button className="action dash" onClick={() => act('dash')} disabled={you.dashIn > 0}>
             <Cooldown left={you.dashIn} total={K.DASH_COOLDOWN_S} />
@@ -449,7 +468,7 @@ export function SwimmerPad({
 // ---- Keyboard: arrow keys move, D casts and reels; other keys match the buttons. ----
 
 export const KEY_HELP = {
-  raider: 'Arrows sail · D cast, hold D to reel, tap D in a fight · S sell · F find me · B store, 1-4 buy',
+  raider: 'Arrows sail · D cast, D again to reel in, tap D in a fight · S sell · F find me · B store, 1-4 buy',
   swimmer: 'Arrows swim · Space dash · E egg · T taunt · F find me · when hooked: tap D, R thrash · B store, 1-4 buy',
 } as const;
 
@@ -503,6 +522,7 @@ export function useKeyboard(
       }
       if (me.role === 'raider') {
         if (k === 'd' && me.hook === 'ready') cb.current.act('cast');
+        else if (k === 'd' && me.hook === 'down') cb.current.act('reelin');
         else if (k === 'd' && me.hook === 'fight') cb.current.act(inHeaveWindow(hostNow(), me.fightStart) ? 'heave' : 'tap');
         else if (k === 's') cb.current.act('sell');
         else if (k === 'f') cb.current.act('find');

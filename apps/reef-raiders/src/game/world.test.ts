@@ -325,4 +325,20 @@ describe('casting', () => {
     }
     expect(b.hook.state).toBe('fight');
   });
+
+  it('one tap of reel in brings the hook all the way up so you can cast again', () => {
+    const w = new World(() => 0.5);
+    w.reset();
+    w.fish = [];
+    const b = w.addRaider('r', 'R', '#ff4f4f');
+    w.cast('r');
+    for (let i = 0; i < 120; i++) w.step(K.STEP, new Map(), none);
+    expect(b.hook.state).toBe('down');
+    w.reelIn('r');
+    for (let i = 0; i < 60 * 8 && b.hook.state === 'down'; i++) w.step(K.STEP, new Map(), none);
+    expect(b.hook.state).toBe('ready');
+    w.cast('r');
+    expect(b.hook.state).toBe('down');
+    expect(b.hook.auto).toBeFalsy();
+  });
 });
