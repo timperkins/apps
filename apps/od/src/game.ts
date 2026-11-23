@@ -25,6 +25,7 @@ import {
   buildCity,
   drivable,
   idx,
+  isPlatform,
   tileAt,
   walkable,
 } from './map';
@@ -82,6 +83,7 @@ export interface Person {
   hair: string;
   mult: number;
   burn: number;
+  vz: number;
 }
 
 export type VehicleKind = 'car' | 'bus' | 'cop' | 'army' | 'tank' | 'ship' | 'sports';
@@ -158,6 +160,7 @@ export interface Input {
   mag: number;
   punch: boolean;
   fire: boolean;
+  jump: boolean;
   use: boolean;
 }
 
@@ -235,6 +238,7 @@ function makePerson(kind: PersonKind, x: number, y: number, mult = 1): Person {
     hair: pick(HAIRS),
     mult,
     burn: 0,
+    vz: 0,
   };
   const set = (hp: number, speed: number) => {
     p.hp = p.maxHp = hp;
@@ -415,6 +419,7 @@ export class Game {
   lift: { t: number; driver: Person; car: Vehicle } | null = null;
   invuln = 0;
   flameT = 0;
+  ground = 0; // the height the player would land on
   regen = 0;
   copT = 0;
   armyT = 10;
@@ -643,7 +648,10 @@ export class Game {
         continue;
       }
       if (onDeck) continue;
-      if (!walkable(tileAt(m, px, py), inVent)) return false;
+      const t = tileAt(m, px, py);
+      // you can stand on crates and counters once you've jumped high enough
+      if (p.kind === 'player' && !inVent && isPlatform(t) && p.z >= m.heights[idx(m, Math.floor(px), Math.floor(py))] - 0.12) continue;
+      if (!walkable(t, inVent)) return false;
     }
     return true;
   }
@@ -1119,7 +1127,7 @@ export class Game {
     this.player.y = e.y;
     this.cam = { x: e.x, y: e.y };
     sfx('door');
-    this.banner(this.vaultT > 0 ? 'The vault is empty right now. Come back later.' : 'Find a way to the vault without the guards seeing you.', '#fff59d');
+    this.banner(this.vaultT > 0 ? 'The vault is empty right now. Come back later.' : 'Sneak past the guards, then jump across the crates. Don\'t touch the lasers!', '#fff59d');
   }
 
   leaveBank() {
@@ -1404,10 +1412,52 @@ export class Game {
       pl.walk += dt * sp * 3;
       pl.moving = true;
     } else pl.moving = false;
-    // height: on top of vents, or on the ship's deck
-    const t = tileAt(this.scene.map, pl.x, pl.y);
-    if (this.inVent) pl.z = t === T.Vent ? 1.3 : 0.5;
-    else pl.z = this.scene === this.city && inRect(this.ship, pl.x, pl.y) ? this.ship.hgt : 0;
+    // height: on top of vents, on the ship's deck, on a crate, or in the air
+    const m = this.scene.map;
+    const t = tileAt(m, pl.x, pl.y);
+    if (this.inVent) {
+      pl.z = t === T.Vent ? 1.3 : 0.5;
+      pl.vz = 0;
+      this.ground = pl.z;
+      return;
+    }
+    const deck = this.scene === this.city && inRect(this.ship, pl.x, pl.y) ? this.ship.hgt : 0;
+    let ground = 0;
+    for (const [ox, oy] of [
+      [-0.26, -0.26],
+      [0.26, -0.26],
+      [-0.26, 0.26],
+      [0.26, 0.26],
+    ]) {
+      const ct = tileAt(m, pl.x + ox, pl.y + oy);
+      if (isPlatform(ct)) ground = Math.max(ground, m.heights[idx(m, Math.floor(pl.x + ox), Math.floor(pl.y + oy))]);
+    }
+    if (ground > pl.z + 0.2) ground = 0; // can't be inside a crate
+    ground = Math.max(ground, deck);
+    if (deck > 0 && pl.z < deck) pl.z = deck; // step up onto the ship
+    this.ground = ground;
+    const onGround = pl.z <= ground + 0.01;
+    if (input.jump && onGround) {
+      pl.vz = 5.4;
+      sfx('jump');
+    }
+    pl.vz -= 15 * dt;
+    pl.z += pl.vz * dt;
+    if (pl.z <= ground) {
+      pl.z = ground;
+      pl.vz = 0;
+    }
+    // the laser floor in the vault room
+    if (t === T.Laser && pl.z < 0.15 && this.invuln <= 0) {
+      this.fx('text', pl.x, pl.y, 1.8, 'ZAP!', '#ff5252');
+      sfx('laser');
+      this.damagePlayer(8);
+      if (!this.alarm) {
+        this.alarm = true;
+        this.banner('You touched a laser! The alarm is ringing. Jump across the crates!', '#ffab91');
+        sfx('alarm');
+      }
+    }
   }
 
   drive(v: Vehicle, dt: number, input: Input) {
@@ -1475,6 +1525,7 @@ export class Game {
       if (v.gone || v.kind === 'ship' || Math.abs(v.speed) < 2.2) continue;
       for (const p of this.scene.people) {
         if (p.ko > 0 || p.gone || p.onShip || p.z > 0.8) continue;
+        if (p === this.player && p.z > 0.35) continue; // jumped over it!
         if (!inRect(v, p.x, p.y, 0.25)) continue;
         if (p === this.player) {
           if (this.vehicle) continue;

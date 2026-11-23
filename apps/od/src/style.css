@@ -184,14 +184,31 @@ button {
   position: absolute;
   right: calc(18px + env(safe-area-inset-right));
   bottom: calc(24px + env(safe-area-inset-bottom));
-  display: flex;
-  gap: 14px;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas:
+    'fire use'
+    'jump punch';
+  gap: 10px;
+  align-items: end;
+  justify-items: center;
   pointer-events: auto;
 }
+#fireBtn {
+  grid-area: fire;
+}
+#useBtn {
+  grid-area: use;
+}
+#jumpBtn {
+  grid-area: jump;
+}
+#punchBtn {
+  grid-area: punch;
+}
 .act {
-  width: 84px;
-  height: 84px;
+  width: 76px;
+  height: 76px;
   border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.5);
   background: rgba(66, 165, 245, 0.75);
@@ -202,11 +219,13 @@ button {
   padding: 4px;
 }
 .act.punch {
-  width: 100px;
-  height: 100px;
+  width: 92px;
+  height: 92px;
   background: rgba(239, 83, 80, 0.85);
   font-size: 16px;
-  margin-bottom: 30px;
+}
+.act.jump {
+  background: rgba(67, 160, 71, 0.85);
 }
 .act.fire {
   background: rgba(255, 145, 0, 0.85);
