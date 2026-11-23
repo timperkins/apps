@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>O&amp;D</title>
+    <meta name="description" content="A cartoon heist game: rob the bank through the vents, steal cars, outrun the cops and take over a ship." />
+    <meta name="theme-color" content="#1d2433" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="O&amp;D" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="apple-touch-icon" href="./icon-180.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+
+    <div id="hud" hidden>
+      <div id="stats">
+        <div id="money">$0</div>
+        <div id="hpbar"><div id="hp"></div></div>
+        <div id="stars"></div>
+        <div id="level"></div>
+      </div>
+      <div id="topRight">
+        <button id="muteBtn" class="round" aria-label="Sound">🔊</button>
+        <button id="phoneBtn" class="round" aria-label="Phone">📱</button>
+      </div>
+      <div id="banners"></div>
+      <div id="hint"></div>
+      <div id="keys">Move: WASD / arrows · Punch: Shift · Flamethrower: F · Use: E · Phone: P</div>
+      <div id="touch">
+        <div id="stick"><div id="knob"></div></div>
+        <div id="btns">
+          <button id="fireBtn" class="act fire" hidden>FIRE</button>
+          <button id="useBtn" class="act">USE</button>
+          <button id="punchBtn" class="act punch">PUNCH</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="phone" class="modal" hidden>
+      <div class="phoneBody">
+        <div class="phoneTop"><span id="phoneClock"></span><button class="close" data-close>✕</button></div>
+        <div class="tabs">
+          <button data-tab="map" class="on">Map</button>
+          <button data-tab="outfits">Outfits</button>
+          <button data-tab="car">Car</button>
+          <button data-tab="help">Help</button>
+        </div>
+        <div class="tab" data-pane="map"><canvas id="minimap" width="560" height="420"></canvas><div id="where"></div><button id="mapZoom" class="pill" style="display:block;margin:8px auto 0">Show whole city</button></div>
+        <div class="tab" data-pane="outfits" hidden></div>
+        <div class="tab" data-pane="car" hidden></div>
+        <div class="tab" data-pane="help" hidden></div>
+      </div>
+    </div>
+
+    <div id="menu" class="modal" hidden>
+      <div class="sheet">
+        <div class="sheetTop"><h2 id="menuTitle"></h2><button class="close" data-close>✕</button></div>
+        <div id="menuMoney"></div>
+        <div id="menuBody"></div>
+        <div id="menuMsg"></div>
+      </div>
+    </div>
+
+    <div id="overlay" hidden><div id="ovTitle"></div><div id="ovSub"></div></div>
+
+    <div id="start">
+      <img src="./icon.svg" alt="" width="140" height="140" />
+      <h1>O&amp;D</h1>
+      <p class="tag">Rob the bank. Steal a car. Take the ship. Don't get busted.</p>
+      <button id="playBtn" class="big">Play</button>
+      <button id="newBtn" class="link" hidden>Start over</button>
+      <ul class="how">
+        <li>Buy a <b>screwdriver</b> or <b>wrench</b> at the Shop, then sneak into the <b>Bank</b> through the vents.</li>
+        <li>Walk up to a car and <b>Use</b> to pick up the driver and take it.</li>
+        <li>Beat the <b>captain</b> on the ship at the dock to drive it.</li>
+        <li>Change into a <b>disguise</b> on your phone to shake the cops.</li>
+      </ul>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
