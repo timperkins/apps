@@ -145,8 +145,6 @@ export class World {
   boats: Boat[] = [];
   eggs: Egg[] = [];
   coins: Coin[] = [];
-  // True in the last minute: lines reach the Deep.
-  deep = false;
   npcTarget = K.NPC_TARGET;
   peteHere = false;
   peteSince = 0;
@@ -243,7 +241,6 @@ export class World {
     }
     this.eggs = [];
     this.coins = [];
-    this.deep = false;
     this.peteHere = false;
     this.peteNext = this.time + K.PETE_FIRST_S;
     this.fillNpcs(true);
@@ -404,7 +401,7 @@ export class World {
   }
 
   lineDepth(): number {
-    return this.deep ? K.LINE_DEEP : K.LINE_MIDWATER;
+    return K.LINE_DEEP;
   }
 
   private moveFish(dt: number, inputs: Map<string, FishInput>): void {

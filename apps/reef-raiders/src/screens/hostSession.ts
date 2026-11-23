@@ -206,7 +206,6 @@ export class HostSession {
 
     if (this.phase === 'playing') {
       this.timeLeft -= dt;
-      this.world.deep = this.timeLeft <= K.DEEP_LINE_AT_S;
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
         this.finish();
