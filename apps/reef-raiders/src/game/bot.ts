@@ -1,6 +1,7 @@
 import * as K from './constants';
 import { fishLen, type World } from './world';
 import type { Action } from '../net/protocol';
+import { UPGRADES, upgradeCost, type UpgradeId } from './upgrades';
 
 // Easy computer players. Each step they read the world like a player looking at the TV and
 // answer with stick input plus button presses. They are slow on purpose: a little late to
@@ -11,6 +12,7 @@ export interface BotOutput {
   y: number;
   hold: boolean;
   acts: Action[];
+  buy?: UpgradeId;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -38,8 +40,16 @@ export class Bot {
   ) {}
 
   step(world: World): BotOutput {
-    if (world.boat(this.id)) return this.raider(world);
-    return this.swimmer(world);
+    const b = world.boat(this.id);
+    const out = b ? this.raider(world) : this.swimmer(world);
+    // Now and then, spend coins on a random upgrade it can afford.
+    const owner = b ?? world.get(this.id);
+    if (owner && this.rand() < 0.004) {
+      const role = b ? 'raider' : 'swimmer';
+      const options = UPGRADES[role].filter((u) => owner.coins >= upgradeCost(owner.ups[u.id] ?? 0));
+      if (options.length) out.buy = options[Math.floor(this.rand() * options.length)].id;
+    }
+    return out;
   }
 
   private raider(w: World): BotOutput {

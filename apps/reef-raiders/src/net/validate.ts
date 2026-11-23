@@ -1,4 +1,5 @@
 import { cleanName, isColor, isKind, isRole } from '../game/looks';
+import { isUpgrade } from '../game/upgrades';
 import type { Action, ControllerMessage } from './protocol';
 
 const ACTIONS: Action[] = ['cast', 'tap', 'heave', 'pull', 'thrash', 'dash', 'egg', 'taunt', 'sell', 'find'];
@@ -16,6 +17,7 @@ export function parseControllerMessage(raw: unknown): ControllerMessage | null {
   if (!m || typeof m !== 'object') return null;
   if (m.t === 'in') return { t: 'in', x: num(m.x), y: num(m.y), hold: m.hold === true };
   if (m.t === 'act') return ACTIONS.includes(m.a as Action) ? { t: 'act', a: m.a as Action } : null;
+  if (m.t === 'buy') return isUpgrade(m.item) ? { t: 'buy', item: m.item } : null;
   if (m.t === 'join') {
     if (!isRole(m.role) || !isKind(m.kind)) return null;
     return { t: 'join', role: m.role, name: cleanName(m.name, ''), color: isColor(m.color) ? m.color : '', kind: m.kind };

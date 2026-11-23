@@ -21,3 +21,10 @@ describe('parseControllerMessage', () => {
     expect(parseControllerMessage('not json')).toBeNull();
   });
 });
+
+describe('buy messages', () => {
+  it('accepts known upgrades only', () => {
+    expect(parseControllerMessage(JSON.stringify({ t: 'buy', item: 'hull' }))).toEqual({ t: 'buy', item: 'hull' });
+    expect(parseControllerMessage(JSON.stringify({ t: 'buy', item: 'laser' }))).toBeNull();
+  });
+});

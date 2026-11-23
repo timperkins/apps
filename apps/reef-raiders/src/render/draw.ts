@@ -1,6 +1,7 @@
 import * as K from '../game/constants';
 import { symbolFor } from '../game/looks';
-import { fishLen, rodTip, type Boat, type Fish, type World, type WorldEvent } from '../game/world';
+import { fishLen, maxHealth, rodTip, type Boat, type Fish, type World, type WorldEvent } from '../game/world';
+import { UPGRADES } from '../game/upgrades';
 import { paintBackground } from './background';
 import { Grid, css, makeCanvas, mix, seeded, type Color } from './pix';
 import {
@@ -128,6 +129,15 @@ export class Scene {
       case 'sell': {
         const b = world.boat(e.boat);
         if (b) this.popups.push({ sprite: textSprite(`+${K.MEAT_PRICE}`, '#ffe27a', '#1a1030'), icon: this.coinIcon(), x: b.x, y: K.SURF - 58, at: t });
+        break;
+      }
+      case 'buy': {
+        const name = [...UPGRADES.raider, ...UPGRADES.swimmer].find((u) => u.id === e.item)?.name ?? '';
+        const b = world.boat(e.id);
+        const f = world.get(e.id);
+        const x = b ? b.x : f ? f.x : 0;
+        const y = b ? K.SURF - 58 : f ? f.y - fishLen(f) * 0.5 - 18 : 0;
+        if (b || f) this.popups.push({ sprite: textSprite(`${name} ${e.level}`, '#a8ffcf', '#1a1030'), x, y, at: t });
         break;
       }
       case 'hatch':
@@ -275,7 +285,7 @@ export class Scene {
     ctx.fillStyle = '#0b1836';
     ctx.fillRect(x, y, w, 5);
     ctx.globalAlpha = 1;
-    const frac = Math.max(0, b.health / K.BOAT_HEALTH);
+    const frac = Math.max(0, b.health / maxHealth(b));
     ctx.fillStyle = frac > 0.5 ? '#5be36a' : frac > 0.25 ? '#ffb03a' : '#ff4f4f';
     ctx.fillRect(x + 1, y + 1, Math.round((w - 2) * frac), 3);
     if (t < b.findUntil) this.findRing(ctx, b.x, K.SURF - 20, b.color, t, 50, K.SURF - 70);

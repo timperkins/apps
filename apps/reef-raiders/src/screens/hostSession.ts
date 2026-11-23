@@ -150,6 +150,7 @@ export class HostSession {
       const out = p.bot.step(this.world);
       p.input = { x: out.x, y: out.y, hold: out.hold };
       for (const a of out.acts) this.act(p, a);
+      if (out.buy) this.world.buy(p.uid, out.buy);
     }
   }
 
@@ -306,6 +307,9 @@ export class HostSession {
       case 'taunt':
         this.sound('taunt');
         break;
+      case 'buy':
+        this.sound('level');
+        break;
       case 'died': {
         const p = this.players.get(e.id);
         if (p) {
@@ -375,6 +379,10 @@ export class HostSession {
       this.syncBots();
       this.broadcast();
       this.emit(true);
+      return;
+    }
+    if (msg.t === 'buy') {
+      if (this.phase !== 'countdown' && this.world.buy(uid, msg.item)) this.sendStatus(uid);
       return;
     }
     this.act(p, msg.a);
@@ -456,6 +464,7 @@ export class HostSession {
         hook: b.hook.state,
         knot: Math.round(b.hook.knot),
         fightStart: b.hook.fightStart,
+        ups: { ...b.ups },
         depth: b.hook.state === 'ready' ? 0 : Math.round(((b.hook.y - K.SURF) / (w.lineDepth() - K.SURF)) * 100),
       };
     }
@@ -479,6 +488,7 @@ export class HostSession {
         eggIn: Math.max(0, f.eggReadyAt - t),
         tauntIn: Math.max(0, f.tauntReadyAt - t),
         diedBy: p?.diedBy ?? null,
+        ups: { ...f.ups },
       };
     }
     return null;

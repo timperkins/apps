@@ -1,4 +1,5 @@
 import * as K from './constants';
+import { boost, roleOf, upgradeCost, type Levels, type UpgradeId } from './upgrades';
 import type { FishKind } from './looks';
 
 // The whole game simulation, with no rendering or networking so it can be unit tested.
@@ -26,6 +27,7 @@ export interface Fish {
   dashUntil: number;
   dashReadyAt: number;
   ramReadyAt: number;
+  ups: Levels;
   eggReadyAt: number;
   tauntUntil: number;
   tauntReadyAt: number;
@@ -78,6 +80,7 @@ export interface Boat {
   hits: Map<string, number>;
   findUntil: number;
   tapTimes: number[];
+  ups: Levels;
 }
 
 export interface Egg {
@@ -126,6 +129,7 @@ export type WorldEvent =
   | { type: 'peteLeave' }
   | { type: 'sell'; boat: string }
   | { type: 'taunt'; id: string }
+  | { type: 'buy'; id: string; item: UpgradeId; level: number }
   | { type: 'died'; id: string; by: string | null; how: 'eaten' | 'caught' };
 
 export const NPC_SPECIES = 6;
@@ -136,6 +140,8 @@ export const fishLen = (f: Pick<Fish, 'level' | 'baby'>) => (f.baby ? 8 : K.fish
 
 // Where the mouth is: the hook bites and eating happen there.
 export const mouthOf = (f: Fish) => ({ x: f.x + f.dir * fishLen(f) * 0.45, y: f.y + fishLen(f) * 0.06 });
+
+export const maxHealth = (b: Boat) => K.BOAT_HEALTH * boost(b.ups, 'hull');
 
 export const rodTip = (b: Boat) => ({ x: b.x + b.dir * K.ROD_DX, y: K.SURF + K.ROD_DY });
 
@@ -197,6 +203,7 @@ export class World {
       hits: new Map(),
       findUntil: 0,
       tapTimes: [],
+      ups: {},
     };
     this.boats.push(boat);
     return boat;
@@ -228,14 +235,14 @@ export class World {
   reset(): void {
     this.fish = this.fish.filter((f) => f.player);
     for (const f of this.fish) {
-      Object.assign(f, { level: 1, food: 0, score: 0, coins: 0, eats: 0, best: 1, hookedBy: null, alive: true });
+      Object.assign(f, { level: 1, food: 0, score: 0, coins: 0, eats: 0, best: 1, hookedBy: null, alive: true, ups: {} });
       this.placeSpawn(f);
       f.safeUntil = this.time + K.SPAWN_SAFE_S;
       f.nextSurviveCoin = this.time + K.SURVIVE_COIN_S;
       f.eggReadyAt = this.time;
     }
     for (const b of this.boats) {
-      Object.assign(b, { health: K.BOAT_HEALTH, sunk: false, meat: 0, coins: 0, score: 0, catches: 0, vx: 0 });
+      Object.assign(b, { health: K.BOAT_HEALTH, sunk: false, meat: 0, coins: 0, score: 0, catches: 0, vx: 0, ups: {} });
       b.hits.clear();
       b.hook = { state: 'ready', x: b.x, y: K.SURF, fishId: null, knot: 0, fightStart: 0, fightY0: 0 };
     }
@@ -252,7 +259,7 @@ export class World {
     const f = this.get(id);
     if (!f?.alive || f.hookedBy || this.time < f.dashReadyAt) return;
     f.dashUntil = this.time + K.DASH_S;
-    f.dashReadyAt = this.time + K.DASH_COOLDOWN_S;
+    f.dashReadyAt = this.time + K.DASH_COOLDOWN_S / boost(f.ups, 'dash');
   }
 
   taunt(id: string): void {
@@ -286,11 +293,30 @@ export class World {
     this.events.push({ type: 'cast', boat: id, x: b.hook.x });
   }
 
+  // Spends coins on the next level of an upgrade. Returns false if it can't be bought.
+  buy(id: string, item: UpgradeId): boolean {
+    const b = this.boat(id);
+    const f = this.get(id);
+    const owner = b ?? f;
+    if (!owner || roleOf(item) !== (b ? 'raider' : 'swimmer')) return false;
+    const level = owner.ups[item] ?? 0;
+    const cost = upgradeCost(level);
+    if (owner.coins < cost) return false;
+    owner.coins -= cost;
+    if (b && item === 'hull') {
+      const before = maxHealth(b);
+      b.ups.hull = level + 1;
+      if (!b.sunk) b.health += maxHealth(b) - before;
+    } else owner.ups[item] = level + 1;
+    this.events.push({ type: 'buy', id, item, level: level + 1 });
+    return true;
+  }
+
   // A Raider's tap during a tug-of-war. Heave taps land in the gold window and pull harder.
   reelTap(id: string, heave: boolean): void {
     const b = this.boat(id);
     if (!b || b.hook.state !== 'fight' || !this.allowTap(b.tapTimes)) return;
-    b.hook.knot += heave ? K.HEAVE_TAP : K.REEL_TAP;
+    b.hook.knot += (heave ? K.HEAVE_TAP : K.REEL_TAP) * boost(b.ups, 'reel');
   }
 
   // A hooked Swimmer's swipe.
@@ -300,14 +326,14 @@ export class World {
     if (!f || !b || b.hook.state !== 'fight') return;
     if (!this.fishTaps.has(id)) this.fishTaps.set(id, []);
     if (!this.allowTap(this.fishTaps.get(id)!)) return;
-    b.hook.knot -= K.PULL_TAP * K.sizeFactor(f.level);
+    b.hook.knot -= K.PULL_TAP * K.sizeFactor(f.level) * boost(f.ups, 'strength');
   }
 
   thrash(id: string): void {
     const f = this.get(id);
     const b = f?.hookedBy ? this.boat(f.hookedBy) : undefined;
     if (!f || !b || b.hook.state !== 'fight') return;
-    b.hook.knot -= K.THRASH;
+    b.hook.knot -= K.THRASH * boost(f.ups, 'strength');
   }
 
   sell(id: string): void {
@@ -356,7 +382,7 @@ export class World {
     for (const b of this.boats) {
       if (b.sunk && this.time >= b.respawnAt) {
         b.sunk = false;
-        b.health = K.BOAT_HEALTH;
+        b.health = maxHealth(b);
         b.hits.clear();
         this.events.push({ type: 'boatBack', boat: b.id });
       }
@@ -371,14 +397,14 @@ export class World {
         continue;
       }
       const slow = b.hook.state === 'ready' ? 1 : K.BOAT_HOOK_DOWN_MULT;
-      const target = clamp(input.x, -1, 1) * K.BOAT_SPEED * slow;
+      const target = clamp(input.x, -1, 1) * K.BOAT_SPEED * boost(b.ups, 'speed') * slow;
       b.vx += (target - b.vx) * Math.min(1, K.BOAT_ACCEL * dt);
       b.x = clamp(b.x + b.vx * dt, K.BOAT_MIN_X, K.BOAT_MAX_X);
       if (b.hook.state === 'ready' && Math.abs(input.x) > 0.2) b.dir = input.x > 0 ? 1 : -1;
       // Holding Reel raises the hook.
       if (b.hook.state === 'down') {
-        if (input.reel) b.hook.y -= K.HOOK_REEL * dt;
-        else b.hook.y = Math.min(this.lineDepth(), b.hook.y + K.HOOK_SINK * dt);
+        if (input.reel) b.hook.y -= K.HOOK_REEL * boost(b.ups, 'reel') * dt;
+        else b.hook.y = Math.min(this.lineDepth(), b.hook.y + K.HOOK_SINK * boost(b.ups, 'line') * dt);
         if (b.hook.y <= K.SURF) b.hook.state = 'ready';
       }
     }
@@ -426,7 +452,7 @@ export class World {
         iy = want.y;
       }
       const dash = this.time < f.dashUntil ? K.DASH_MULT : 1;
-      const speed = K.FISH_SPEED * (f.baby ? 1.1 : K.speedForLevel(f.level)) * dash * (f.player || f.baby ? 1 : 0.6);
+      const speed = K.FISH_SPEED * (f.baby ? 1.1 : K.speedForLevel(f.level)) * dash * (f.player || f.baby ? 1 : 0.6) * boost(f.ups, 'fins');
       f.vx += (ix * speed - f.vx) * Math.min(1, K.FISH_ACCEL * dt);
       f.vy += (iy * speed - f.vy) * Math.min(1, K.FISH_ACCEL * dt);
       const half = fishLen(f) / 2;
@@ -496,7 +522,7 @@ export class World {
         for (const f of this.fish) {
           if (!f.alive || f.hookedBy || this.time < f.safeUntil) continue;
           const m = mouthOf(f);
-          if (Math.hypot(m.x - h.x, m.y - h.y) < K.HOOK_RADIUS + fishLen(f) * 0.15) {
+          if (Math.hypot(m.x - h.x, m.y - h.y) < K.HOOK_RADIUS * boost(b.ups, 'line') + fishLen(f) * 0.15) {
             h.state = 'fight';
             h.fishId = f.id;
             h.knot = K.KNOT_START;
@@ -637,7 +663,7 @@ export class World {
         if (b.sunk || Math.abs(f.x - b.x) > K.BOAT_HALF_W + fishLen(f) * 0.3) continue;
         f.ramReadyAt = this.time + K.RAM_COOLDOWN_S;
         f.vy = 70;
-        b.health -= K.ramDamage(f.level);
+        b.health -= K.ramDamage(f.level) * boost(f.ups, 'ram');
         b.hits.set(f.id, this.time);
         this.events.push({ type: 'ram', boat: b.id, by: f.id, x: f.x });
         if (b.health <= 0) this.sink(b, f);
@@ -783,6 +809,7 @@ export class World {
       dashUntil: 0,
       dashReadyAt: 0,
       ramReadyAt: 0,
+      ups: {},
       eggReadyAt: this.time,
       tauntUntil: 0,
       tauntReadyAt: 0,

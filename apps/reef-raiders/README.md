@@ -7,7 +7,9 @@ A pirate fishing party game. One screen (TV, laptop) shows the sea in pixel art;
 
 Computer fish fill the sea. A round lasts 3 minutes; lines reach all the way to the seabed. The team with the bigger total wins (the Crew's total is scaled by how many Swimmers there are per Raider, so uneven teams stay fair).
 
-Not built yet: the upgrades shop, drawing your own fish, extra customization and Frenzy mode.
+Spend coins in the **Store** (B on a keyboard, then 1-4) on upgrades for your boat (sails, hull, reel, line) or fish (fins, dash, strength, ram). Every upgrade can be bought again; each level costs more. Upgrades reset each round.
+
+Not built yet: drawing your own fish, extra customization and Frenzy mode.
 
 ## How it works
 
