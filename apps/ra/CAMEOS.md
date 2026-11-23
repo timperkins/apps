@@ -49,6 +49,7 @@ What is used now, so a new one can be different:
 | light | medium tank, one gun | green-grey | meadow |
 | hauler | tracked mining truck full of ore | safety yellow | ore field |
 | arty | tracked howitzer, barrel raised, firing | desert camo | mountain ridge |
+| comet | long tracked launcher, one huge off-white rocket lifting off a tilted rail, white smoke | pale khaki-grey, off-white, hazard stripes | white salt flat, pink dawn |
 | heavy | huge tank, two guns at the viewer | charcoal gunmetal | battlefield |
 | scorch | dome-turret tank spraying two jets of fire | dark olive | burning wheat field, sunset |
 | lumen | tank with a tall finned mast, ring coil and blazing ball firing a beam | off-white, grey, copper | snowy mountain pass, night |
