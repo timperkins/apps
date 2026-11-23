@@ -45,9 +45,11 @@ export const TAUNT_LINE = "You can't catch me, I'm the gingerbread man!";
 export const EGG_COOLDOWN_S = 25;
 export const EGG_HATCH_S = 10;
 export const BABIES_PER_EGG = 2;
-export const BABY_LIFE_S = 40;
-// Every this many seconds each living baby brings its parent one food.
-export const BABY_FEED_S = 5;
+// Babies stay until they are caught; a parent can have at most this many.
+export const MAX_BABIES = 6;
+// Babies go for coins and minnows this close to them, as long as it is this close to their parent.
+export const BABY_REACH = 60;
+export const BABY_LEASH = 90;
 
 // ---- Computer fish ----
 export const NPC_TARGET = 26;

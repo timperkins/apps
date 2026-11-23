@@ -61,15 +61,41 @@ describe('swimmers', () => {
     expect(clown.tauntUntil).toBeGreaterThan(w.time);
   });
 
-  it('eggs hatch into babies that feed their parent', () => {
+  it('eggs hatch into babies that stay, and what they gather goes to the parent', () => {
     const w = quietWorld();
     const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
     f.safeUntil = Infinity;
     w.layEgg('a');
     expect(w.eggs.length).toBe(1);
-    for (let t = 0; t < K.EGG_HATCH_S + K.BABY_FEED_S + 0.5; t += K.STEP) w.step(K.STEP, none, none);
+    for (let t = 0; t < K.EGG_HATCH_S + 0.5; t += K.STEP) w.step(K.STEP, none, none);
+    const babies = w.fish.filter((x) => x.baby);
+    expect(babies.length).toBe(K.BABIES_PER_EGG);
+    // A coin right at a baby's mouth goes to the parent.
+    const coinsBefore = f.coins;
+    const m = mouthOf(babies[0]);
+    w.coins.push({ id: 'c', x: m.x, y: m.y, restUntil: Infinity, phase: 0 } as (typeof w.coins)[number]);
+    w.step(K.STEP, none, none);
+    expect(f.coins).toBe(coinsBefore + 1);
+    // Babies don't age out, and a big fish can't eat them.
+    const shark = w.addSwimmer('s', 'S', '#45e3ff', 'fish');
+    shark.level = 10;
+    for (let t = 0; t < 90; t += K.STEP) {
+      shark.x = babies[0].x;
+      shark.y = babies[0].y;
+      w.step(K.STEP, none, none);
+    }
     expect(w.fish.filter((x) => x.baby).length).toBe(K.BABIES_PER_EGG);
-    expect(f.food + f.level).toBeGreaterThan(1);
+  });
+
+  it('a parent has at most MAX_BABIES', () => {
+    const w = quietWorld();
+    w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    for (let i = 0; i < 6; i++) {
+      w.get('a')!.eggReadyAt = 0;
+      w.layEgg('a');
+      for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, none, none);
+    }
+    expect(w.fish.filter((x) => x.baby).length).toBe(K.MAX_BABIES);
   });
 });
 

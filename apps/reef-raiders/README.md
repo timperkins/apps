@@ -3,7 +3,7 @@
 A pirate fishing party game. One screen (TV, laptop) shows the sea in pixel art; up to 12 players join with their phones, on two teams:
 
 - **The Crew** (up to 4): each Raider has their own boat in their own color. Slide to sail along the surface, **Cast**, hold to reel the line in, and when something bites, tap to win the tug-of-war. Tapping just as the gold ring closes is a **Heave** and pulls much harder. A catch pays coins, or sometimes meat, which Gristle Pete buys when his boat comes by ("Hot diggity dog, do you have any meat?").
-- **The School** (up to 8): each Swimmer is a fish in their own color. Drag to swim, eat smaller fish to grow, dodge bigger ones and hooks, and **Dash**. When hooked, tap fast to pull free, and **Thrash** once per fight. Ramming a boat damages it; a sunk boat is fixed after 8 seconds. Swimmers can lay eggs that hatch into babies that follow them, and clownfish can **Taunt** ("You can't catch me, I'm the gingerbread man").
+- **The School** (up to 8): each Swimmer is a fish in their own color. Drag to swim, eat smaller fish to grow, dodge bigger ones and hooks, and **Dash**. When hooked, tap fast to pull free, and **Thrash** once per fight. Ramming a boat damages it; a sunk boat is fixed after 8 seconds. Swimmers can lay eggs that hatch into babies (up to 6) that follow them, grab nearby coins and minnows for their parent, and stay until a boat catches them; clownfish can **Taunt** ("You can't catch me, I'm the gingerbread man").
 
 Computer fish fill the sea. A round lasts 3 minutes; lines reach all the way to the seabed. The team with the bigger total wins (the Crew's total is scaled by how many Swimmers there are per Raider, so uneven teams stay fair).
 

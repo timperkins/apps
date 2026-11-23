@@ -462,11 +462,32 @@ export class World {
     }
   }
 
+  // A coin or minnow close to a baby and not too far from its parent.
+  private nearestSnack(f: Fish, parent: Fish | undefined): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestD = K.BABY_REACH;
+    const near = (x: number, y: number) => !parent?.alive || Math.hypot(x - parent.x, y - parent.y) < K.BABY_LEASH;
+    for (const c of this.coins) {
+      const d = Math.hypot(c.x - f.x, c.y - f.y);
+      if (d < bestD && near(c.x, c.y)) [best, bestD] = [c, d];
+    }
+    for (const v of this.fish) {
+      if (v.player || v.baby || v.level > 0 || !v.alive || v.hookedBy) continue;
+      const d = Math.hypot(v.x - f.x, v.y - f.y);
+      if (d < bestD && near(v.x, v.y)) [best, bestD] = [v, d];
+    }
+    return best;
+  }
+
   // Computer fish wander, flee big player fish, and sometimes go for a hook. Babies follow their parent.
   private npcSteer(f: Fish): { x: number; y: number } {
     if (f.baby) {
       const parent = f.owner ? this.get(f.owner) : undefined;
-      if (parent?.alive) {
+      const snack = this.nearestSnack(f, parent);
+      if (snack) {
+        f.tx = snack.x;
+        f.ty = snack.y;
+      } else if (parent?.alive) {
         const i = Number(f.id.split('-').pop()) % 3;
         f.tx = parent.x - parent.dir * (fishLen(parent) * 0.6 + 6 + i * 6);
         f.ty = parent.y + (i - 1) * 7;
@@ -609,21 +630,30 @@ export class World {
 
   private eating(): void {
     for (const a of this.fish) {
-      if (!a.player || !a.alive || a.hookedBy) continue;
+      if (!(a.player || a.baby) || !a.alive || a.hookedBy) continue;
+      // A baby gathers for its parent: what it eats and picks up goes to the parent.
+      const parent = a.baby ? (a.owner ? this.get(a.owner) : undefined) : a;
+      if (!parent) continue;
       const la = fishLen(a);
       const m = mouthOf(a);
       for (const v of this.fish) {
         if (v === a || !v.alive || v.hookedBy || this.time < v.safeUntil) continue;
-        if (v.owner === a.id) continue;
+        // Babies are safe from being eaten; only a hook can take them.
+        if (v.baby || v.owner === parent.id) continue;
         const lv = fishLen(v);
-        if (la < lv * K.EAT_RATIO) continue;
-        if (Math.hypot(m.x - v.x, m.y - v.y) > la * 0.25 + lv * 0.3) continue;
-        const food = v.baby ? 1 : v.player ? 2 + v.level * 2 : Math.max(1, v.level);
-        a.eats += 1;
-        a.score += v.player ? K.EAT_PLAYER_SCORE * v.level : K.EAT_SCORE * Math.max(1, v.level);
-        this.events.push({ type: 'eat', by: a.id, victim: v.id, player: v.player, x: v.x, y: v.y, color: v.color });
-        this.feed(a, food);
-        this.kill(v, a.id, 'eaten');
+        // Babies are tiny, so they can only manage minnows.
+        if (a.baby ? v.player || v.level > 0 : la < lv * K.EAT_RATIO) continue;
+        if (Math.hypot(m.x - v.x, m.y - v.y) > la * 0.25 + lv * 0.3 + (a.baby ? 3 : 0)) continue;
+        const food = v.player ? 2 + v.level * 2 : Math.max(1, v.level);
+        parent.eats += 1;
+        parent.score += v.player ? K.EAT_PLAYER_SCORE * v.level : K.EAT_SCORE * Math.max(1, v.level);
+        this.events.push({ type: 'eat', by: parent.id, victim: v.id, player: v.player, x: v.x, y: v.y, color: v.color });
+        this.feed(parent, food);
+        this.kill(v, parent.id, 'eaten');
+      }
+      if (a.baby) {
+        this.pickCoins(a, parent);
+        continue;
       }
       // Other fish's eggs are a snack too.
       for (const e of this.eggs) {
@@ -635,16 +665,23 @@ export class World {
         }
       }
       this.eggs = this.eggs.filter((e) => e.hatchAt !== -1);
-      for (const c of this.coins) {
-        if (Math.hypot(m.x - c.x, m.y - c.y) < la * 0.3 + 4) {
-          c.restUntil = -1;
-          a.coins += 1;
-          a.score += K.COIN_SCORE;
-          this.events.push({ type: 'coin', by: a.id, x: c.x, y: c.y });
-        }
-      }
-      this.coins = this.coins.filter((c) => c.restUntil !== -1);
+      this.pickCoins(a, a);
     }
+  }
+
+  // `picker` touches the coin; `owner` gets it.
+  private pickCoins(picker: Fish, owner: Fish): void {
+    const m = mouthOf(picker);
+    const r = fishLen(picker) * 0.3 + (picker.baby ? 6 : 4);
+    for (const c of this.coins) {
+      if (Math.hypot(m.x - c.x, m.y - c.y) < r) {
+        c.restUntil = -1;
+        owner.coins += 1;
+        owner.score += K.COIN_SCORE;
+        this.events.push({ type: 'coin', by: owner.id, x: c.x, y: c.y });
+      }
+    }
+    this.coins = this.coins.filter((c) => c.restUntil !== -1);
   }
 
   feed(f: Fish, food: number): void {
@@ -692,7 +729,8 @@ export class World {
     for (const e of this.eggs) {
       e.y = Math.min(K.SEABED - 2, e.y + 22 * dt);
       if (this.time >= e.hatchAt) {
-        for (let i = 0; i < K.BABIES_PER_EGG; i++) {
+        const have = this.fish.filter((f) => f.baby && f.owner === e.owner).length;
+        for (let i = 0; i < Math.min(K.BABIES_PER_EGG, K.MAX_BABIES - have); i++) {
           const parent = this.get(e.owner);
           const baby = this.newFish(`baby-${this.serial++}`, false, 'npc', 0, '', e.color, 1);
           Object.assign(baby, {
@@ -700,8 +738,6 @@ export class World {
             owner: e.owner,
             x: e.x + i * 4,
             y: e.y - 4,
-            diesAt: this.time + K.BABY_LIFE_S,
-            nextFeed: this.time + K.BABY_FEED_S,
             kind: parent?.kind === 'clown' ? 'clown' : 'npc',
           });
           this.fish.push(baby);
@@ -710,15 +746,6 @@ export class World {
       }
     }
     this.eggs = this.eggs.filter((e) => this.time < e.hatchAt);
-    for (const f of this.fish) {
-      if (!f.baby || !f.alive) continue;
-      const parent = f.owner ? this.get(f.owner) : undefined;
-      if (parent?.alive && this.time >= f.nextFeed) {
-        f.nextFeed = this.time + K.BABY_FEED_S;
-        this.feed(parent, 1);
-      }
-    }
-    this.fish = this.fish.filter((f) => !f.baby || this.time < f.diesAt || f.hookedBy);
   }
 
   private coinsStep(dt: number): void {
