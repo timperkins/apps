@@ -1,0 +1,15 @@
+{
+  "name": "reef-raiders",
+  "type": "hosting",
+  "domain": "fish.trom.dev",
+  "hostingSite": "trom-reef-raiders",
+  "firestore": {
+    "prod": "reef-raiders",
+    "preview": "reef-raiders-preview"
+  },
+  "ttlCollections": [
+    "rooms",
+    "players",
+    "rtc"
+  ]
+}
