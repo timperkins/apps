@@ -143,6 +143,9 @@ const BUILD_GAP = 30;
 const PACK_S = 1.2;
 const PACE_SPEED = 3.5; // a soldier pacing about, in map pixels a second
 const PACE_R = 6; // and how far from where it was left
+// On a player's screen, how fast a unit closes the gap to where the host has it
+// (a little more of it every frame; about 90% in a quarter of a second)
+const NET_EASE = 9;
 // The Commando swims: in the water she is drawn this far down, only her head
 // and shoulders above it.
 const SWIM_DROP = 5.5;
@@ -261,6 +264,11 @@ interface Unit {
   home?: [number, number];
   pace?: [number, number];
   look?: number;
+  // on a player's screen: how far it still has to drift to be where the host
+  // last had it (eased out over a few frames, not jumped at each update), and
+  // which way the host has it facing
+  netErr?: [number, number];
+  netA?: number;
   face?: number; // the way it was left facing, which it shifts about
   // fighting: what it is firing on, whether it was told to (and so chases
   // it anywhere) or is chasing whoever hit it (and gives up past LEASH from
@@ -2837,6 +2845,17 @@ export class IsoGame implements GameLike {
   // A soldier with nothing to do: stands a while, then wanders a step or two
   // round the spot it was left on, or just turns to look somewhere else.
   private paceAbout(u: Unit, dt: number): void {
+    // on a player's screen the host picks where it paces (by chance, so the two
+    // would go different ways and pull it to and fro): just follow it about,
+    // turning to face the way the host has it
+    if (this.net === 'client') {
+      u.pace = undefined;
+      if (u.netA === undefined) return;
+      const diff = angDiff(u.netA, u.a);
+      const stepA = UNIT[u.kind].turn * dt;
+      u.a = Math.abs(diff) <= stepA ? u.netA : u.a + Math.sign(diff) * stepA;
+      return;
+    }
     if (!u.home) u.home = [u.x, u.y];
     if (u.pace) {
       const dx = u.pace[0] - u.x;
@@ -3701,6 +3720,17 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
+      // on a player's screen: drift a little more of the way to where the host has it
+      if (u.netErr) {
+        const k = 1 - Math.exp(-NET_EASE * dt);
+        const ex = u.netErr[0] * k;
+        const ey = u.netErr[1] * k;
+        u.x += ex;
+        u.y += ey;
+        u.netErr[0] -= ex;
+        u.netErr[1] -= ey;
+        if (Math.abs(u.netErr[0]) + Math.abs(u.netErr[1]) < 0.01) u.netErr = undefined;
+      }
       if (u.kind === 'hauler') this.haulerLooks(u, dt);
       if (u.dug || u.digK) {
         u.digK = Math.max(0, Math.min(1, (u.digK ?? 0) + (u.dug ? dt : -dt) / DIG_S));
@@ -4499,20 +4529,22 @@ export class IsoGame implements GameLike {
         u.lap += kx;
         u.lapY += ky;
       }
-      // close enough: ease towards where the host has it; far off: jump
+      // close enough: drift over the next few frames to where the host has
+      // it (see update); far off (or the host's own world): jump
       const d = Math.hypot(x - u.x, y - u.y);
-      if (d > 24) {
+      if (d > 24 || this.net !== 'client') {
         u.x = x;
         u.y = y;
-      } else {
-        u.x += (x - u.x) * 0.35;
-        u.y += (y - u.y) * 0.35;
-      }
+        u.netErr = undefined;
+      } else u.netErr = [x - u.x, y - u.y];
+      u.netA = a;
       u.hp = hp;
       u.load = load;
       const fresh = this.time - (this.predicted.get(id) ?? -1e9) < 0.5;
       if (!fresh) {
-        if (Math.abs(angDiff(a, u.a)) > 0.4) u.a = a;
+        // (a soldier standing about turns to it in paceAbout)
+        const idleFoot = isFoot(kind) && !(flags & 1) && !(flags & 16) && !tgt;
+        if (Math.abs(angDiff(a, u.a)) > 0.4 && !idleFoot) u.a = a;
         u.moving = !!(flags & 1);
         u.tx = tx;
         u.ty = ty;
