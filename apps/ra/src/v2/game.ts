@@ -12,7 +12,8 @@ import { DOOR_S, Door, clipDoorway, doorOf, drawDoor } from './doors';
 import { cameoUrl, tabIconUrl } from './cameo';
 import { BURST_CENTER, BURST_FRAME, burstFrames, type BurstKind } from '../cursors';
 import { MAPS, combatHome, mapDef, mapPreview, startsFor, worldOf } from './maps';
-import { clearLine, findPath } from './path';
+import { type PathOpts, clearLine, findWay } from './path';
+import { SeaNav } from './seanav';
 import { riversFor } from './rivers';
 import { planBridges } from './bridges';
 import { BRIDGE_Z, BridgeStyle, DECK_W, HUT_R, bridgeFromKey, bridgeKey, bridgeLen, deckTop, makeHut } from './bridge-art';
@@ -20,7 +21,7 @@ import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -73,7 +74,7 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   otter: { name: 'Otter hovercraft', speed: 26, turn: 2.4, r: 10, hp: 1 },
   destroyer: { name: 'Destroyer', speed: 22, turn: 1.4, r: 15, hp: 1 },
   cruiser: { name: 'Skyguard cruiser', speed: 19, turn: 1.3, r: 15, hp: 1 },
-  carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 31, hp: 1 },
+  carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 55, hp: 1 },
   sub: { name: 'Submarine', speed: 20, turn: 1.7, r: 12, hp: 1 },
 };
 const BNAME: Record<BuildingKind, string> = {
@@ -324,7 +325,9 @@ interface Unit {
   rolled?: number;
   land?: [number, number, number];
   nest?: number; // (not `pad`: isB takes anything with a pad for a building)
-  padI?: number;
+  padI?: number; // its stand on its Air command, or its spot on its carrier's deck
+  deck?: number; // a jet's carrier (instead of an Air command), by unit id
+  fireAt?: [number, number, number, number, number]; // a ship's place to fire on its target from: x, y, and where the target was, and its id
   rearm?: number;
   idleAir?: number;
   unloading?: boolean;
@@ -372,6 +375,16 @@ const isBridge = (t: Target): t is Bridge => t.kind === 'bridge';
 const structDef = (t: Building | Bridge) => (isBridge(t) ? BRIDGE_DEF[t.style] : BUILDING_DEF[t.kind]);
 // Milliseconds a frame may spend finding ways round cliffs and water.
 const ROUTE_MS = 6;
+// How far from the shore a ship keeps its middle (world units): the carrier
+// is too big to come in close, or into narrow channels.
+const SEA_CLEAR: Partial<Record<Kind, number>> = { carrier: 60 };
+// Ships cross whole oceans, so they look for their way for longer (and the
+// carrier, which keeps well out, on a coarser grid).
+const SEA_PATH: PathOpts = { step: 6, maxNodes: 40000 };
+const CARRIER_PATH: PathOpts = { step: 16, maxNodes: 60000 };
+// How near a Naval yard a carrier counts as parked there (past its edge),
+// for new jets to land on it.
+const PARK_NEAR = 110;
 // How far a unit chases whoever hit it before it gives up and goes back.
 const LEASH = 10 * CELL;
 // How close a friend has to be to come and help when one of its side is hit.
@@ -531,7 +544,7 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 17, sub: 2 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
 const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
@@ -623,6 +636,7 @@ export type Command =
   | { c: 'attack'; u: number[]; t: number }
   | { c: 'deploy'; u: number[] }
   | { c: 'board'; u: number[]; t: number } // soldiers get into transport t
+  | { c: 'land'; u: number[]; t: number } // Swift jets go and land on carrier t
   | { c: 'fix'; u: number[]; t: number } // engineers go and mend bridge or building t
   | { c: 'dock'; u: number[]; b: number } // ore haulers go and unload at refinery b
   | { c: 'unload'; u: number[] } // transports let their soldiers out
@@ -651,7 +665,7 @@ const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait', 'dock'
  * the ore now and then, messages for players and who is out of the game. */
 export interface Snapshot {
   t: number;
-  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state, passengers "id:kind:hp,..."]
+  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state, passengers "id:kind:hp,...", unloading, air, carrier id * 100 + deck spot]
   u: (number | string)[][];
   // [id, kind, side, x, y, hp, rise, flags, pad x, y, w, h, rally x, rally y, target id]
   b: (number | string)[][];
@@ -1318,16 +1332,25 @@ export class IsoGame implements GameLike {
       // ships off the Naval yard
       const yard = this.buildings.find((b) => b.f === this.me && b.kind === 'navy');
       if (yard)
-        for (const kind of COMBAT_SHIPS)
+        for (const kind of COMBAT_SHIPS) {
+          // (the carrier needs room: well clear of the yard and the rest)
+          if (kind === 'carrier') {
+            const u = this.newUnit(kind, this.me, yard.x, yard.y, rand() * Math.PI * 2);
+            const p = this.launchSpot(u, yard);
+            if (p) [u.x, u.y, u.tx, u.ty] = [p[0], p[1], p[0], p[1]];
+            else this.units.splice(this.units.indexOf(u), 1);
+            continue;
+          }
           for (let t = 0; t < 200; t++) {
             const a = rand() * Math.PI * 2;
             const d = 30 + rand() * (40 + t);
             const [x, y] = this.fold(yard.x + Math.cos(a) * d, yard.y + Math.sin(a) * d);
             const u = this.newUnit(kind, this.me, x, y, a);
-            const ok = this.okAt(u, x, y) && T.k(x, y) === K.Water && this.units.every((o) => o === u || !isNaval(o.kind) || Math.hypot(o.x - x, o.y - y) > 26);
+            const ok = this.okAt(u, x, y) && T.k(x, y) === K.Water && this.units.every((o) => o === u || !isNaval(o.kind) || Math.hypot(o.x - x, o.y - y) > Math.max(26, UNIT[o.kind].r + UNIT[kind].r));
             if (ok) break;
             this.units.splice(this.units.indexOf(u), 1);
           }
+        }
     }
     if (!mp) {
       for (const [kind, c] of army) for (let i = 0; i < c; i++) spawn(kind, foe.f, foe.sx + 60, foe.sy + 140, 220);
@@ -1724,6 +1747,19 @@ export class IsoGame implements GameLike {
     const makers = this.buildings.filter((b) => b.f === f && b.kind === t.from && b.rise >= 1 && !b.packing);
     if (!makers.length) return false;
     const kind = t.unit as Kind;
+    // a jet with a carrier parked at a Naval yard flies off to land on it
+    const ship = kind === 'jet' ? this.parkedCarrier(f) : null;
+    if (ship) {
+      const b = makers[makers.length - 1];
+      const d = doorOf('radar')!;
+      const [fx, fy] = this.fold(b.x + d.x, b.y + d.y + 4);
+      const u = this.newUnit('jet', f, fx, fy, Math.PI / 2);
+      u.fly = 0;
+      u.ammo = JET_AMMO;
+      this.toDeck(u, ship, this.freeSlots(ship)[0]);
+      this.sound(b.x, b.y, 'unit_exit');
+      return true;
+    }
     if (kind === 'jet' || kind === 'plane') {
       // a plane rolls out of the hangar and taxis to a free stand
       const fp = this.freePad(f, kind);
@@ -1744,6 +1780,17 @@ export class IsoGame implements GameLike {
         this.toRally(u, b);
         // ships sail out of the slip, to the rally point only if they can get there by water
         if (b.kind === 'navy' && !this.okAt(u, u.tx, u.ty)) [u.tx, u.ty] = this.fold(b.x, b.y + b.art.ry + 14);
+        // (the carrier is far too big for the slip: it is launched out on
+        // open water just off the yard)
+        if (b.kind === 'navy' && kind === 'carrier') {
+          const p = this.launchSpot(u, b);
+          if (p) {
+            [u.x, u.y] = p;
+            u.a = Math.atan2(p[1] - b.y, p[0] - b.x);
+            // (it stays there, unless the yard has a rally point it can get to)
+            if (!b.rally || !this.seaReach(u, u.tx, u.ty)) [u.tx, u.ty] = p;
+          }
+        }
       }
     });
     return true;
@@ -2727,7 +2774,7 @@ export class IsoGame implements GameLike {
   // the cliffs and out of the buildings (helicopters fly over it all).
   private okAt(u: Unit, x: number, y: number): boolean {
     const w = this.terrain.k(x, y) === K.Water;
-    if (isNaval(u.kind)) return w && !this.blockAt(x, y);
+    if (isNaval(u.kind)) return w && !this.blockAt(x, y) && this.offShore(u.kind, x, y);
     if (isAir(u.kind)) return !w;
     // (the Otter rides its air cushion over the water too)
     if (u.kind === 'otter' && w) return !this.blockAt(x, y);
@@ -2745,6 +2792,63 @@ export class IsoGame implements GameLike {
       return b === 0 || b === let1 || b === let2;
     };
     return free(x, y) && free(x + m, y) && free(x - m, y) && free(x, y + m) && free(x, y - m);
+  }
+
+  // Is there open water all round (x, y), as far as a ship of this kind
+  // keeps from the shore?
+  private offShore(kind: Kind, x: number, y: number): boolean {
+    const c = SEA_CLEAR[kind];
+    if (!c) return true;
+    const T = this.terrain;
+    for (const r of [c, c * 0.5])
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + (r === c ? 0 : 0.26);
+        if (T.k(x + Math.cos(a) * r, y + Math.sin(a) * r) !== K.Water) return false;
+      }
+    return true;
+  }
+
+  // The nearest place to (x, y) that ship u can be (far enough out), within
+  // reach, or null.
+  private nearestSea(u: Unit, x: number, y: number, far = 160): [number, number] | null {
+    if (this.okAt(u, x, y)) return [x, y];
+    for (let r = 4; r <= far; r += 4) {
+      const n = Math.max(8, Math.round(r / 2));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const px = x + Math.cos(a) * r;
+        const py = y + Math.sin(a) * r;
+        if (this.okAt(u, px, py)) return [px, py];
+      }
+    }
+    return null;
+  }
+
+  // Where a new carrier is launched off Naval yard b: the nearest open water
+  // it fits in, clear of the yard and of the other ships.
+  private launchSpot(u: Unit, b: Building): [number, number] | null {
+    const r = UNIT[u.kind].r;
+    const free = (x: number, y: number) =>
+      this.okAt(u, x, y) &&
+      this.buildings.every((o) => {
+        const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
+        return Math.abs(ox - x) > o.art.rx + r * 0.6 || Math.abs(oy - y) > o.art.ry + r * 0.6;
+      }) &&
+      this.units.every((o) => {
+        if (o === u || !isNaval(o.kind)) return true;
+        const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
+        return Math.hypot(ox - x, oy - y) > r + UNIT[o.kind].r * 0.8;
+      });
+    for (let d = 0; d <= 600; d += 8) {
+      const n = Math.max(8, Math.round(d / 3));
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const x = b.x + Math.cos(a) * d;
+        const y = b.y + Math.sin(a) * d;
+        if (free(x, y)) return [x, y];
+      }
+    }
+    return null;
   }
 
   // Is (x, y) inside a building that unit u isn't let into?
@@ -2775,6 +2879,8 @@ export class IsoGame implements GameLike {
     }
     // the way-finding grid's open cells have changed
     this.landCells.clear();
+    this.seaCells.clear();
+    this.carrierCells.clear();
   }
 
   // The id of the building standing at ground point (x, y), or 0.
@@ -2786,6 +2892,7 @@ export class IsoGame implements GameLike {
 
   // which grid cells of the way-finding grid are open, for boats and for the rest
   private seaCells = new Map<number, boolean>();
+  private carrierCells = new Map<number, boolean>(); // (the carrier keeps further out, on a coarser grid)
   private landCells = new Map<Kind, Map<number, boolean>>(); // (each kind of unit by its size)
   private routeMs = 0; // spent finding ways this frame
 
@@ -2798,20 +2905,112 @@ export class IsoGame implements GameLike {
   // The way for unit u to its destination round cliffs and water (see path.ts).
   private route(u: Unit): void {
     u.path = undefined;
-    if (isAir(u.kind) || !this.okAt(u, u.x, u.y)) return;
+    if (isAir(u.kind)) return;
     const boat = isNaval(u.kind);
+    // (a ship too near the shore, as one just out of the Naval yard can be,
+    // first heads out to where it can be, and finds its way from there)
+    let lead: [number, number] | null = null;
+    if (!this.okAt(u, u.x, u.y)) {
+      if (!boat || this.terrain.k(u.x, u.y) !== K.Water) return;
+      lead = this.nearestSea(u, u.x, u.y);
+      if (!lead) return;
+    }
+    const [sx, sy] = lead ?? [u.x, u.y];
+    // a ship sails the sea grid when its goal is somewhere it can get to
+    const nav = boat ? this.seaNav() : null;
+    const sea = nav?.path(SEA_CLEAR[u.kind] ?? 0, ...toScreen(sx, sy), ...toScreen(u.tx, u.ty));
+    if (sea) {
+      const pts = sea.map(([px, py]) => toWorld(px, py, 0));
+      u.path = lead ? [lead, ...pts] : pts;
+      return;
+    }
     const okFn = (x: number, y: number) => this.okAt(u, x, y);
     const t0 = performance.now();
     // (a unit let through a building finds its own way: the shared grid is for everyone else)
     const own = !!u.exit || u.job?.st === 'dock';
-    const p = findPath(okFn, u.x, u.y, u.tx, u.ty, boat ? this.seaCells : own ? new Map() : this.landFor(u.kind));
+    // (somewhere a ship can't get to: only as near as it finds close by)
+    const p = findWay(okFn, sx, sy, u.tx, u.ty, boat ? this.seaCellsOf(u) : own ? new Map() : this.landFor(u.kind), boat ? (nav ? { ...this.seaPath(u), maxNodes: 3000 } : this.seaPath(u)) : {}).path;
     this.routeMs += performance.now() - t0;
-    if (p === null) u.moving = false;
+    if (lead) u.path = [lead, ...(p?.length ? p : p ? [[u.tx, u.ty] as [number, number]] : [])];
+    else if (p === null) u.moving = false;
     else if (p.length) u.path = p;
   }
 
+  private seaCellsOf(u: Unit): Map<number, boolean> {
+    return u.kind === 'carrier' ? this.carrierCells : this.seaCells;
+  }
+  private seaPath(u: Unit): PathOpts {
+    return u.kind === 'carrier' ? CARRIER_PATH : SEA_PATH;
+  }
+
+  // The sea grid (see seanav.ts), made from the overview the first time a
+  // ship needs it.
+  private navGrid: SeaNav | null = null;
+  private seaNav(): SeaNav | null {
+    if (this.navGrid) return this.navGrid;
+    this.mapStep(1e9);
+    if (this.navGrid) return this.navGrid;
+    const wet = this.terrain.ovWet;
+    if (!wet) return null;
+    const tw = Math.round(this.w / OV);
+    const th = Math.round(this.h / OV);
+    // two by two of the overview's pixels to a cell: water if half of them are
+    const at = (i: number, j: number) => wet[j * tw + i];
+    this.navGrid = new SeaNav(tw >> 1, th >> 1, ((tw >> 1) * 2 * this.w) / tw, ((th >> 1) * 2 * this.h) / th, (i, j) => at(2 * i, 2 * j) + at(2 * i + 1, 2 * j) + at(2 * i, 2 * j + 1) + at(2 * i + 1, 2 * j + 1) >= 2);
+    return this.navGrid;
+  }
+
+  // Can ship u get to (x, y) by water (and be there, far enough from the
+  // shore)?
+  private seaReach(u: Unit, x: number, y: number): boolean {
+    [x, y] = this.nearPoint(u.x, u.y, x, y);
+    if (!this.okAt(u, x, y)) return false;
+    const [sx, sy] = this.nearestSea(u, u.x, u.y) ?? [u.x, u.y];
+    const nav = this.seaNav();
+    if (nav?.joined(SEA_CLEAR[u.kind] ?? 0, ...toScreen(sx, sy), ...toScreen(x, y))) return true;
+    // (the grid is coarse: a small boat up a narrow creek is looked for
+    // close by too)
+    if (nav && SEA_CLEAR[u.kind]) return false;
+    const way = findWay((px, py) => this.okAt(u, px, py), sx, sy, x, y, this.seaCellsOf(u), { ...this.seaPath(u), maxNodes: 4000 });
+    return way.reached;
+  }
+
+  // Where ship u could fire on t from (in reach of it, and somewhere it can
+  // get to by water), or null if nowhere.
+  private fireSpot(u: Unit, t: Target): [number, number] | null {
+    const w = WEAPON[u.kind];
+    if (!w) return null;
+    if (this.reach(u.x, u.y, t) <= w.range) return [u.x, u.y];
+    const [cx, cy] = this.nearPoint(u.x, u.y, t.x, t.y);
+    const cands: [number, number][] = [];
+    for (const k of [0.85, 0.6, 0.35])
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * Math.PI * 2;
+        const px = cx + Math.cos(a) * w.range * k;
+        const py = cy + Math.sin(a) * w.range * k;
+        const d = this.reach(px, py, t);
+        if (d <= w.range && d >= (w.min ?? 0) && this.okAt(u, px, py)) cands.push([px, py]);
+      }
+    cands.sort((a, b) => Math.hypot(a[0] - u.x, a[1] - u.y) - Math.hypot(b[0] - u.x, b[1] - u.y));
+    for (const c of cands) if (this.seaReach(u, c[0], c[1])) return c;
+    return null;
+  }
+
+  // Can u attack t: it has a weapon for it, and a ship has somewhere on the
+  // water to fire from.
+  private canAttack(u: Unit, t: Target): boolean {
+    if (!this.canHit(WEAPON[u.kind], t)) return false;
+    return !isNaval(u.kind) || !!this.fireSpot(u, t);
+  }
+
+
   private groundZ(u: Unit): number {
     if (isNaval(u.kind) || (u.kind === 'otter' && this.terrain.k(u.x, u.y) === K.Water)) return 0;
+    // a jet over its carrier sits on (or comes down to) the deck
+    if (u.deck !== undefined) {
+      const h = this.padOfJet(u);
+      if (h && Math.hypot(h[0] - u.x, h[1] - u.y) < 8) return DECK_Z;
+    }
     const dz = this.deckZ(u.x, u.y);
     if (dz >= 0) return dz;
     return this.terrain.elev(u.x, u.y);
@@ -3050,7 +3249,7 @@ export class IsoGame implements GameLike {
       this.hoverBridge = fb;
       return 'attack';
     }
-    if (this.rideAt(x, y)) return 'enter';
+    if (this.rideAt(x, y) || this.carrierAt(x, y)) return 'enter';
     // Engineers selected, over a damaged bridge (or its hut) or building of yours: mend it
     const fix = this.fixAt(x, y);
     if (fix) {
@@ -3074,14 +3273,27 @@ export class IsoGame implements GameLike {
     if (!sel.length) return null;
     // over an enemy that one of them can shoot at: attack it
     const foe = this.enemyAt(x, y);
-    if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) return 'attack';
+    if (foe && this.armed(sel).some((u) => this.canAttack(u, foe))) return 'attack';
     // over your refinery with a hauler selected: go and unload there
     if (sel.some((u) => u.kind === 'hauler') && this.myRefineryAt(x, y)) return 'enter';
     // over ore with a hauler selected: dig it (haulers only ever go after ore)
     const [gx, gy] = this.fold(...this.groundAt(x, y));
     if (sel.some((u) => u.kind === 'hauler') && this.oreNear(gx, gy, 16).some((n) => n.amt > 20)) return 'harvest';
-    // boats can't go onto land, nor anyone else into the water
-    return sel.some((u) => this.okAt(u, gx, gy)) ? 'move' : 'blocked';
+    // boats can't go onto land (nor anywhere they can't get to by water),
+    // nor anyone else into the water
+    return sel.some((u) => this.canGo(u, gx, gy)) ? 'move' : 'blocked';
+  }
+
+  // Can u be sent to (x, y)? A ship only where it can get to by water.
+  private canGo(u: Unit, x: number, y: number): boolean {
+    return isNaval(u.kind) ? this.seaReach(u, x, y) : this.okAt(u, ...this.nearPoint(u.x, u.y, x, y));
+  }
+
+  // Units to fight with: these, and the jets parked on any carriers among them.
+  private armed(sel: Unit[]): Unit[] {
+    const decks = new Set(sel.filter((u) => u.kind === 'carrier').map((u) => u.id));
+    if (!decks.size) return sel;
+    return [...sel.filter((u) => u.kind !== 'carrier'), ...this.units.filter((j) => j.deck !== undefined && decks.has(j.deck) && !j.dead && !sel.includes(j))];
   }
 
   private mine(): Unit[] {
@@ -3199,6 +3411,34 @@ export class IsoGame implements GameLike {
     this.speak(go, 'move');
   }
 
+  // A carrier of yours under screen point (x, y) that the Swift jets you
+  // have selected could land on (it has room, and they aren't all on it).
+  private carrierAt(x: number, y: number): Unit | null {
+    const jets = this.mine().filter((u) => u.kind === 'jet');
+    if (!jets.length) return null;
+    for (const c of this.units) {
+      if (c.kind !== 'carrier' || c.f !== this.me || !this.shown(c)) continue;
+      const lap = this.copyNear(c, x, y);
+      const [sx, sy] = this.screenOf(c);
+      if (Math.hypot(sx + lap[0] * this.w - x, (sy + lap[1] * this.h - y) * 1.6) > UNIT[c.kind].r + 4) continue;
+      return this.freeSlots(c).length && jets.some((j) => j.deck !== c.id) ? c : null;
+    }
+    return null;
+  }
+
+  // Send the Swift jets you have selected to land on carrier c.
+  private landOrder(c: Unit): void {
+    const go = this.mine().filter((u) => u.kind === 'jet' && u.deck !== c.id);
+    this.command({ c: 'land', u: go.map((u) => u.id), t: c.id });
+    c.aimT = this.time;
+    if (this.moveMarks) {
+      const [mx, my] = this.fold(c.x, c.y);
+      this.markers.push({ x: mx, y: my, z: DECK_Z, t: 0, enter: true });
+    }
+    ui('order_confirm');
+    this.speak(go, 'move');
+  }
+
   // You command your own side. Enemy units and buildings can be tapped to
   // look at them (their health), but not ordered about.
   click(x: number, y: number, add: boolean): void {
@@ -3229,6 +3469,9 @@ export class IsoGame implements GameLike {
     // soldiers selected and a tap on a transport of yours: they get in
     const ride = add ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
+    // jets selected and a tap on a carrier of yours: they land on it
+    const deck = add ? null : this.carrierAt(x, y);
+    if (deck) return this.landOrder(deck);
     const hitU = this.unitAt(x, y);
     const mine = this.mine();
     if (hitU && (hitU.u.f === this.me || !mine.length)) {
@@ -3321,18 +3564,22 @@ export class IsoGame implements GameLike {
     const foe = fb ?? (shortest ? null : this.enemyAt(x, y));
     const ride = shortest || fb ? null : this.rideAt(x, y);
     if (ride) return this.boardOrder(ride);
+    const deck = shortest || fb ? null : this.carrierAt(x, y);
+    if (deck) return this.landOrder(deck);
     // Engineers onto something to mend: they go and mend it (the rest stay put)
     const fix = shortest || fb ? null : this.fixAt(x, y);
     if (fix) return this.fixOrder(fix);
-    if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) {
-      this.command({ c: 'attack', u: sel.map((u) => u.id), t: foe.id });
+    // (a carrier sends its jets)
+    const fighters = foe ? this.armed(sel).filter((u) => this.canAttack(u, foe)) : [];
+    if (foe && fighters.length) {
+      this.command({ c: 'attack', u: fighters.map((u) => u.id), t: foe.id });
       foe.aimT = this.time;
       if (this.moveMarks) {
         const [mx, my] = this.fold(foe.x, foe.y);
         this.markers.push({ x: mx, y: my, z: isBridge(foe) ? BRIDGE_Z[foe.style] : isB(foe) ? 0 : foe.z, t: 0, foe: true });
       }
       ui('order_confirm', 0.8);
-      this.speak(sel.filter((u) => this.canHit(WEAPON[u.kind], foe)), 'attack');
+      this.speak(fighters, 'attack');
       return;
     }
     // onto your refinery: the haulers go and unload there (the rest go to it)
@@ -3377,6 +3624,15 @@ export class IsoGame implements GameLike {
     }
     // wx, wy are unwrapped: on the copy of the world the player is looking at
     const [wx, wy] = this.groundAt(x, y);
+    // ships only go where they can get to by water: the rest of them stay put
+    if (sel.some((u) => isNaval(u.kind))) {
+      const go = sel.filter((u) => !isNaval(u.kind) || this.seaReach(u, ...this.lapped(wx, wy, -u.lap, -u.lapY)));
+      if (!go.length) {
+        ui('ui_error');
+        return;
+      }
+      sel = go;
+    }
     const [mx, my] = this.fold(wx, wy);
     if (this.moveMarks || shortest) this.markers.push({ x: mx, y: my, z: this.terrain.elev(wx, wy), t: 0, ore: !!dig?.length });
     const cols = Math.ceil(Math.sqrt(sel.length));
@@ -3794,7 +4050,8 @@ export class IsoGame implements GameLike {
           const nx = u.x + Math.cos(ang) * sp;
           const ny = u.y + Math.sin(ang) * sp;
           // (somewhere it shouldn't be, it can drive out, but not on into a building)
-          if (isAir(u.kind) || this.okAt(u, nx, ny) || (!this.okAt(u, u.x, u.y) && (!this.inBuilding(u, nx, ny) || this.inBuilding(u, u.x, u.y)))) {
+          // (a ship too near the shore can sail out, but never onto it)
+          if (isAir(u.kind) || this.okAt(u, nx, ny) || (!this.okAt(u, u.x, u.y) && (!this.inBuilding(u, nx, ny) || this.inBuilding(u, u.x, u.y)) && (!isNaval(u.kind) || this.terrain.k(nx, ny) === K.Water))) {
             u.x = nx;
             u.y = ny;
           } else if (sp > 0) {
@@ -4143,6 +4400,23 @@ export class IsoGame implements GameLike {
         }
         break;
       }
+      case 'land': {
+        const c = unit(cmd.t);
+        if (!c || c.kind !== 'carrier') break;
+        const free = this.freeSlots(c);
+        // the nearest jets first, until the deck is full
+        const jets = cmd.u
+          .map(unit)
+          .filter((u): u is Unit => !!u && u.kind === 'jet' && u.deck !== c.id && !u.exit)
+          .sort((a, b) => Math.hypot(a.x - c.x, a.y - c.y) - Math.hypot(b.x - c.x, b.y - c.y));
+        for (const u of jets) {
+          const i = free.shift();
+          if (i === undefined) break;
+          u.taxi = u.taxiA = undefined;
+          this.toDeck(u, c, i);
+        }
+        break;
+      }
       case 'fix': {
         const t = this.bridges.find((o) => o.id === cmd.t) ?? bldg(cmd.t);
         if (!t || (!isBridge(t) && (t.rise < 1 || t.packing))) break;
@@ -4294,6 +4568,7 @@ export class IsoGame implements GameLike {
       (o.cargo ?? []).map((p) => `${p.id}:${p.kind}:${Math.round(p.hp * 1000) / 1000}`).join(','),
       o.unloading ? 1 : 0,
       o.fly === undefined ? -1 : Math.round(o.fly * 100) + (o.ammo ?? 0) * 1000,
+      o.deck === undefined ? 0 : o.deck * 100 + (o.padI ?? 0),
     ]);
     const b = this.buildings.map((o) => [
       o.id,
@@ -4416,7 +4691,7 @@ export class IsoGame implements GameLike {
       }
     const seenU = new Set<number>();
     for (const e of s.u) {
-      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job, riders, unloading, air] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number, string?, number?, number?];
+      const [id, kind, f, x, y, a, turret, hp, flags, tx, ty, tgt, load, job, riders, unloading, air, deck] = e as [number, Kind, number, number, number, number, number, number, number, number, number, number, number, number, string?, number?, number?, number?];
       seenU.add(id);
       let u = units.get(id);
       if (!u) {
@@ -4462,6 +4737,11 @@ export class IsoGame implements GameLike {
       if (air !== undefined && (isAir(kind) || isFoot(kind))) {
         u.fly = air < 0 ? undefined : (air % 1000) / 100;
         u.ammo = air < 0 ? undefined : Math.floor(air / 1000);
+      }
+      // a jet's carrier, and its spot on the deck
+      if (kind === 'jet' && deck !== undefined) {
+        u.deck = deck ? Math.floor(deck / 100) : undefined;
+        if (deck) u.padI = deck % 100;
       }
       // who is riding in it
       if (riders || u.cargo?.length) {
@@ -4799,7 +5079,7 @@ export class IsoGame implements GameLike {
   // Your units go for t: all of them that can hit it.
   private attack(sel: Unit[], t: Target): void {
     for (const u of sel) {
-      if (!this.canHit(WEAPON[u.kind], t)) continue;
+      if (!this.canAttack(u, t)) continue;
       u.target = t;
       u.board = undefined;
       u.forced = true;
@@ -4854,6 +5134,7 @@ export class IsoGame implements GameLike {
         u.target = undefined;
         return;
       }
+      if (isNaval(u.kind)) return this.sailToFire(u, t);
       if ((u.repath = (u.repath ?? 0) - dt) <= 0 || !u.moving) {
         u.repath = 0.5;
         const [ax, ay] = this.aimPoint(u.x, u.y, t);
@@ -4898,6 +5179,30 @@ export class IsoGame implements GameLike {
     u.fired = this.time;
     const z = u.z + (isAir(u.kind) ? this.alt(u) + Math.sin(u.anim * 2) * 1.2 * (u.fly ?? 1) : 0) - (u.digK ? KNEEL_DROP : 0);
     this.shoot(u, w, t, muzzles(u.kind, u.x, u.y, z, u.a, u.turret));
+  }
+
+  // A ship closing in on t: it sails for a place on the water it can fire
+  // from (found again when t moves off), or gives up if there is none.
+  private sailToFire(u: Unit, t: Target): void {
+    const [ax, ay] = this.nearPoint(u.x, u.y, t.x, t.y);
+    let f = u.fireAt;
+    if (!f || f[4] !== t.id || Math.hypot(f[2] - ax, f[3] - ay) > 24) {
+      const p = this.fireSpot(u, t);
+      if (!p) {
+        u.target = u.fireAt = undefined;
+        u.forced = u.chase = false;
+        u.moving = false;
+        u.tx = u.x;
+        u.ty = u.y;
+        return;
+      }
+      f = u.fireAt = [p[0], p[1], ax, ay, t.id];
+    }
+    if (!u.moving || u.tx !== f[0] || u.ty !== f[1]) {
+      u.tx = f[0];
+      u.ty = f[1];
+      u.moving = true;
+    }
   }
 
   // The Commando plants a charge on building or bridge t: it goes off a
@@ -4951,10 +5256,81 @@ export class IsoGame implements GameLike {
 
   // The stand a plane belongs on: its Air command and where on it.
   private padOfJet(u: Unit): [number, number] | null {
+    if (u.deck !== undefined) {
+      const c = this.carrierOf(u);
+      if (c) return this.nearPoint(u.x, u.y, ...this.slotPoint(c, u.padI ?? 0));
+      if (this.net !== 'client') u.deck = undefined;
+      return null;
+    }
     const b = this.buildings.find((o) => o.id === u.nest && !o.dead && o.f === u.f);
     const p = b?.art.fx[1 + (u.padI ?? 0)];
     if (!b || !p) return null;
     return this.nearPoint(u.x, u.y, b.x + p.x, b.y + p.y);
+  }
+
+  // The carrier jet u belongs on, if it is still afloat.
+  private carrierOf(u: Unit): Unit | undefined {
+    return u.deck === undefined ? undefined : this.units.find((c) => c.id === u.deck && c.kind === 'carrier' && !c.dead && c.f === u.f);
+  }
+
+  // Where spot i on carrier c's deck is, on the water (it turns with the ship).
+  private slotPoint(c: Unit, i: number): [number, number] {
+    const [au, av] = CARRIER_SLOTS[i] ?? [0, 0];
+    const ca = Math.cos(c.a);
+    const sa = Math.sin(c.a);
+    return [c.x + au * ca - av * sa, c.y + au * sa + av * ca];
+  }
+
+  // The spots on carrier c's deck with no jet on (or on its way to) them.
+  private freeSlots(c: Unit): number[] {
+    const used = new Set(this.units.filter((j) => j.deck === c.id && !j.dead).map((j) => j.padI));
+    const out: number[] = [];
+    for (let i = 0; i < CARRIER_JETS; i++) if (!used.has(i)) out.push(i);
+    return out;
+  }
+
+  // Send jet u to land on carrier c, on spot i (it takes off if it is down).
+  private toDeck(u: Unit, c: Unit, i: number): void {
+    u.deck = c.id;
+    u.padI = i;
+    u.nest = undefined;
+    u.target = u.board = undefined;
+    u.forced = u.chase = false;
+    u.dest = u.aim = undefined;
+    [u.tx, u.ty] = this.nearPoint(u.x, u.y, ...this.slotPoint(c, i));
+    u.moving = true;
+  }
+
+  // A carrier of side f lying idle at one of its Naval yards with room on
+  // deck: new jets land on it rather than at an Air command.
+  private parkedCarrier(f: number): Unit | null {
+    for (const c of this.units) {
+      if (c.f !== f || c.kind !== 'carrier' || c.dead || c.moving || c.target) continue;
+      const near = this.buildings.some((b) => {
+        if (b.f !== f || b.kind !== 'navy' || b.rise < 1 || b.dead) return false;
+        const [bx, by] = this.nearPoint(c.x, c.y, b.x, b.y);
+        return Math.hypot(bx - c.x, by - c.y) < Math.max(b.art.rx, b.art.ry) + PARK_NEAR;
+      });
+      if (near && this.freeSlots(c).length) return c;
+    }
+    return null;
+  }
+
+  // A carrier of side f with room on deck, nearest (x, y), for a jet that
+  // has lost its home.
+  private carrierWithRoom(f: number, x: number, y: number): Unit | null {
+    let best: Unit | null = null;
+    let bd = 1e9;
+    for (const c of this.units) {
+      if (c.f !== f || c.kind !== 'carrier' || c.dead || !this.freeSlots(c).length) continue;
+      const [cx, cy] = this.nearPoint(x, y, c.x, c.y);
+      const d = Math.hypot(cx - x, cy - y);
+      if (d < bd) {
+        bd = d;
+        best = c;
+      }
+    }
+    return best;
   }
 
   // A free stand of side f's Air commands, for a new plane of this kind (or
@@ -5272,20 +5648,36 @@ export class IsoGame implements GameLike {
     if (u.exit) return;
     let home = this.padOfJet(u);
     if (!home && this.net !== 'client') {
-      // its Air command is gone: another one's free stand, if there is one
+      // its Air command (or carrier) is gone: another one's free stand, or
+      // room on a carrier, if there is any
       const fp = this.freePad(u.f, 'jet');
-      if (fp) [u.nest, u.padI] = [fp[0].id, fp[1]];
+      const c = fp ? null : this.carrierWithRoom(u.f, u.x, u.y);
+      if (fp) [u.nest, u.padI, u.deck] = [fp[0].id, fp[1], undefined];
+      else if (c) [u.nest, u.padI, u.deck] = [undefined, this.freeSlots(c)[0], c.id];
       home = this.padOfJet(u);
     }
-    const atHome = !!home && Math.hypot(home[0] - u.x, home[1] - u.y) < 2;
+    const ship = this.carrierOf(u);
+    // on its way back to a carrier: it follows the ship as it sails
+    if (ship && home && u.moving && !u.target && Math.hypot(u.tx - home[0], u.ty - home[1]) < 40) [u.tx, u.ty] = home;
+    const atHome = !!home && Math.hypot(home[0] - u.x, home[1] - u.y) < (ship ? 6 : 2);
     const busy = u.moving || !!u.target;
+    // sitting on (or settling onto) a carrier's deck: it rides along with it
+    if (ship && home && atHome && !busy) {
+      [u.x, u.y] = home;
+      u.tx = u.x;
+      u.ty = u.y;
+      u.a = ship.a;
+    }
     // up when it has somewhere to be; down on its pad
     const up = busy || !atHome;
     u.fly = Math.max(0, Math.min(1, (u.fly ?? 0) + (up ? 1 : -1) * dt * 0.7));
     if (atHome && !busy && (u.fly ?? 0) < 0.05) {
-      // on its stand: turn to face the runway, and rearm, one missile pair at a time
-      const diff = angDiff(Math.PI / 2, u.a);
-      u.a += Math.sign(diff) * Math.min(Math.abs(diff), dt);
+      // on its stand: turn to face the runway (on a deck, the bow), and
+      // rearm, one missile pair at a time
+      if (!ship) {
+        const diff = angDiff(Math.PI / 2, u.a);
+        u.a += Math.sign(diff) * Math.min(Math.abs(diff), dt);
+      }
       if ((u.ammo ?? 0) < JET_AMMO && (u.rearm = (u.rearm ?? JET_REARM) - dt) <= 0) {
         u.ammo = (u.ammo ?? 0) + 1;
         u.rearm = JET_REARM;
@@ -5878,6 +6270,14 @@ export class IsoGame implements GameLike {
   private kill(u: Unit, drowned = false): void {
     u.dead = true;
     this.units.splice(this.units.indexOf(u), 1);
+    // a carrier going down takes the jets sitting on its deck with it
+    // (those in the air look for somewhere else to land)
+    if (u.kind === 'carrier' && this.net !== 'client')
+      for (const j of [...this.units])
+        if (j.deck === u.id) {
+          if ((j.fly ?? 0) < 0.5 && !j.moving) this.kill(j, true);
+          else j.deck = undefined;
+        }
     this.gone.push([u.id, GONE_KILL]);
     if (u.f === this.me) announce('unit_lost');
     if (this.lastTap?.u === u) this.lastTap = null;
@@ -6206,7 +6606,11 @@ export class IsoGame implements GameLike {
   private ov: HTMLCanvasElement | null = null;
   // Build the overview a little at a time; true once it is ready.
   mapStep(ms: number): boolean {
-    if (!this.ov) this.ov = this.terrain.overview((x, y, c) => this.forestTint(x, y, c), ms);
+    if (!this.ov) {
+      this.ov = this.terrain.overview((x, y, c) => this.forestTint(x, y, c), ms);
+      // and the sea grid the ships find their way on, made from it
+      if (this.ov) this.seaNav();
+    }
     return this.ov !== null;
   }
   private forestTint(sx: number, sy: number, c: RGB): RGB {

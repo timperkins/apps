@@ -7,9 +7,27 @@ export type Ok = (x: number, y: number) => boolean;
 
 // Grid step in world units. Plateaus and lakes are far bigger than this.
 export const STEP = 6;
+const DEFAULT_STEP = STEP;
 // Most grid cells one search looks at before it gives up and heads for the
 // closest place it found.
 const MAX_NODES = 5000;
+
+/** How finely to search and for how long: ships cross whole oceans, so they
+ * search a coarser grid for longer. */
+export interface PathOpts {
+  step?: number;
+  maxNodes?: number;
+}
+
+/** A way found: the points to drive to (see findPath), whether it gets all
+ * the way to the goal (or only as near as it can), and whether the search
+ * looked at everywhere it could get to (so a goal not reached is out of reach
+ * for sure, not just too far to look). */
+export interface Way {
+  path: [number, number][] | null;
+  reached: boolean;
+  exhausted: boolean;
+}
 
 const OFF = 1 << 15;
 const key = (i: number, j: number) => (i + OFF) * 65536 + (j + OFF);
@@ -90,8 +108,15 @@ const DIRS: [number, number, number][] = [
  * there is nowhere better to go than where it is. `cache` keeps which grid
  * cells are open from one search to the next (for the same kind of unit).
  */
-export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number, cache = new Map<number, boolean>()): [number, number][] | null {
-  if (clearLine(ok, sx, sy, gx, gy)) return [];
+export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number, cache = new Map<number, boolean>(), opts: PathOpts = {}): [number, number][] | null {
+  return findWay(ok, sx, sy, gx, gy, cache, opts).path;
+}
+
+/** findPath, saying too whether the goal can be reached. */
+export function findWay(ok: Ok, sx: number, sy: number, gx: number, gy: number, cache = new Map<number, boolean>(), opts: PathOpts = {}): Way {
+  const STEP = opts.step ?? DEFAULT_STEP;
+  const maxNodes = opts.maxNodes ?? MAX_NODES;
+  if (ok(gx, gy) && clearLine(ok, sx, sy, gx, gy)) return { path: [], reached: true, exhausted: false };
   const si = Math.round(sx / STEP);
   const sj = Math.round(sy / STEP);
   let gi = Math.round(gx / STEP);
@@ -143,7 +168,7 @@ export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number,
   let end = -1;
   let n = 0;
   const isOpen = (i: number, j: number) => (i === si && j === sj) || cellOk(i, j);
-  while (open.size && n < MAX_NODES) {
+  while (open.size && n < maxNodes) {
     const c = open.pop();
     if (closed.has(c)) continue;
     closed.add(c);
@@ -176,16 +201,20 @@ export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number,
       }
     }
   }
+  const exhausted = end < 0 && !open.size;
   if (end < 0) {
     end = best;
     exact = false;
   }
-  if (end === sk) return null;
+  if (end === sk) return { path: null, reached: false, exhausted };
   const cells: [number, number][] = [];
   for (let c: number | undefined = end; c !== undefined && c !== sk; c = from.get(c)) cells.push([(Math.floor(c / 65536) - OFF) * STEP, ((c % 65536) - OFF) * STEP]);
   cells.reverse();
   if (exact) cells[cells.length - 1] = [gx, gy];
-  else if (end === gk && goalOk && clearLine(ok, cells[cells.length - 1][0], cells[cells.length - 1][1], gx, gy)) cells.push([gx, gy]); // the goal is open, its cell's middle isn't
+  else if (end === gk && goalOk && clearLine(ok, cells[cells.length - 1][0], cells[cells.length - 1][1], gx, gy)) {
+    cells.push([gx, gy]); // the goal is open, its cell's middle isn't
+    exact = true;
+  }
   // pull it tight: from each corner, go straight on past every point still in sight
   const out: [number, number][] = [];
   let ax = sx;
@@ -196,5 +225,5 @@ export function findPath(ok: Ok, sx: number, sy: number, gx: number, gy: number,
     out.push(cells[i]);
     [ax, ay] = cells[i];
   }
-  return out;
+  return { path: out, reached: exact, exhausted };
 }

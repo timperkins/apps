@@ -60,13 +60,13 @@ export const TECH: Tech[] = [
   { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },
   { id: 'heli', name: 'Kestrel copter', tab: 'veh', cost: 1200, needs: ['helipad', 'lab'], unit: 'heli', from: 'helipad', blurb: 'Rocket copter.' },
   { id: 'heron', name: 'Heron transport', tab: 'veh', cost: 1200, needs: ['helipad', 'radar'], unit: 'heron', from: 'helipad', blurb: 'Twin-rotor copter that carries five soldiers over anything. Lands on open ground to let them out. Has a door gun.' },
-  { id: 'jet', name: 'Swift jet', tab: 'veh', cost: 1200, needs: ['radar'], unit: 'jet', from: 'radar', blurb: 'Jump jet with three pairs of missiles. Rolls out of the Air command hangar, and flies home to its stand there to rearm. Four planes to an Air command.' },
+  { id: 'jet', name: 'Swift jet', tab: 'veh', cost: 1200, needs: ['radar'], unit: 'jet', from: 'radar', blurb: 'Jump jet with three pairs of missiles. Rolls out of the Air command hangar, and flies home to its stand there to rearm. Four planes to an Air command, or twelve on a Carrier.' },
   { id: 'plane', name: 'Paratrooper plane', tab: 'veh', cost: 1500, needs: ['radar'], unit: 'plane', from: 'radar', blurb: 'Carries eight paratroopers. Waits on its Air command stand until they are ready, then you call them in from the top of the Defense tab. One at a time: lose it and you need a new one.' },
   { id: 'otter', name: 'Otter hovercraft', tab: 'veh', cost: 900, needs: ['navy'], unit: 'otter', from: 'navy', blurb: 'Unarmed hovercraft that carries twelve soldiers, or three vehicles, over land and water. Comes ashore to let them out.' },
   { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
   { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water until it fires torpedoes, which only hit ships. Only Destroyers can hit it submerged.' },
   { id: 'cruiser', name: 'Skyguard cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Warship with two Skyguard missile launchers that shoot down aircraft from far off. Can\'t hit anything on the ground or water.' },
-  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Launches drones at targets on land or sea from very long range.' },
+  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Carries up to 12 Swift jets, which fly off it to fight and land back on it to rearm. Select jets and tap the Carrier to land them. New jets land on a Carrier parked at the Naval yard.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Construction yard.' },
 ];
 

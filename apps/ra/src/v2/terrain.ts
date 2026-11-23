@@ -140,6 +140,9 @@ export class IsoTerrain {
   private cache = new Map<number, Uint8Array>();
   private ovImg: ImageData | null = null;
   private ovRow = 0;
+  /** Which of the overview's pixels are open water (1), made along with it:
+   * the ships find their way across the sea on it (see seanav.ts). */
+  ovWet: Uint8Array | null = null;
   private na: WrapNoise; // noise in rotated world units (along and across the screen)
   private ns: WrapNoise; // noise in screen pixels
   // bounding box of the folded map in world units, with room to spare
@@ -836,6 +839,7 @@ export class IsoTerrain {
     const tw = Math.round(this.w / OV);
     const th = Math.round(this.h / OV);
     const img = (this.ovImg ??= new ImageData(tw, th));
+    const wet = (this.ovWet ??= new Uint8Array(tw * th));
     const d = img.data;
     const { highF, jitX, jitY, roads, wThr, sandThr, wMax, hThr, w, h } = this;
     const t0 = performance.now();
@@ -850,6 +854,7 @@ export class IsoTerrain {
         const lift = highF.at(sx, tsy) > hThr && this.wat(sx, tsy) < sandThr - 0.03;
         let c: RGB;
         const wv = this.wat(sx, sy);
+        wet[j * tw + i] = wv > wThr ? 1 : 0;
         if (lift) c = HIGH[1 + Math.floor(rnd * 2)];
         else if (wv > wThr) c = mix(W_SHALLOW, W_DEEP, Math.pow(Math.min(1, ((wv - wThr) / (wMax - wThr)) * 1.6), 0.6));
         else if (wv > sandThr) c = SAND;
