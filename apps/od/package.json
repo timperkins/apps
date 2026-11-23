@@ -1,0 +1,19 @@
+{
+  "name": "od",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "O&D: an isometric cartoon heist game. Rob the bank through the vents, steal cars, outrun the cops and take over a ship.",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "^3.2.7"
+  }
+}

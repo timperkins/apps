@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "trom-od",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
