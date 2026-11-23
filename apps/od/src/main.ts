@@ -45,6 +45,7 @@ resize();
 // ---------- input ----------
 const keys = new Set<string>();
 let punchPressed = false;
+let fireHeld = false;
 let usePressed = false;
 let stick = { x: 0, y: 0, active: false, id: -1 };
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -133,6 +134,20 @@ function tapButton(el: HTMLElement, fn: () => void) {
   });
 }
 tapButton($('punchBtn'), () => (punchPressed = true));
+{
+  const fb = $('fireBtn');
+  const on = (e: Event) => {
+    e.preventDefault();
+    unlockAudio();
+    fireHeld = true;
+  };
+  const off = () => (fireHeld = false);
+  fb.addEventListener('touchstart', on);
+  fb.addEventListener('mousedown', on);
+  fb.addEventListener('touchend', off);
+  fb.addEventListener('touchcancel', off);
+  window.addEventListener('mouseup', off);
+}
 tapButton($('useBtn'), () => (usePressed = true));
 tapButton($('phoneBtn'), () => togglePhone());
 tapButton($('muteBtn'), () => {
@@ -154,7 +169,7 @@ function readInput(): Input {
     mag = Math.min(1, Math.hypot(dx, dy) * 1.2);
   }
   const w = screenDirToWorld(dx, dy);
-  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, use: usePressed };
+  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, fire: fireHeld || keys.has('f'), use: usePressed };
   punchPressed = false;
   usePressed = false;
   return inp;
@@ -274,10 +289,11 @@ function renderPhone() {
     });
   } else {
     pane.innerHTML = `<div class="help">
-      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. <b>Use</b> with E or the blue button.</p>
+      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. Got the <b>flamethrower</b>? Hold F or the orange button. <b>Use</b> with E or the blue button.</p>
       <p><b>The Bank:</b> buy a screwdriver or wrench at the Shop. Inside, guards chase you if they see you in the back rooms. Open the vent grate in the lobby, crawl through, and climb out by the vault.</p>
       <p><b>Cars:</b> walk up to a car to pick up the driver, put them down and drive away. Buses and cars can bonk you, so watch out!</p>
       <p><b>The ship:</b> walk down the dock, beat the captain, then take the wheel and sail.</p>
+      <p><b>Police</b> walk around calmly and only chase you if they see you do something bad (or you bonk one). Robbing the bank or taking the ship always makes them angry.</p>
       <p><b>Cops</b> get tired if they chase you too long. Every 10 minutes they get 25% tougher. At 4 stars the army shows up with Greniders, Heaters and Lazors. At 5 stars, tanks!</p>
       <p><b>Lose the cops</b> by staying out of sight, or change your disguise when nobody is looking.</p>
     </div>`;
@@ -298,7 +314,7 @@ function renderMenu(msg = '') {
     body.innerHTML = SHOP_ITEMS.map((it) => {
       const lvl = g.upgrades[it.id] ?? 0;
       const maxed = it.kind === 'upgrade' && lvl >= (it.max ?? 1);
-      const owned = (it.kind === 'tool' || it.kind === 'disguise') && g.owned.has(it.id);
+      const owned = (it.kind === 'tool' || it.kind === 'disguise' || it.kind === 'weapon') && g.owned.has(it.id);
       const label = maxed ? 'Maxed' : owned ? 'Owned' : `$${g.priceOf(it.id)}`;
       const extra = it.kind === 'upgrade' ? ` (level ${lvl}/${it.max})` : '';
       return `<div class="row"><div class="name"><b>${it.name}${extra}</b><small>${it.desc}</small></div><button class="pill ${maxed || owned ? 'off' : g.money >= g.priceOf(it.id) ? 'green' : ''}" data-buy="${it.id}">${label}</button></div>`;
@@ -330,7 +346,7 @@ function renderMenu(msg = '') {
 let lastMenu: Game['menu'] = null;
 let hudCache = '';
 function updateHud(g: Game) {
-  const key = [Math.floor(g.money), Math.round(g.player.hp), g.player.maxHp, g.wanted, copLevel(g.time), Math.floor(g.time), g.hint?.text, g.hint?.label, g.banners.map((b) => b.text).join('|'), !!g.overlay].join('/');
+  const key = [Math.floor(g.money), Math.round(g.player.hp), g.player.maxHp, g.wanted, copLevel(g.time), Math.floor(g.time), g.hint?.text, g.hint?.label, g.owned.has('flamer'), g.banners.map((b) => b.text).join('|'), !!g.overlay].join('/');
   if (key === hudCache) return;
   hudCache = key;
   $('money').textContent = `$${Math.floor(g.money).toLocaleString()}`;
@@ -346,6 +362,7 @@ function updateHud(g: Game) {
   use.textContent = h?.label || 'USE';
   use.classList.toggle('dim', !h?.act);
   $('punchBtn').classList.toggle('dim', !!g.vehicle);
+  $('fireBtn').hidden = !g.owned.has('flamer');
   const ov = $('overlay');
   ov.hidden = !g.overlay;
   if (g.overlay) {

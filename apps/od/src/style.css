@@ -208,6 +208,9 @@ button {
   font-size: 16px;
   margin-bottom: 30px;
 }
+.act.fire {
+  background: rgba(255, 145, 0, 0.85);
+}
 .act.dim {
   opacity: 0.35;
 }

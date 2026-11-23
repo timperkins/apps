@@ -81,6 +81,7 @@ export interface Person {
   skin: string;
   hair: string;
   mult: number;
+  burn: number;
 }
 
 export type VehicleKind = 'car' | 'bus' | 'cop' | 'army' | 'tank' | 'ship' | 'sports';
@@ -128,6 +129,7 @@ export interface Shot {
   vz: number;
   t: number;
   dmg: number;
+  mine?: boolean;
 }
 
 export interface Fx {
@@ -155,6 +157,7 @@ export interface Input {
   my: number;
   mag: number;
   punch: boolean;
+  fire: boolean;
   use: boolean;
 }
 
@@ -231,6 +234,7 @@ function makePerson(kind: PersonKind, x: number, y: number, mult = 1): Person {
     skin: pick(SKINS),
     hair: pick(HAIRS),
     mult,
+    burn: 0,
   };
   const set = (hp: number, speed: number) => {
     p.hp = p.maxHp = hp;
@@ -410,6 +414,7 @@ export class Game {
   overlay: { title: string; sub: string; t: number } | null = null;
   lift: { t: number; driver: Person; car: Vehicle } | null = null;
   invuln = 0;
+  flameT = 0;
   regen = 0;
   copT = 0;
   armyT = 10;
@@ -566,7 +571,7 @@ export class Game {
     }
   }
 
-  spawnCop(onRoad = false) {
+  spawnCop(onRoad = false, calm = false) {
     const c = this.vehicle ?? this.player;
     const police = this.city.map.spawns.police.reduce((a, b) => (dist(a, c) < dist(b, c) ? a : b));
     let pos = this.randomSidewalk(9, 15);
@@ -584,7 +589,7 @@ export class Game {
       return;
     }
     const p = makePerson('cop', pos.x, pos.y, this.mult);
-    p.hostile = true;
+    p.hostile = !calm;
     this.city.people.push(p);
   }
 
@@ -678,7 +683,18 @@ export class Game {
 
   // ---------- crime ----------
 
+  /** Is a police officer close enough to see what you just did? */
+  copSees(): boolean {
+    if (this.scene !== this.city) return false;
+    const c = this.vehicle ?? this.player;
+    for (const p of this.city.people) if (p.kind === 'cop' && p.ko === 0 && dist(p, c) < 11) return true;
+    for (const v of this.city.vehicles) if (v.kind === 'cop' && v.driver === 'cop' && dist(v, c) < 13) return true;
+    return false;
+  }
+
+  /** Police only get angry when they see a crime; big crimes (bank, ship) always count. */
   crime(n: number, why: string, big = false) {
+    if (!big && !this.copSees()) return;
     if (!big && this.crimeCd > 0) return;
     this.crimeCd = 6;
     const before = this.wanted;
@@ -732,7 +748,7 @@ export class Game {
     const level = this.upgrades[id] ?? 0;
     const price = item.kind === 'upgrade' ? item.price * (level + 1) : item.price;
     if (item.kind === 'upgrade' && level >= (item.max ?? 1)) return 'Already maxed out!';
-    if ((item.kind === 'tool' || item.kind === 'disguise') && this.owned.has(id)) return 'You already have it.';
+    if ((item.kind === 'tool' || item.kind === 'disguise' || item.kind === 'weapon') && this.owned.has(id)) return 'You already have it.';
     if (item.kind === 'heal' && this.player.hp >= this.player.maxHp) return "You're not hungry.";
     if (this.money < price) return 'Not enough money!';
     this.money -= price;
@@ -886,14 +902,69 @@ export class Game {
     }
   }
 
-  hitPerson(p: Person, dmg: number, fromX: number, fromY: number, byPlayer: boolean) {
+  fireFlamer(dt: number) {
+    if (!this.owned.has('flamer') || this.vehicle || this.inVent || this.lift) return;
+    const pl = this.player;
+    pl.punch = 0.1;
+    this.flameT -= dt;
+    while (this.flameT <= 0) {
+      this.flameT += 0.04;
+      const a = Math.atan2(pl.fy, pl.fx) + (Math.random() - 0.5) * 0.45;
+      this.scene.shots.push({
+        kind: 'flame',
+        x: pl.x + pl.fx * 0.4,
+        y: pl.y + pl.fy * 0.4,
+        z: pl.z + 0.8,
+        vx: Math.cos(a) * 6,
+        vy: Math.sin(a) * 6,
+        vz: 0.4,
+        t: 0.45,
+        dmg: 4,
+        mine: true,
+      });
+    }
+    if (Math.random() < dt * 6) sfx('flame');
+  }
+
+  /** A player's flame touching someone: cartoon "HOT!", no gore. */
+  flameHit(s: Shot) {
+    for (const p of this.scene.people) {
+      if (p === this.player || p.ko > 0 || p.gone || dist(p, s) > 0.5) continue;
+      p.hp -= s.dmg;
+      p.hit = 0.12;
+      s.t = 0;
+      if (p.burn <= 0) {
+        p.burn = 0.7;
+        this.fx('text', p.x, p.y, 1.8 + p.z, pick(['HOT!', 'YOW!', 'TOASTY!', 'OUCH!']), '#ffab40');
+        // same reactions as getting punched, without the knockback
+        const hp = p.hp;
+        this.hitPerson(p, 0, p.x, p.y, true, true);
+        p.hp = hp;
+      }
+      if (p.hp <= 0) this.knockOut(p);
+      return;
+    }
+    for (const v of this.scene.vehicles) {
+      if (v.gone || v.kind === 'ship' || v.driver === 'player') continue;
+      if (inRect(v, s.x, s.y, 0.1)) {
+        this.hitVehicle(v, s.dmg * 0.6);
+        s.t = 0;
+        if (v.driver === 'cop' || v.kind === 'tank' || v.kind === 'army') this.crime(1, 'You torched a police car!');
+        return;
+      }
+    }
+  }
+
+  hitPerson(p: Person, dmg: number, fromX: number, fromY: number, byPlayer: boolean, quiet = false) {
     p.hp -= dmg;
     p.hit = 0.25;
-    const d = Math.hypot(p.x - fromX, p.y - fromY) || 1;
-    p.kx = ((p.x - fromX) / d) * 4;
-    p.ky = ((p.y - fromY) / d) * 4;
-    this.fx('text', p.x, p.y, 1.6 + p.z, pick(['POW!', 'BAM!', 'WHAM!', 'BOP!']), '#ffeb3b');
-    sfx('punch');
+    if (!quiet) {
+      const d = Math.hypot(p.x - fromX, p.y - fromY) || 1;
+      p.kx = ((p.x - fromX) / d) * 4;
+      p.ky = ((p.y - fromY) / d) * 4;
+      this.fx('text', p.x, p.y, 1.6 + p.z, pick(['POW!', 'BAM!', 'WHAM!', 'BOP!']), '#ffeb3b');
+      sfx('punch');
+    }
     if (p.sleeping) {
       p.sleeping = false;
       this.alarm = true;
@@ -904,7 +975,7 @@ export class Game {
         case 'driver':
           p.flee = 5;
           if (Math.random() < 0.5) this.say(p, pick(['Ow!', 'Help!', 'Hey!', 'Rude!']));
-          if (this.hostilesNear(10) > 0 || Math.random() < 0.35) this.crime(1, 'Someone called the cops!');
+          this.crime(1, 'A cop saw that!');
           break;
         case 'bully':
           p.hostile = true;
@@ -1316,6 +1387,7 @@ export class Game {
       return;
     }
     if (input.punch) this.punch();
+    if (input.fire) this.fireFlamer(dt);
     if (input.mag > 0.1) {
       const sp = pl.speed * (this.inVent ? 0.6 : 1) * Math.min(1, input.mag);
       this.movePerson(pl, input.mx * sp * dt, input.my * sp * dt);
@@ -1431,6 +1503,7 @@ export class Game {
   updatePerson(p: Person, dt: number) {
     if (p.kind === 'player') return;
     p.hit = Math.max(0, p.hit - dt);
+    p.burn = Math.max(0, p.burn - dt);
     p.punch = Math.max(0, p.punch - dt);
     p.attackCd = Math.max(0, p.attackCd - dt);
     p.sayT = Math.max(0, p.sayT - dt);
@@ -1543,8 +1616,14 @@ export class Game {
       case 'cop': {
         if (!p.hostile || this.wanted === 0) {
           p.hostile = false;
+          p.chase = 0;
+          p.tired = false;
+          if (dP < 2.3 && !this.vehicle && p.sayCd <= 0) {
+            this.say(p, pick(['Evening.', 'Stay out of trouble!', 'Nice day for a walk.', 'Hello, citizen.']));
+            p.sayCd = 12;
+          }
           this.wander(p, dt, 6);
-          if (dP > 20) p.gone = true;
+          if (dP > 26) p.gone = true;
           return;
         }
         p.chase += dt;
@@ -1930,6 +2009,11 @@ export class Game {
       s.t -= dt;
       s.x += s.vx * dt;
       s.y += s.vy * dt;
+      if (s.mine) {
+        if (!walkable(tileAt(m, s.x, s.y), false) && tileAt(m, s.x, s.y) !== T.Water) s.t = 0;
+        else this.flameHit(s);
+        continue;
+      }
       if (s.kind === 'grenade') {
         s.vz -= 12 * dt;
         s.z += s.vz * dt;
@@ -2000,6 +2084,9 @@ export class Game {
     this.copT -= dt;
     if (this.copT <= 0) {
       this.copT = 2.5;
+      // a few calm police officers walk the beat when you're not in trouble
+      const patrol = people.filter((p) => p.kind === 'cop' && !p.hostile).length;
+      if (this.wanted === 0 && patrol < 4) this.spawnCop(false, true);
       if (cops < wantCops) this.spawnCop();
       if (copCars < wantCars) this.spawnCop(true);
     }

@@ -8,7 +8,7 @@ export const LOST_LINES = ["Huh? Where'd they go?", 'Lost them!', 'Who was that?
 export const CAPTAIN_LINES = ['Get off my ship!', 'Arr! Scram!', 'This ship is MINE!'];
 export const TROOP_LINES = ['Move out!', 'Target spotted!', 'Go go go!'];
 
-export type ItemKind = 'tool' | 'disguise' | 'upgrade' | 'heal';
+export type ItemKind = 'tool' | 'disguise' | 'upgrade' | 'heal' | 'weapon';
 
 export interface Item {
   id: string;
@@ -22,6 +22,7 @@ export interface Item {
 export const SHOP_ITEMS: Item[] = [
   { id: 'screwdriver', name: 'Screwdriver', price: 100, kind: 'tool', desc: 'Opens vents and locked doors.' },
   { id: 'wrench', name: 'Wrench', price: 150, kind: 'tool', desc: 'Opens vents and locked doors.' },
+  { id: 'flamer', name: 'Flamethrower', price: 800, kind: 'weapon', desc: 'Hold F (or the fire button) to spray cartoon flames.' },
   { id: 'snack', name: 'Sandwich', price: 20, kind: 'heal', desc: 'Get your health back.' },
   { id: 'shoes', name: 'Fast shoes', price: 300, kind: 'upgrade', desc: 'Run faster.', max: 2 },
   { id: 'gloves', name: 'Boxing gloves', price: 250, kind: 'upgrade', desc: 'Punch harder.', max: 2 },
