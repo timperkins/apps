@@ -15,5 +15,9 @@
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "qrcode-generator": "^2.0.4"
   }
 }

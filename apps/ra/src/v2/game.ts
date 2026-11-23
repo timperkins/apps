@@ -144,6 +144,9 @@ const BUILD_GAP = 30;
 const PACK_S = 1.2;
 const PACE_SPEED = 3.5; // a soldier pacing about, in map pixels a second
 const PACE_R = 6; // and how far from where it was left
+// On a player's screen, how fast a unit closes the gap to where the host has it
+// (a little more of it every frame; about 90% in a quarter of a second)
+const NET_EASE = 9;
 // The Commando swims: in the water she is drawn this far down, only her head
 // and shoulders above it.
 const SWIM_DROP = 5.5;
@@ -262,6 +265,11 @@ interface Unit {
   home?: [number, number];
   pace?: [number, number];
   look?: number;
+  // on a player's screen: how far it still has to drift to be where the host
+  // last had it (eased out over a few frames, not jumped at each update), and
+  // which way the host has it facing
+  netErr?: [number, number];
+  netA?: number;
   face?: number; // the way it was left facing, which it shifts about
   // fighting: what it is firing on, whether it was told to (and so chases
   // it anywhere) or is chasing whoever hit it (and gives up past LEASH from
@@ -538,6 +546,23 @@ const blockKey = (x: number, y: number) => (Math.floor(x / BLOCK_CELL) + 32768) 
 // The key of the DECK_CELL square of the map that (x, y) is in (see refreshDecks).
 const DECK_CELL = 3;
 const deckKey = (x: number, y: number) => (Math.floor(x / DECK_CELL) + 32768) * 65536 + (Math.floor(y / DECK_CELL) + 32768);
+
+// Can unit u be mended at building b? The Naval yard mends ships, and the
+// Otter, in its slip; the Service depot vehicles on its pad.
+function servedBy(u: Unit, b: Building): boolean {
+  if (b.kind !== 'depot' && b.kind !== 'navy') return false;
+  if (isFoot(u.kind) || isAir(u.kind)) return false;
+  return (isNaval(u.kind) || u.kind === 'otter') === (b.kind === 'navy');
+}
+
+// Where a unit sent to building b for repairs parks: the middle of the
+// depot's pad, or out in the Naval yard's slip (world, b's copy of the map).
+function bayOf(b: Building): [number, number] {
+  return b.kind === 'navy' ? [b.x, b.y + 5] : [b.x, b.y];
+}
+// and where the second, third... unit sent there with it parks, round it
+// (spread out in the Naval yard's slip, closer together on the depot's pad)
+const BAY_SLOTS: [number, number][] = [[0, 0], [-6, 0], [6, 0], [0, -5], [0, 5], [-6, 5], [6, 5], [-6, -5], [6, -5]];
 
 // Which click burst an order marker plays.
 function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }): BurstKind {
@@ -3019,6 +3044,17 @@ export class IsoGame implements GameLike {
   // A soldier with nothing to do: stands a while, then wanders a step or two
   // round the spot it was left on, or just turns to look somewhere else.
   private paceAbout(u: Unit, dt: number): void {
+    // on a player's screen the host picks where it paces (by chance, so the two
+    // would go different ways and pull it to and fro): just follow it about,
+    // turning to face the way the host has it
+    if (this.net === 'client') {
+      u.pace = undefined;
+      if (u.netA === undefined) return;
+      const diff = angDiff(u.netA, u.a);
+      const stepA = UNIT[u.kind].turn * dt;
+      u.a = Math.abs(diff) <= stepA ? u.netA : u.a + Math.sign(diff) * stepA;
+      return;
+    }
     if (!u.home) u.home = [u.x, u.y];
     if (u.pace) {
       const dx = u.pace[0] - u.x;
@@ -3276,6 +3312,9 @@ export class IsoGame implements GameLike {
     if (foe && this.armed(sel).some((u) => this.canAttack(u, foe))) return 'attack';
     // over your refinery with a hauler selected: go and unload there
     if (sel.some((u) => u.kind === 'hauler') && this.myRefineryAt(x, y)) return 'enter';
+    // over your Naval yard with a ship selected, or your Service depot with a
+    // vehicle: go in for repairs
+    if (this.bayAt(x, y)) return 'enter';
     // over ore with a hauler selected: dig it (haulers only ever go after ore)
     const [gx, gy] = this.fold(...this.groundAt(x, y));
     if (sel.some((u) => u.kind === 'hauler') && this.oreNear(gx, gy, 16).some((n) => n.amt > 20)) return 'harvest';
@@ -3387,6 +3426,40 @@ export class IsoGame implements GameLike {
   private myRefineryAt(x: number, y: number): Building | null {
     const b = this.buildingAt(x, y);
     return b && b.f === this.me && b.kind === 'refinery' && b.rise >= 1 && !b.packing ? b : null;
+  }
+
+  // Your Naval yard or Service depot at screen point (x, y), with the units
+  // you have selected that it can mend (none: null).
+  private bayAt(x: number, y: number): { b: Building; go: Unit[] } | null {
+    const b = this.buildingAt(x, y);
+    if (!b || b.f !== this.me || (b.kind !== 'navy' && b.kind !== 'depot') || b.rise < 1 || b.packing || b.hp <= 0) return null;
+    const go = this.mine().filter((u) => !u.deploy && servedBy(u, b));
+    return go.length ? { b, go } : null;
+  }
+
+  // Send the units you have selected that b can mend into it for repairs:
+  // the ones that need it most park nearest the middle, where it mends first.
+  private bayOrder(b: Building, go: Unit[]): void {
+    const [bx, by] = bayOf(b);
+    const moves: [number, number, number][] = [];
+    [...go]
+      .sort((p, q) => p.hp - q.hp)
+      .forEach((u, i) => {
+        const k = b.kind === 'navy' ? 1 : 0.6;
+        const [dx, dy] = BAY_SLOTS[i % BAY_SLOTS.length].map((v) => v * k);
+        // (in the unit's own copy of the map)
+        const [tx, ty] = this.nearPoint(u.x, u.y, bx + dx, by + dy);
+        moves.push([u.id, tx, ty]);
+        u.aim = undefined;
+      });
+    this.command({ c: 'move', m: moves });
+    b.aimT = this.time;
+    if (this.moveMarks) {
+      const [mx, my] = this.fold(bx, by);
+      this.markers.push({ x: mx, y: my, z: 0, t: 0, enter: true });
+    }
+    ui('order_confirm', 1.3);
+    this.speak(go, 'move');
   }
 
   // A transport of yours at (x, y) that the soldiers you have selected could
@@ -3595,6 +3668,14 @@ export class IsoGame implements GameLike {
       ui('order_confirm', 1.3);
       this.speak(haulers, 'move');
       sel = sel.filter((u) => u.kind !== 'hauler');
+      if (!sel.length) return;
+    }
+    // onto your Naval yard or Service depot: the ships (or vehicles) go in
+    // for repairs (the rest go to it)
+    const bay = shortest ? null : this.bayAt(x, y);
+    if (bay) {
+      this.bayOrder(bay.b, bay.go);
+      sel = sel.filter((u) => !bay.go.includes(u));
       if (!sel.length) return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
@@ -3895,6 +3976,17 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
+      // on a player's screen: drift a little more of the way to where the host has it
+      if (u.netErr) {
+        const k = 1 - Math.exp(-NET_EASE * dt);
+        const ex = u.netErr[0] * k;
+        const ey = u.netErr[1] * k;
+        u.x += ex;
+        u.y += ey;
+        u.netErr[0] -= ex;
+        u.netErr[1] -= ey;
+        if (Math.abs(u.netErr[0]) + Math.abs(u.netErr[1]) < 0.01) u.netErr = undefined;
+      }
       if (u.kind === 'hauler') this.haulerLooks(u, dt);
       if (u.dug || u.digK) {
         u.digK = Math.max(0, Math.min(1, (u.digK ?? 0) + (u.dug ? dt : -dt) / DIG_S));
@@ -4712,20 +4804,22 @@ export class IsoGame implements GameLike {
         u.lap += kx;
         u.lapY += ky;
       }
-      // close enough: ease towards where the host has it; far off: jump
+      // close enough: drift over the next few frames to where the host has
+      // it (see update); far off (or the host's own world): jump
       const d = Math.hypot(x - u.x, y - u.y);
-      if (d > 24) {
+      if (d > 24 || this.net !== 'client') {
         u.x = x;
         u.y = y;
-      } else {
-        u.x += (x - u.x) * 0.35;
-        u.y += (y - u.y) * 0.35;
-      }
+        u.netErr = undefined;
+      } else u.netErr = [x - u.x, y - u.y];
+      u.netA = a;
       u.hp = hp;
       u.load = load;
       const fresh = this.time - (this.predicted.get(id) ?? -1e9) < 0.5;
       if (!fresh) {
-        if (Math.abs(angDiff(a, u.a)) > 0.4) u.a = a;
+        // (a soldier standing about turns to it in paceAbout)
+        const idleFoot = isFoot(kind) && !(flags & 1) && !(flags & 16) && !tgt;
+        if (Math.abs(angDiff(a, u.a)) > 0.4 && !idleFoot) u.a = a;
         u.moving = !!(flags & 1);
         u.tx = tx;
         u.ty = ty;
@@ -5816,12 +5910,11 @@ export class IsoGame implements GameLike {
   // screen only shows the sparks).
   private serviceAt(b: Building, dt: number): void {
     const u = this.units.find((o) => {
-      if (o.f !== b.f || o.dead || o.hp >= 1 || isFoot(o.kind) || isAir(o.kind) || o.moving) return false;
-      // (the Naval yard mends ships, and the Otter, in its slip; the depot vehicles on its pad)
-      const wet = isNaval(o.kind) || o.kind === 'otter';
-      if (wet !== (b.kind === 'navy')) return false;
+      if (o.f !== b.f || o.dead || o.hp >= 1 || o.moving || !servedBy(o, b)) return false;
       const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
-      return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 11 && Math.abs(oy - b.y) < 11;
+      // (anywhere on the depot's pad: a vehicle driving in can stop short of
+      // the middle, at a corner post)
+      return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 13 && Math.abs(oy - b.y) < 13;
     });
     if (!u) return;
     if (Math.random() < dt * 6) {

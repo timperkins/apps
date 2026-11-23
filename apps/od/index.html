@@ -30,12 +30,13 @@
       </div>
       <div id="banners"></div>
       <div id="hint"></div>
-      <div id="keys">Move: WASD / arrows · Punch: Shift · Flamethrower: F · Use: E · Phone: P</div>
+      <div id="keys">Move: WASD / arrows · Punch: Shift · Jump: Space · Flamethrower: F · Use: E · Phone: P</div>
       <div id="touch">
         <div id="stick"><div id="knob"></div></div>
         <div id="btns">
           <button id="fireBtn" class="act fire" hidden>FIRE</button>
           <button id="useBtn" class="act">USE</button>
+          <button id="jumpBtn" class="act jump">JUMP</button>
           <button id="punchBtn" class="act punch">PUNCH</button>
         </div>
       </div>
@@ -66,6 +67,13 @@
       </div>
     </div>
 
+    <div id="friend" class="modal" hidden>
+      <div class="sheet">
+        <div class="sheetTop"><h2>👫 2 players</h2><button class="close" data-close>✕</button></div>
+        <div id="friendBody"></div>
+      </div>
+    </div>
+
     <div id="overlay" hidden><div id="ovTitle"></div><div id="ovSub"></div></div>
 
     <div id="start">
@@ -73,6 +81,8 @@
       <h1>O&amp;D</h1>
       <p class="tag">Rob the bank. Steal a car. Take the ship. Don't get busted.</p>
       <button id="playBtn" class="big">Play</button>
+      <button id="hostBtn" class="big friendBtn">👫 Play with a friend</button>
+      <button id="joinBtn" class="link">Join a friend's game</button>
       <button id="newBtn" class="link" hidden>Start over</button>
       <ul class="how">
         <li>Buy a <b>screwdriver</b> or <b>wrench</b> at the Shop, then sneak into the <b>Bank</b> through the vents.</li>

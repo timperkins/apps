@@ -97,3 +97,15 @@ npm install
 npm run dev
 npm run build
 ```
+
+## Emberwild
+
+An open-world adventure with block mining and building and factory automation. Original code, art and sounds. Code in `src/games/emberwild/`.
+
+- A 340 × 340 tile land generated from a seed: meadows, deep forest, snowy peaks in the north, desert in the south, lakes and rocky highlands. Fog of war, a minimap and a full map (M).
+- Mine and chop by holding click (or tap and hold): trees, rocks, coal, copper, iron and sky crystal seams. Mining a seam uncovers its vein. Place blocks (planks, stone bricks, glass, cobblestone); cobblestone fills shallow water to make paths.
+- Craft in your bag (Tab): pickaxes and swords in three tiers, a bow and arrows, campfires, lamps, furnaces, belts, drills, assemblers and chests. Cook roasts and stew at a campfire.
+- Automation: drills on a vein dig forever and push ore out of their arrow side; belts carry things (and you); furnaces take ore and fuel from belts; assemblers make any picked recipe; chests collect. R turns machines.
+- The goal: four Ember Beacons (meadows, deep forest, desert, snowy peaks) each guarded by three Rustguards and each asking for a load of goods. Relighting one gives a heart, an Ember core, a map reveal and a travel point. With all four lit, craft and place the Sky Engine to win.
+- Explore: 9 waystones to wake and travel between, 48 treasure chests (hearts, gear and relics: Swift boots, Otter fins, Ember lantern, Wind kite), stamina for sprinting and swimming, day and night. Bramblebacks roam; gloomlings come out at night but keep away from lamps, fires and lit beacons. Knocked out, you wake at your last campfire or waystone.
+- Keyboard and mouse, or touch (stick, buttons, tap to mine and build). Saves in localStorage under `emberwild-save-v1` (autosave every 45 seconds).

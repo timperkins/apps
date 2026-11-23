@@ -53,12 +53,19 @@ function noise(dur: number, vol = 0.2, freq = 800) {
   src.start();
 }
 
+/** Set while hosting 2 player mode, so the friend's phone can play the same sounds. */
+export const sfxTap: { log: string[] | null } = { log: null };
+
 export function sfx(name: string) {
+  if (sfxTap.log && sfxTap.log.length < 30 && !sfxTap.log.includes(name)) sfxTap.log.push(name);
   if (!ctx || muted) return;
   const now = performance.now();
   if (last[name] && now - last[name] < 60) return;
   last[name] = now;
   switch (name) {
+    case 'jump':
+      tone(330, 0.15, 'square', 0.05, 330);
+      break;
     case 'swing':
       noise(0.08, 0.06, 2000);
       break;

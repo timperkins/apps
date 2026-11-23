@@ -4,6 +4,8 @@ import { drawMinimap, render } from './draw';
 import { screenDirToWorld, copLevel } from './iso';
 import { BUY_PRICE, RENT_PRICE, RENT_SECONDS, SHOP_ITEMS } from './data';
 import { isMuted, setMuted, sfx, unlockAudio } from './audio';
+import qrcode from 'qrcode-generator';
+import { CODE_LENGTH, GuestNet, HostNet, joinRoom, normalizeCode, openRoom } from './net';
 
 const SAVE_KEY = 'od-save-v1';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -17,6 +19,7 @@ function loadSave(): SaveData | null {
   }
 }
 function writeSave(g: Game) {
+  if (guest) return; // the friend's phone keeps its own save
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(g.save()));
   } catch {
@@ -46,6 +49,7 @@ resize();
 const keys = new Set<string>();
 let punchPressed = false;
 let fireHeld = false;
+let jumpPressed = false;
 let usePressed = false;
 let stick = { x: 0, y: 0, active: false, id: -1 };
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -59,7 +63,8 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   keys.add(k);
   if (k === 'shift') punchPressed = true;
-  if (k === 'e' || k === 'enter' || k === ' ') usePressed = true;
+  if (k === 'e' || k === 'enter') usePressed = true;
+  if (k === ' ') jumpPressed = true;
   if (k === 'p' || k === 'm' || k === 'tab') {
     e.preventDefault();
     if (game) togglePhone();
@@ -134,6 +139,7 @@ function tapButton(el: HTMLElement, fn: () => void) {
   });
 }
 tapButton($('punchBtn'), () => (punchPressed = true));
+tapButton($('jumpBtn'), () => (jumpPressed = true));
 {
   const fb = $('fireBtn');
   const on = (e: Event) => {
@@ -169,14 +175,17 @@ function readInput(): Input {
     mag = Math.min(1, Math.hypot(dx, dy) * 1.2);
   }
   const w = screenDirToWorld(dx, dy);
-  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, fire: fireHeld || keys.has('f'), use: usePressed };
+  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, fire: fireHeld || keys.has('f'), jump: jumpPressed, use: usePressed };
   punchPressed = false;
+  jumpPressed = false;
   usePressed = false;
   return inp;
 }
 
 // ---------- game ----------
 let game: Game | null = null;
+let host: HostNet | null = null;
+let guest: GuestNet | null = null;
 
 function startGame(fresh: boolean) {
   if (fresh) {
@@ -209,6 +218,134 @@ $('newBtn').addEventListener('click', () => {
   }
 });
 
+// ---------- 2 players ----------
+const friendBody = $('friendBody');
+
+function joinUrl(code: string) {
+  const url = new URL(location.href);
+  const peerhost = new URLSearchParams(location.search).get('peerhost');
+  url.search = `?join=${code}${peerhost ? `&peerhost=${peerhost}` : ''}`;
+  url.hash = '';
+  return url.toString();
+}
+
+function showHostPanel() {
+  $('friend').hidden = false;
+  if (host?.hero) {
+    friendBody.innerHTML = `<p style="font-size:20px">✅ <b>Your friend is playing with you!</b></p><p>You share the money, the stars and the shop stuff. Player 2 wears the red shirt.</p><button class="pill green" data-close-friend>Back to the game</button>`;
+  } else if (host) {
+    const code = host.room.code;
+    const qr = qrcode(0, 'M');
+    qr.addData(joinUrl(code));
+    qr.make();
+    friendBody.innerHTML = `<p>On the other phone, open the camera and scan this:</p>
+      <div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })}</div>
+      <p>Or open <b>${location.host}</b>, tap <b>Join a friend's game</b> and type:</p>
+      <div class="joinCode">${code}</div>
+      <p class="friendStatus">Waiting for your friend...</p>
+      <button class="pill" data-close-friend>Play while I wait</button>`;
+  } else {
+    friendBody.innerHTML = `<p class="friendStatus">Getting a code...</p>`;
+  }
+  friendBody.querySelectorAll('[data-close-friend]').forEach((b) => b.addEventListener('click', () => ($('friend').hidden = true)));
+}
+
+async function hostGame() {
+  if (!game) startGame(false);
+  showHostPanel();
+  if (host) return;
+  try {
+    const room = await openRoom();
+    host = new HostNet(game!, room);
+    (window as unknown as { odNet: HostNet }).odNet = host;
+    host.onChange = () => {
+      if (host?.hero) {
+        sfx('cash');
+        $('friend').hidden = true;
+      }
+      if (!$('friend').hidden) showHostPanel();
+    };
+    if (!$('friend').hidden) showHostPanel();
+  } catch (e) {
+    friendBody.innerHTML = `<p class="friendStatus bad">Couldn't start 2 player mode. Check the internet and try again.</p><button class="pill" id="retryHost">Try again</button>`;
+    $('retryHost').addEventListener('click', () => void hostGame());
+    console.warn(e);
+  }
+}
+
+function showJoinPanel(msg = '', bad = false) {
+  $('friend').hidden = false;
+  friendBody.innerHTML = `<p>Type the code on your friend's phone:</p>
+    <input class="codeIn" id="codeIn" inputmode="numeric" maxlength="${CODE_LENGTH}" autocomplete="off" placeholder="${'0'.repeat(CODE_LENGTH)}" />
+    <p class="friendStatus ${bad ? 'bad' : ''}">${msg}</p>
+    <button class="pill green" id="joinGo">Join</button>`;
+  const inp = $<HTMLInputElement>('codeIn');
+  const go = () => {
+    const code = normalizeCode(inp.value);
+    if (code) void joinGame(code);
+    else showJoinPanel(`The code has ${CODE_LENGTH} numbers.`, true);
+  };
+  $('joinGo').addEventListener('click', go);
+  inp.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') go();
+  });
+  inp.addEventListener('input', () => {
+    if (normalizeCode(inp.value)) go();
+  });
+  setTimeout(() => inp.focus(), 50);
+}
+
+async function joinGame(code: string) {
+  $('friend').hidden = false;
+  friendBody.innerHTML = `<p class="friendStatus">Joining game ${code}...</p>`;
+  try {
+    const link = await joinRoom(code);
+    const g = new Game(null);
+    game = g;
+    guest = new GuestNet(g, link);
+    (window as unknown as { odNet: GuestNet }).odNet = guest;
+    guest.onReply = (text) => {
+      if (text || !g.menu) renderMenu(text);
+      else closeModals();
+      if (!$('phone').hidden) renderPhone();
+    };
+    guest.onClose = () => {
+      game = null;
+      guest = null;
+      closeModals();
+      $('hud').hidden = true;
+      $('start').hidden = false;
+      showJoinPanel('Your friend\'s game ended. Join again?', true);
+    };
+    (window as unknown as { od: Game }).od = g;
+    $('friend').hidden = true;
+    $('start').hidden = true;
+    $('hud').hidden = false;
+    unlockAudio();
+    sfx('cash');
+  } catch (e) {
+    console.warn(e);
+    showJoinPanel(`Couldn't find game ${code}. Check the code, and keep your friend's game open.`, true);
+  }
+}
+
+$('hostBtn').addEventListener('click', () => void hostGame());
+$('joinBtn').addEventListener('click', () => showJoinPanel());
+{
+  const code = normalizeCode(new URLSearchParams(location.search).get('join') ?? '');
+  if (code) void joinGame(code);
+}
+
+/** Things the friend's phone asks the host to do. */
+function buyItem(id: string): string | null {
+  if (guest) {
+    guest.action('buy', id);
+    return null;
+  }
+  return game!.buy(id);
+}
+
 // ---------- phone ----------
 let phoneTab = 'map';
 let mapNear = true;
@@ -230,6 +367,7 @@ function togglePhone() {
 function closeModals() {
   $('phone').hidden = true;
   $('menu').hidden = true;
+  $('friend').hidden = true;
   if (game) game.menu = null;
 }
 document.querySelectorAll<HTMLElement>('[data-close]').forEach((b) => b.addEventListener('click', closeModals));
@@ -273,7 +411,8 @@ function renderPhone() {
         .join('');
     pane.querySelectorAll<HTMLButtonElement>('[data-wear]').forEach((b) =>
       b.addEventListener('click', () => {
-        g.setOutfit(b.dataset.wear!);
+        if (guest) guest.action('wear', b.dataset.wear!);
+        else g.setOutfit(b.dataset.wear!);
         renderPhone();
       }),
     );
@@ -282,18 +421,26 @@ function renderPhone() {
     pane.innerHTML = g.ownsCar
       ? `<div class="row"><div class="name"><b>Your sports car</b><small>${car && car.broken === 0 ? 'Parked somewhere (pink square on the map)' : 'Broken. Call a new one!'}</small></div><button class="pill green" id="callCar">Call it</button></div>`
       : `<p style="font-size:14px;margin:6px">You don't own a car yet. Buy one at the <b>Car lot</b> for $${BUY_PRICE}, rent one for $${RENT_PRICE}, or just borrow one from the street...</p>`;
+    if (!guest)
+      pane.innerHTML += `<div class="row"><div class="name"><b>2 players</b><small>${host?.hero ? 'Your friend is playing!' : 'Play with a friend on another phone'}</small></div><button class="pill" id="inviteBtn">${host?.hero ? 'Info' : 'Invite'}</button></div>`;
     pane.innerHTML += `<div class="row"><div class="name"><b>Stats</b><small>Money $${Math.floor(g.money)} · Played ${fmtTime(g.time)} · Cop level ${copLevel(g.time)}</small></div></div>`;
+    $('inviteBtn')?.addEventListener('click', () => {
+      $('phone').hidden = true;
+      void hostGame();
+    });
     $('callCar')?.addEventListener('click', () => {
-      g.callMyCar();
+      if (guest) guest.action('call');
+      else g.callMyCar();
       closeModals();
     });
   } else {
     pane.innerHTML = `<div class="help">
-      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. Got the <b>flamethrower</b>? Hold F or the orange button. <b>Use</b> with E or the blue button.</p>
+      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. <b>Jump</b> with Space or the green button. Got the <b>flamethrower</b>? Hold F or the orange button. <b>Use</b> with E or the blue button.</p>
       <p><b>The Bank:</b> buy a screwdriver or wrench at the Shop. Inside, guards chase you if they see you in the back rooms. Open the vent grate in the lobby, crawl through, and climb out by the vault.</p>
       <p><b>Cars:</b> walk up to a car to pick up the driver, put them down and drive away. Buses and cars can bonk you, so watch out!</p>
       <p><b>The ship:</b> walk down the dock, beat the captain, then take the wheel and sail.</p>
       <p><b>Police</b> walk around calmly and only chase you if they see you do something bad (or you bonk one). Robbing the bank or taking the ship always makes them angry.</p>
+      <p>Knock out a cop and they drop <b>$50 to $100</b>.</p>
       <p><b>Cops</b> get tired if they chase you too long. Every 10 minutes they get 25% tougher. At 4 stars the army shows up with Greniders, Heaters and Lazors. At 5 stars, tanks!</p>
       <p><b>Lose the cops</b> by staying out of sight, or change your disguise when nobody is looking.</p>
     </div>`;
@@ -308,6 +455,7 @@ function renderMenu(msg = '') {
   if (!g.menu) return;
   $('menuMoney').textContent = `You have $${Math.floor(g.money)}`;
   $('menuMsg').textContent = msg;
+  $('menuMsg').style.color = msg.startsWith('Bought') ? '#2e7d32' : '#c62828';
   const body = $('menuBody');
   if (g.menu === 'shop') {
     $('menuTitle').textContent = '🛒 Shop';
@@ -321,9 +469,8 @@ function renderMenu(msg = '') {
     }).join('');
     body.querySelectorAll<HTMLButtonElement>('[data-buy]').forEach((b) =>
       b.addEventListener('click', () => {
-        const r = g.buy(b.dataset.buy!);
-        renderMenu(r);
-        $('menuMsg').style.color = r.startsWith('Bought') ? '#2e7d32' : '#c62828';
+        const r = buyItem(b.dataset.buy!);
+        if (r !== null) renderMenu(r);
       }),
     );
   } else {
@@ -334,6 +481,10 @@ function renderMenu(msg = '') {
       <p style="font-size:13px;opacity:.7;margin:10px 4px 0">Or you could just... take one of the cars on the lot. The cops won't like that.</p>`;
     body.querySelectorAll<HTMLButtonElement>('[data-deal]').forEach((b) =>
       b.addEventListener('click', () => {
+        if (guest) {
+          guest.action('deal', b.dataset.deal!);
+          return;
+        }
         const r = g.lotDeal(b.dataset.deal as 'rent' | 'buy');
         if (r) renderMenu(r);
         else closeModals();
@@ -380,9 +531,14 @@ function frame(now: number) {
   last = now;
   if (game) {
     const g = game;
-    const paused = !$('phone').hidden;
     const inp = readInput();
-    if (!paused) g.update(dt, inp);
+    const paused = !$('phone').hidden || !$('friend').hidden;
+    if (guest) guest.tick(dt, inp);
+    else if (host?.hero) {
+      // 2 players: the world keeps going while either of you looks at the phone
+      g.update(dt, host.inputs(paused ? { ...inp, mag: 0, punch: false, jump: false, use: false, fire: false } : inp));
+      host.afterUpdate(dt);
+    } else if (!paused) g.update(dt, inp);
     if (g.menu !== lastMenu) {
       lastMenu = g.menu;
       renderMenu();
