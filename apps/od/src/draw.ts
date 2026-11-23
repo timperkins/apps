@@ -146,6 +146,26 @@ function drawGround(ctx: Ctx, m: GameMap, x: number, y: number, t: number, time:
       poly(ctx, diamond(x, y, 0, 0.7), '#9c3d2a');
       poly(ctx, diamond(x, y, 0, 0.45), '#c0563c');
       break;
+    case T.Laser: {
+      poly(ctx, d, '#3a2a30');
+      // flickering red laser beams just above the floor
+      const on = Math.sin(time * 9 + x * 1.7 + y) > -0.6;
+      ctx.strokeStyle = on ? 'rgba(255,40,60,0.95)' : 'rgba(255,40,60,0.35)';
+      ctx.lineWidth = 2;
+      for (let k = 1; k < 3; k++) {
+        const a = toScreen(x + k / 3, y, 0.12);
+        const b = toScreen(x + k / 3, y + 1, 0.12);
+        const c = toScreen(x, y + k / 3, 0.12);
+        const e = toScreen(x + 1, y + k / 3, 0.12);
+        ctx.beginPath();
+        ctx.moveTo(a.sx, a.sy);
+        ctx.lineTo(b.sx, b.sy);
+        ctx.moveTo(c.sx, c.sy);
+        ctx.lineTo(e.sx, e.sy);
+        ctx.stroke();
+      }
+      break;
+    }
     case T.Floor:
     case T.Grate:
       if (m.restricted[i]) poly(ctx, d, (x + y) % 2 ? '#dccaca' : '#d2bfbf');
@@ -247,6 +267,18 @@ function drawPrism(ctx: Ctx, m: GameMap, x: number, y: number, t: number, time: 
     ctx.fillStyle = '#424242';
     ctx.fillRect(-1.5, -8, 3, 16);
     ctx.restore();
+  }
+  if (t === T.Crate) {
+    ctx.strokeStyle = '#5d4030';
+    ctx.lineWidth = 2;
+    for (const f of [face(x, y + 1, x + 1, y + 1, 0, h), face(x + 1, y, x + 1, y + 1, 0, h)]) {
+      ctx.beginPath();
+      ctx.moveTo(f[0].sx, f[0].sy);
+      ctx.lineTo(f[2].sx, f[2].sy);
+      ctx.moveTo(f[1].sx, f[1].sy);
+      ctx.lineTo(f[3].sx, f[3].sy);
+      ctx.stroke();
+    }
   }
   if (t === T.Locked) {
     const c = toScreen(x + 0.5, y + 1, h * 0.45);
@@ -432,7 +464,7 @@ function drawVehicle(ctx: Ctx, v: Vehicle, g: Game, time: number) {
 const DISGUISE_SUIT: Record<string, string> = { tophat: '#263238', cowboy: '#8d6e63', cap: '#1565c0', clown: '#ffeb3b', mustache: '#6d4c41' };
 
 function drawPerson(ctx: Ctx, p: Person, g: Game, time: number) {
-  const ground = toScreen(p.x, p.y, p.onShip || (p.kind === 'player' && p.z > 0.3 && !g.inVent) ? p.z : g.inVent && p.kind === 'player' ? p.z : 0);
+  const ground = toScreen(p.x, p.y, p.kind === 'player' ? (g.vehicle ? p.z : g.ground) : p.onShip ? p.z : 0);
   const s = toScreen(p.x, p.y, p.z);
   const isPlayer = p.kind === 'player';
   const dis = isPlayer ? g.wearing : null;
@@ -849,6 +881,7 @@ export function render(ctx: Ctx, g: Game, W: number, H: number, zoom: number, ti
     let d = pd;
     if (g.scene === g.city && inRect(g.ship, pl.x, pl.y)) d = Math.max(d, shipD + 4.5);
     if (g.inVent) d += 0.6;
+    d += g.ground; // standing on a crate draws you on top of it
     drawables.push({
       d,
       f: () => {

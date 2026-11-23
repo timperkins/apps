@@ -46,6 +46,7 @@ resize();
 const keys = new Set<string>();
 let punchPressed = false;
 let fireHeld = false;
+let jumpPressed = false;
 let usePressed = false;
 let stick = { x: 0, y: 0, active: false, id: -1 };
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -59,7 +60,8 @@ window.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
   keys.add(k);
   if (k === 'shift') punchPressed = true;
-  if (k === 'e' || k === 'enter' || k === ' ') usePressed = true;
+  if (k === 'e' || k === 'enter') usePressed = true;
+  if (k === ' ') jumpPressed = true;
   if (k === 'p' || k === 'm' || k === 'tab') {
     e.preventDefault();
     if (game) togglePhone();
@@ -134,6 +136,7 @@ function tapButton(el: HTMLElement, fn: () => void) {
   });
 }
 tapButton($('punchBtn'), () => (punchPressed = true));
+tapButton($('jumpBtn'), () => (jumpPressed = true));
 {
   const fb = $('fireBtn');
   const on = (e: Event) => {
@@ -169,8 +172,9 @@ function readInput(): Input {
     mag = Math.min(1, Math.hypot(dx, dy) * 1.2);
   }
   const w = screenDirToWorld(dx, dy);
-  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, fire: fireHeld || keys.has('f'), use: usePressed };
+  const inp: Input = { mx: w.x, my: w.y, mag, punch: punchPressed, fire: fireHeld || keys.has('f'), jump: jumpPressed, use: usePressed };
   punchPressed = false;
+  jumpPressed = false;
   usePressed = false;
   return inp;
 }
@@ -289,7 +293,7 @@ function renderPhone() {
     });
   } else {
     pane.innerHTML = `<div class="help">
-      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. Got the <b>flamethrower</b>? Hold F or the orange button. <b>Use</b> with E or the blue button.</p>
+      <p><b>Move</b> with WASD/arrows or the joystick. <b>Punch</b> with Shift or the red button. <b>Jump</b> with Space or the green button. Got the <b>flamethrower</b>? Hold F or the orange button. <b>Use</b> with E or the blue button.</p>
       <p><b>The Bank:</b> buy a screwdriver or wrench at the Shop. Inside, guards chase you if they see you in the back rooms. Open the vent grate in the lobby, crawl through, and climb out by the vault.</p>
       <p><b>Cars:</b> walk up to a car to pick up the driver, put them down and drive away. Buses and cars can bonk you, so watch out!</p>
       <p><b>The ship:</b> walk down the dock, beat the captain, then take the wheel and sail.</p>

@@ -18,6 +18,8 @@ export const T = {
   Locked: 15,
   Vault: 16,
   Counter: 17,
+  Laser: 18,
+  Crate: 19,
 } as const;
 export type Tile = (typeof T)[keyof typeof T];
 
@@ -74,7 +76,14 @@ export function tileAt(m: GameMap, x: number, y: number): number {
 }
 
 export function isTall(t: number): boolean {
-  return t === T.Building || t === T.Tree || t === T.Wall || t === T.Vent || t === T.Locked || t === T.Vault || t === T.Counter;
+  return (
+    t === T.Building || t === T.Tree || t === T.Wall || t === T.Vent || t === T.Locked || t === T.Vault || t === T.Counter || t === T.Crate
+  );
+}
+
+/** Low blocks you can jump up onto. */
+export function isPlatform(t: number): boolean {
+  return t === T.Crate || t === T.Counter;
 }
 
 export function walkable(t: number, inVent: boolean): boolean {
@@ -285,15 +294,16 @@ function trees(m: GameMap, x0: number, y0: number, x1: number, y1: number, r: ()
 }
 
 // Bank interior. W wall, . floor, r restricted floor, $ vault, V vent duct, G vent grate,
-// L locked door, D exit door, c counter, g guard, s sleeping guard.
+// L locked door, D exit door, c counter, g guard, s sleeping guard,
+// ~ laser floor (sets off the alarm), # crate to jump on (parkour across the lasers).
 const BANK = [
   'WWWWWWWWWWWWWWWWWW',
-  'Wrr$$rrrrrrrrrrVVW',
-  'Wrr$$rrrrrrrrrrGVW',
-  'WrrrrrrrrrrrrrrrVW',
-  'WrrrrrrrrrsrrrrrVW',
-  'WrrrrrrrrrrrrrrrVW',
-  'WWWWWWWLWWWWWWWWVW',
+  'Wrr$$~~~~~rrrrrVVW',
+  'Wrr$$~#~~~rrrrrGVW',
+  'Wrrrr~~~#~rrrrrrVW',
+  'Wrrrr~~~~~rsrrrrVW',
+  'Wrrrr~~~~~rrrrrrVW',
+  'WWWWWWWWWWWWLWWWVW',
   'W...............VW',
   'W..............GVW',
   'W.cccccc.........W',
@@ -340,6 +350,14 @@ export function buildBank(): GameMap {
           break;
         case 'c':
           rect(m, x, y, x, y, T.Counter, 0.6, 11);
+          break;
+        case '~':
+          rect(m, x, y, x, y, T.Laser);
+          m.restricted[i] = 1;
+          break;
+        case '#':
+          rect(m, x, y, x, y, T.Crate, 0.55, 11);
+          m.restricted[i] = 1;
           break;
         case 'g':
           m.spawns.guards.push({ x: x + 0.5, y: y + 0.5 });

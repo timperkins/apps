@@ -59,6 +59,9 @@ export function sfx(name: string) {
   if (last[name] && now - last[name] < 60) return;
   last[name] = now;
   switch (name) {
+    case 'jump':
+      tone(330, 0.15, 'square', 0.05, 330);
+      break;
     case 'swing':
       noise(0.08, 0.06, 2000);
       break;
