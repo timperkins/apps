@@ -526,6 +526,23 @@ const blockKey = (x: number, y: number) => (Math.floor(x / BLOCK_CELL) + 32768) 
 const DECK_CELL = 3;
 const deckKey = (x: number, y: number) => (Math.floor(x / DECK_CELL) + 32768) * 65536 + (Math.floor(y / DECK_CELL) + 32768);
 
+// Can unit u be mended at building b? The Naval yard mends ships, and the
+// Otter, in its slip; the Service depot vehicles on its pad.
+function servedBy(u: Unit, b: Building): boolean {
+  if (b.kind !== 'depot' && b.kind !== 'navy') return false;
+  if (isFoot(u.kind) || isAir(u.kind)) return false;
+  return (isNaval(u.kind) || u.kind === 'otter') === (b.kind === 'navy');
+}
+
+// Where a unit sent to building b for repairs parks: the middle of the
+// depot's pad, or out in the Naval yard's slip (world, b's copy of the map).
+function bayOf(b: Building): [number, number] {
+  return b.kind === 'navy' ? [b.x, b.y + 5] : [b.x, b.y];
+}
+// and where the second, third... unit sent there with it parks, round it
+// (spread out in the Naval yard's slip, closer together on the depot's pad)
+const BAY_SLOTS: [number, number][] = [[0, 0], [-6, 0], [6, 0], [0, -5], [0, 5], [-6, 5], [6, 5], [-6, -5], [6, -5]];
+
 // Which click burst an order marker plays.
 function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }): BurstKind {
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
@@ -3077,6 +3094,9 @@ export class IsoGame implements GameLike {
     if (foe && sel.some((u) => this.canHit(WEAPON[u.kind], foe))) return 'attack';
     // over your refinery with a hauler selected: go and unload there
     if (sel.some((u) => u.kind === 'hauler') && this.myRefineryAt(x, y)) return 'enter';
+    // over your Naval yard with a ship selected, or your Service depot with a
+    // vehicle: go in for repairs
+    if (this.bayAt(x, y)) return 'enter';
     // over ore with a hauler selected: dig it (haulers only ever go after ore)
     const [gx, gy] = this.fold(...this.groundAt(x, y));
     if (sel.some((u) => u.kind === 'hauler') && this.oreNear(gx, gy, 16).some((n) => n.amt > 20)) return 'harvest';
@@ -3175,6 +3195,40 @@ export class IsoGame implements GameLike {
   private myRefineryAt(x: number, y: number): Building | null {
     const b = this.buildingAt(x, y);
     return b && b.f === this.me && b.kind === 'refinery' && b.rise >= 1 && !b.packing ? b : null;
+  }
+
+  // Your Naval yard or Service depot at screen point (x, y), with the units
+  // you have selected that it can mend (none: null).
+  private bayAt(x: number, y: number): { b: Building; go: Unit[] } | null {
+    const b = this.buildingAt(x, y);
+    if (!b || b.f !== this.me || (b.kind !== 'navy' && b.kind !== 'depot') || b.rise < 1 || b.packing || b.hp <= 0) return null;
+    const go = this.mine().filter((u) => !u.deploy && servedBy(u, b));
+    return go.length ? { b, go } : null;
+  }
+
+  // Send the units you have selected that b can mend into it for repairs:
+  // the ones that need it most park nearest the middle, where it mends first.
+  private bayOrder(b: Building, go: Unit[]): void {
+    const [bx, by] = bayOf(b);
+    const moves: [number, number, number][] = [];
+    [...go]
+      .sort((p, q) => p.hp - q.hp)
+      .forEach((u, i) => {
+        const k = b.kind === 'navy' ? 1 : 0.6;
+        const [dx, dy] = BAY_SLOTS[i % BAY_SLOTS.length].map((v) => v * k);
+        // (in the unit's own copy of the map)
+        const [tx, ty] = this.nearPoint(u.x, u.y, bx + dx, by + dy);
+        moves.push([u.id, tx, ty]);
+        u.aim = undefined;
+      });
+    this.command({ c: 'move', m: moves });
+    b.aimT = this.time;
+    if (this.moveMarks) {
+      const [mx, my] = this.fold(bx, by);
+      this.markers.push({ x: mx, y: my, z: 0, t: 0, enter: true });
+    }
+    ui('order_confirm', 1.3);
+    this.speak(go, 'move');
   }
 
   // A transport of yours at (x, y) that the soldiers you have selected could
@@ -3348,6 +3402,14 @@ export class IsoGame implements GameLike {
       ui('order_confirm', 1.3);
       this.speak(haulers, 'move');
       sel = sel.filter((u) => u.kind !== 'hauler');
+      if (!sel.length) return;
+    }
+    // onto your Naval yard or Service depot: the ships (or vehicles) go in
+    // for repairs (the rest go to it)
+    const bay = shortest ? null : this.bayAt(x, y);
+    if (bay) {
+      this.bayOrder(bay.b, bay.go);
+      sel = sel.filter((u) => !bay.go.includes(u));
       if (!sel.length) return;
     }
     // haulers sent onto ore dig there; sent anywhere else they stop work
@@ -5424,12 +5486,11 @@ export class IsoGame implements GameLike {
   // screen only shows the sparks).
   private serviceAt(b: Building, dt: number): void {
     const u = this.units.find((o) => {
-      if (o.f !== b.f || o.dead || o.hp >= 1 || isFoot(o.kind) || isAir(o.kind) || o.moving) return false;
-      // (the Naval yard mends ships, and the Otter, in its slip; the depot vehicles on its pad)
-      const wet = isNaval(o.kind) || o.kind === 'otter';
-      if (wet !== (b.kind === 'navy')) return false;
+      if (o.f !== b.f || o.dead || o.hp >= 1 || o.moving || !servedBy(o, b)) return false;
       const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
-      return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 11 && Math.abs(oy - b.y) < 11;
+      // (anywhere on the depot's pad: a vehicle driving in can stop short of
+      // the middle, at a corner post)
+      return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 13 && Math.abs(oy - b.y) < 13;
     });
     if (!u) return;
     if (Math.random() < dt * 6) {
