@@ -52,6 +52,7 @@ What is used now, so a new one can be different:
 | heavy | huge tank, two guns at the viewer | charcoal gunmetal | battlefield |
 | scorch | dome-turret tank spraying two jets of fire | dark olive | burning wheat field, sunset |
 | lumen | tank with a tall finned mast, ring coil and blazing ball firing a beam | off-white, grey, copper | snowy mountain pass, night |
+| skyguard | tank with a four-tube box launcher tilted up firing, small white radar dome | pale sand khaki | autumn birch woods, lake, clear sky, contrails |
 | heli | attack copter, rocket pods | olive drab | over a lake |
 | heron | tandem-rotor transport, ramp open, door gun | khaki tan, olive stripes | red canyon, golden dust |
 | jet | jump jet hovering, missiles launching | light gunmetal, off-white | stormy sea coast |
@@ -60,7 +61,7 @@ What is used now, so a new one can be different:
 | mcv | long tracked truck carrying a folded base | grey, hazard stripes | pine forest |
 | otter | hovercraft on a black skirt coming up a beach | sand tan, black | tropical beach |
 | destroyer | lean warship at speed, bow gun firing | haze grey | rough ocean, sunset |
-| cruiser | warship with radar panels, missiles launching straight up | light grey, white | arctic sea, ice floes |
+| cruiser | warship with a huge white radar dome, four-tube launchers tilted up on rings fore and aft, one firing | haze grey, khaki, white | fjord, dark cliffs, overcast, contrails |
 | carrier | flat-deck carrier, drones taking off | dark gunmetal deck | ocean, cumulus clouds |
 | sub | half-submerged submarine, split above and below the water | black, charcoal | night, moonlight |
 
