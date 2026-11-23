@@ -6,7 +6,7 @@ import { ensureUser } from '../net/firebase';
 import type { Action } from '../net/protocol';
 import { joinRoom, watchRoom, type Room } from '../net/rooms';
 import { connectToDisplay, type ControllerLink } from '../net/rtc';
-import { JoinPanel, RaiderPad, SwimmerPad, buzz, clock, loadLook, saveLook, useHostClock, type GameInfo, type Look } from './controls';
+import { JoinPanel, RaiderPad, SwimmerPad, buzz, clock, loadLook, saveLook, useHostClock, useKeyboard, type GameInfo, type Look } from './controls';
 
 type Status = 'intro' | 'connecting' | 'missing' | 'unreachable' | 'lost' | 'connected';
 
@@ -149,6 +149,15 @@ export default function Play() {
     sendJoin(look);
     setEditing(false);
   }
+
+  useKeyboard(
+    playing ? you : null,
+    hostNow,
+    (x, y, hold) => {
+      input.current = { x, y, hold };
+    },
+    act,
+  );
 
   const hold = (on: boolean) => (e: ReactPointerEvent) => {
     e.preventDefault();

@@ -261,6 +261,7 @@ export function RaiderPad({
         <span>Catches {you.catches}</span>
       </div>
       {you.hook === 'fight' && <KnotBar knot={you.knot} mine="raider" />}
+      <div className="keys-hint">{KEY_HELP.raider}</div>
       <div className="controls">
         <div ref={padEl} className="pad stick-pad">
           <StickView stick={stick} hint={you.hook === 'ready' ? 'Slide left or right to sail' : 'Slide to drag the line'} />
@@ -360,6 +361,7 @@ export function SwimmerPad({
           <div style={{ width: `${Math.round(you.food * 100)}%` }} />
         </div>
       </div>
+      <div className="keys-hint">{KEY_HELP.swimmer}</div>
       <div className="controls">
         <div ref={padEl} className="pad stick-pad">
           <StickView stick={stick} hint="Touch and drag to swim. Eat smaller fish, dodge bigger ones and hooks." />
@@ -386,4 +388,101 @@ export function SwimmerPad({
       </div>
     </>
   );
+}
+
+// ---- Keyboard: arrow keys move, D casts and reels; other keys match the buttons. ----
+
+export const KEY_HELP = {
+  raider: 'Arrows sail · D cast, hold D to reel, tap D in a fight · S sell · F find me',
+  swimmer: 'Arrows swim · Space dash · E egg · T taunt · F find me · when hooked: tap D, R thrash',
+} as const;
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
+// Calls onMove with the arrow direction and whether D is held, and act for key presses.
+// `you` is read through a ref so the listeners always see the latest status.
+export function useKeyboard(
+  you: RaiderStatus | SwimmerStatus | null,
+  hostNow: () => number,
+  onMove: (x: number, y: number, hold: boolean) => void,
+  act: (a: Action) => void,
+): boolean {
+  const youRef = useRef(you);
+  youRef.current = you;
+  const cb = useRef({ onMove, act });
+  cb.current = { onMove, act };
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!you) return;
+    const down = new Set<string>();
+    const push = () => {
+      let x = 0;
+      let y = 0;
+      for (const k of down) {
+        const a = ARROWS[k];
+        if (a) {
+          x += a[0];
+          y += a[1];
+        }
+      }
+      const m = Math.hypot(x, y) || 1;
+      cb.current.onMove(x / m, y / m, down.has('d'));
+      setActive(down.size > 0);
+    };
+    const press = (k: string) => {
+      const me = youRef.current;
+      if (!me) return;
+      if (me.role === 'raider') {
+        if (k === 'd' && me.hook === 'ready') cb.current.act('cast');
+        else if (k === 'd' && me.hook === 'fight') cb.current.act(inHeaveWindow(hostNow(), me.fightStart) ? 'heave' : 'tap');
+        else if (k === 's') cb.current.act('sell');
+        else if (k === 'f') cb.current.act('find');
+      } else if (me.hooked) {
+        if (k === 'd' || k === ' ') cb.current.act('pull');
+        else if (k === 'r') cb.current.act('thrash');
+      } else {
+        if (k === ' ') cb.current.act('dash');
+        else if (k === 'e') cb.current.act('egg');
+        else if (k === 't') cb.current.act('taunt');
+        else if (k === 'f') cb.current.act('find');
+      }
+    };
+    const onDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (!(k in ARROWS) && !'dsfetr '.includes(k)) return;
+      e.preventDefault();
+      if (e.repeat) return;
+      down.add(k);
+      press(k);
+      push();
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (down.delete(k)) push();
+    };
+    const clear = () => {
+      if (down.size) {
+        down.clear();
+        push();
+      }
+    };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+      window.removeEventListener('blur', clear);
+      clear();
+    };
+  }, [!!you, hostNow]);
+
+  return active;
 }

@@ -10,7 +10,7 @@ import { ensureUser } from '../net/firebase';
 import { watchRoom } from '../net/rooms';
 import { Scene } from '../render/draw';
 import { loadPixelFont } from '../render/text';
-import { JoinPanel, RaiderPad, SwimmerPad, loadLook, saveLook, useHostClock, type GameInfo, type Look } from './controls';
+import { JoinPanel, RaiderPad, SwimmerPad, loadLook, saveLook, useHostClock, useKeyboard, type GameInfo, type Look } from './controls';
 import { HostSession, type HostView, type PlayerRow } from './hostSession';
 
 type Status = 'loading' | 'hosting' | 'missing' | 'not-host' | 'error';
@@ -75,6 +75,7 @@ export default function Host() {
 
   const holdRef = useRef(false);
   useEffect(() => {
+    if (keys.current.on && !stick.active) return;
     sessionRef.current?.local({ t: 'in', x: stick.x, y: stick.y, hold: holdRef.current });
   }, [stick]);
   const hold = (on: boolean) => (e: ReactPointerEvent) => {
@@ -82,6 +83,17 @@ export default function Host() {
     holdRef.current = on;
     sessionRef.current?.local({ t: 'in', x: stick.x, y: stick.y, hold: on });
   };
+
+  const keys = useRef({ x: 0, y: 0, hold: false, on: false });
+  useKeyboard(
+    picking ? null : me,
+    hostNow,
+    (x, y, hold) => {
+      keys.current = { x, y, hold, on: x !== 0 || y !== 0 || hold };
+      sessionRef.current?.local({ t: 'in', x, y, hold: hold || holdRef.current });
+    },
+    (a) => sessionRef.current?.local({ t: 'act', a }),
+  );
 
   const joinHere = () => {
     sessionRef.current?.local({ t: 'join', role: look.role, name: cleanName(look.name, ''), color: look.color, kind: look.kind });
