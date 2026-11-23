@@ -166,7 +166,7 @@ export const PLANE_ALT = 48;
 export const DROP_ALT = 42;
 
 // The size of the explosion when each kind of vehicle is destroyed (map pixels).
-export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, heron: 9, jet: 7, plane: 11, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9, otter: 9, destroyer: 13, cruiser: 13, carrier: 16, sub: 10 };
+export const BOOM: Partial<Record<UnitKind, number>> = { buggy: 6, apc: 9, light: 9.5, heavy: 12, scorch: 10, lumen: 9, heron: 9, jet: 7, plane: 11, hauler: 10.5, arty: 7, mcv: 13, heli: 8, boat: 9, otter: 9, destroyer: 13, cruiser: 13, carrier: 20, sub: 10 };
 // Tracked armor: these cook off in a string of explosions when destroyed.
 const TANKS = new Set<UnitKind>(['light', 'heavy', 'scorch', 'lumen', 'mcv', 'hauler']);
 
@@ -176,7 +176,7 @@ export const BURN_RUIN = 20;
 
 // How hard the screen shakes (in map pixels) when something big is
 // destroyed nearby: tanks and the like, and every building, by its size.
-export const QUAKE: Partial<Record<UnitKind, number>> = { apc: 1.3, light: 1.5, heavy: 2, scorch: 1.6, lumen: 1.4, mcv: 2, hauler: 1.6, boat: 1.2, destroyer: 2, cruiser: 2, carrier: 2.6, sub: 1.5 };
+export const QUAKE: Partial<Record<UnitKind, number>> = { apc: 1.3, light: 1.5, heavy: 2, scorch: 1.6, lumen: 1.4, mcv: 2, hauler: 1.6, boat: 1.2, destroyer: 2, cruiser: 2, carrier: 3, sub: 1.5 };
 export const buildingQuake = (rx: number, ry: number) => Math.min(3.5, 1.8 + (rx + ry) * 0.04);
 // How long a shake lasts, in seconds.
 export const QUAKE_S = 0.5;
@@ -240,7 +240,7 @@ export function muzzles(kind: UnitKind | DefenseKind, x: number, y: number, z: n
     case 'cruiser':
       return [at(x, y, a, 11.8, 1.2, 4.2), at(x, y, a, -11, -1.2, 4.2)];
     case 'carrier':
-      return [at(x, y, a, 18, -3, 6), at(x, y, a, 12, 3, 6), at(x, y, a, 6, -3, 6)];
+      return [at(x, y, a, 25, -4, 8.4), at(x, y, a, 17, 4, 8.4), at(x, y, a, 8.5, -4, 8.4)];
     case 'sub':
       return [at(x, y, a, 15, 0, 0)];
     case 'heron':
@@ -374,7 +374,7 @@ function charred(img: HTMLCanvasElement): HTMLCanvasElement {
 
 // How far round its middle a round may land on each kind of unit (world
 // units): rounds hit all over it, not just dead center.
-export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5, heron: 6, jet: 5, plane: 9, otter: 6, destroyer: 10, cruiser: 10, carrier: 14, sub: 8 };
+export const HIT_SPREAD: Record<UnitKind, number> = { mcv: 8, light: 5, heavy: 6, buggy: 3.5, apc: 5.5, hauler: 6, arty: 5, boat: 6, heli: 4.5, inf: 1, rocket: 1, gren: 1, eng: 1, dog: 1.5, cmdo: 1, flamer: 1, scorch: 5, lumen: 5, heron: 6, jet: 5, plane: 9, otter: 6, destroyer: 10, cruiser: 10, carrier: 19, sub: 8 };
 
 interface Flash {
   x: number;
