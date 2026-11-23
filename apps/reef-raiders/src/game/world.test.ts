@@ -97,6 +97,7 @@ describe('raiders', () => {
     const fish = w.fish[0];
     w.cast('r');
     expect(boat.hook.state).toBe('down');
+    boat.hook.y = K.SURF + K.HOOK_BITE_DEPTH + 20;
     w.step(K.STEP, none, none);
     fish.dir = 1;
     fish.level = 1;
@@ -123,6 +124,7 @@ describe('raiders', () => {
     const f = w.addSwimmer('s', 'S', '#ffd23f', 'fish');
     f.safeUntil = 0;
     w.cast('r');
+    boat.hook.y = K.SURF + K.HOOK_BITE_DEPTH + 20;
     w.step(K.STEP, none, none);
     f.dir = 1;
     f.x = boat.hook.x - fishLen(f) * 0.45;
@@ -222,5 +224,30 @@ describe('store', () => {
     w.buy('r', 'hull');
     expect(maxHealth(b)).toBeGreaterThan(before);
     expect(b.health).toBeCloseTo(maxHealth(b));
+  });
+});
+
+describe('casting', () => {
+  it('a fresh cast sinks past fish at the surface instead of hooking them', () => {
+    const w = new World(() => 0.5);
+    w.reset();
+    w.fish = w.fish.filter((f) => f.player);
+    const b = w.addRaider('r', 'R', '#ff4f4f');
+    w.cast('r');
+    const f = w.addSwimmer('s', 'S', '#45e3ff', 'fish');
+    f.safeUntil = 0;
+    // Park the fish's mouth right where the hook lands.
+    f.dir = 1;
+    f.x = b.hook.x - fishLen(f) * 0.45;
+    f.y = b.hook.y + 4;
+    for (let i = 0; i < 10; i++) w.step(K.STEP, new Map([['s', { x: 0, y: 0 }]]), none);
+    expect(b.hook.state).toBe('down');
+    // Lower down, the same fish does get hooked.
+    for (let i = 0; i < 120 && b.hook.state === 'down'; i++) {
+      f.x = b.hook.x - fishLen(f) * 0.45;
+      f.y = b.hook.y;
+      w.step(K.STEP, new Map([['s', { x: 0, y: 0 }]]), none);
+    }
+    expect(b.hook.state).toBe('fight');
   });
 });

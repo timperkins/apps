@@ -519,6 +519,8 @@ export class World {
       if (h.state === 'down') {
         // The hook trails the boat when it moves.
         h.x += (tip.x + b.dir * 8 - h.x) * Math.min(1, K.HOOK_FOLLOW * dt);
+        // Nothing bites until the hook has sunk a little, so a cast never snags a fish at the surface.
+        if (h.y < K.SURF + K.HOOK_BITE_DEPTH) continue;
         for (const f of this.fish) {
           if (!f.alive || f.hookedBy || this.time < f.safeUntil) continue;
           const m = mouthOf(f);

@@ -82,6 +82,8 @@ export const HOOK_SINK = 70;
 export const HOOK_REEL = 95;
 export const HOOK_FOLLOW = 3;
 export const HOOK_RADIUS = 5;
+// The hook can't catch anything in the top this-many pixels of water.
+export const HOOK_BITE_DEPTH = 40;
 export const LINE_DEEP = SEABED - 4;
 
 // ---- Tug-of-war ----
