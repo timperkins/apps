@@ -1,7 +1,7 @@
 // Isometric art for v2: units, buildings and props as shaded voxel shapes.
 // Everything is modelled in world units (one unit is one pixel across the
 // ground) down to half a unit, which is the finest the renderer samples.
-import { RGB, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
+import { RGB, dirIndex, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
 import { FACTIONS, Faction } from '../v1/sprites';
 import { Shape, StackOpts, StackSprite, columnMap, inBox, renderDirs, renderStack, toScreen } from './stack';
 
@@ -576,6 +576,25 @@ function aaLauncher(f: Faction): Shape {
   };
 }
 
+// The Skyguard tank's turret: the battery's four-tube launcher on a low
+// turret ring, with a small radar dome on a post at the back.
+function skyguardTurret(f: Faction): Shape {
+  const launcher = aaLauncher(f);
+  const Z0 = 5;
+  return (u, v, z) => {
+    if (z < Z0) return null;
+    const lz = z - Z0;
+    // the turret ring under the launcher
+    const d = Math.hypot(u, v);
+    if (lz < 0.8 && d < 4.6) return d > 4 ? GUN_D : g(mix(f.main, f.light, 0.3), u, v, z);
+    const ru = u + 4.2;
+    if (Math.hypot(ru, v) < 0.5 && lz < 4.4) return GUN_D;
+    const rd = Math.hypot(ru, v, lz - 5.6);
+    if (rd < 1.7) return mod(Math.atan2(v, ru) * 3, 1) < 0.1 ? PLAS_D : WHITE;
+    return launcher(u + 0.6, v, lz - 0.6);
+  };
+}
+
 function artillery(f: Faction): Shape {
   const hull = tankHull(f, 16, 12, false);
   return (u, v, z) => {
@@ -925,46 +944,58 @@ function destroyer(f: Faction): Shape {
   };
 }
 
-// The Sentinel cruiser: a big block of a superstructure with four flat
-// radar panels on its faces, banks of missile hatches fore and aft, and a
-// small gun at the bow.
-function cruiser(f: Faction): Shape {
+// The Skyguard cruiser, styled after the Skyguard battery: two round raised
+// launcher rings, fore and aft (the game draws the battery's own turning
+// four-tube launcher on each, at CRUISER_LAUNCHERS), and a superstructure
+// carrying a big white radar dome. It is drawn in two parts so a launcher
+// behind the superstructure is hidden by it: the hull with the rings, and
+// the superstructure on its own ('top').
+export const CRUISER_LAUNCHERS = [11, -11];
+export const CRUISER_RING_Z = 4.6;
+function cruiser(f: Faction, part: 'hull' | 'top'): Shape {
   const H = 3.2;
-  const PANEL = hex('#3e4a52');
   return (u, v, z) => {
     const av = Math.abs(v);
-    const hull = hullAt(u, v, z, f, -18, 19, 5, H);
-    if (hull !== undefined) return hull;
-    if (u < -18 || u > 19 || z > 15) return null;
-    // the superstructure, narrower as it rises
-    const top = 9.4;
-    const shrink = (z - H) * 0.12;
-    if (u > -6 + shrink && u < 7 - shrink && av < 3.8 - shrink && z < top) {
-      // the radar panels: an octagon on each face
-      const face = av > 3.8 - shrink - 0.5 ? Math.abs(u - 0.5) : u > 6.5 - shrink ? av : -1;
-      if (face >= 0 && face < 2 && Math.abs(z - 6.6) < 1.6 && face + Math.abs(z - 6.6) < 3) return mod(face * 2 + z * 2, 1.4) < 0.15 ? shade(PANEL, 0.25) : PANEL;
-      if (z > top - 0.6) return g(f.main, u, v, z);
-      if (z > H + 1.2 && z < H + 1.6) return f.dark;
-      return g(shade(HULL, 0.05), u, v, z);
-    }
-    // the bridge windows on a step in front of it
-    if (u >= 7 - (5 - H) * 0.12 && u < 8.6 && av < 2.8 && z < 6) return z > 4.6 && z < 5.6 ? (mod(v + 9, 2) < 0.35 ? f.dark : GLASS_L) : g(HULL, u, v, z);
-    // a mast with a cross bar and a light
-    if (Math.abs(u - 0.5) < 0.4 && av < 0.4 && z < 14.4) return z > 13.8 ? RED : GUN_D;
-    if (Math.abs(u - 0.5) < 0.4 && av < 2.4 && Math.abs(z - 12.2) < 0.35) return GUN_D;
-    // missile hatches: raised banks of square lids, fore and aft
-    for (const [a, b] of [[9.4, 14.2], [-14.6, -7.6]]) {
-      if (u > a && u < b && av < 2.6 && z < H + 0.8) {
-        if (mod(u - a, 1.6) < 0.25 || mod(v + 2.6, 1.3) < 0.2) return GUN_D;
-        return z > H + 0.5 ? g(METAL, u, v, z) : GUN;
+    if (part === 'hull') {
+      const hull = hullAt(u, v, z, f, -18, 19, 5, H);
+      if (hull !== undefined) return hull;
+      if (u < -18 || u > 19 || z > CRUISER_RING_Z) return null;
+      // the launcher rings, like the battery's emplacement
+      for (const cu of CRUISER_LAUNCHERS) {
+        const d = Math.hypot(u - cu, v);
+        const rr = 4 - Math.max(0, z - H - 0.6) * 0.6;
+        if (d < rr) {
+          const a = Math.atan2(v, u - cu);
+          if (z > CRUISER_RING_Z - 0.5) return d > rr - 0.8 ? PLAS_L : d < 2.2 ? GUN : mod(a * 6 / Math.PI, 1) < 0.1 ? GUN_D : TAR;
+          if (z > H + 0.4 && z < H + 0.9) return g(f.main, u, v, z);
+          return g(PLAS, u, v, z);
+        }
       }
+      // hazard stripes at the stern, and the rail round the bow
+      if (u < -15.4 && u > -17.4 && av < 2.4 && z < H + 0.1) return hazard(u, v);
+      if (u > 15 && u < 18 && rail(u, av, z, H, 2.6)) return STEEL;
+      return null;
     }
-    // the bow gun
-    const gd = (u - 15.6) ** 2 + v * v;
-    if (gd < 2.6 && z < H + 1.8) return g(f.main, u, v, z);
-    if (u > 16 && u < 19.6 && av < 0.3 && Math.abs(z - (H + 1.1)) < 0.3) return GUN;
-    // a small helicopter-less pad of hazard paint at the stern
-    if (u < -15 && u > -17.4 && av < 2.4 && z < H + 0.1) return hazard(u, v);
+    // the superstructure, narrower as it rises, with the side's color round its top
+    const top = 8.4;
+    const shrink = Math.max(0, z - H) * 0.14;
+    if (z > H - 0.1 && u > -5.5 + shrink && u < 5.2 - shrink && av < 3.6 - shrink && z < top) {
+      // bridge windows across the front, a hazard band low down
+      if (u > 4.6 - shrink && z > 5.6 && z < 6.7) return mod(v + 9, 2) < 0.35 ? f.dark : GLASS_L;
+      if (av > 3.1 - shrink && z > 5.8 && z < 6.5) return mod(u, 2.4) < 0.5 ? f.dark : GLASS_D;
+      if (z > top - 0.7) return g(f.main, u, v, z);
+      if (z > H + 0.9 && z < H + 1.5) return hazard(u + v, z * 0);
+      return g(PLAS, u, v, z);
+    }
+    // equipment boxes either side, olive with a hazard stripe, like the battery's
+    if (u > -4 && u < -1 && Math.abs(av - 4.1) < 0.6 && z > H - 0.1 && z < H + 1.6) return z > H + 1.2 ? OLIVE : Math.abs(u + 2.5) < 0.25 ? HAZ : OLIVE_D;
+    // the radar dome on a short round tower: the cruiser's mark, seen from far off
+    const dc = Math.hypot(u + 0.5, v);
+    if (dc < 1.6 && z >= top - 0.1 && z < 10.6) return PLAS_D;
+    const ds = Math.hypot(u + 0.5, v, z - 12.4);
+    if (ds < 3.2) return mod(Math.atan2(v, u + 0.5) * 3, 1) < 0.08 || Math.abs(z - 12.4) < 0.2 ? PLAS_D : WHITE;
+    // a whip mast behind it, with a light
+    if (Math.abs(u + 4.4) < 0.35 && av < 0.35 && z >= top - 0.1 && z < 14.4) return z > 13.8 ? RED : GUN_D;
     return null;
   };
 }
@@ -1501,6 +1532,9 @@ export interface V2FactionArt {
   otter: StackSprite[];
   destroyer: StackSprite[];
   cruiser: StackSprite[];
+  cruiserTop: StackSprite[];
+  skyguardTank: StackSprite[];
+  skyguardTurret: StackSprite[];
   carrier: StackSprite[];
   sub: StackSprite[];
   drone: StackSprite[];
@@ -1547,12 +1581,15 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     lumenTank: renderDirs(tankHull(f, 17, 13.5, false), DIRS, { r: 11, zmax: 7, bakeShadow: true }, k('lumenTank')),
     lumenTurret: renderDirs(lumenTurret(f), DIRS, { r: 6, zmax: 21 }, k('lumenTurret')),
     aaGun: renderDirs(aaLauncher(f), DIRS, { r: 7.5, zmax: 10 }, k('aaGun')),
+    skyguardTank: renderDirs(tankHull(f, 16, 12.5, false), DIRS, { r: 10.5, zmax: 7, bakeShadow: true }, k('skyguardTank')),
+    skyguardTurret: renderDirs(skyguardTurret(f), DIRS, { r: 8, zmax: 15 }, k('skyguardTurret')),
     heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
     jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
     plane: renderDirs(cargoPlane(f), DIRS, { r: 21, zmax: 11 }, k('plane')),
     otter: renderDirs(hovercraft(f), DIRS, { r: 13, zmax: 9, bakeShadow: true, shadowAlpha: 0.2 }, k('otter')),
     destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
-    cruiser: renderDirs(cruiser(f), DIRS, { r: 20.5, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
+    cruiser: renderDirs(cruiser(f, 'hull'), DIRS, { r: 20.5, zmax: 6, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
+    cruiserTop: renderDirs(cruiser(f, 'top'), DIRS, { r: 7, zmax: 16 }, k('cruiserTop')),
     carrier: renderDirs(carrier(f), DIRS, { r: 29, zmax: 17, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
     sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
     drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
@@ -1565,6 +1602,23 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     dog: [0, 1, 2, 3].map((fr) => renderDirs(dog(f, fr), 16, { r: 5, zmax: 8, step: 0.5, bakeShadow: true }, k(`dog:${fr}`))),
     infantryDug: [1, 2, 3].map((n, i) => renderDirs(soldier(f, 'gi', 4, n / 3), 16, { r: 4.8, zmax: 10, step: 0.5, bakeShadow: true }, k(`infantryDug:${i}`))),
   };
+}
+
+/** The Skyguard cruiser's sprites, back to front, for a ship at (x, y) and
+ * height z facing a with its launchers turned to tur: the hull, the
+ * launchers and the superstructure, a launcher behind the superstructure
+ * drawn before it and one in front after it. */
+export function cruiserParts(art: V2FactionArt, x: number, y: number, z: number, a: number, tur: number): [StackSprite, number, number, number][] {
+  const di = dirIndex(a, DIRS);
+  const ti = dirIndex(tur, DIRS);
+  const out: [StackSprite, number, number, number][] = [[art.cruiser[di], x, y, z]];
+  const ls = CRUISER_LAUNCHERS.map((l) => ({ l, x: x + Math.cos(a) * l, y: y + Math.sin(a) * l }));
+  const behind = ls.filter((p) => p.x + p.y < x + y);
+  const ahead = ls.filter((p) => p.x + p.y >= x + y);
+  for (const p of behind) out.push([art.aaGun[ti], p.x, p.y, z + CRUISER_RING_Z]);
+  out.push([art.cruiserTop[di], x, y, z]);
+  for (const p of ahead) out.push([art.aaGun[ti], p.x, p.y, z + CRUISER_RING_Z]);
+  return out;
 }
 
 /** The set of headings a key from makeFactionArt names, in a given set of art. */
