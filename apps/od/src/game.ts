@@ -1007,6 +1007,14 @@ export class Game {
       this.fx('text', p.x, p.y, 2.6, `+$${cash}`, '#a5d6a7', 1.2);
       sfx('coin');
     }
+    if (p.kind === 'cop') {
+      // beat a cop and they drop their lunch money (more as cops get tougher)
+      const cash = Math.round((50 + Math.floor(Math.random() * 51)) * p.mult);
+      this.money += cash;
+      this.fx('text', p.x, p.y, 2.6, `+$${cash}`, '#a5d6a7', 1.4, 1.2);
+      sfx('cash');
+      this.onSave?.();
+    }
     if (p.kind === 'captain') {
       this.captainDown = true;
       this.crime(2, 'You beat the captain!', true);
