@@ -433,7 +433,7 @@ export function collectLong(R: Renderer, game: Game, cam: Cam, add: Add) {
         ctx.shadowBlur = 0;
         label(ctx, 'The Sword of Light', 0, -66, '#fff2a0');
         const p = game.p;
-        if (Math.hypot(p.x - GROVE.x, p.y - GROVE.y) < 6) label(ctx, `Needs 10 full hearts (you have ${Math.floor(p.hp / 4)})`, 0, -78, p.hp >= LIGHT_HEARTS ? '#9fe37a' : '#ffb0b0');
+        if (Math.hypot(p.x - GROVE.x, p.y - GROVE.y) < 6) label(ctx, `Needs 12 full hearts (you have ${Math.floor(p.hp / 4)})`, 0, -78, p.hp >= LIGHT_HEARTS ? '#9fe37a' : '#ffb0b0');
       }
       ctx.restore();
     });

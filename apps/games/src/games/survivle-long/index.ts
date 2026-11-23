@@ -321,7 +321,7 @@ const game: GameModule = {
           <details class="svl-new"><summary>What's new in the Long Edition</summary>
             <ul>
               <li><b>The Dark Beast is 3× harder</b>: 1,500 health, hits harder and attacks faster.</li>
-              <li><b>The Sword of Light</b>: 30 damage, double to bosses. You need 10 full hearts to pull it out. Follow the gold arrow.</li>
+              <li><b>The Sword of Light</b>: 30 damage, double to bosses. You need 12 full hearts to pull it out. Follow the gold arrow.</li>
               <li><b>Raider camps</b> around a fire with 4 spears with apples on them. Take the spears!</li>
               <li><b>Raiders</b> with swords, bows, spears, armor and shields. <b>Shields break</b>, yours too.</li>
               <li><b>Shift</b> changes weapons. <b>Armor</b> from the blacksmith, captains and loot chests.</li>
@@ -702,7 +702,7 @@ const game: GameModule = {
           </div>
           <div class="svl-cols">
             <div><h3>In your hand (Shift)</h3>${g.lx.weapons().map((w) => `<button class="svl-item ${g.lx.weapon === w ? 'on' : ''}" data-a="weapon" data-id="${w}">${g.lx.weaponIcon(w)} ${esc(g.lx.weaponLabel(g, w))}</button>`).join('')}
-              ${g.lx.light ? '' : '<p class="svl-dim">✨ The Sword of Light waits in a ring of trees (gold arrow). You need 10 full hearts to pull it out.</p>'}</div>
+              ${g.lx.light ? '' : '<p class="svl-dim">✨ The Sword of Light waits in a ring of trees (gold arrow). You need 12 full hearts to pull it out.</p>'}</div>
             <div><h3>Armor (${Math.round(g.lx.armorDef() * 100)}% less damage)</h3>${g.lx.ownedArmor.length ? g.lx.ownedArmor.map((id) => { const a = ARMOR.find((q) => q.id === id)!; return `<button class="svl-item ${g.lx.armor[a.slot] === id ? 'on' : ''}" data-a="armor" data-id="${id}"><i style="background:${a.color};border-color:#222"></i>${a.name}${a.warm ? ' (warm)' : ''}</button>`; }).join('') : '<p class="svl-dim">No armor yet. The blacksmith in each village sells it.</p>'}</div>
             <div><h3>Shield &amp; more</h3><p class="svl-dim">${g.lx.shield ? `🛡 ${shieldById(g.lx.shield.id)?.name}: ${g.lx.shield.hp} / ${shieldById(g.lx.shield.id)?.hp}` : '🛡 No shield'}<br>💣 ${g.lx.bombs} bombs · 🔥 ${g.lx.fireArrows} fire arrows · ❄ ${g.iceArrows} ice arrows<br>🍄 ${g.lx.red} red, ${g.lx.blue} blue · 🍖 ${g.lx.meat} meat<br>🔮 ${g.lx.orbs} spirit orbs · ⭐ ${g.lx.stars} · 💎 ${g.lx.gems}${g.lx.glider ? '<br>🪂 Glider' : ''}</p></div>
           </div>
