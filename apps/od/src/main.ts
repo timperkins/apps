@@ -294,6 +294,7 @@ function renderPhone() {
       <p><b>Cars:</b> walk up to a car to pick up the driver, put them down and drive away. Buses and cars can bonk you, so watch out!</p>
       <p><b>The ship:</b> walk down the dock, beat the captain, then take the wheel and sail.</p>
       <p><b>Police</b> walk around calmly and only chase you if they see you do something bad (or you bonk one). Robbing the bank or taking the ship always makes them angry.</p>
+      <p>Knock out a cop and they drop <b>$50 to $100</b>.</p>
       <p><b>Cops</b> get tired if they chase you too long. Every 10 minutes they get 25% tougher. At 4 stars the army shows up with Greniders, Heaters and Lazors. At 5 stars, tanks!</p>
       <p><b>Lose the cops</b> by staying out of sight, or change your disguise when nobody is looking.</p>
     </div>`;
