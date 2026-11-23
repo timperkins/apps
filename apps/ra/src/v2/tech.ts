@@ -55,6 +55,7 @@ export const TECH: Tech[] = [
   { id: 'scorch', name: 'Scorch tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'scorch', from: 'factory', blurb: 'Twin flame projectors: burns soldiers and buildings at short range.' },
   { id: 'arty', name: 'Howler artillery', tab: 'veh', cost: 800, needs: ['factory', 'radar'], unit: 'arty', from: 'factory', blurb: 'Long-range gun.' },
   { id: 'comet', name: 'Comet launcher', tab: 'veh', cost: 1300, needs: ['factory', 'radar'], unit: 'comet', from: 'factory', blurb: 'Slow rocket carrier that fires one huge rocket at a time, from further off than anything else on land, and takes a long while to load the next. Can\'t fire on anything close: keep it guarded.' },
+  { id: 'skyguard', name: 'Skyguard tank', tab: 'veh', cost: 900, needs: ['factory', 'radar'], unit: 'skyguard', from: 'factory', blurb: 'Tank carrying a Skyguard missile launcher: shoots down aircraft and keeps up with your army. Can\'t hit anything on the ground.' },
   { id: 'heavy', name: 'Bastion tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'heavy', from: 'factory', blurb: 'Heavy twin-gun tank.' },
   { id: 'lumen', name: 'Lumen tank', tab: 'veh', cost: 1200, needs: ['factory', 'lab'], unit: 'lumen', from: 'factory', blurb: 'Fires a long-range beam of light that splashes over everything near where it lands.' },
   { id: 'heli', name: 'Kestrel copter', tab: 'veh', cost: 1200, needs: ['helipad', 'lab'], unit: 'heli', from: 'helipad', blurb: 'Rocket copter.' },
@@ -64,7 +65,7 @@ export const TECH: Tech[] = [
   { id: 'otter', name: 'Otter hovercraft', tab: 'veh', cost: 900, needs: ['navy'], unit: 'otter', from: 'navy', blurb: 'Unarmed hovercraft that carries twelve soldiers, or three vehicles, over land and water. Comes ashore to let them out.' },
   { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
   { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water until it fires torpedoes, which only hit ships. Only Destroyers can hit it submerged.' },
-  { id: 'cruiser', name: 'Sentinel cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Shoots down aircraft from far off with banks of missiles. Can\'t hit anything on the ground or water.' },
+  { id: 'cruiser', name: 'Skyguard cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Warship with two Skyguard missile launchers that shoot down aircraft from far off. Can\'t hit anything on the ground or water.' },
   { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Launches drones at targets on land or sea from very long range.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Construction yard.' },
 ];

@@ -48,7 +48,7 @@ const LEVELS: Record<BotLevel, Level> = {
     firstAttack: 210,
     every: 90,
     order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower', 'navy', 'aa', 'power', 'lab', 'power', 'prism', 'depot', 'uplink', 'power', 'prism', 'aa'],
-    units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'plane', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'sub', 'cruiser', 'lumen', 'comet', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
+    units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'plane', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'skyguard', 'sub', 'cruiser', 'lumen', 'comet', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
   },
 };
 

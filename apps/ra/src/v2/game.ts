@@ -49,6 +49,7 @@ import {
   AIR_RUNWAY,
   AIR_STAND_V,
   HANGAR_DOOR,
+  cruiserParts,
 } from './sprites';
 
 // v2 adds the Mobile Foundry to v1's units.
@@ -65,12 +66,13 @@ const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number;
   scorch: { name: 'Scorch tank', speed: 20, turn: 2.8, r: 7.5, hp: 1 },
   lumen: { name: 'Lumen tank', speed: 18, turn: 2.6, r: 7.5, hp: 1 },
   comet: { name: 'Comet launcher', speed: 11, turn: 1.6, r: 8.5, hp: 1 },
+  skyguard: { name: 'Skyguard tank', speed: 21, turn: 2.8, r: 7.5, hp: 1 },
   heron: { name: 'Heron transport', speed: 30, turn: 2.6, r: 9, hp: 1 },
   jet: { name: 'Swift jet', speed: 52, turn: 3.2, r: 8, hp: 1 },
   plane: { name: 'Paratrooper plane', speed: 60, turn: 0.6, r: 12, hp: 1 },
   otter: { name: 'Otter hovercraft', speed: 26, turn: 2.4, r: 10, hp: 1 },
   destroyer: { name: 'Destroyer', speed: 22, turn: 1.4, r: 15, hp: 1 },
-  cruiser: { name: 'Sentinel cruiser', speed: 19, turn: 1.3, r: 15, hp: 1 },
+  cruiser: { name: 'Skyguard cruiser', speed: 19, turn: 1.3, r: 15, hp: 1 },
   carrier: { name: 'Carrier', speed: 13, turn: 0.9, r: 22, hp: 1 },
   sub: { name: 'Submarine', speed: 20, turn: 1.7, r: 12, hp: 1 },
 };
@@ -124,6 +126,7 @@ const VOICE: Record<Kind, UnitVoice> = {
   scorch: 'tank',
   lumen: 'tank',
   comet: 'tank',
+  skyguard: 'tank',
   heron: 'pilot',
   plane: 'pilot',
   otter: 'navy',
@@ -193,7 +196,7 @@ const RIDERS = new Set<Kind>(['inf', 'rocket', 'gren', 'eng', 'dog', 'cmdo', 'fl
 // too, each one filling HAUL_SEATS of them (so 12 soldiers, or 3 vehicles).
 const OTTER_SEATS = 12;
 const HAUL_SEATS = 4;
-const HAULED = new Set<Kind>(['mcv', 'light', 'heavy', 'buggy', 'arty', 'scorch', 'lumen', 'comet']);
+const HAULED = new Set<Kind>(['mcv', 'light', 'heavy', 'buggy', 'arty', 'scorch', 'lumen', 'comet', 'skyguard']);
 // The seats transport t has, the seats u takes up, and whether u can ride in t
 const seatsOf = (t: { kind: Kind }): number => (t.kind === 'otter' ? OTTER_SEATS : CARGO);
 const seatOf = (u: { kind: Kind }): number => (RIDERS.has(u.kind) ? 1 : HAUL_SEATS);
@@ -528,10 +531,10 @@ function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: bool
   return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
-const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
+const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 7, sub: 2 };
 // How far each of your units sees, in cells: it lifts the shroud that far
 // round itself.
-const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
+const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
 const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
@@ -562,15 +565,16 @@ const GARRISON: [Kind, number][] = [
   ['scorch', 2],
   ['lumen', 2],
   ['comet', 1],
+  ['skyguard', 2],
 ];
 // The walk and stand frames of each kind of foot soldier.
 const footFrames = (art: V2FactionArt, k: Kind): StackSprite[][] =>
   k === 'rocket' ? art.rocket : k === 'gren' ? art.gren : k === 'eng' ? art.eng : k === 'dog' ? art.dog : k === 'cmdo' ? art.cmdo : k === 'flamer' ? art.flamer : art.infantry;
 // The tanks with a turning turret, and the hull and turret each is drawn with.
-const TURRETED: ReadonlySet<Kind> = new Set<Kind>(['light', 'heavy', 'scorch', 'lumen']);
+const TURRETED: ReadonlySet<Kind> = new Set<Kind>(['light', 'heavy', 'scorch', 'lumen', 'skyguard', 'cruiser']);
 const tankParts = (art: V2FactionArt, k: Kind): [StackSprite[], StackSprite[]] =>
-  k === 'heavy' ? [art.heavyTank, art.heavyTurret] : k === 'scorch' ? [art.scorchTank, art.scorchTurret] : k === 'lumen' ? [art.lumenTank, art.lumenTurret] : [art.lightTank, art.lightTurret];
-const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', buggy: 'factory', arty: 'factory', comet: 'factory', heli: 'helipad' };
+  k === 'heavy' ? [art.heavyTank, art.heavyTurret] : k === 'scorch' ? [art.scorchTank, art.scorchTurret] : k === 'lumen' ? [art.lumenTank, art.lumenTurret] : k === 'skyguard' ? [art.skyguardTank, art.skyguardTurret] : [art.lightTank, art.lightTurret];
+const MAKER: Partial<Record<Kind, BuildingKind>> = { inf: 'barracks', rocket: 'barracks', gren: 'barracks', eng: 'barracks', dog: 'barracks', flamer: 'barracks', light: 'factory', heavy: 'factory', scorch: 'factory', lumen: 'factory', skyguard: 'factory', buggy: 'factory', arty: 'factory', comet: 'factory', heli: 'helipad' };
 // ...and it waits in groups of this many at each of its posts round its base.
 const SQUAD = 4;
 const POSTS = 6;
@@ -913,7 +917,8 @@ export class IsoGame implements GameLike {
       case 'light':
       case 'heavy':
       case 'scorch':
-      case 'lumen': {
+      case 'lumen':
+      case 'skyguard': {
         const [hull, tur] = tankParts(art, u.kind);
         return [[hull, di], [tur, dirIndex(u.turret, DIRS)]];
       }
@@ -927,8 +932,9 @@ export class IsoGame implements GameLike {
         return [[art.plane, di]];
       case 'boat':
       case 'otter':
-      case 'destroyer':
       case 'cruiser':
+        return [[art.cruiser, di], [art.cruiserTop, di], [art.aaGun, dirIndex(u.turret, DIRS)]];
+      case 'destroyer':
       case 'carrier':
       case 'sub':
         return [[art[u.kind], di]];
@@ -976,7 +982,7 @@ export class IsoGame implements GameLike {
     }
     // then every heading of those, and of everything you can make
     const mine = this.art[this.me];
-    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.buggy, mine.apc, mine.artillery, mine.comet, mine.cometEmpty, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
+    for (const arr of [mine.mcv, mine.lightTank, mine.lightTurret, mine.heavyTank, mine.heavyTurret, mine.scorchTank, mine.scorchTurret, mine.lumenTank, mine.lumenTurret, mine.skyguardTank, mine.skyguardTurret, mine.buggy, mine.apc, mine.artillery, mine.comet, mine.cometEmpty, mine.heli, mine.boat, ...mine.haulerLoad, ...mine.infantry, ...mine.rocket, ...mine.dog, ...mine.flamer, ...mine.haulerDig])
       if (!sets.includes(arr)) sets.push(arr);
     for (const arr of sets) {
       const s = dirSet(arr);
@@ -1497,7 +1503,9 @@ export class IsoGame implements GameLike {
     const di = dirIndex(a, DIRS);
     return isFoot(kind)
       ? [footFrames(art, kind)[0][dirIndex(a, 16)]]
-      : TURRETED.has(kind)
+      : kind === 'cruiser'
+        ? cruiserParts(art, 0, 0, 0, a, a).map(([s]) => s)
+        : TURRETED.has(kind)
         ? tankParts(art, kind).map((s) => s[di])
         : [{ mcv: art.mcv, buggy: art.buggy, apc: art.apc, hauler: art.hauler, arty: art.artillery, comet: art.comet, heli: art.heli, heron: art.heron, jet: art.jet, plane: art.plane, boat: art.boat, otter: art.otter, destroyer: art.destroyer, cruiser: art.cruiser, carrier: art.carrier, sub: art.sub }[kind as 'mcv'][di]];
   }
@@ -5526,6 +5534,7 @@ export class IsoGame implements GameLike {
       case 'prism':
         return this.sound(x, y, 'beam_fire', 1, { rate: kind === 'prism' ? 0.9 : 1.05 }, z);
       case 'aa':
+      case 'skyguard':
         return twin('rocket_launch', 1.3, 0.9);
       case 'boat':
         return twin('cannon_shot', 1.2, 0.8);
@@ -6014,7 +6023,8 @@ export class IsoGame implements GameLike {
       case 'light':
       case 'heavy':
       case 'scorch':
-      case 'lumen': {
+      case 'lumen':
+      case 'skyguard': {
         const [hull, tur] = tankParts(art, u.kind);
         return [
           [hull[di], u.x, u.y, u.z],
@@ -6027,9 +6037,10 @@ export class IsoGame implements GameLike {
       case 'jet':
       case 'plane':
         return [[art[u.kind][di], u.x, u.y, u.z + this.alt(u)]];
+      case 'cruiser':
+        return cruiserParts(art, u.x, u.y, 0, u.a, u.turret);
       case 'boat':
       case 'destroyer':
-      case 'cruiser':
       case 'carrier':
       case 'sub':
         return [[art[u.kind][di], u.x, u.y, 0]];
@@ -6639,7 +6650,8 @@ export class IsoGame implements GameLike {
       case 'light':
       case 'heavy':
       case 'scorch':
-      case 'lumen': {
+      case 'lumen':
+      case 'skyguard': {
         const [hull, tur] = tankParts(art, u.kind);
         this.blit(hull[di], u.x, u.y, u.z);
         this.blit(tur[dirIndex(u.turret, DIRS)], u.x - Math.cos(u.a) * 1.2 - Math.cos(u.turret) * kick, u.y - Math.sin(u.a) * 1.2 - Math.sin(u.turret) * kick, u.z);
@@ -6715,8 +6727,10 @@ export class IsoGame implements GameLike {
         }
         break;
       }
-      case 'destroyer':
       case 'cruiser':
+        for (const [spr, x, y, z] of cruiserParts(art, u.x, u.y, Math.sin(u.anim * 1.4) * 0.4, u.a, u.turret)) this.blit(spr, x, y, z);
+        break;
+      case 'destroyer':
       case 'carrier': {
         // big ships roll slowly
         this.blit(art[u.kind][di], u.x, u.y, Math.sin(u.anim * 1.4) * 0.4);
