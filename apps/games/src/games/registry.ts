@@ -144,4 +144,25 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./survivle-long/index'),
   },
+  {
+    id: 'emberwild',
+    title: 'Emberwild',
+    tagline: 'Roam a wild land, mine and build with blocks, and automate drills, belts and furnaces to relight four lost beacons.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#2b3a5a"/>
+      <path d="M0 52L30 38L60 50L92 30L120 44V80H0Z" fill="#4f9440"/>
+      <path d="M0 62L40 52L80 64L120 54V80H0Z" fill="#72b54e"/>
+      <rect x="84" y="26" width="16" height="14" fill="#b9b1a0"/><rect x="82" y="23" width="20" height="4" fill="#857d6b"/>
+      <path d="M86 23q0-10 6-15q6 5 6 15z" fill="#ff7a1a"/><path d="M89 23q0-5 3-8q3 3 3 8z" fill="#ffe27a"/>
+      <path d="M86 23L80 0H104L98 23Z" fill="rgba(255,190,80,.2)"/>
+      <rect x="10" y="56" width="11" height="11" fill="#d39a3a"/><rect x="10" y="53" width="11" height="4" fill="#e8b860"/>
+      <rect x="21" y="60" width="34" height="6" fill="#33383e"/><path d="M26 61l3 2-3 2M36 61l3 2-3 2M46 61l3 2-3 2" stroke="#d9a632" stroke-width="1.2" fill="none"/>
+      <rect x="55" y="54" width="13" height="13" fill="#a19b92"/><rect x="58" y="61" width="7" height="4" rx="1" fill="#ff8a2a"/>
+      <rect x="104" y="58" width="10" height="10" fill="#a39f97"/><rect x="104" y="55" width="10" height="4" fill="#c4c0b8"/><rect x="107" y="60" width="3" height="2" fill="#e8803e"/>
+      <circle cx="30" cy="40" r="7" fill="#3f8a3a"/><rect x="29" y="44" width="2.5" height="6" fill="#6b4424"/>
+      <g transform="translate(74 60)"><rect x="-3" y="-8" width="6" height="7" rx="1.5" fill="#2f8a74"/><circle cy="-11" r="3.2" fill="#f0c7a0"/><path d="M-3.4 -11.5a3.4 3.4 0 0 1 6.8 0z" fill="#e0b04a"/><path d="M-3 -8L-4 -1H4L3 -8Z" fill="#c4462f" opacity=".85"/></g>
+      <g fill="#fff8e0"><circle cx="14" cy="10" r=".9"/><circle cx="48" cy="6" r="1"/><circle cx="66" cy="16" r=".8"/></g>
+    </svg>`,
+    load: () => import('./emberwild/index'),
+  },
 ];
