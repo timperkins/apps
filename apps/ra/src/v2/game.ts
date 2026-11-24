@@ -18,6 +18,7 @@ import { planBridges } from './bridges';
 import { BRIDGE_Z, BridgeStyle, DECK_W, HUT_R, bridgeFromKey, bridgeKey, bridgeLen, deckTop, makeHut } from './bridge-art';
 import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
+import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
 import { type Armor, isNaval, BOOM, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
@@ -34,6 +35,8 @@ import {
   BLOCK_CELL,
   makeBuilding,
   makeBushes,
+  makeOreGen,
+  ORE_GEN_TIP,
   makeClutter,
   makeDish,
   makeOre,
@@ -760,6 +763,9 @@ export class IsoGame implements GameLike {
   force = false;
   ore: OreNode[] = [];
   private oreGrid = new Map<number, OreNode[]>();
+  // a generator in the middle of each ore field, growing its ore back
+  oreGens: OreGen<OreNode>[] = [];
+  oreGenArt = makeOreGen();
   time = 0;
   onSelect: (names: string[]) => void = () => {};
   // which map generate() makes (see maps.ts), and the stage it starts at
@@ -1067,6 +1073,7 @@ export class IsoGame implements GameLike {
     this.aiT = 0;
     this.ore = [];
     this.oreGrid = new Map();
+    this.oreGens = [];
     this.seaCells = new Map();
     this.landCells = new Map();
     this.blocksKey = '';
@@ -1257,6 +1264,9 @@ export class IsoGame implements GameLike {
     const startSites = spots.map((ms) => this.siteOf(...toWorld(ms[0], ms[1], 0)));
     const field = (sx: number, sy: number, n: number) => {
       const reach = 6 + Math.sqrt(n) * 5.5;
+      // the generator in the middle, the clumps round it
+      const [gx, gy] = T.fold(...toWorld(sx, sy, 0));
+      const nodes: OreNode[] = [];
       for (let i = 0, t = 0; i < n && t < n * 30; t++) {
         const a = rand() * Math.PI * 2;
         const d = Math.sqrt(rand()) * reach;
@@ -1265,9 +1275,20 @@ export class IsoGame implements GameLike {
         if (startSites.some((ss) => inside(x, y, ss, 10))) continue;
         if (this.oreNear(x, y, 5).length) continue;
         const [fx, fy] = T.fold(x, y);
-        this.addOre({ x: fx, y: fy, amt: ORE.node * (0.6 + rand() * 0.4), v: Math.floor(rand() * 4) });
+        const [px, py] = this.nearPoint(gx, gy, fx, fy);
+        if (Math.hypot(px - gx, py - gy) < 7) continue;
+        const node = { x: fx, y: fy, amt: ORE.node * (0.6 + rand() * 0.4), v: Math.floor(rand() * 4) };
+        this.addOre(node);
+        nodes.push(node);
         i++;
       }
+      if (!nodes.length || T.k(gx, gy) !== K.Grass) return;
+      const dist = (o: OreNode) => {
+        const [px, py] = this.nearPoint(gx, gy, o.x, o.y);
+        return Math.hypot(px - gx, py - gy);
+      };
+      nodes.sort((a, b) => dist(a) - dist(b));
+      this.oreGens.push({ x: gx, y: gy, nodes });
     };
     const nearField = (cx: number, cy: number, r0: number, n: number) => {
       for (let t = 0; t < 60; t++) {
@@ -2099,6 +2120,7 @@ export class IsoGame implements GameLike {
     // not on ore either
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
+    if (this.oreGens.some((g) => inside(...this.nearPoint(cx, cy, g.x, g.y), r, 5))) return false;
     return !this.oreNear(cx, cy, Math.hypot(r.w, r.h) / 2 + 4).some((n) => n.amt > 1 && inside(...this.nearPoint(cx, cy, n.x, n.y), r, 3));
   }
 
@@ -2111,6 +2133,14 @@ export class IsoGame implements GameLike {
     const i = (((Math.floor(sx / 64) % nx) + nx) % nx);
     const j = (((Math.floor(sy / 64) % ny) + ny) % ny);
     return [i, j];
+  }
+
+  // Whether a building stands on (or right by) ore clump n.
+  private builtOn(n: OreNode): boolean {
+    return this.buildings.some((b) => {
+      const [bx, by] = this.nearPoint(n.x, n.y, b.x, b.y);
+      return Math.abs(bx - n.x) < b.pad.w / 2 + 4 && Math.abs(by - n.y) < b.pad.h / 2 + 4;
+    });
   }
 
   private addOre(n: OreNode): void {
@@ -3715,8 +3745,10 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) if (u.kind === 'plane') this.planeAbout(u, dt);
     for (const u of [...this.units]) if (u.fly !== undefined && isFoot(u.kind)) this.paraDrop(u, dt);
     for (const u of [...this.units]) if (!u.dead && !u.exit) this.fight(u, dt);
-    // ore creeps back slowly, as long as a clump isn't dug out completely
-    for (const n of this.ore) if (n.amt > 1 && n.amt < ORE.node) n.amt = Math.min(ORE.node, n.amt + ORE.regrow * dt);
+    // each field's generator slowly grows its ore back, nearest clumps first
+    // (on a player's screen the host's ore arrives with the snapshots)
+    // (not where a building has gone up on dug-out ground)
+    if (this.net !== 'client') for (const g of this.oreGens) regrowField(g, ORE.regrow * dt, ORE.node, (n) => n.amt > 1 || !this.builtOn(n));
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
@@ -6219,6 +6251,31 @@ export class IsoGame implements GameLike {
     }
   }
 
+  // An ore field's generator, its crystal pulsing while it grows ore back,
+  // and a glint over the clump it is filling.
+  private drawOreGen(g: OreGen<OreNode>): void {
+    this.blit(this.oreGenArt, g.x, g.y, 0);
+    const c = this.ctx;
+    const growing = g.nodes.find((n) => n.amt < ORE.node);
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * (growing ? 4 : 1.5) + g.x);
+    const [sx, sy] = toScreen(g.x, g.y, ORE_GEN_TIP - 1);
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    c.fillStyle = `rgba(255,214,110,${(growing ? 0.35 : 0.15) + pulse * (growing ? 0.4 : 0.15)})`;
+    c.beginPath();
+    c.arc(sx, sy, 2 + pulse * 1.5, 0, Math.PI * 2);
+    c.fill();
+    if (growing) {
+      const [px, py] = this.nearPoint(g.x, g.y, growing.x, growing.y);
+      const [gx, gy] = toScreen(px, py, 2);
+      const a = 0.5 + 0.5 * Math.sin(this.time * 6);
+      c.fillStyle = `rgba(255,240,180,${a * 0.8})`;
+      c.fillRect(Math.round(gx) - 1, Math.round(gy), 3, 1);
+      c.fillRect(Math.round(gx), Math.round(gy) - 1, 1, 3);
+    }
+    c.restore();
+  }
+
   private drawRuin(r: Ruin): void {
     if (r.t < 0) {
       // still going up in smoke: the damaged building until the big bang
@@ -6407,6 +6464,7 @@ export class IsoGame implements GameLike {
       const spr = this.oreArt.lumps[n.v][oreSize(n)];
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
+    for (const g of this.oreGens) if (seen(g.x, g.y, 4)) items.push({ k: g.x + g.y, draw: () => this.drawOreGen(g) });
     for (const u of this.units) if ((!this.aloft(u) || u.exit) && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
