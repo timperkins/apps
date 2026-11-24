@@ -24,7 +24,8 @@ export type Announce =
   | 'building_lost'
   | 'new_options'
   | 'rally_point'
-  | 'para_ready';
+  | 'para_ready'
+  | 'tech_captured';
 
 const UNIT_CLIPS: Record<UnitVoice, Partial<Record<UnitLine, number>>> = {
   soldier: { select: 5, move: 5, attack: 5 },
@@ -55,6 +56,7 @@ const ANNOUNCE: Announce[] = [
   'new_options',
   'rally_point',
   'para_ready',
+  'tech_captured',
 ];
 
 // The least time between two of the same announcement, in seconds: alerts

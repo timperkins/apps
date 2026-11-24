@@ -2,10 +2,10 @@
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
-import { DIRS, FACTIONS, KNEEL_DROP, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
+import { DIRS, FACTIONS, KNEEL_DROP, NEUTRAL_F, PUMP_FRAMES, factionOf, makePumpBeam, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
-import { TECH } from './v2/tech';
+import { DERRICK, TECH } from './v2/tech';
 import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
 
 const TAU = Math.PI * 2;
@@ -1213,13 +1213,14 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'tower', name: 'Gun tower' },
   { kind: 'aa', name: 'Skyguard battery' },
   { kind: 'prism', name: 'Lumen tower' },
+  { kind: 'derrick', name: 'Tech oil derrick', blurb: `Can't be built: a few stand out on every map, belonging to nobody. Send an Engineer in to capture it (the three yellow arrows) and it turns your color, pays you $${DERRICK.bonus} at once and then $${DERRICK.rate} a second while you hold it. Anyone can capture it from you the same way, and it can be destroyed for good.` },
 ];
 
 // The building's moving parts and smoke, as the game draws them.
 const labGlow: (StackSprite | null)[] = [];
 function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art: V2FactionArt, dish: StackSprite[], phase: number, dt: number, gun: number): void {
   const c = s.c;
-  const f = FACTIONS[fi];
+  const f = factionOf(fi);
   const fx = (i: number) => toScreen(b.fx[i].x, b.fx[i].y, b.fx[i].z).map(Math.round) as [number, number];
   const emit = (i: number, kind: 'smoke' | 'soot', rate: number) => {
     if (!b.fx[i] || Math.random() > dt * rate) return;
@@ -1281,12 +1282,30 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
     case 'refinery':
       emit(0, 'soot', 2);
       break;
+    case 'derrick': {
+      // the pumpjack nodding (still when nobody holds it), the holder's flag and the beacon
+      const k = fi === NEUTRAL_F ? 0 : Math.floor(phase * DERRICK.strokes * PUMP_FRAMES) % PUMP_FRAMES;
+      const set = (pumps[fi] ??= []);
+      s.blit((set[k] ??= makePumpBeam(f, k)), 0, 0, 0);
+      const [x, y] = fx(1);
+      const wave = Math.floor(phase * 5) % 4;
+      for (let i = 0; i < 7; i++) {
+        const dy = Math.round(Math.sin(i * 0.9 - wave * 1.6) * 0.8);
+        c.fillStyle = cssOf(i < 2 ? f.light : i === 6 ? f.dark : f.main);
+        c.fillRect(x - 1 - i, y + dy, 1, 4);
+      }
+      blink(1.4);
+      break;
+    }
     case 'factory':
       emit(0, 'smoke', 0.8);
       emit(1, 'smoke', 0.8);
       break;
   }
 }
+
+// The oil derrick's pumpjack pictures, by side (see makePumpBeam).
+const pumps: Record<number, StackSprite[]> = {};
 
 // The turning gun drawn on top of a defense, if it has one.
 const gunOf = (art: V2FactionArt, kind: BuildingKind): StackSprite[] | null => (kind === 'tower' ? art.towerGun : kind === 'aa' ? art.aaGun : null);
@@ -1307,6 +1326,23 @@ function buildingRow(parent: HTMLElement, def: (typeof BUILDINGS)[number], arts:
     if (g) s.blit(g[dirIndex(gun, DIRS)], b.fx[0].x, b.fx[0].y, b.fx[0].z);
   };
   const cells: Cell[] = [];
+  if (def.kind === 'derrick') {
+    // it can't be built, so no going up: nobody's, then captured by you and by the enemy
+    const free = makeBuilding('derrick', factionOf(NEUTRAL_F));
+    const held = (b: V2BuildingArt, fi: number, label: string): Cell => ({
+      label,
+      box,
+      anim: true,
+      draw: (s, t, dt) => {
+        s.blit(b.spr, 0, 0, 0);
+        working(s, 'derrick', b, fi, arts[0], dish, t, dt, 0);
+      },
+    });
+    cells.push(held(free, NEUTRAL_F, 'Nobody’s'), held(me, 0, 'Captured'), held(foe, 1, 'Enemy’s'));
+    cells.push(...buildingFight(def.kind, me, makeBuildingStates(def.kind, FACTIONS[0]), box, still(me, 0, A), arts[0], dish));
+    addRow(parent, def.name, def.blurb ?? '', cells, true);
+    return;
+  }
   if (gunOf(arts[0], def.kind)) {
     // the building is fixed; its gun turns to any of 32 headings
     for (const { a, label } of ANGLES) cells.push({ label: `Gun ${label}`, box, draw: still(me, 0, a) });

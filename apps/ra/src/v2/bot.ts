@@ -251,7 +251,7 @@ export class Bot {
     let bd = Infinity;
     const out = g.out;
     for (const b of g.buildings) {
-      if (b.f === this.f || b.dead || out.has(b.f)) continue;
+      if (b.f === this.f || b.f < 0 || b.dead || out.has(b.f)) continue;
       const d = apart(g, x, y, b.x, b.y);
       if (d < bd) [best, bd] = [b, d];
     }
