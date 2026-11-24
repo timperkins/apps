@@ -3445,6 +3445,14 @@ export class IsoGame implements GameLike {
     [...go]
       .sort((p, q) => p.hp - q.hp)
       .forEach((u, i) => {
+        // (a carrier lies off the yard, on the nearest open water it fits in)
+        if (u.kind === 'carrier') {
+          const p = this.launchSpot(u, b) ?? [u.x, u.y];
+          const [tx, ty] = this.nearPoint(u.x, u.y, ...p);
+          moves.push([u.id, tx, ty]);
+          u.aim = undefined;
+          return;
+        }
         const k = b.kind === 'navy' ? 1 : 0.6;
         const [dx, dy] = BAY_SLOTS[i % BAY_SLOTS.length].map((v) => v * k);
         // (in the unit's own copy of the map)
@@ -5912,6 +5920,8 @@ export class IsoGame implements GameLike {
     const u = this.units.find((o) => {
       if (o.f !== b.f || o.dead || o.hp >= 1 || o.moving || !servedBy(o, b)) return false;
       const [ox, oy] = this.nearPoint(b.x, b.y, o.x, o.y);
+      // (the carrier is far too big for the slip: it is mended lying off the yard)
+      if (o.kind === 'carrier') return Math.hypot(ox - b.x, oy - b.y) < Math.max(b.art.rx, b.art.ry) + PARK_NEAR;
       // (anywhere on the depot's pad: a vehicle driving in can stop short of
       // the middle, at a corner post)
       return b.kind === 'navy' ? Math.abs(ox - b.x) < 13 && oy - b.y > -10 && oy - b.y < 24 : Math.abs(ox - b.x) < 13 && Math.abs(oy - b.y) < 13;
