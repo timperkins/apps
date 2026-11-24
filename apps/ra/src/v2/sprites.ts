@@ -2994,6 +2994,44 @@ export function makeOre(): OreArt {
   return { lumps, stain };
 }
 
+// An ore generator: a squat steel drum on an eight-sided footing plate,
+// ringed with vents, with a gold crystal on top that seeds the field round it.
+export const ORE_GEN_TIP = 9; // height of the crystal's top
+export function makeOreGen(): StackSprite {
+  const plate = hex('#5d625f');
+  const steel = hex('#8a918c');
+  const dark = hex('#3a3f3c');
+  const band = hex('#b38a2e');
+  const gold = hex('#e3b545');
+  const glint = hex('#fff0b0');
+  return renderStack(
+    (u, v, z) => {
+      const d = Math.hypot(u, v);
+      const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) / 1.35);
+      // the footing plate, with bolts at its corners
+      if (z < 1 && oct <= 4.6) {
+        if (oct > 3.9 && hash2(Math.round(u * 2), Math.round(v * 2), 31) > 0.82) return shade(steel, 0.1);
+        return oct > 4.1 ? shade(plate, -0.15) : plate;
+      }
+      // the drum, with dark vents round it and a brass band near the top
+      if (z < 5.5 && d <= 3) {
+        if (z > 4.2 && z < 4.9) return band;
+        const ang = Math.atan2(v, u);
+        if (d > 2.6 && z > 1.6 && z < 3.8 && Math.sin(ang * 4) > 0.55) return dark;
+        return z > 5 ? shade(steel, 0.12) : steel;
+      }
+      // a collar, then the crystal: a pointed gold spire
+      if (z < 6.3 && d <= 1.7) return dark;
+      if (z <= ORE_GEN_TIP) {
+        const k = 1 - (z - 6.3) / (ORE_GEN_TIP - 6.3);
+        if (Math.abs(u) + Math.abs(v) <= 1.6 * k + 0.2) return u < 0 && z > 7 ? glint : gold;
+      }
+      return null;
+    },
+    { r: 5, zmax: 10, step: 0.25, bakeShadow: true, outline: [30, 26, 14], shadowAlpha: 0.3 },
+  );
+}
+
 export function makeRocks(): StackSprite[] {
   const out: StackSprite[] = [];
   const moss = hex('#4c6a34');
