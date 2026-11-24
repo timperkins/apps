@@ -3,7 +3,7 @@
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, KNEEL_DROP, NEUTRAL_F, PUMP_FRAMES, factionOf, makePumpBeam, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
-import { BOOM, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
+import { BOOM, CARRIER_SLOTS, DECK_Z, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { DERRICK, TECH } from './v2/tech';
 import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
@@ -460,7 +460,7 @@ function unitCells(spr: StackSprite, draw: Draw, enemy: Draw, o: { R: number; sp
 // out on a loop in each cell.
 
 const A = Math.PI / 4; // facing the viewer
-const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 9.5, sub: 2 };
+const MID: Record<UnitKind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, cmdo: 5.5, flamer: 5.5, dog: 3.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 17, sub: 2 };
 
 // A health bar, as the game draws it.
 function healthBar(c: CanvasRenderingContext2D, bx: number, by: number, bw: number, hp: number): void {
@@ -1149,7 +1149,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     ['destroyer', 'Destroyer', 26],
     ['sub', 'Submarine', 22],
     ['cruiser', 'Skyguard cruiser', 26],
-    ['carrier', 'Carrier', 46],
+    ['carrier', 'Carrier', 80],
   ] as const) {
     const draw =
       (art: V2FactionArt): Draw =>
@@ -1163,6 +1163,18 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     let box = union(boxOf(spr, 0, 0, 1), boxOf(spr, 0, 0, -1));
     if (kind === 'cruiser') box = union(box, boxOf(me.cruiserTop[0], 0, 0, 1), boxOf(me.cruiserTop[0], 0, 0, -1));
     const cells: Cell[] = ANGLES.map(({ a, label }) => ({ label, box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, a, t) }));
+    // the carrier with its dozen Swift jets parked on deck
+    if (kind === 'carrier')
+      cells.push({
+        label: 'Jets on deck',
+        box,
+        anim: true,
+        draw: (s, t) => {
+          const a = Math.PI / 4;
+          draw(me)(s, 0, 0, a, t);
+          for (const [u, v] of CARRIER_SLOTS) s.blit(me.jet[di(a)], Math.cos(a) * u - Math.sin(a) * v, Math.sin(a) * u + Math.cos(a) * v, DECK_Z + Math.sin(t * 1.4) * 0.4);
+        },
+      });
     if (kind === 'cruiser') cells.push({ label: 'Launchers turn', box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, Math.PI / 4 + t * 1.4) });
     cells.push({
       label: 'Sail',

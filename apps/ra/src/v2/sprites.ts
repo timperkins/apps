@@ -1067,11 +1067,13 @@ function cruiser(f: Faction, part: 'hull' | 'top'): Shape {
 }
 
 // How much bigger the carrier is drawn than the shape below is modelled:
-// it is the largest ship afloat and should look it beside a destroyer.
-export const CARRIER_SCALE = 1.4;
+// it is the largest ship afloat, with room on deck for a dozen Swift jets
+// (see CARRIER_SLOTS in combat.ts, which must match).
+export const CARRIER_SCALE = 2.5;
 
 // The carrier: a long flat flight deck over a broad hull, an island tower
-// on the starboard side, deck markings and drones parked along the edge.
+// on the starboard side and deck markings. (The jets it carries park on the
+// deck; they are drawn on their own.)
 function carrier(f: Faction): Shape {
   const at = carrierAt(f);
   const s = 1 / CARRIER_SCALE;
@@ -1111,12 +1113,6 @@ function carrierAt(f: Faction): Shape {
     if (Math.abs(u - 1) < 0.4 && Math.abs(v - 7) < 0.4 && z < 16.6) return z > 16 ? RED : GUN_D;
     if (Math.abs(u - 1) < 0.5 && Math.abs(v - 7) < 2.4 && Math.abs(z - 14.4) < 0.35) return STEEL;
     if (cyl(u, v, -5, 7.1, 1.1) && z < 11.4) return z > 10.8 ? BLACK : GUN;
-    // drones parked in a row along the starboard edge, wings folded
-    for (const pu of [-22, -17.5, -13, 10, 14.5]) {
-      const du = u - pu;
-      if (Math.abs(du) < 1.8 && Math.abs(v - 7.2) < 0.5 && z < H + 1.9) return g(GUN, u, v, z);
-      if (Math.abs(du + 1) < 0.5 && Math.abs(v - 7.2) < 1.4 && z < H + 1.6) return GUN_D;
-    }
     return null;
   };
 }
@@ -1670,7 +1666,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
     cruiser: renderDirs(cruiser(f, 'hull'), DIRS, { r: 20.5, zmax: 6, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
     cruiserTop: renderDirs(cruiser(f, 'top'), DIRS, { r: 7, zmax: 16 }, k('cruiserTop')),
-    carrier: renderDirs(carrier(f), DIRS, { r: 41, zmax: 24, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
+    carrier: renderDirs(carrier(f), DIRS, { r: 73, zmax: 43, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
     sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
     drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
