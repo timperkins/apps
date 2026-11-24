@@ -4,7 +4,7 @@ import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } fro
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { STATS } from '../v1/game';
 import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
-import { COMBAT_CREDITS, COMBAT_STORE, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
+import { COMBAT_CREDITS, COMBAT_STORE, DERRICK, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
 import { buildingArt as workerBuilding, constructionArt, glowArt, pooled, prefetch } from './art-pool';
@@ -53,6 +53,10 @@ import {
   AIR_STAND_V,
   HANGAR_DOOR,
   cruiserParts,
+  NEUTRAL_F,
+  PUMP_FRAMES,
+  factionOf,
+  makePumpBeam,
 } from './sprites';
 
 // v2 adds the Mobile Foundry to v1's units.
@@ -96,6 +100,7 @@ const BNAME: Record<BuildingKind, string> = {
   wall: 'Wall',
   uplink: 'Satellite uplink',
   navy: 'Naval yard',
+  derrick: 'Tech oil derrick',
 };
 // Where a hauler unloads at a refinery, from its center: backed onto the
 // striped pad, facing out (DOCK_A) with its bed's tail at the intake. It
@@ -806,7 +811,7 @@ export class IsoGame implements GameLike {
     const key = `${kind}-${f}`;
     let s = this.bStates.get(key);
     if (!s) {
-      s = makeBuildingStates(kind, FACTIONS[f]);
+      s = makeBuildingStates(kind, factionOf(f));
       this.bStates.set(key, s);
     }
     return s;
@@ -854,7 +859,7 @@ export class IsoGame implements GameLike {
     const key = `${kind}-${f}`;
     let a = this.bArt.get(key);
     if (!a) {
-      a = makeBuilding(kind, FACTIONS[f]);
+      a = makeBuilding(kind, factionOf(f));
       this.bArt.set(key, a);
     }
     return a;
@@ -871,7 +876,7 @@ export class IsoGame implements GameLike {
     this.stageArt.set(key, null);
     void constructionArt(kind, f, urgent).then((st) => {
       if (st) this.stageArt.set(key, st);
-      else setTimeout(() => this.stageArt.set(key, makeConstruction(kind, FACTIONS[f])), 0);
+      else setTimeout(() => this.stageArt.set(key, makeConstruction(kind, factionOf(f))), 0);
     });
     return null;
   }
@@ -885,7 +890,7 @@ export class IsoGame implements GameLike {
     this.glowSpr.set(key, null);
     void glowArt(kind, f).then((st) => {
       if (st) this.glowSpr.set(key, st[0] ?? null);
-      else setTimeout(() => this.glowSpr.set(key, makeBuildingGlow(kind, FACTIONS[f])), 0);
+      else setTimeout(() => this.glowSpr.set(key, makeBuildingGlow(kind, factionOf(f))), 0);
     });
     return null;
   }
@@ -898,9 +903,9 @@ export class IsoGame implements GameLike {
     if (this.bArt.has(key)) return Promise.resolve();
     let spr: StackSprite | undefined;
     const a = {
-      ...buildingFoot(kind, FACTIONS[f]),
+      ...buildingFoot(kind, factionOf(f)),
       get spr(): StackSprite {
-        return (spr ??= makeBuilding(kind, FACTIONS[f]).spr);
+        return (spr ??= makeBuilding(kind, factionOf(f)).spr);
       },
     };
     this.bArt.set(key, a);
@@ -918,12 +923,14 @@ export class IsoGame implements GameLike {
 
   /** Before generate(): the buildings it will place (it needn't wait for them). */
   preload(): Promise<unknown>[] {
-    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy'];
+    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy', 'derrick'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
     if (this.stage === 'combat') now.push(...COMBAT_B.map((k): [BuildingKind, number] => [k, this.me]));
     else now.push(['yard', this.me]);
     const get = (kind: BuildingKind, f: number, urgent: boolean) => this.artLater(kind, f, urgent);
+    // the tech oil derricks nobody holds yet, out on every map
+    now.push(['derrick', NEUTRAL_F]);
     const waits = now.map(([k, f]) => get(k, f, true));
     // what you can build, for later
     for (const k of all) void get(k, this.me, false);
@@ -1191,6 +1198,50 @@ export class IsoGame implements GameLike {
       }
       // what it opens up is already known, not news
       for (const t of this.available()) this.known.add(t.id);
+    }
+
+    // tech oil derricks out between the starts, for anyone to capture: two
+    // either side of the way between the two starts, or one beside the way
+    // between each pair of neighbors when there are more
+    const derrickAt = (sx0: number, sy0: number, clear: number): boolean => {
+      const [cx, cy] = T.at(sx0, sy0);
+      const art = this.buildingArt('derrick', NEUTRAL_F);
+      for (let ring = 0; ring < 120; ring++) {
+        const tries = ring === 0 ? 1 : 8 + ring;
+        for (let t = 0; t < tries; t++) {
+          const ang = rand() * Math.PI * 2;
+          const x = Math.round(cx + Math.cos(ang) * ring * 6);
+          const y = Math.round(cy + Math.sin(ang) * ring * 6);
+          const pad = { x: x - art.rx - 3, y: y - art.ry - 3, w: art.rx * 2 + 6, h: art.ry * 2 + 6 };
+          if (!T.clear(pad, 1) || pads.some((p) => overlap(p, pad, 40))) continue;
+          const [px, py] = toScreen(x, y);
+          if (sites.some((st) => {
+            const [nx, ny] = nearestCopy(px, py, st.sx, st.sy, w, h);
+            return Math.hypot(nx - px, ny - py) < clear;
+          })) continue;
+          pads.push(pad);
+          T.markPad(pad);
+          this.addBuilding({ id: 0, kind: 'derrick', f: NEUTRAL_F, x, y, art, phase: rand() * 10, gun: 0, gunGoal: 0, pad, sel: false, rise: 1, hp: 1 });
+          return true;
+        }
+      }
+      return false;
+    };
+    // (on a small or crowded map, closer to the starts if need be)
+    const derrickNear = (sx0: number, sy0: number) => [1, 0.7, 0.45].some((k) => derrickAt(sx0, sy0, DERRICK.clear * k));
+    if (sites.length > 1) {
+      const pairs = sites.length > 2 ? sites.length : 1;
+      for (let i = 0; i < pairs; i++) {
+        const a = sites[i];
+        const b = sites[(i + 1) % sites.length];
+        const [mx, my] = nearestCopy(a.sx, a.sy, b.sx, b.sy, w, h);
+        const L = Math.hypot(mx - a.sx, my - a.sy) || 1;
+        const off = Math.min(DERRICK.off, L * 0.25);
+        for (const k of pairs === 1 ? [1, -1] : [i % 2 ? 1 : -1]) derrickNear((a.sx + mx) / 2 - ((my - a.sy) / L) * off * k, (a.sy + my) / 2 + ((mx - a.sx) / L) * off * k);
+      }
+      // and wherever there is room, if the way between was all water or hills
+      const want = pairs === 1 ? 2 : pairs;
+      for (let t = 0; t < 40 && this.buildings.filter((b) => b.kind === 'derrick').length < want; t++) derrickAt(rand() * w, rand() * h, DERRICK.clear * 0.7);
     }
 
     // a little clutter beside some buildings
@@ -1951,6 +2002,7 @@ export class IsoGame implements GameLike {
     const b = this.buildingAt(x, y);
     if (!b || b.f !== this.me || b.rise < 1 || b.packing || b.dead) return null;
     if (this.mode === 'repair' && b.hp >= 1 && !b.fixing) return null;
+    if (this.mode === 'sell' && b.kind === 'derrick') return null;
     return b;
   }
 
@@ -3121,7 +3173,8 @@ export class IsoGame implements GameLike {
     const fix = this.fixAt(x, y);
     if (fix) {
       if (isBridge(fix)) this.hoverBridge = fix;
-      return 'repair';
+      // (a tech building to capture: they go in, under the three yellow arrows)
+      return !isBridge(fix) && this.capturable(fix, this.me) ? 'enter' : 'repair';
     }
     const hit = this.unitAt(x, y);
     // over a picked unit of yours that can deploy (a Foundry vehicle that
@@ -3177,7 +3230,13 @@ export class IsoGame implements GameLike {
     const b = this.hutAt(x, y) ?? this.bridgeAt(x, y);
     if (b) return b.dead || b.hp < 1 ? b : null;
     const h = this.buildingAt(x, y);
+    if (h && this.capturable(h, this.me)) return h;
     return h && h.f === this.me && h.hp < 1 && h.rise >= 1 && !h.packing ? h : null;
+  }
+
+  // Can side f's Engineers take tech building b (one nobody holds, or someone else does)?
+  private capturable(b: Building, f: number): boolean {
+    return b.kind === 'derrick' && b.f !== f && !b.dead && b.rise >= 1;
   }
 
   // The bridge one of whose huts is under screen point (x, y).
@@ -3198,13 +3257,14 @@ export class IsoGame implements GameLike {
     const go = this.mine().filter((u) => u.kind === 'eng' && !u.deploy);
     this.command({ c: 'fix', u: go.map((u) => u.id), t: t.id });
     t.aimT = this.time;
+    const take = !isBridge(t) && this.capturable(t, this.me);
     if (this.moveMarks && go.length) {
       const [px, py] = this.fixPoint(go[0], t);
       const [mx, my] = this.fold(px, py);
-      this.markers.push({ x: mx, y: my, z: 0, t: 0, fix: true });
+      this.markers.push({ x: mx, y: my, z: 0, t: 0, fix: !take, enter: take });
     }
     ui('order_confirm', 1.2);
-    this.speak(go, 'repair');
+    this.speak(go, take ? 'move' : 'repair');
   }
 
   // Where Engineer u goes to mend t: just outside the nearest of a bridge's
@@ -4043,6 +4103,10 @@ export class IsoGame implements GameLike {
     for (const b of this.buildings) if (b.door || exiting.has(b)) b.door = exiting.has(b) ? Math.min(1, (b.door ?? 0) + dt / DOOR_S) : Math.max(0, (b.door ?? 0) - dt / (DOOR_S * 1.5));
     for (const b of [...this.buildings]) {
       b.phase += dt;
+      // a tech oil derrick pays whoever holds it, a little every moment
+      if (b.kind === 'derrick' && b.f >= 0 && !b.dead && this.net !== 'client') {
+        this.eco[b.f].credits += DERRICK.rate * dt;
+      }
       // a Commando's charge goes off
       if (b.c4 !== undefined && this.time >= b.c4 && this.net !== 'client') {
         this.damage(b, 1e9);
@@ -4268,7 +4332,7 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'fix': {
-        const t = this.bridges.find((o) => o.id === cmd.t) ?? bldg(cmd.t);
+        const t = this.bridges.find((o) => o.id === cmd.t) ?? bldg(cmd.t) ?? this.buildings.find((o) => o.id === cmd.t && this.capturable(o, f));
         if (!t || (!isBridge(t) && (t.rise < 1 || t.packing))) break;
         for (const id of cmd.u) {
           const u = unit(id);
@@ -4340,7 +4404,8 @@ export class IsoGame implements GameLike {
       }
       case 'sell': {
         const b = bldg(cmd.b);
-        if (!b || b.rise < 1 || b.packing) break;
+        // (a tech building can't be sold, only lost)
+        if (!b || b.rise < 1 || b.packing || b.kind === 'derrick') break;
         // its credits back (some of them), and it goes down as it went up
         this.eco[f].credits += Math.round(this.priceOf(b.kind) * SELL_BACK * b.hp);
         b.packing = b.sold = true;
@@ -4384,7 +4449,7 @@ export class IsoGame implements GameLike {
     this.outT = this.time;
     const alive = new Set<number>();
     for (const u of this.units) if (!u.dead) alive.add(u.f);
-    for (const b of this.buildings) if (!b.dead) alive.add(b.f);
+    for (const b of this.buildings) if (!b.dead && b.kind !== 'derrick') alive.add(b.f);
     for (const p of this.players) if (!alive.has(p.f) && !this.out.has(p.f)) this.setOut([...this.out, p.f]);
   }
   private setOut(out: number[]): void {
@@ -4521,6 +4586,13 @@ export class IsoGame implements GameLike {
           this.sound(b.x, b.y, 'build_rise', 1, { rate: 1.1 });
         }
         if (f === this.me) this.emit();
+      }
+      if (b.f !== f) {
+        // a tech building taken: it turns its new owner's color
+        b.f = f;
+        this.recolor(b);
+        if (b.sel && f !== this.me) b.sel = false;
+        this.mapVersion++;
       }
       b.hp = hp;
       // (rising and packing go on here between updates)
@@ -5831,7 +5903,7 @@ export class IsoGame implements GameLike {
   // and mends it, and is used up. It gives up if the thing is gone or no
   // longer needs it, or after stopping short of it a few times.
   private fixing(u: Unit): void {
-    const t: Bridge | Building | undefined = this.bridges.find((o) => o.id === u.fix) ?? this.buildings.find((o) => o.id === u.fix && o.f === u.f && !o.dead);
+    const t: Bridge | Building | undefined = this.bridges.find((o) => o.id === u.fix) ?? this.buildings.find((o) => o.id === u.fix && (o.f === u.f || this.capturable(o, u.f)) && !o.dead);
     const stop = () => {
       u.fix = undefined;
       if (u.moving) {
@@ -5840,7 +5912,8 @@ export class IsoGame implements GameLike {
         u.ty = u.y;
       }
     };
-    if (!t || (!t.dead && t.hp >= 1) || (!isBridge(t) && t.packing)) return stop();
+    const take = !!t && !isBridge(t) && this.capturable(t, u.f);
+    if (!t || (!t.dead && t.hp >= 1 && !take) || (!isBridge(t) && t.packing)) return stop();
     const [px, py] = this.fixPoint(u, t);
     let there: boolean;
     if (isBridge(t)) there = t.huts.some(([hx, hy]) => {
@@ -5875,7 +5948,8 @@ export class IsoGame implements GameLike {
     if (isBridge(t)) {
       this.mendBridge(t);
       if (u.f === this.me) this.notice('Bridge repaired');
-    } else {
+    } else if (this.capturable(t, u.f)) this.capture(t, u.f);
+    else {
       t.hp = 1;
       const [sx, sy] = toScreen(t.x, t.y, 8);
       for (let i = 0; i < 5; i++) this.fx.dust(sx + (Math.random() - 0.5) * t.art.rx * 1.6, sy + (Math.random() - 0.5) * 8, 4);
@@ -5885,6 +5959,57 @@ export class IsoGame implements GameLike {
     this.sound(u.x, u.y, 'build_place', 0.4, { rate: 1.6 }, u.z);
     this.mapVersion++;
     if (was) this.emit();
+  }
+
+  // ---------- Tech buildings ----------
+
+  // Side f takes tech building b (an Engineer went in): it turns their color,
+  // pays them a bonus at once and from then on a steady income (see update),
+  // neither of which needs room in their silos. Whoever held it before loses it.
+  private capture(b: Building, f: number): void {
+    const was = b.f;
+    b.f = f;
+    this.recolor(b);
+    b.fixing = false;
+    b.target = undefined;
+    if (b.sel && f !== this.me) {
+      b.sel = false;
+      this.emit();
+    }
+    const e = this.eco[f];
+    e.credits += DERRICK.bonus;
+    const [sx, sy] = toScreen(b.x, b.y, 8);
+    for (let i = 0; i < 6; i++) this.fx.dust(sx + (Math.random() - 0.5) * b.art.rx * 1.6, sy + (Math.random() - 0.5) * 8, 4);
+    this.sound(b.x, b.y, 'build_place', 0.9, { rate: 0.9 });
+    this.tell(f, `Tech building captured: +$${DERRICK.bonus}, then $${DERRICK.rate} a second`, 'tech_captured');
+    if (was >= 0) this.tell(was, 'Tech building lost', 'building_lost');
+    this.mapVersion++;
+  }
+
+  // Building b in its (new) side's colors: drawn by a worker, keeping the old
+  // look for the moment that takes rather than stalling a frame.
+  private recolor(b: Building): void {
+    const f = b.f;
+    const key = `${b.kind}-${f}`;
+    const have = this.bArt.get(key);
+    if (have) {
+      b.art = have;
+      return;
+    }
+    void this.artLater(b.kind, f, true).then(() => {
+      if (b.f === f) b.art = this.bArt.get(key) ?? b.art;
+    });
+  }
+
+  // A tech building's moving parts (the pumpjack), side by side's color:
+  // drawn a picture at a time as they are first wanted, so a capture doesn't
+  // stall a frame.
+  private pumpArt = new Map<number, StackSprite[]>();
+  private pumpFrame(f: number, k: number): StackSprite | null {
+    let set = this.pumpArt.get(f);
+    if (!set) this.pumpArt.set(f, (set = []));
+    if (set.length < PUMP_FRAMES) set.push(makePumpBeam(factionOf(f), set.length));
+    return set[Math.min(k, set.length - 1)] ?? null;
   }
 
   // ---------- Transports ----------
@@ -6639,7 +6764,7 @@ export class IsoGame implements GameLike {
       c.fillRect(X + 1, Y - 7, 4, 1);
     }
     const { rx, ry } = b.art;
-    c.fillStyle = b.f === this.me ? '#ffffff' : '#ff6a5a';
+    c.fillStyle = b.f === this.me ? '#ffffff' : b.f === NEUTRAL_F ? '#f2e6b8' : '#ff6a5a';
     // dots one art pixel across, stepped along each edge at the art grid
     const L = 7;
     const t = 1 / ART;
@@ -6992,7 +7117,7 @@ export class IsoGame implements GameLike {
         const [x, y] = toScreen(b.x + p.x, b.y + p.y, p.z);
         drawFlame(c, x, y, b.hp < 0.25 ? 5 : 3.5, this.time + i * 0.37, i + 11);
       }
-    const f = FACTIONS[b.f];
+    const f = factionOf(b.f);
     const fx = (i: number) => {
       const p = b.art.fx[i];
       return toScreen(b.x + p.x, b.y + p.y, p.z).map(Math.round) as [number, number];
@@ -7039,6 +7164,30 @@ export class IsoGame implements GameLike {
         c.fillRect(x - 2, y - 2, 5, 5);
         c.fillStyle = '#fff1a8';
         c.fillRect(x - 1, y - 1, 3, 2);
+        break;
+      }
+      case 'derrick': {
+        // the pumpjack nods away while someone holds it (still when nobody
+        // does, or once it is badly hit)
+        const going = b.f >= 0 && !hurt;
+        const spr = this.pumpFrame(b.f, going ? Math.floor(b.phase * DERRICK.strokes * PUMP_FRAMES) % PUMP_FRAMES : 0);
+        if (spr) this.blit(spr, b.x, b.y, 0);
+        // the flag of whoever holds it (a pale one when nobody does)
+        const [x, y] = fx(1);
+        const wave = Math.floor(b.phase * 5) % 4;
+        for (let i = 0; i < 7; i++) {
+          const dy = Math.round(Math.sin(i * 0.9 - wave * 1.6) * 0.8);
+          c.fillStyle = css(i < 2 ? f.light : i === 6 ? f.dark : f.main);
+          c.fillRect(x - 1 - i, y + dy, 1, 4);
+        }
+        // and a beacon blinking on top of the tank
+        if (Math.floor(b.phase * 1.4) % 2 === 0) {
+          const [bx, by] = fx(0);
+          c.fillStyle = 'rgba(255,90,60,0.35)';
+          c.fillRect(bx - 1, by - 1, 3, 3);
+          c.fillStyle = '#ff7a5c';
+          c.fillRect(bx, by, 1, 1);
+        }
         break;
       }
       case 'radar': {

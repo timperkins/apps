@@ -105,6 +105,12 @@ export const STORE = { base: 3000, refinery: 2000, silo: 3000 };
 // and how much a field's generator grows back each second.
 export const ORE = { node: 600, load: 700, digRate: 70, unloadRate: 350, regrow: 20 };
 
+// Tech oil derricks, out on every map for an Engineer to capture: what one
+// pays its new owner at once and then every second, how many strokes a second
+// its pumpjack makes, and how far from any start (and either side of the way
+// between two) they stand, in screen pixels.
+export const DERRICK = { bonus: 1000, rate: 20, strokes: 0.45, clear: 650, off: 420 };
+
 // The Combat test stage: plenty of money, and room to hold it.
 export const COMBAT_CREDITS = 50000;
 export const COMBAT_STORE = 100000;
