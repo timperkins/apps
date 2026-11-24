@@ -171,6 +171,7 @@ export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor
   wall: { strength: 300, armor: 'concrete' },
   uplink: { strength: 1000, armor: 'wood' },
   navy: { strength: 1000, armor: 'heavy' },
+  derrick: { strength: 800, armor: 'wood' },
 };
 
 // A building is shown damaged (scorched, holed, on fire) at or below this much health.

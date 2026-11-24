@@ -1721,7 +1721,13 @@ export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy';
+export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy' | 'derrick';
+
+// The colors of a tech building nobody holds yet (side NEUTRAL_F).
+export const NEUTRAL: Faction = { name: 'Neutral', main: hex('#9c9583'), light: hex('#e4ddc8'), dark: hex('#5d584c') };
+export const NEUTRAL_F = -1;
+/** The colors of side f: one of FACTIONS, or NEUTRAL for a tech building nobody holds. */
+export const factionOf = (f: number): Faction => (f < 0 ? NEUTRAL : FACTIONS[f]);
 
 export interface V2BuildingArt {
   spr: StackSprite;
@@ -2139,6 +2145,86 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
         return null;
       };
       return { shape, rx: 16, ry: 12, zmax: 27, fx: [{ x: 15.5, y: 9, z: 26 }] };
+    }
+    case 'derrick': {
+      // A tech oil derrick, out in the wilds for anyone to take: a riveted
+      // steel storage tank under a shallow dome, ringed by a handrail and
+      // banded in the color of whoever holds it, with a ladder up its front;
+      // a pumpjack's skid, A-frame and gearbox over the wellhead (its beam,
+      // horsehead and cranks are drawn on top, nodding: makePumpBeam); a
+      // tin-roofed pump shed; sandbags round the back and a tall flagpole.
+      // fx[0] is the beacon on the tank, fx[1] the top of the flagpole.
+      const [tu, tv] = DERRICK_TANK;
+      const TR = 7.5;
+      const TH = 16;
+      const shape: Shape = (u, v, z) => {
+        // the tank
+        const t = drum(u, v, z, tu, tv, TR, TH, 3.4);
+        if (t) {
+          if (t.roof) {
+            if (t.d < 1.5) return z > TH + 3.4 - 0.3 ? GUN_D : METAL_D;
+            return mod(t.a * 8 / Math.PI, 1) < 0.05 || Math.abs(t.d - 4.2) < 0.25 ? METAL_D : g(STEEL, u, v, z, 0.05);
+          }
+          // the ladder, up the side that faces the pumpjack
+          const la = Math.abs(t.a - 1.2);
+          if (la < 0.17 && z > 0.8) {
+            if (la > 0.12) return RUST;
+            if (mod(z, 1.3) < 0.35) return shade(RUST, 0.15);
+            return shade(METAL_D, -0.18);
+          }
+          // rivets along the seams
+          const along = t.a * TR;
+          if (mod(z, 3.6) < 0.3 || mod(along, 6.5) < 0.25) return METAL_D;
+          if (mod(z, 3.6) < 0.7 && mod(along, 1.3) < 0.35) return GUN_L;
+          return rskin(along, z, TH, { seed: 41, body: STEEL, band: [11.6, 13.4, f.main] });
+        }
+        // the hatch and beacon on top of the dome
+        if (cyl(u, v, tu, tv, 1.1) && z >= TH + 3.2 && z < TH + 4.8) return z > TH + 4.2 ? RED : GUN;
+        // the handrail round the edge of the roof
+        const rd = Math.hypot(u - tu, v - tv);
+        if (rd > TR && rd < TR + 0.5 && z > TH && z < TH + 1.6) {
+          if (z > TH + 1.2) return METAL_D;
+          if (mod(Math.atan2(v - tv, u - tu) * TR, 3) < 0.45) return METAL_D;
+          return null;
+        }
+        // the pumpjack, standing along the right-hand side
+        const jk = pumpBase(...pumpAt(u, v), z);
+        if (jk) return jk;
+        // the pump shed: corrugated walls under a tin roof that slopes to the front
+        const sd = rrect(u, v, -9, 8.4, 4, 3, 0.6);
+        const top = 6.6 - (v - 8.4) * 0.22;
+        if (sd <= 0.6 && z > top - 0.6 && z <= top) return mod(u + 40, 1.1) < 0.4 ? shade(METAL, -0.14) : g(METAL, u, v, z, 0.08);
+        if (sd <= 0 && z <= top - 0.6) {
+          if (v > 11.1 && u > -10.6 && u < -8 && z < 4.6) return Math.abs(u + 8.6) < 0.25 && Math.abs(z - 2.4) < 0.3 ? HAZ : z > 4.2 || u < -10.3 || u > -8.3 ? GUN_D : METAL_D;
+          if (u > -5.3 && v > 7.4 && v < 9.8 && z > 2.6 && z < 4.4) return z < 2.9 || z > 4.1 || Math.abs(v - 8.6) < 0.2 ? GUN_D : hash2(Math.floor(u), 3, 7) > 0.4 ? WIN_LIT : WIN;
+          if (z < 1.2) return CONC_D;
+          return mod((u > -5.3 ? v : u) + 40, 1.2) < 0.4 ? shade(GUN_L, -0.16) : g(GUN_L, u, v, z, 0.06);
+        }
+        // oil drums by the jack
+        const dr = drums(u, v, z - 1.1, [[13.4, -9.4, RUST], [12, -11, f.main], [13.6, -7.4, GUN_L]]);
+        if (dr && z > 1.1) return dr;
+        // the flagpole
+        if (Math.abs(u - DERRICK_FLAG[0]) < 0.4 && Math.abs(v - DERRICK_FLAG[1]) < 0.4 && z < 25) return z > 24.4 ? HAZ : STEEL;
+        // sandbags along the back
+        if (z < 3.6 && z >= 1 && ((u < -12.4 && v < 4 && v > -12.6) || (v < -10.6 && u < 9 && u > -14.6))) {
+          const zz = z - 1;
+          const course = Math.floor(zz / 0.9);
+          const along = u < -12.4 ? v : u;
+          const bag = mod(along + course * 1.1, 2.2);
+          return bag < 0.35 ? shade(SAND_BAG, -0.3) : shade(SAND_BAG, (hash2(Math.floor((along + course * 1.1) / 2.2), course, 6) - 0.5) * 0.2 + (zz - course * 0.9 > 0.5 ? 0.06 : -0.06));
+        }
+        // the concrete pad, with an oily stain round the wellhead
+        if (z < 1 && Math.abs(u) <= 14.8 && Math.abs(v) <= 12.8) {
+          const e = Math.min(14.8 - Math.abs(u), 12.8 - Math.abs(v));
+          if (e < 0.7) return CONC_D;
+          if (mod(u + 15, 7.4) < 0.25 || mod(v + 13, 6.4) < 0.25) return shade(CONC, -0.1);
+          const oil = Math.hypot((u - 9) * 1.3, v - 9.4) + vnoise(u / 2, v / 2, 19) * 2.4;
+          if (oil < 3.6) return mix(TAR, BLACK, oil < 2.4 ? 0.4 : 0.1);
+          return g(CONC_L, u, v, z, 0.08, 17);
+        }
+        return null;
+      };
+      return { shape, rx: 15, ry: 13, zmax: 25, fx: [{ x: tu, y: tv, z: TH + 5 }, { x: DERRICK_FLAG[0], y: DERRICK_FLAG[1], z: 24 }] };
     }
     case 'refinery': {
       // A great domed processing drum with a tall chimney, a round ore tank,
@@ -2811,6 +2897,106 @@ export function makeDish(): StackSprite[] {
   return renderDirs(dish, 16, { r: 6.5, zmax: 11, outline: [30, 30, 28] }, 'dish');
 }
 
+// ---------- The oil derrick's pumpjack ----------
+
+// The pumpjack's fixed parts (in its own frame, see pumpAt): the wellhead,
+// the skid, the A-frame with the bearing the beam rocks on, and the gearbox.
+function pumpBase(u: number, v: number, z: number): RGB | null {
+  const [pu, pv] = PUMP_PIVOT;
+  // the wellhead: a cellar box, the casing, a red flange and a valve
+  if (inBox(u, v, z, -0.6, 2.8, pv - 1.8, pv + 1.8, 1, 1.6)) return CONC_D;
+  if (cyl(u, v, 1.1, pv, 0.7) && z < 4.4) return z > 2.6 && z < 3.1 ? RED : METAL;
+  if (Math.abs(z - 3.6) < 0.3 && Math.abs(u - 1.1) < 0.3 && Math.abs(v - pv) < 1.4) return RED;
+  // the pumpjack's skid
+  if (inBox(u, v, z, 3.6, 14.2, pv - 1.6, pv + 1.6, 1, 1.9)) return mod(u, 2.1) < 0.3 ? BLACK : u > 13.6 || u < 4.2 ? hazard(v, z) : GUN;
+  // the A-frame (samson post), its cross brace and the bearing on top
+  if (z >= 1.9 && z < PUMP_PIVOT[2]) {
+    const k = Math.min(1, (z - 1.9) / (PUMP_PIVOT[2] - 1.9));
+    const half = 1.7 - 0.8 * k;
+    if (Math.abs(Math.abs(v - pv) - half) < 0.45 && z < PUMP_PIVOT[2]) {
+      const fu = pu - 2.4 * (1 - k);
+      const bu = pu + 2.4 * (1 - k);
+      if (Math.abs(u - fu) < 0.5 || Math.abs(u - bu) < 0.5) return k > 0.9 ? GUN_D : GUN_L;
+      if (Math.abs(z - 5.2) < 0.3 && u > fu && u < bu) return GUN;
+    }
+  }
+  if (Math.hypot(u - pu, z - PUMP_PIVOT[2]) < 0.9 && Math.abs(v - pv) < 1.1) return GUN_D;
+  // the gearbox the cranks turn on
+  if (inBox(u, v, z, 10.6, 13.6, pv - 1.4, pv + 1.4, 1.9, 5)) return z > 4.6 ? METAL_D : mod(Math.floor(z * 1.6), 2) ? GUN : shade(GUN, 0.08);
+  if (inBox(u, v, z, 10.9, 13.3, pv + 1.4, pv + 2.6, 1.9, 3.4)) return OLIVE; // the motor
+  return null;
+}
+
+
+// Where things stand on the oil derrick (from its middle): the tank, the
+// flagpole, and the bearing the pumpjack's beam rocks on.
+export const DERRICK_TANK: [number, number] = [-4, -3.5];
+export const DERRICK_FLAG: [number, number] = [-13.4, 11.6];
+export const PUMP_PIVOT: [number, number, number] = [7.5, 6, 11.5];
+// The pumpjack is modelled with its beam along u at v = PUMP_PIVOT[1] and
+// stands on the derrick turned a quarter round, down its right-hand side with
+// the horsehead to the front: this is where derrick point (u, v) is in the
+// pumpjack's own frame.
+const pumpAt = (u: number, v: number): [number, number] => [11 - v, u - 3];
+export const PUMP_FRAMES = 12;
+
+/**
+ * The pumpjack's moving parts at step k of a stroke of PUMP_FRAMES steps, drawn over the derrick at its middle: the walking beam in
+ * the side's color rocking on its bearing, the horsehead at its front with
+ * the polished rod down to the wellhead, and the cranks turning at the back
+ * with the pitman arms up to the beam's tail.
+ */
+export function makePumpBeam(f: Faction, k: number): StackSprite {
+  const [pu, pv, pz] = PUMP_PIVOT;
+  const CU = 12;
+  const CZ = 3.6;
+  {
+    const ph = (k / PUMP_FRAMES) * Math.PI * 2;
+    const th = 0.2 * Math.sin(ph);
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    // the world point at (lu, lz) along the beam
+    const at = (lu: number, lz: number): [number, number] => [pu + lu * c - lz * s, pz + lu * s + lz * c];
+    const [hu, hz] = at(-6.2, -0.4); // where the bridle hangs from the horsehead
+    const [tu, tz] = at(5, -0.9); // the tail bearing
+    const pin: [number, number] = [CU + 1.7 * Math.cos(ph + Math.PI / 2), CZ + 1.7 * Math.sin(ph)];
+    const seg = (u: number, z: number, a: [number, number], b: [number, number]) => {
+      const dx = b[0] - a[0];
+      const dz = b[1] - a[1];
+      const q = Math.max(0, Math.min(1, ((u - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz)));
+      return Math.hypot(u - a[0] - q * dx, z - a[1] - q * dz);
+    };
+    const shape: Shape = (wu, wv, z) => {
+      const [u, v] = pumpAt(wu, wv);
+      const dv = Math.abs(v - pv);
+      const du = u - pu;
+      const dz = z - pz;
+      const lu = du * c + dz * s;
+      const lz = -du * s + dz * c;
+      // the walking beam: an I-beam in the side's color
+      if (dv < 0.6 && lu > -4.8 && lu < 5.6 && Math.abs(lz) < 0.7) return Math.abs(lz) > 0.45 ? f.dark : g(f.main, lu, v, lz, 0.06);
+      // the horsehead: a curved head on the beam's front end
+      if (dv < 0.8 && lu <= -4.6 && lu > -6.6 && lz < 1 && lz > -3.4) {
+        if (Math.hypot(lu + 3.6, lz + 1.2) > 3.1) return null;
+        return lu < -6 ? GUN_D : g(f.light, lu, v, lz, 0.06);
+      }
+      // the counterweight at the tail
+      if (dv < 0.9 && lu > 4.4 && lu < 6 && lz < 0.1 && lz > -1.6) return GUN;
+      // the polished rod down to the wellhead
+      if (Math.abs(u - 1.1) < 0.3 && dv < 0.3 && z > 4.2 && z < hz) return STEEL;
+      // the cranks, either side of the gearbox, and the pitman arms up to the tail
+      if (Math.abs(dv - 2) < 0.3) {
+        if (seg(u, z, [CU, CZ], pin) < 0.7) return HAZ;
+        if (Math.hypot(u - CU, z - CZ) < 0.6) return GUN_D;
+      }
+      if (Math.abs(dv - 2) < 0.25 && seg(u, z, pin, [tu, tz]) < 0.3) return GUN_L;
+      if (dv < 2.2 && Math.abs(lu - 5) < 0.3 && Math.abs(lz + 0.9) < 0.3) return GUN_D; // the equalizer bar
+      return null;
+    };
+    return renderStack(shape, { r: 0, rx: 15, ry: 13, zmax: 14, step: 0.5 });
+  }
+}
+
 // ---------- Props ----------
 
 export function makeTrees(): StackSprite[] {
@@ -2990,6 +3176,44 @@ export function makeOre(): OreArt {
   return { lumps, stain };
 }
 
+// An ore generator: a squat steel drum on an eight-sided footing plate,
+// ringed with vents, with a gold crystal on top that seeds the field round it.
+export const ORE_GEN_TIP = 9; // height of the crystal's top
+export function makeOreGen(): StackSprite {
+  const plate = hex('#5d625f');
+  const steel = hex('#8a918c');
+  const dark = hex('#3a3f3c');
+  const band = hex('#b38a2e');
+  const gold = hex('#e3b545');
+  const glint = hex('#fff0b0');
+  return renderStack(
+    (u, v, z) => {
+      const d = Math.hypot(u, v);
+      const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) / 1.35);
+      // the footing plate, with bolts at its corners
+      if (z < 1 && oct <= 4.6) {
+        if (oct > 3.9 && hash2(Math.round(u * 2), Math.round(v * 2), 31) > 0.82) return shade(steel, 0.1);
+        return oct > 4.1 ? shade(plate, -0.15) : plate;
+      }
+      // the drum, with dark vents round it and a brass band near the top
+      if (z < 5.5 && d <= 3) {
+        if (z > 4.2 && z < 4.9) return band;
+        const ang = Math.atan2(v, u);
+        if (d > 2.6 && z > 1.6 && z < 3.8 && Math.sin(ang * 4) > 0.55) return dark;
+        return z > 5 ? shade(steel, 0.12) : steel;
+      }
+      // a collar, then the crystal: a pointed gold spire
+      if (z < 6.3 && d <= 1.7) return dark;
+      if (z <= ORE_GEN_TIP) {
+        const k = 1 - (z - 6.3) / (ORE_GEN_TIP - 6.3);
+        if (Math.abs(u) + Math.abs(v) <= 1.6 * k + 0.2) return u < 0 && z > 7 ? glint : gold;
+      }
+      return null;
+    },
+    { r: 5, zmax: 10, step: 0.25, bakeShadow: true, outline: [30, 26, 14], shadowAlpha: 0.3 },
+  );
+}
+
 export function makeRocks(): StackSprite[] {
   const out: StackSprite[] = [];
   const moss = hex('#4c6a34');
@@ -3130,7 +3354,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {
