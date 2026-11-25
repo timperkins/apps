@@ -109,3 +109,16 @@ An open-world adventure with block mining and building and factory automation. O
 - The goal: four Ember Beacons (meadows, deep forest, desert, snowy peaks) each guarded by three Rustguards and each asking for a load of goods. Relighting one gives a heart, an Ember core, a map reveal and a travel point. With all four lit, craft and place the Sky Engine to win.
 - Explore: 9 waystones to wake and travel between, 48 treasure chests (hearts, gear and relics: Swift boots, Otter fins, Ember lantern, Wind kite), stamina for sprinting and swimming, day and night. Bramblebacks roam; gloomlings come out at night but keep away from lamps, fires and lit beacons. Knocked out, you wake at your last campfire or waystone.
 - Keyboard and mouse, or touch (stick, buttons, tap to mine and build). Saves in localStorage under `emberwild-save-v1` (autosave every 45 seconds).
+
+## M.D. (Monster Dungeons)
+
+A blocky action dungeon crawler. Original code, art, monsters and sounds. Code in `src/games/md/`.
+
+- **Camp (Hearthstead):** a village clearing with three traders. Bram the Weaponsmith sells melee weapons and bows, Tilda the Armorer sells armor, and Old Pip the Peddler sells Healing Draughts, arrows, Fizz Bombs and Mystery Crates (a random piece of gear you don't own). The mission table by the fire opens the mission map.
+- **Mission map:** five dungeons on a parchment map, each unlocked by clearing the one before: Mossy Crypt, Shroom Hollow, Frostdeep Halls, Cinder Forge and the Obsidian Throne. Each shows its monsters, its guardian and the reward.
+- **Dungeons:** generated fresh each run from rooms and corridors, with torches, pillars, pools of water, ice or lava, crates and barrels to smash, and chests with coins, supplies and sometimes new gear. The last room holds the guardian; beating it opens a portal home. M shows the dungeon map (explored rooms, chests, monsters, the guardian's room) and a minimap sits in the corner.
+- **Monsters:** Mosslings (hopping mossy stones), Lantern Monks (throw embers), Sporecaps (lob spores), Rustknights (heavy horned armor), Gloomwings (swooping winged cubes), Frost Wisps (slowing ice bolts) and Cinder Hounds (charging lava dogs). Guardians: Old Boulderback, Queen Puffshroom, the Frozen Warden, Magmajaw, and the final boss, the Hollow Crown (slams, charges, ember volleys and summons).
+- **Weapons:** Rusty Sword, Twin Daggers, Battle Axe, Long Spear, Frost Glaive (slows), Thunder Hammer (shock ring, stuns) and Ember Blade (burns); Shortbow, Heavy Crossbow (pierces), Fan Bow (3 arrows) and Starlight Bow. Armor: Traveler's Tunic, Leather Jerkin, Chainmail, Mossguard Plate (heals) and Obsidian Plate.
+- Controls: WASD to walk, mouse to aim, left click melee, right click or F bow, Space or Shift dodge roll, Q draught, R bomb, E use, I gear, M map, Esc menu. Phones get a stick and buttons, with auto-aim.
+- Saves in localStorage under `md-save-v1`. Falling in a dungeon sends you back to camp with everything you found.
+
