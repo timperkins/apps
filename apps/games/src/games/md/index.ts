@@ -1232,6 +1232,7 @@ const game: GameModule = {
     if (import.meta.env.DEV)
       (window as unknown as { __md: unknown }).__md = {
         g: () => g,
+        R: () => R,
         start,
         show: (o: Overlay) => show(o),
         shop: (i: number) => openShop(TRADERS[i]),

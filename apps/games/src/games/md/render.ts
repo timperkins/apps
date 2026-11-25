@@ -5,6 +5,9 @@ import { T, tileAt, type Level, type Prop } from './dungeon';
 import type { Game, Monster, Peer } from './game';
 import { armorOf, meleeOf, parseKey, rangedOf, type MeleeShape, type Ranged } from './data';
 
+/** backing pixels per screen pixel for the game canvas */
+const PIXEL_SCALE = 0.5;
+
 interface HeroView {
   x: number; y: number; face: number; walk: number; moving: boolean; rolling: boolean;
   swingT: number; swingDur: number; drawT: number; bowOut: boolean; hurt: boolean;
@@ -182,6 +185,20 @@ function bakeFlat(img: HTMLCanvasElement, dark = 0): HTMLCanvasElement {
     x.fillStyle = `rgba(0,0,0,${dark})`;
     x.fillRect(0, 0, TW, HH * 2);
   }
+  // block edges: a light top-left rim and a dark bottom-right seam, so the ground reads as a grid of blocks
+  x.lineWidth = 2;
+  x.strokeStyle = 'rgba(255,255,255,.10)';
+  x.beginPath();
+  x.moveTo(0, HH);
+  x.lineTo(HW, 0);
+  x.lineTo(TW, HH);
+  x.stroke();
+  x.strokeStyle = 'rgba(0,0,0,.22)';
+  x.beginPath();
+  x.moveTo(TW, HH);
+  x.lineTo(HW, HH * 2);
+  x.lineTo(0, HH);
+  x.stroke();
   return c;
 }
 
@@ -572,19 +589,26 @@ export class Renderer {
   }
 
   resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // the world is drawn at half resolution and scaled up with hard edges: chunky, blocky pixels,
+    // and far fewer pixels to paint each frame (much less lag, most of all on phones)
+    const dpr = PIXEL_SCALE;
     const w = this.cv.clientWidth, h = this.cv.clientHeight;
-    if (w * dpr !== this.cv.width || h * dpr !== this.cv.height) {
-      this.cv.width = Math.round(w * dpr);
-      this.cv.height = Math.round(h * dpr);
+    const bw = Math.max(1, Math.round(w * dpr)), bh = Math.max(1, Math.round(h * dpr));
+    if (bw !== this.cv.width || bh !== this.cv.height) {
+      this.cv.width = bw;
+      this.cv.height = bh;
     }
     this.dpr = dpr;
     this.W = w;
     this.H = h;
     // show roughly the same amount of dungeon on any screen
     this.zoom = Math.max(0.6, Math.min(1.5, Math.min(w / 1100, h / 700) * 1.15));
-    this.light.width = Math.ceil(w / 3);
-    this.light.height = Math.ceil(h / 3);
+    // only reallocate the light map when the size really changes (resizing a canvas clears and rebuilds it)
+    const lw = Math.ceil(w / 6), lh = Math.ceil(h / 6);
+    if (this.light.width !== lw || this.light.height !== lh) {
+      this.light.width = lw;
+      this.light.height = lh;
+    }
   }
 
   /** world → screen (css px) */
@@ -799,7 +823,7 @@ export class Renderer {
       x.fillStyle = `rgba(200,0,0,${(g.hurtT - 0.25) * 0.8})`;
       x.fillRect(0, 0, this.cv.width, this.cv.height);
     }
-    if (opts.minimap && !camp) this.minimap(g);
+    this.minimap(g, opts.minimap && !camp);
   }
 
   iso(wx: number, wy: number, wz = 0): [number, number] {
@@ -1345,22 +1369,33 @@ export class Renderer {
     x.restore();
   }
 
-  private minimap(g: Game) {
-    const x = this.x;
-    const size = Math.round(Math.min(190, this.W * 0.3));
-    const px = (this.W - size - 10) * this.dpr, py = 58 * this.dpr;
-    x.save();
-    x.setTransform(this.dpr, 0, 0, this.dpr, px, py);
-    x.fillStyle = 'rgba(10,8,14,.7)';
-    x.strokeStyle = 'rgba(255,220,150,.5)';
-    x.lineWidth = 2;
-    x.beginPath();
-    x.roundRect(0, 0, size, size * 0.62, 10);
-    x.fill();
-    x.stroke();
-    x.clip();
-    this.drawMap(x, g, size, size * 0.62, false);
-    x.restore();
+  /** the minimap is its own small sharp canvas, redrawn a few times a second instead of every frame */
+  private mini: HTMLCanvasElement | null = null;
+  private miniT = 0;
+  private minimap(g: Game, show: boolean) {
+    if (!this.mini) {
+      this.mini = document.createElement('canvas');
+      this.mini.className = 'md-mini';
+      this.cv.parentElement?.appendChild(this.mini);
+    }
+    const c = this.mini;
+    c.hidden = !show;
+    if (!show) return;
+    const now = performance.now();
+    if (now - this.miniT < 160) return;
+    this.miniT = now;
+    const size = Math.round(Math.min(190, this.W * 0.3)), h = Math.round(size * 0.62);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (c.width !== size * dpr || c.height !== h * dpr) {
+      c.width = size * dpr;
+      c.height = h * dpr;
+      c.style.width = `${size}px`;
+      c.style.height = `${h}px`;
+    }
+    const x = c.getContext('2d')!;
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, size, h);
+    this.drawMap(x, g, size, h, false);
   }
 }
 

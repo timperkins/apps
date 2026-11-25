@@ -2,7 +2,7 @@
   position: fixed; inset: 0; overflow: hidden; outline: none; user-select: none; -webkit-user-select: none; touch-action: none;
   color: #f6ecd8; font: 15px/1.4 ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif; background: #0b0a10;
 }
-.md-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+.md-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; image-rendering: pixelated; image-rendering: crisp-edges; }
 .md button { font: inherit; color: inherit; }
 .md img { image-rendering: pixelated; }
 
@@ -185,3 +185,4 @@
 .md-pips i { width: 10px; height: 10px; background: #3a2a4a; border: 1px solid #6a4aa0; }
 .md-pips i.on { background: #c08aff; box-shadow: 0 0 6px #c08aff; }
 @media (max-width: 640px) { .md-xp { width: 160px; } }
+.md-mini { position: absolute; right: 10px; top: 58px; background: rgba(10,8,14,.7); border: 2px solid rgba(255,220,150,.5); border-radius: 10px; pointer-events: none; }

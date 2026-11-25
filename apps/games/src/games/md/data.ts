@@ -447,31 +447,31 @@ export const LEVELS: LevelDef[] = [
     id: 'crypt', name: 'Mossy Crypt', blurb: 'Old tombs gone green. Mind the hopping stones.',
     floor: ['#56605a', '#4a534d'], wall: ['#6d7a68', '#3d4a3a'], accent: '#8fd16a', ambient: '#0b1410', light: 0.8,
     monsters: ['mossling', 'mossling', 'lantern-monk', 'gloomwing'],
-    guardian: { kind: 'mossling', name: 'Old Boulderback', scale: 2.2, hp: 260 }, rooms: 9, hazard: 'water', map: { x: 18, y: 72 }, reward: 40,
+    guardian: { kind: 'mossling', name: 'Old Boulderback', scale: 2.2, hp: 260 }, rooms: 16, hazard: 'water', map: { x: 18, y: 72 }, reward: 65,
   },
   {
     id: 'shroom', name: 'Shroom Hollow', blurb: 'Caves full of giant glowing mushrooms, and some that walk.',
     floor: ['#5a4a5e', '#4c3e50'], wall: ['#7a5a7e', '#3e2c44'], accent: '#e06ad6', ambient: '#140b16', light: 0.85,
     monsters: ['sporecap', 'mossling', 'gloomwing', 'sporecap'],
-    guardian: { kind: 'sporecap', name: 'Queen Puffshroom', scale: 2.4, hp: 420 }, rooms: 10, map: { x: 36, y: 40 }, reward: 60,
+    guardian: { kind: 'sporecap', name: 'Queen Puffshroom', scale: 2.4, hp: 420 }, rooms: 17, map: { x: 36, y: 40 }, reward: 95,
   },
   {
     id: 'frost', name: 'Frostdeep Halls', blurb: 'Frozen halls where wisps drift and old armor walks.',
     floor: ['#9fb6c8', '#8aa2b6'], wall: ['#d8eaf6', '#7896b0'], accent: '#aee8ff', ambient: '#0a1220', light: 0.95,
     monsters: ['frost-wisp', 'rustknight', 'gloomwing', 'frost-wisp'],
-    guardian: { kind: 'rustknight', name: 'The Frozen Warden', scale: 2.0, hp: 700 }, rooms: 11, hazard: 'ice', map: { x: 60, y: 22 }, reward: 85,
+    guardian: { kind: 'rustknight', name: 'The Frozen Warden', scale: 2.0, hp: 700 }, rooms: 18, hazard: 'ice', map: { x: 60, y: 22 }, reward: 135,
   },
   {
     id: 'forge', name: 'Cinder Forge', blurb: 'A forge built over lava. Hounds of ember guard it.',
     floor: ['#4a3a36', '#3e302c'], wall: ['#6e4a3e', '#38221c'], accent: '#ff7a2a', ambient: '#1a0806', light: 0.9,
     monsters: ['cinder-hound', 'rustknight', 'lantern-monk', 'cinder-hound'],
-    guardian: { kind: 'cinder-hound', name: 'Magmajaw', scale: 2.3, hp: 900 }, rooms: 12, hazard: 'lava', map: { x: 78, y: 52 }, reward: 110,
+    guardian: { kind: 'cinder-hound', name: 'Magmajaw', scale: 2.3, hp: 900 }, rooms: 19, hazard: 'lava', map: { x: 78, y: 52 }, reward: 175,
   },
   {
     id: 'throne', name: 'Obsidian Throne', blurb: 'The deepest dungeon, where the Hollow Crown waits.',
     floor: ['#2e2838', '#262030'], wall: ['#4a3e5e', '#1c1626'], accent: '#b07aff', ambient: '#08050e', light: 0.75,
     monsters: ['rustknight', 'frost-wisp', 'cinder-hound', 'lantern-monk', 'sporecap', 'gloomwing'],
-    guardian: { kind: 'hollow-crown', name: 'The Hollow Crown', scale: 1, hp: 1400 }, rooms: 13, hazard: 'lava', map: { x: 88, y: 16 }, reward: 300,
+    guardian: { kind: 'hollow-crown', name: 'The Hollow Crown', scale: 1, hp: 1400 }, rooms: 20, hazard: 'lava', map: { x: 88, y: 16 }, reward: 450,
   },
 ];
 
