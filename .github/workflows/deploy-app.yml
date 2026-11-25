@@ -18,7 +18,19 @@ on:
         type: string
         required: false
       latest_only:
-        description: Preview only. Deploy just the fixed latest channel (no branch channel). Used by prod.yml after a merge.
+        description: Preview only. Deploy just the fixed latest channel (no branch channel).
+        type: boolean
+        required: false
+        default: false
+      with_latest:
+        description: >-
+          Prod only. After the prod deploy, rebuild with the preview environment in the same job and put it
+          on the fixed "latest" preview link, so that link also tracks main. Used by prod.yml after a merge.
+        type: boolean
+        required: false
+        default: false
+      pr_comment:
+        description: Preview only. Add this app's links to the branch PR's preview-links comment. Used by preview.yml.
         type: boolean
         required: false
         default: false
@@ -52,7 +64,7 @@ jobs:
     permissions:
       contents: write # move the deployed/<app> tag
       statuses: write # preview link on the commit
-      pull-requests: read # the PR number shown as the build's version
+      pull-requests: write # the PR number shown as the build's version, and the preview-links comment
     concurrency:
       group: deploy-${{ inputs.app }}-${{ inputs.target }}-${{ inputs.ref || github.ref_name }}
       cancel-in-progress: ${{ inputs.target == 'preview' }}
@@ -83,6 +95,9 @@ jobs:
             echo "database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // .firestore.prod // empty' app.json)"
             # The database that belongs to this target. Rules are deployed only to this one.
             echo "own_database=$(jq -r --arg t '${{ inputs.target }}' '.firestore[$t] // empty' app.json)"
+            # The same two for the preview environment, used by with_latest on prod.
+            echo "preview_database=$(jq -r '.firestore.preview // .firestore.prod // empty' app.json)"
+            echo "preview_own_database=$(jq -r '.firestore.preview // empty' app.json)"
             echo "jobs=$(jq -c '.jobs // []' app.json)"
             echo "job_service_account=$(jq -r '.jobServiceAccount // empty' app.json)"
             echo "sha=$(git rev-parse HEAD)"
@@ -204,6 +219,41 @@ jobs:
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
+      - name: Deploy to prod
+        id: hosting_prod
+        if: steps.app.outputs.type == 'hosting' && inputs.target == 'prod'
+        run: |
+          only=hosting
+          if [ -n '${{ steps.app.outputs.database }}' ]; then only='hosting,firestore:${{ steps.app.outputs.database }}'; fi
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
+            --message "${{ inputs.app }} ${{ steps.app.outputs.sha }}"
+          echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
+
+      # with_latest: rebuild the app with the preview environment, in this job instead of a second
+      # deploy-app run, and deploy it to the fixed link below. This runs even if the prod deploy
+      # failed, and a failure here doesn't stop the deployed tag from moving (see the last step).
+      - name: Rebuild for the fixed preview link
+        id: latest_build
+        if: >-
+          !cancelled() && steps.app.outputs.type == 'hosting' && inputs.target == 'prod' && inputs.with_latest
+        continue-on-error: true
+        env:
+          VITE_PR_NUMBER: ${{ steps.pr.outputs.number }}
+          NEXT_PUBLIC_PR_NUMBER: ${{ steps.pr.outputs.number }}
+          VITE_APP_ENV: preview
+          VITE_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.preview_database }}
+          NEXT_PUBLIC_APP_ENV: preview
+          NEXT_PUBLIC_FIRESTORE_DATABASE_ID: ${{ steps.app.outputs.preview_database }}
+        run: '"$RUN" npm run build'
+
+      - name: Deploy Firestore rules (preview database, after a merge)
+        id: latest_rules
+        if: steps.latest_build.outcome == 'success' && steps.app.outputs.preview_own_database != ''
+        continue-on-error: true
+        run: |
+          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only 'firestore:${{ steps.app.outputs.preview_own_database }}' \
+            --project "$FIREBASE_PROJECT" --force
+
       # The same build also goes to a fixed "latest" channel, so each app has one preview link that
       # never changes and always shows the most recent preview push from any branch or merge to main
       # (last one wins; prod.yml runs this with latest_only after each merge).
@@ -211,8 +261,11 @@ jobs:
       # An app with previewSite in app.json gets its fixed link from that site instead (next step).
       - name: Deploy fixed latest channel
         id: hosting_latest
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.preview_site == ''
-        continue-on-error: ${{ !inputs.latest_only }}
+        if: >-
+          steps.app.outputs.preview_site == '' && (
+            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview')
+            || (!cancelled() && steps.latest_build.outcome == 'success'))
+        continue-on-error: ${{ inputs.target == 'prod' || !inputs.latest_only }}
         run: |
           npx -y "$FIREBASE_TOOLS" hosting:channel:deploy latest \
             --project "$FIREBASE_PROJECT" --expires 30d --json > "$RUNNER_TEMP/latest.json" 2> "$RUNNER_TEMP/latest.err" || {
@@ -228,8 +281,11 @@ jobs:
       # site's live channel, which never expires.
       - name: Deploy fixed preview site
         id: hosting_preview_site
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && steps.app.outputs.preview_site != ''
-        continue-on-error: ${{ !inputs.latest_only }}
+        if: >-
+          steps.app.outputs.preview_site != '' && (
+            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview')
+            || (!cancelled() && steps.latest_build.outcome == 'success'))
+        continue-on-error: ${{ inputs.target == 'prod' || !inputs.latest_only }}
         env:
           SITE: ${{ steps.app.outputs.preview_site }}
           DOMAIN: ${{ steps.app.outputs.preview_domain }}
@@ -242,16 +298,6 @@ jobs:
           cp "$RUNNER_TEMP/firebase.json.orig" firebase.json
           [ "$status" = 0 ] || { echo "::warning title=preview site::deploy to $SITE failed"; exit "$status"; }
           echo "url=https://${DOMAIN:-$SITE.web.app}" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy to prod
-        id: hosting_prod
-        if: steps.app.outputs.type == 'hosting' && inputs.target == 'prod'
-        run: |
-          only=hosting
-          if [ -n '${{ steps.app.outputs.database }}' ]; then only='hosting,firestore:${{ steps.app.outputs.database }}'; fi
-          "$RUN" npx -y "$FIREBASE_TOOLS" deploy --only "$only" --project "$FIREBASE_PROJECT" --force \
-            --message "${{ inputs.app }} ${{ steps.app.outputs.sha }}"
-          echo "url=https://${{ steps.app.outputs.domain }}" >> "$GITHUB_OUTPUT"
 
       # Apps with server code on Firebase App Hosting
 
@@ -370,3 +416,69 @@ jobs:
           tag='deployed/${{ inputs.app }}'
           git tag -f "$tag" '${{ steps.app.outputs.sha }}'
           git push -f origin "refs/tags/$tag"
+
+      # with_latest: the fixed link steps above don't stop the job, so the tag still moves when only they
+      # fail. Fail the job here instead, so the run still shows it.
+      - name: Check the fixed preview link
+        if: >-
+          !cancelled() && inputs.with_latest && (steps.latest_build.outcome == 'failure'
+          || steps.latest_rules.outcome == 'failure' || steps.hosting_latest.outcome == 'failure'
+          || steps.hosting_preview_site.outcome == 'failure')
+        run: |
+          echo "::error title=fixed preview link::rebuilding or deploying the fixed latest preview link failed"
+          exit 1
+
+      # pr_comment: add this app's links to the branch PR's comment (one comment per PR, updated in
+      # place). The first app to finish in a run starts the comment over; the others add their line.
+      # Runs when the deploy failed too, so the comment says so.
+      - name: PR comment
+        if: >-
+          !cancelled() && inputs.pr_comment && inputs.target == 'preview' && !inputs.latest_only
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP: ${{ inputs.app }}
+          BRANCH: ${{ inputs.ref || github.ref_name }}
+          URL: ${{ steps.hosting_preview.outputs.url || steps.apphosting.outputs.url || steps.hosting_preview_site.outputs.url || steps.hosting_latest.outputs.url }}
+          NOTE: ${{ steps.apphosting.outputs.note }}
+          LATEST: ${{ steps.hosting_preview_site.outputs.url || steps.hosting_latest.outputs.url }}
+        run: |
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          [ -n "$pr" ] || exit 0
+          marker='<!-- preview-links -->'
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          entry="- **$APP**: ${URL:-${NOTE:-deploy failed, see the run}}"
+          [ -z "$LATEST" ] || entry+=$'\n'"  - fixed link (always the latest preview): $LATEST"
+          find_comment() {
+            gh api "repos/$GH_REPO/issues/$pr/comments" --paginate \
+              --jq "map(select(.body | startswith(\"$marker\")) | {id, body} | tojson) | .[]" | head -n1
+          }
+          for attempt in 1 2 3; do
+            found=$(find_comment)
+            id=$(jq -r '.id // empty' <<< "${found:-null}")
+            old=$(jq -r '.body // empty' <<< "${found:-null}")
+            old_run=$(grep -oE 'actions/runs/[0-9]+' <<< "$old" | tail -n1 | cut -d/ -f3 || true)
+            # A newer run already owns the comment: leave it alone.
+            if [ -n "$old_run" ] && [ "$old_run" -gt "$GITHUB_RUN_ID" ]; then exit 0; fi
+            # Keep the other apps' entries from this run, and drop this app's old entry.
+            entries=""
+            if [ "$old_run" = "$GITHUB_RUN_ID" ]; then
+              entries=$(awk -v app="- **$APP**:" '
+                /^- \*\*/ { skip = (index($0, app) == 1) }
+                /^(- \*\*|  - )/ { if (!skip) print }' <<< "$old")
+            fi
+            entries="${entries:+$entries$'\n'}$entry"
+            body="$marker"$'\n'"**Preview links** for \`${GITHUB_SHA::7}\`"$'\n\n'"$entries"$'\n\n'"[Run]($run_url)"
+            if [ -n "$id" ]; then
+              gh api -X PATCH "repos/$GH_REPO/issues/comments/$id" -f body="$body" > /dev/null
+            else
+              gh pr comment "$pr" --body "$body" > /dev/null
+            fi
+            # Another app in this run may have written at the same moment: check that this entry stuck.
+            sleep $(( RANDOM % 4 + 2 ))
+            now=$(jq -r '.body // empty' <<< "$(find_comment)")
+            grep -qF "$run_url" <<< "$now" || exit 0 # a newer run took over
+            grep -qxF -- "$(head -n1 <<< "$entry")" <<< "$now" && exit 0
+          done
+          echo "::warning title=PR comment::could not add $APP to the preview-links comment"
