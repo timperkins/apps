@@ -36,7 +36,8 @@ export const TECH: Tech[] = [
   { id: 'navy', name: 'Naval yard', tab: 'base', cost: 1000, needs: ['power'], building: 'navy', blurb: 'Built out on open water next to your base. Makes ships, and mends ships parked in its slip, for credits.' },
   { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; tap Wall again (or Esc) to stop.' },
   { id: 'uplink', name: 'Satellite uplink', tab: 'base', cost: 1500, needs: ['radar', 'lab'], building: 'uplink', blurb: 'Reveals the whole map while it stands.' },
-  { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
+  { id: 'pillbox', name: 'Pillbox', tab: 'defense', cost: 400, needs: ['barracks'], building: 'pillbox', blurb: 'Concrete bunker with a fast machine gun: the key defense against soldiers. Barely scratches vehicles, and grenades and artillery crack it.' },
+  { id: 'tower', name: 'Turret', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Twin anti-tank cannon: tears into vehicles, but does little to soldiers.' },
   { id: 'aa', name: 'Skyguard battery', tab: 'defense', cost: 1000, needs: ['barracks', 'radar'], building: 'aa', blurb: 'Missile launcher that shoots down aircraft. Can\'t hit anything on the ground.' },
   { id: 'prism', name: 'Lumen tower', tab: 'defense', cost: 1500, needs: ['radar', 'lab'], building: 'prism', blurb: 'Long-range light beam. Lumen towers near one that fires beam their light into it and add to the blow.' },
 
@@ -66,7 +67,7 @@ export const TECH: Tech[] = [
   { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
   { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water, where only Destroyers can hit it. It comes up to fire a long torpedo that hits ships and Naval yards hard but is slow to reload, and stays surfaced for 8 seconds after (longer if it is hit), open to anything that can hit a ship.' },
   { id: 'cruiser', name: 'Skyguard cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Warship with two Skyguard missile launchers that shoot down aircraft from far off. Can\'t hit anything on the ground or water.' },
-  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Carries up to 12 Swift jets, which fly off it to fight and land back on it to rearm. Select jets and tap the Carrier to land them. New jets land on a Carrier parked at the Naval yard.' },
+  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Carries up to 12 Swift jets, which take off from its runway to fight and land back on it to rearm and be mended. Very tough. Select jets and tap the Carrier to land them. New jets land on a Carrier parked at the Naval yard.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Construction yard.' },
 ];
 
@@ -91,6 +92,7 @@ export const POWER: Partial<Record<BuildingKind, number>> = {
   helipad: -10,
   lab: -75,
   tower: -20,
+  pillbox: -15,
   prism: -75,
   aa: -50,
   depot: -25,
