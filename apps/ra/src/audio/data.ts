@@ -468,30 +468,30 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   tank: {
     title: 'Vehicle crews',
-    voice: 'Desert Ranger – Male 01',
-    voiceId: 'iEvYV2o9zHf3RDl9U51b',
-    style: 'Deep American voice, muffled as if through a gas-mask radio.',
+    voice: 'Pyle',
+    voiceId: 'weNdhGmYaizQlfiLlyJq',
+    style: 'Low baritone, plainspoken military veteran, deadpan and dry.',
     units: ['light', 'heavy', 'scorch', 'lumen', 'skyguard', 'arty', 'comet', 'apc', 'mcv', 'boat'],
   },
   copter: {
     title: 'Copter pilot',
-    voice: 'Eryn – Strong Female Military Commander',
-    voiceId: 'wa4sQVgbDDzUDEzJwch3',
-    style: 'Strong, commanding American female voice.',
+    voice: 'Oliver – Friendly Professional',
+    voiceId: 'snyKKuaGYk1VUEh42zbW',
+    style: 'Warm, laid-back Australian.',
     units: ['heli'],
   },
   pilot: {
     title: 'Jet and plane pilot',
-    voice: 'Everley Rhodes – VO Pro',
-    voiceId: 'Xm5W2LBUW4LWizr18Fbd',
-    style: 'Confident American female voice. Asked for: crisp, cool, over a cockpit radio; focused for the attack lines.',
+    voice: 'Penfist – Military Broadcaster',
+    voiceId: 'PODaWQBE9fnXYis1ztG8',
+    style: 'Military-trained radio broadcaster, confident.',
     units: ['jet', 'heron', 'plane'],
   },
   scout: {
     title: 'Scout',
-    voice: 'Emma – Wry, Gritty Hero',
-    voiceId: 'dmWfLQZJq7wNPv9WmtiM',
-    style: 'Wry, gritty young American woman with dry humor.',
+    voice: 'John Mansfield',
+    voiceId: 'jD9ZLAx3sVOQk9LCF0zD',
+    style: 'Mid-twenties East Coast American, low and no-nonsense.',
     units: ['buggy'],
   },
   harvester: {
@@ -510,9 +510,9 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   commando: {
     title: 'Commando',
-    voice: 'Pauly – Brooklyn Wise Guy',
-    voiceId: 'OBLxU3DhFiBOh33EeRvi',
-    style: 'Brash, wisecracking New Yorker. Asked for: cocky, confident; grinning for the attack lines.',
+    voice: 'Revenant – RTS Stealth Ghost Soldier',
+    voiceId: 'AocjYzHzWRalprWmBG9m',
+    style: 'Gritty American soldier, sinister and calculating, made for RTS units.',
     units: ['cmdo'],
   },
   flamer: {
@@ -524,9 +524,9 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   navy: {
     title: 'Sea captain',
-    voice: 'Arkadius – Old Storyteller',
-    voiceId: 'O4uxPTtvgxrA0QCLHI1J',
-    style: 'Old Scottish storyteller, deep and raspy. Asked for: gruff old sea captain, commanding; fierce for the attack lines.',
+    voice: 'Spartan',
+    voiceId: 'S75jVZ0i3J6Xa5BbK8CE',
+    style: 'Calm, grounded American baritone, measured.',
     units: ['otter', 'destroyer', 'cruiser', 'carrier', 'sub'],
   },
   dog: {
@@ -683,8 +683,21 @@ export const MUSIC: Record<MoodId, MusicInfo> = {
 
 // Three new ElevenLabs takes of every sound effect, made from the same
 // prompts (Text to Sound v3), trimmed and matched in loudness to the clip the
-// game plays now: public/sfx/options/<name>_<1..3>.mp3.
+// game played: public/sfx/options/<name>_<1..3>.mp3. Where a take was picked
+// it became the game's clip, and the clip it replaced took its slot.
 export const SFX_OPTIONS = 3;
+
+// Takes that were picked and now play in the game, by the slot they came
+// from; that slot holds the clip they replaced.
+export const SFX_APPLIED: Partial<Record<Sfx | Loop, number>> = {
+  shell_whistle: 2,
+  flame_burst: 1,
+  dog_attack: 2,
+  bullet_hit: 2,
+  dog_yelp: 1,
+  ore_unload: 3,
+  credits_tick: 2,
+};
 
 export interface VoiceOption {
   slug: string; // file name part: public/voice-options/<voice>/<voice>_select_<slug>.mp3
@@ -693,54 +706,7 @@ export interface VoiceOption {
   style: string;
 }
 
-// Three new male voices for some units, each saying that unit's first select
-// line (Eleven v4). The game keeps its current voice until one is picked.
-export const VOICE_OPTIONS: Partial<Record<UnitVoice, { why?: string; options: VoiceOption[] }>> = {
-  commando: {
-    options: [
-      { slug: 'adam', voice: 'Adam – Brooding, Dark, Tough American', voiceId: 'IRHApOXLvnW57QJPQH2P', style: 'A tough hero weathered by years of experience, mid-low and gritty.' },
-      { slug: 'revenant', voice: 'Revenant – RTS Stealth Ghost Soldier', voiceId: 'AocjYzHzWRalprWmBG9m', style: 'Gritty American soldier, sinister and calculating, made for RTS units.' },
-      { slug: 'clive', voice: 'Clive – Determined Hero', voiceId: 'dnHIANkC4u76O6OE22jT', style: 'Deep and resonant with a slight rasp; strong and controlled.' },
-    ],
-  },
-  tank: {
-    why: 'Asked for: less echo-y than the gas-mask radio voice.',
-    options: [
-      { slug: 'rolando', voice: 'Rolando', voiceId: '6PBHdlpKVQ70t6tnDUYF', style: 'Strong, authoritative and deep, with a military past; clean studio sound.' },
-      { slug: 'rob', voice: 'Rob – Military Podcast Host', voiceId: 'hWhGhek2FTOGZaByvSGa', style: 'Many years in the military; serious but lively, dry and close.' },
-      { slug: 'pyle', voice: 'Pyle', voiceId: 'weNdhGmYaizQlfiLlyJq', style: 'Low baritone, plainspoken military veteran, deadpan and dry.' },
-    ],
-  },
-  scout: {
-    why: 'Male voices; the current one is female.',
-    options: [
-      { slug: 'max', voice: 'Max – Deep and Crisp', voiceId: 'ItKJeqCQp9zXEfMJgRLS', style: 'Young American man, confident, clear and a little breathy.' },
-      { slug: 'john', voice: 'John Mansfield', voiceId: 'jD9ZLAx3sVOQk9LCF0zD', style: 'Mid-twenties East Coast American, low and no-nonsense.' },
-      { slug: 'louie', voice: 'Louie the Legend', voiceId: 'ataV0GNgfIus2NWdTJP0', style: 'Youthful, expressive and animated, warm and confident.' },
-    ],
-  },
-  copter: {
-    why: 'Male voices; the current one is female.',
-    options: [
-      { slug: 'steven', voice: 'Steven Casteel – Hero, Villain, or Narrator', voiceId: 'QEj0heL4nQHjaGrihlr0', style: 'Neutral Pacific Northwest accent, confident hero.' },
-      { slug: 'oliver', voice: 'Oliver – Friendly Professional', voiceId: 'snyKKuaGYk1VUEh42zbW', style: 'Warm, laid-back Australian.' },
-      { slug: 'chris', voice: 'Chris – Northern UK', voiceId: 'AmY1pcgcEc15wyuIj50p', style: 'British, North Eastern accent (Durham).' },
-    ],
-  },
-  pilot: {
-    why: 'Male voices; the current one is female.',
-    options: [
-      { slug: 'penfist', voice: 'Penfist – Military Broadcaster', voiceId: 'PODaWQBE9fnXYis1ztG8', style: 'Military-trained radio broadcaster, confident.' },
-      { slug: 'mark', voice: 'Mark – Friendly, Confident', voiceId: 'v3p1kjzUvro6S76qmYmH', style: 'Midwestern American, friendly and sure of himself.' },
-      { slug: 'adam', voice: 'Adam – American Male', voiceId: 'ookcfIYgQDpBT5ueX6gr', style: 'Neutral newscaster American, relaxed.' },
-    ],
-  },
-  navy: {
-    why: 'Asked for: not like a pirate.',
-    options: [
-      { slug: 'severin', voice: 'Severin – Powerful & Commanding', voiceId: 'ib8aaABAPZQpTo6hx8Jr', style: 'Refined British, composed and authoritative.' },
-      { slug: 'jeff', voice: 'Jeff Wells', voiceId: 'sK8BRDMixLgM8i4inA71', style: 'Deep, commanding, bold American.' },
-      { slug: 'spartan', voice: 'Spartan', voiceId: 'S75jVZ0i3J6Xa5BbK8CE', style: 'Calm, grounded American baritone, measured.' },
-    ],
-  },
-};
+// New voices to try for some units, each saying that unit's first select
+// line (Eleven v4). None waiting now: the six picked voices replaced the old
+// ones in the game, every line.
+export const VOICE_OPTIONS: Partial<Record<UnitVoice, { why?: string; options: VoiceOption[] }>> = {};

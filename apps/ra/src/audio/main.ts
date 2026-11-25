@@ -6,7 +6,7 @@ import './audio.css';
 import type { Loop, Sfx } from '../sfx';
 import type { UnitLine, UnitVoice } from '../voice';
 import { ANNOUNCE, ANNOUNCE_GAP, GAIN, MUSIC_VOLUME as VOLUME, UNIT_CLIPS } from '../audio-config';
-import { ANNOUNCEMENTS, LINES, LINE_TITLE, LINE_WHEN, MUSIC, type MoodId, SFX, SFX_GROUPS, SFX_OPTIONS, UNIT_NAME, type Use, VOICE_OPTIONS, VOICES } from './data';
+import { ANNOUNCEMENTS, LINES, LINE_TITLE, LINE_WHEN, MUSIC, type MoodId, SFX, SFX_APPLIED, SFX_GROUPS, SFX_OPTIONS, UNIT_NAME, type Use, VOICE_OPTIONS, VOICES } from './data';
 import { ROOT, picture } from './pics';
 import { load, play, stopAll, type PlayOpts, type Playing } from './player';
 
@@ -27,7 +27,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 // ---------- picks: which option is chosen for each sound and voice ----------
 // 0 is what the game plays now. Kept in this browser so a reload keeps them.
 
-const PICKS_KEY = 'ra.audio.picks';
+const PICKS_KEY = 'ra.audio.picks.v2'; // v2: the first picks were applied, and the slots moved
 const picks: Record<string, number> = (() => {
   try {
     return JSON.parse(localStorage.getItem(PICKS_KEY) ?? '{}') as Record<string, number>;
@@ -153,8 +153,10 @@ function sfxCard(n: Sfx | Loop): HTMLElement {
   when.append(el('b', '', 'Plays when: '), info.when);
   body.append(when);
   const key = `sfx:${n}`;
-  const opts = ['Current', ...Array.from({ length: SFX_OPTIONS }, (_, i) => `New ${i + 1}`)];
-  body.append(choiceGroup(key, opts, ['What the game plays now', ...opts.slice(1).map((_, i) => `New ElevenLabs take ${i + 1}`)]));
+  const old = SFX_APPLIED[n];
+  const opts = ['Current', ...Array.from({ length: SFX_OPTIONS }, (_, i) => (i + 1 === old ? 'Old' : `New ${i + 1}`))];
+  const titles = opts.map((o, i) => (!i ? 'What the game plays now' : o === 'Old' ? 'What the game played before' : `New ElevenLabs take ${i}`));
+  body.append(choiceGroup(key, opts, titles));
   const plays = el('div', 'plays');
   const path = () => sfxPath(n);
   plays.append(playBtn(path, loop ? 'Loop' : 'Play', { loop, gain: 1 }, 'main'));
@@ -385,7 +387,7 @@ function changesText(): { text: string; count: number } {
   const sfx: string[] = [];
   for (const n of Object.keys(SFX)) {
     const i = picks[`sfx:${n}`];
-    if (i) sfx.push(`- ${n} (${SFX[n as Sfx | Loop].title}): new ${i} (public/sfx/options/${n}_${i}.mp3)`);
+    if (i) sfx.push(`- ${n} (${SFX[n as Sfx | Loop].title}): ${SFX_APPLIED[n as Sfx | Loop] === i ? 'back to the old clip' : `new ${i}`} (public/sfx/options/${n}_${i}.mp3)`);
   }
   const voices: string[] = [];
   for (const [v, vo] of Object.entries(VOICE_OPTIONS) as [UnitVoice, NonNullable<(typeof VOICE_OPTIONS)[UnitVoice]>][]) {

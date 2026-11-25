@@ -1,5 +1,5 @@
 // The Audio page's words and numbers match the game's clips.
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ANNOUNCE, GAIN, MUSIC_VOLUME, UNIT_CLIPS } from '../audio-config';
 import { ANNOUNCEMENTS, LINES, MUSIC, SFX, SFX_OPTIONS, VOICE_OPTIONS, VOICES } from './data';
@@ -49,6 +49,7 @@ describe('audio page', () => {
       expect(vo.options, v).toHaveLength(3);
       expect(mp3s(`voice-options/${v}`), v).toEqual(vo.options.map((o) => `${v}_select_${o.slug}`).sort());
     }
-    expect(readdirSync(pub + 'voice-options').sort()).toEqual(Object.keys(VOICE_OPTIONS).sort());
+    const dirs = existsSync(pub + 'voice-options') ? readdirSync(pub + 'voice-options') : [];
+    expect(dirs.sort()).toEqual(Object.keys(VOICE_OPTIONS).sort());
   });
 });
