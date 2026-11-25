@@ -3176,41 +3176,44 @@ export function makeOre(): OreArt {
   return { lumps, stain };
 }
 
-// An ore generator: a squat steel drum on an eight-sided footing plate,
-// ringed with vents, with a gold crystal on top that seeds the field round it.
-export const ORE_GEN_TIP = 9; // height of the crystal's top
+// An ore generator: a small mossy mound of dark rock split open at the top,
+// with a few gold crystals pushing up out of the crack, as if the field grew
+// out of it.
 export function makeOreGen(): StackSprite {
-  const plate = hex('#5d625f');
-  const steel = hex('#8a918c');
-  const dark = hex('#3a3f3c');
-  const band = hex('#b38a2e');
-  const gold = hex('#e3b545');
-  const glint = hex('#fff0b0');
+  const rock = hex('#5e5446');
+  const rockD = hex('#3f382e');
+  const moss = hex('#4f6b32');
+  const gold = hex('#d9a93c');
+  const goldD = hex('#9c7224');
+  const glint = hex('#fbe48e');
+  // crystals: [u, v, lean u, lean v, radius, height]
+  const shards: [number, number, number, number, number, number][] = [
+    [0, 0, 0.1, -0.15, 0.75, 4.6],
+    [0.9, -0.5, 0.35, -0.2, 0.55, 3.4],
+    [-0.8, 0.4, -0.3, 0.15, 0.5, 3.1],
+    [-0.2, -1, -0.1, -0.35, 0.45, 2.7],
+  ];
   return renderStack(
     (u, v, z) => {
-      const d = Math.hypot(u, v);
-      const oct = Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) / 1.35);
-      // the footing plate, with bolts at its corners
-      if (z < 1 && oct <= 4.6) {
-        if (oct > 3.9 && hash2(Math.round(u * 2), Math.round(v * 2), 31) > 0.82) return shade(steel, 0.1);
-        return oct > 4.1 ? shade(plate, -0.15) : plate;
+      for (const [su, sv, lu, lv, r, h] of shards) {
+        if (z > h) continue;
+        const k = 1 - z / h;
+        const du = u - su - lu * z;
+        const dv = v - sv - lv * z;
+        // six-sided, tapering to a point
+        const hexd = Math.max(Math.abs(du) * 0.87 + Math.abs(dv) * 0.5, Math.abs(dv));
+        if (hexd <= r * Math.min(1, k * 2.2)) return du < -r * 0.2 && z > 1 ? glint : du > r * 0.35 ? goldD : gold;
       }
-      // the drum, with dark vents round it and a brass band near the top
-      if (z < 5.5 && d <= 3) {
-        if (z > 4.2 && z < 4.9) return band;
-        const ang = Math.atan2(v, u);
-        if (d > 2.6 && z > 1.6 && z < 3.8 && Math.sin(ang * 4) > 0.55) return dark;
-        return z > 5 ? shade(steel, 0.12) : steel;
-      }
-      // a collar, then the crystal: a pointed gold spire
-      if (z < 6.3 && d <= 1.7) return dark;
-      if (z <= ORE_GEN_TIP) {
-        const k = 1 - (z - 6.3) / (ORE_GEN_TIP - 6.3);
-        if (Math.abs(u) + Math.abs(v) <= 1.6 * k + 0.2) return u < 0 && z > 7 ? glint : gold;
-      }
-      return null;
+      // the mound: a lumpy dome, cracked open in the middle
+      const n = hash2(Math.floor(u * 2 + 20), Math.floor(v * 2 + 20), 41);
+      const d = Math.hypot(u * 0.9, v);
+      const top = 2.2 * (1 - (d / 3.2) ** 2) + (n - 0.5) * 0.5;
+      if (z > top || d > 3.3) return null;
+      if (d < 1.4 && z > top - 0.6) return rockD; // the crack
+      if (z > top - 0.5 && n > 0.55 && d > 1.6) return shade(moss, (n - 0.7) * 0.3);
+      return shade(rock, (n - 0.5) * 0.2 - (z < 0.6 ? 0.1 : 0));
     },
-    { r: 5, zmax: 10, step: 0.25, bakeShadow: true, outline: [30, 26, 14], shadowAlpha: 0.3 },
+    { r: 3.6, zmax: 5, step: 0.25, bakeShadow: true, outline: [28, 24, 16], shadowAlpha: 0.3 },
   );
 }
 

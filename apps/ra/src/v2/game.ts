@@ -37,7 +37,6 @@ import {
   makeBuilding,
   makeBushes,
   makeOreGen,
-  ORE_GEN_TIP,
   makeClutter,
   makeDish,
   makeOre,
@@ -6786,29 +6785,9 @@ export class IsoGame implements GameLike {
     }
   }
 
-  // An ore field's generator, its crystal pulsing while it grows ore back,
-  // and a glint over the clump it is filling.
+  // An ore field's generator.
   private drawOreGen(g: OreGen<OreNode>): void {
     this.blit(this.oreGenArt, g.x, g.y, 0);
-    const c = this.ctx;
-    const growing = g.nodes.find((n) => n.amt < ORE.node);
-    const pulse = 0.5 + 0.5 * Math.sin(this.time * (growing ? 4 : 1.5) + g.x);
-    const [sx, sy] = toScreen(g.x, g.y, ORE_GEN_TIP - 1);
-    c.save();
-    c.globalCompositeOperation = 'lighter';
-    c.fillStyle = `rgba(255,214,110,${(growing ? 0.35 : 0.15) + pulse * (growing ? 0.4 : 0.15)})`;
-    c.beginPath();
-    c.arc(sx, sy, 2 + pulse * 1.5, 0, Math.PI * 2);
-    c.fill();
-    if (growing) {
-      const [px, py] = this.nearPoint(g.x, g.y, growing.x, growing.y);
-      const [gx, gy] = toScreen(px, py, 2);
-      const a = 0.5 + 0.5 * Math.sin(this.time * 6);
-      c.fillStyle = `rgba(255,240,180,${a * 0.8})`;
-      c.fillRect(Math.round(gx) - 1, Math.round(gy), 3, 1);
-      c.fillRect(Math.round(gx), Math.round(gy) - 1, 1, 3);
-    }
-    c.restore();
   }
 
   private drawRuin(r: Ruin): void {
@@ -7003,7 +6982,7 @@ export class IsoGame implements GameLike {
       const spr = this.oreArt.lumps[n.v][oreSize(n)];
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
-    for (const g of this.oreGens) if (seen(g.x, g.y, 4)) items.push({ k: g.x + g.y, draw: () => this.drawOreGen(g) });
+    for (const g of this.oreGens) if (seen(g.x, g.y, 3)) items.push({ k: g.x + g.y, draw: () => this.drawOreGen(g) });
     for (const u of this.units) if ((!this.aloft(u) || u.exit) && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();
