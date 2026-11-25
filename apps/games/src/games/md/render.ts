@@ -992,7 +992,16 @@ export class Renderer {
   }
 
   /** the other player on your team */
-  private mate(p: Peer, g: Game) {
+  private mateAt = new Map<string, { x: number; y: number }>();
+  private mate(p0: Peer, g: Game) {
+    // glide between network updates instead of jumping, so your teammate doesn't cut corners through walls
+    let at = this.mateAt.get(p0.id);
+    if (!at || Math.hypot(at.x - p0.x, at.y - p0.y) > 3) at = { x: p0.x, y: p0.y };
+    const k = Math.min(1, this.frameDt * 14);
+    at.x += (p0.x - at.x) * k;
+    at.y += (p0.y - at.y) * k;
+    this.mateAt.set(p0.id, at);
+    const p = { ...p0, x: at.x, y: at.y };
     const view: HeroView = {
       x: p.x, y: p.y, face: p.face, walk: p.walk, moving: p.moving, rolling: p.rolling,
       swingT: p.swingT, swingDur: p.swingDur, drawT: p.drawT, bowOut: p.drawT > 0, hurt: false,
@@ -1000,7 +1009,7 @@ export class Renderer {
     };
     const x = this.x;
     if (p.dead) x.globalAlpha = 0.35;
-    this.drawHero(view, p);
+    this.drawHero(view, at);
     x.globalAlpha = 1;
     if (p.dead) {
       // a ring that fills while you hold E to revive them

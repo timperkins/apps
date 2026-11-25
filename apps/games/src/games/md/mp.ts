@@ -56,7 +56,7 @@ export class HostSession {
     pipe.onMessage = (m) => this.onMessage(id, m);
     g.peers = [{ ...peerOf(g, id, 'Player 2'), dead: false }];
     g.fxOut = [];
-    pipe.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, diff: g.diff, x: g.x, y: g.y });
+    // the level is sent once the guest says hello (their game may not be listening before that)
     this.host.players = 2;
     void this.host.touch();
   }
@@ -77,7 +77,11 @@ export class HostSession {
     if (m.t === 'hello') {
       this.guest!.name = String(m.name || 'Player 2').slice(0, 20);
       if (g.peers[0]) g.peers[0].name = this.guest!.name;
+      this.sendLevel();
       this.onJoin(this.guest!.name);
+    } else if (m.t === 'sync') {
+      // the guest is on a different map than us: send it again
+      this.sendLevel();
     } else if (m.t === 'pos') {
       const p = g.peers[0];
       if (p) Object.assign(p, m.p, { id, name: this.guest!.name });
@@ -86,6 +90,10 @@ export class HostSession {
 
   send(m: object) {
     this.guest?.pipe.send(m);
+  }
+  private sendLevel() {
+    const g = this.game();
+    this.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, diff: g.diff, x: g.x, y: g.y });
   }
 
   // hooks the game calls (wired up in index.ts)
@@ -126,6 +134,8 @@ export class HostSession {
     });
     this.send({
       t: 'snap',
+      // which map we're on, so the guest can tell if it's on the same one
+      lv: [g.mode === 'camp' ? 0 : 1, g.levelIdx, g.seed],
       me: peerOf(g, 'host', this.myName()),
       m: g.monsters.map((m) => [
         m.id, KINDS.indexOf(m.kind), r2(m.x), r2(m.y), Math.round(m.hp), m.maxHp, STATES.indexOf(m.state), r2(m.face), m.scale,
@@ -194,6 +204,7 @@ export class GuestSession {
           g.x = m.x;
           g.y = m.y;
         }
+        g.unstick();
         this.goal.clear();
         break;
       case 'done':
@@ -238,8 +249,22 @@ export class GuestSession {
     }
   }
 
+  private syncAsked = -Infinity;
   private snap(m: Msg) {
     const g = this.game();
+    if (Array.isArray(m.lv)) {
+      const [mode, idx, seed] = m.lv;
+      const same = mode === 0 ? g.mode === 'camp' : g.mode === 'dungeon' && g.levelIdx === idx && g.seed === seed;
+      if (!same) {
+        // we missed a level change: ask the host for it, and don't use this snapshot's map data
+        if (performance.now() - this.syncAsked > 1500) {
+          this.syncAsked = performance.now();
+          this.pipe?.send({ t: 'sync' });
+        }
+        g.mate = m.me;
+        return;
+      }
+    }
     g.mate = m.me;
     const old = new Map(g.monsters.map((x) => [x.id, x]));
     const seen = new Set<number>();

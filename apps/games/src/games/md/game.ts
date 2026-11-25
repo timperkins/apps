@@ -579,6 +579,25 @@ export class Game {
     if (!flier && t === T.HAZARD && this.def.hazard === 'lava') return false;
     return !this.solidAt(Math.floor(x), Math.floor(y), flier);
   }
+  /** if you're ever inside a wall, a tree or a crate, hop to the nearest open spot */
+  unstick() {
+    const open = (x: number, y: number) => !this.solidAt(Math.floor(x), Math.floor(y));
+    const free = (x: number, y: number) => open(x - 0.2, y - 0.2) && open(x + 0.2, y - 0.2) && open(x - 0.2, y + 0.2) && open(x + 0.2, y + 0.2);
+    if (free(this.x, this.y)) return false;
+    for (let r = 0.5; r <= 12; r += 0.5)
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        const x = Math.floor(this.x + Math.cos(a) * r) + 0.5, y = Math.floor(this.y + Math.sin(a) * r) + 0.5;
+        if (free(x, y)) {
+          this.x = x;
+          this.y = y;
+          this.vx = this.vy = 0;
+          return true;
+        }
+      }
+    return false;
+  }
+  private stuckCheck = 0;
   /** moves a circle with wall sliding */
   private moveCircle(o: { x: number; y: number }, dx: number, dy: number, r: number, flier = false, avoidLava = false) {
     const blocked = (x: number, y: number) => {
@@ -1183,6 +1202,11 @@ export class Game {
       this.vy += (gy * speed - this.vy) * Math.min(1, dt * slip);
     }
     this.moveCircle(this, this.vx * dt, this.vy * dt, HERO_R);
+    this.stuckCheck -= dt;
+    if (this.stuckCheck <= 0) {
+      this.stuckCheck = 0.5;
+      this.unstick();
+    }
     if (this.moving || this.rollT > 0) this.walk += dt * 10;
     if (this.speedT > 0 && this.moving && Math.random() < dt * 14) this.burst(this.x, this.y, 0.1, '#b8a8ff', 1, 0.5);
     if (onHaz && this.def.hazard === 'lava' && this.rollT <= 0 && !this.armor.lavaproof) {

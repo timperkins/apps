@@ -243,7 +243,14 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
     }
   });
   // chests in a few rooms (never the first)
-  const chestRooms = L.rooms.map((_, i) => i).filter((i) => i > 0 && i !== L.bossRoom).sort(() => r() - 0.5).slice(0, 3);
+  // shuffle with our own seeded random numbers (a sort with a random compare differs between browsers,
+  // which gave two players different chest rooms)
+  const pickable = L.rooms.map((_, i) => i).filter((i) => i > 0 && i !== L.bossRoom);
+  for (let i = pickable.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [pickable[i], pickable[j]] = [pickable[j], pickable[i]];
+  }
+  const chestRooms = pickable.slice(0, 3);
   for (const i of chestRooms) {
     const rm = L.rooms[i];
     for (let k = 0; k < 20; k++) {
