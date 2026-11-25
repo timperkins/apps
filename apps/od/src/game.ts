@@ -22,6 +22,9 @@ import {
   SHIP_START,
   T,
   buildBank,
+  buildJail,
+  jailTick,
+  COURSE,
   buildCity,
   drivable,
   idx,
@@ -403,6 +406,7 @@ export interface Hero {
   wearing: string | null;
   overlay: { title: string; sub: string; t: number } | null;
   menuReq: 'shop' | 'lot' | null; // a menu the friend's phone should open
+  course: number; // highest jail platform reached since the last fall
 }
 
 export const IDLE: Input = { mx: 0, my: 0, mag: 0, punch: false, fire: false, jump: false, use: false };
@@ -412,12 +416,15 @@ function makeHero(id: number, x: number, y: number): Hero {
   p.shirt = id === 0 ? '#222' : '#c62828';
   p.pants = id === 0 ? '#30343c' : '#1a237e';
   p.skin = id === 0 ? '#f2c9a0' : '#c98d5f';
-  return { id, player: p, vehicle: null, inVent: false, lift: null, invuln: 0, flameT: 0, ground: 0, regen: 0, hint: null, wearing: null, overlay: null, menuReq: null };
+  return { id, player: p, vehicle: null, inVent: false, lift: null, invuln: 0, flameT: 0, ground: 0, regen: 0, hint: null, wearing: null, overlay: null, menuReq: null, course: 0 };
 }
 
 export class Game {
   city: Scene;
   bank: Scene;
+  jail: Scene;
+  jailClock = 0;
+  trophyT = 0; // seconds until the jail trophy can be won again
   scene: Scene;
   heroes: Hero[];
   cur: Hero;
@@ -514,6 +521,7 @@ export class Game {
   constructor(save?: SaveData | null) {
     this.city = { map: buildCity(), people: [], vehicles: [], shots: [], fx: [] };
     this.bank = { map: buildBank(), people: [], vehicles: [], shots: [], fx: [] };
+    this.jail = { map: buildJail(), people: [], vehicles: [], shots: [], fx: [] };
     this.scene = this.city;
     const s = this.city.map.spawns.player[0];
     this.cur = makeHero(0, s.x, s.y);
@@ -1273,7 +1281,7 @@ export class Game {
     if (this.multi) this.banner(`Player ${this.cur.id + 1} got ${busted ? 'busted' : 'knocked out'}!`, '#ffab91');
     sfx('busted');
     // in 2 player mode the friend gets kicked out of the bank too
-    if (this.scene === this.bank) this.leaveBank(false);
+    if (this.scene !== this.city) this.leaveBank(false);
     this.dropHero(this.cur);
     const s = this.city.map.spawns.player[0];
     this.player.x = s.x + (this.cur.id ? 1 : 0);
@@ -1341,6 +1349,65 @@ export class Game {
     this.banner(this.vaultT > 0 ? 'The vault is empty right now. Come back later.' : 'Sneak past the guards, then jump across the crates. Don\'t touch the lasers!', '#fff59d');
   }
 
+  enterJail(doorX: number, doorY: number) {
+    this.bankReturn = { x: doorX + 0.5, y: doorY + 1.5 };
+    this.jail = { map: buildJail(), people: [], vehicles: [], shots: [], fx: [] };
+    this.jailClock = 0;
+    this.scene = this.jail;
+    const e = this.jail.map.spawns.entry[0];
+    this.placeHeroes(e.x, e.y);
+    for (const h of this.heroes) h.course = 0;
+    sfx('door');
+    this.banner('34 platforms to the golden trophy. Fall in the pit and you start over!', '#fff59d');
+  }
+
+  /** Just landed (or standing) on something in the jail. */
+  jailLand(t: number, landed: boolean) {
+    const pl = this.player;
+    const m = this.jail.map;
+    const h = this.cur;
+    if (t === T.Pit && pl.z <= 0.02) {
+      // fell in the pit: back to the start
+      const s = m.spawns.start[0];
+      this.fx('text', pl.x, pl.y, 0.8, 'WHOOPS!', '#ffab91', 1.1, 1.2);
+      sfx('splash');
+      pl.x = s.x + (h.id ? 0.8 : 0);
+      pl.y = s.y;
+      pl.z = 0;
+      pl.vz = 0;
+      pl.kx = pl.ky = 0;
+      if (h.course > 0) this.banner(`${this.multi ? `Player ${h.id + 1} fell` : 'You fell'} at platform ${h.course}. Back to the start!`, '#ffab91');
+      h.course = 0;
+      return;
+    }
+    // springy pads throw you up high
+    if (t === T.Bounce) {
+      pl.vz = 9;
+      sfx('jump');
+      this.fx('text', pl.x, pl.y, pl.z + 1.4, 'BOING!', '#ff8a80', 0.6);
+    }
+    const n = m.course?.[idx(m, Math.floor(pl.x), Math.floor(pl.y))] ?? 0;
+    if (n > h.course && (landed || n === h.course + 1)) {
+      h.course = n;
+      const done = n === COURSE.length;
+      this.fx('text', pl.x, pl.y, pl.z + 2, done ? 'FINISH!' : `${n}/${COURSE.length}`, done ? '#ffd54f' : '#fff', 1, done ? 1.5 : 1);
+      sfx(done ? 'cash' : 'coin');
+      if (done) this.banner('You made it across all 34 platforms! Grab the trophy!', '#ffd54f');
+    }
+  }
+
+  winTrophy() {
+    const prize = 1000;
+    this.money += prize;
+    this.trophyT = 60;
+    this.cur.course = 0;
+    const pl = this.player;
+    this.fx('text', pl.x, pl.y, 2.4, `+$${prize}`, '#a5d6a7', 1.6, 1.5);
+    this.banner(`${this.multi ? `Player ${this.cur.id + 1} won` : 'You won'} the golden trophy! +$${prize}`, '#ffd54f');
+    sfx('cash');
+    this.onSave?.();
+  }
+
   leaveBank(cops = true) {
     this.scene = this.city;
     const e = this.bankReturn;
@@ -1381,7 +1448,7 @@ export class Game {
         const x = tx + dx;
         const y = ty + dy;
         const t = tileAt(m, x, y);
-        if (t === T.Door || t === T.Grate || t === T.Locked || t === T.Vault) {
+        if (t === T.Door || t === T.Grate || t === T.Locked || t === T.Vault || t === T.Trophy) {
           const d = Math.hypot(x + 0.5 - pl.x, y + 0.5 - pl.y);
           const prio = t === T.Grate ? -0.2 : 0;
           if (d < 1.25 && (!near || d + prio < near.d)) near = { t, x, y, d: d + prio };
@@ -1397,7 +1464,8 @@ export class Game {
       if (near.t === T.Door) {
         const place = m.places.get(i);
         if (place === 'bank') return { text: 'The Bank', label: 'Go in', act: () => this.enterBank(near.x, near.y) };
-        if (place === 'exit') return { text: 'Leave the bank', label: 'Go out', act: () => this.leaveBank() };
+        if (place === 'jail') return { text: 'The Jail: a HUGE parkour course', label: 'Go in', act: () => this.enterJail(near.x, near.y) };
+        if (place === 'exit') return { text: this.scene === this.jail ? 'Leave the jail' : 'Leave the bank', label: 'Go out', act: () => this.leaveBank() };
         if (place === 'shop') return { text: 'Tools, disguises and upgrades', label: 'Shop', act: () => this.openMenu('shop') };
         if (place === 'lot') return { text: 'Rent or buy a car', label: 'Car lot', act: () => this.openMenu('lot') };
         if (place === 'home')
@@ -1433,6 +1501,13 @@ export class Game {
             }
           },
         };
+      }
+      if (near.t === T.Trophy) {
+        const pt = this.cur;
+        // the trophy sits next to platform 34, so you have to finish the course to reach it
+        if (this.trophyT > 0) return { text: `Trophy won! Try again in ${Math.ceil(this.trophyT)}s`, label: '', act: null };
+        if (pt.course < COURSE.length) return { text: 'The golden trophy! Get here by jumping across all 34 platforms.', label: '', act: null };
+        return { text: 'The golden trophy!', label: 'Grab it!', act: () => this.winTrophy() };
       }
       if (near.t === T.Vault) {
         if (this.vaultT > 0) return { text: `The vault is empty. It refills in ${Math.ceil(this.vaultT / 60)} min.`, label: '', act: null };
@@ -1553,6 +1628,11 @@ export class Game {
     }
     this.updateShots(dt);
     this.updateFx(dt);
+    this.trophyT = Math.max(0, this.trophyT - dt);
+    if (this.scene === this.jail) {
+      this.jailClock += dt;
+      jailTick(this.jail.map, this.jailClock);
+    }
     this.runOvers();
     if (this.scene === this.city) {
       this.select(pick(this.heroes));
@@ -1691,8 +1771,10 @@ export class Game {
     pl.vz -= 15 * dt;
     pl.z += pl.vz * dt;
     if (pl.z <= ground) {
+      const landed = pl.vz < -1;
       pl.z = ground;
       pl.vz = 0;
+      if (this.scene === this.jail) this.jailLand(t, landed);
     }
     // the laser floor in the vault room
     if (t === T.Laser && pl.z < 0.15 && this.invuln <= 0) {

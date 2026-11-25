@@ -17,6 +17,7 @@ An isometric cartoon heist game at [od.trom.dev](https://od.trom.dev). Built fro
 - **Police** walk the beat calmly and only get angry when one sees you commit a crime or you hit one; robbing a bank or taking the ship always counts.
 - **Cops:** wanted stars go up for crimes they see. Knock one out and they drop $50 to $100 (more as cops get tougher). Cops chase on foot and in cars, get tired after chasing too long ("You too fast") and slow down. Every 10 minutes of play they get 25% tougher. Stars cool down when nobody is close, or change your disguise on the phone while no one is looking.
 - **Army:** at 4 stars military buses drop off troops: **Greniders** (throw grenades), **Heaters** (flamethrowers) and **Lazors** (laser blasters). At 5 stars, tanks.
+- **Jail parkour:** the JAIL by Home has a HUGE course: 34 numbered platforms over a deep pit, with blinking platforms that vanish and springy pads that throw you up high. Fall in and you start over. Reach platform 34 and grab the golden trophy for $1000 (once a minute).
 - **Ship:** walk down the dock, beat the captain and his sailors, then take the wheel and sail.
 - **Phone:** map with your location (zoomed in, or the whole city), outfits, your car and help.
 - **2 players:** tap **Play with a friend** and the other phone scans the QR code (or taps **Join a friend's game** and types the 4 number code). You share money, stars and shop stuff; Player 2 wears the red shirt. Going into the bank takes you both in. Invite later from the phone's Car tab.

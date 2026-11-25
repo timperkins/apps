@@ -1,6 +1,6 @@
 import { Peer, type DataConnection, type PeerOptions } from 'peerjs';
 import { Fx, Game, Hero, IDLE, Input, Person, PersonKind, Shot, Vehicle, VehicleKind, makePerson, makeVehicle } from './game';
-import { T, buildBank } from './map';
+import { T, buildBank, buildJail, jailTick } from './map';
 import { sfx, sfxTap } from './audio';
 
 /*
@@ -227,7 +227,9 @@ type ShotRow = [Shot['kind'], number, number, number, number, number, number, nu
 
 interface Snapshot {
   t: 's';
-  sc: 0 | 1; // city or bank
+  sc: 0 | 1 | 2; // city, bank or jail
+  jc: number; // jail clock, for the blinking platforms
+  tr: number; // seconds until the jail trophy is back
   bid: string;
   open: boolean; // the bank's locked door has been opened
   h: HeroRow[];
@@ -274,11 +276,13 @@ function heroRow(h: Hero): HeroRow {
 
 export function snapshot(g: Game, guest: Hero, fx: Fx[], sounds: string[]): Snapshot {
   const me = g.heroPos(guest);
-  const near = (o: { x: number; y: number }, r: number) => g.scene === g.bank || Math.hypot(o.x - me.x, o.y - me.y) < r;
+  const near = (o: { x: number; y: number }, r: number) => g.scene !== g.city || Math.hypot(o.x - me.x, o.y - me.y) < r;
   const hint = guest.hint;
   const snap: Snapshot = {
     t: 's',
-    sc: g.scene === g.bank ? 1 : 0,
+    sc: g.scene === g.bank ? 1 : g.scene === g.jail ? 2 : 0,
+    jc: r2(g.jailClock),
+    tr: Math.ceil(g.trophyT),
     bid: g.bankId,
     open: g.scene === g.bank && !g.bank.map.tiles.includes(T.Locked),
     h: g.heroes.map(heroRow),
@@ -483,6 +487,10 @@ export class GuestNet {
         s.z = Math.max(0, s.z + s.vz * dt);
       }
     }
+    if (g.scene === g.jail) {
+      g.jailClock += dt;
+      jailTick(g.jail.map, g.jailClock);
+    }
     for (const f of g.scene.fx) f.t += dt;
     g.scene.fx = g.scene.fx.filter((f) => f.t < f.life);
     for (const p of g.scene.people) p.sayT = Math.max(0, p.sayT - dt);
@@ -522,6 +530,15 @@ export class GuestNet {
             m.heights[i] = 0;
           }
       }
+    } else if (s.sc === 2) {
+      if (g.scene !== g.jail) {
+        g.jail = { map: buildJail(), people: [], vehicles: [], shots: [], fx: [] };
+        g.scene = g.jail;
+        this.targets.clear();
+        this.people.clear();
+      }
+      g.jailClock = s.jc;
+      jailTick(g.jail.map, s.jc);
     } else if (g.scene !== g.city) {
       g.scene = g.city;
       this.targets.clear();
@@ -625,6 +642,7 @@ export class GuestNet {
     g.owned = new Set(s.o);
     g.upgrades = s.u;
     g.captainDown = s.cd;
+    g.trophyT = s.tr;
     g.ownsCar = s.car;
     if (s.menu) g.menu = s.menu;
     if (first) {

@@ -146,6 +146,19 @@ function drawGround(ctx: Ctx, m: GameMap, x: number, y: number, t: number, time:
       poly(ctx, diamond(x, y, 0, 0.7), '#9c3d2a');
       poly(ctx, diamond(x, y, 0, 0.45), '#c0563c');
       break;
+    case T.Pit:
+    case T.Block:
+    case T.Bounce:
+    case T.Trophy: {
+      // a deep dark pit under the jail course
+      poly(ctx, d, (x + y) % 2 ? '#141221' : '#17142a');
+      if (v > 0.9) {
+        const c = toScreen(x + 0.5, y + 0.5);
+        ctx.fillStyle = 'rgba(160,140,255,0.35)';
+        ctx.fillRect(c.sx - 1, c.sy - 1, 2, 2);
+      }
+      break;
+    }
     case T.Laser: {
       poly(ctx, d, '#3a2a30');
       // flickering red laser beams just above the floor
@@ -225,6 +238,9 @@ function drawPrism(ctx: Ctx, m: GameMap, x: number, y: number, t: number, time: 
     return;
   }
   const [top, left, right] = PALETTE[m.pal[i]] ?? PALETTE[0];
+  // blinking jail platforms flicker just before they vanish
+  const warn = m.warn?.has(i);
+  if (warn) ctx.globalAlpha = Math.floor(time * 10) % 2 ? 0.35 : 0.9;
   poly(ctx, face(x, y + 1, x + 1, y + 1, 0, h), left);
   poly(ctx, face(x + 1, y, x + 1, y + 1, 0, h), right);
   poly(ctx, diamond(x, y, h), top);
@@ -238,7 +254,74 @@ function drawPrism(ctx: Ctx, m: GameMap, x: number, y: number, t: number, time: 
       if (m.tiles[i + 1] !== T.Building) {
         poly(ctx, face(x + 1, y + 0.25, x + 1, y + 0.75, z, z + 0.35), shade('#a9d0e6', 0.95));
       }
+      if (m.pal[i] === 19) {
+        // jail bars
+        ctx.strokeStyle = '#263238';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (const k of [0.37, 0.5, 0.63]) {
+          if (m.tiles[i + m.w] !== T.Building) {
+            const a = toScreen(x + k, y + 1, z);
+            const b = toScreen(x + k, y + 1, z + 0.35);
+            ctx.moveTo(a.sx, a.sy);
+            ctx.lineTo(b.sx, b.sy);
+          }
+          if (m.tiles[i + 1] !== T.Building) {
+            const a = toScreen(x + 1, y + k, z);
+            const b = toScreen(x + 1, y + k, z + 0.35);
+            ctx.moveTo(a.sx, a.sy);
+            ctx.lineTo(b.sx, b.sy);
+          }
+        }
+        ctx.stroke();
+      }
     }
+  }
+  if (warn) ctx.globalAlpha = 1;
+  if (t === T.Block || t === T.Bounce) {
+    const n = m.courseLabels?.get(i);
+    if (t === T.Bounce) {
+      // a springy pad
+      poly(ctx, diamond(x, y, h, 0.7), '#fff');
+      poly(ctx, diamond(x, y, h + 0.02, 0.45), '#e53935');
+    }
+    if (n) {
+      const c = toScreen(x + 0.5, y + 0.5, h);
+      ctx.font = '900 15px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.strokeText(String(n), c.sx, c.sy + 5);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(String(n), c.sx, c.sy + 5);
+    }
+  }
+  if (t === T.Trophy) {
+    // a big golden cup on a stone stand
+    const c = toScreen(x + 0.5, y + 0.5, h);
+    const bob = Math.sin(time * 2.5) * 3;
+    ctx.fillStyle = 'rgba(255,215,64,0.25)';
+    ctx.beginPath();
+    ctx.arc(c.sx, c.sy - 22 + bob, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#c79100';
+    ctx.fillRect(c.sx - 9, c.sy - 6 + bob, 18, 5);
+    ctx.fillRect(c.sx - 3, c.sy - 16 + bob, 6, 11);
+    ctx.fillStyle = '#ffd54f';
+    ctx.beginPath();
+    ctx.moveTo(c.sx - 14, c.sy - 38 + bob);
+    ctx.lineTo(c.sx + 14, c.sy - 38 + bob);
+    ctx.quadraticCurveTo(c.sx + 13, c.sy - 16 + bob, c.sx, c.sy - 15 + bob);
+    ctx.quadraticCurveTo(c.sx - 13, c.sy - 16 + bob, c.sx - 14, c.sy - 38 + bob);
+    ctx.fill();
+    ctx.strokeStyle = '#ffd54f';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(c.sx - 15, c.sy - 30 + bob, 6, Math.PI * 0.5, Math.PI * 1.5);
+    ctx.arc(c.sx + 15, c.sy - 30 + bob, 6, Math.PI * 1.5, Math.PI * 0.5);
+    ctx.stroke();
+    ctx.fillStyle = '#fff8e1';
+    ctx.fillRect(c.sx - 8, c.sy - 35 + bob, 3, 12);
   }
   if (t === T.Vent) {
     ctx.strokeStyle = '#596069';
@@ -828,7 +911,7 @@ function bubble(ctx: Ctx, text: string, x: number, y: number) {
 export function render(ctx: Ctx, g: Game, W: number, H: number, zoom: number, time: number) {
   const m = g.scene.map;
   const cam = toScreen(g.cam.x, g.cam.y);
-  ctx.fillStyle = m.name === 'bank' ? '#1d1b22' : '#3f8fd8';
+  ctx.fillStyle = m.name === 'bank' ? '#1d1b22' : m.name === 'jail' ? '#0d0b16' : '#3f8fd8';
   ctx.fillRect(0, 0, W, H);
   ctx.save();
   ctx.translate(W / 2, H / 2);
@@ -860,7 +943,7 @@ export function render(ctx: Ctx, g: Game, W: number, H: number, zoom: number, ti
       if (isTall(t)) {
         const h = m.heights[y * m.w + x] || 1;
         const d = x + y + 1;
-        const fade = !g.vehicle && !g.inVent && t !== T.Vent && d > pd + 0.2 && d - pd < h * 2.4 + 1.5 && Math.abs(x - y - pdx) < 2.2 && h > 0.7;
+        const fade = !g.vehicle && !g.inVent && t !== T.Vent && d > pd + 0.2 && d - pd < h * 2.4 + 1.5 && Math.abs(x - y - pdx) < 2.2 && h > 0.7 && h > pl.z + 0.3;
         drawables.push({
           d,
           f: () => {
@@ -1131,6 +1214,7 @@ export function drawMinimap(canvas: HTMLCanvasElement, g: Game, near: boolean) {
     if (place === 'bank' && m.places.get(i - 1) === 'bank') continue;
     const names: Record<string, [string, string]> = {
       bank: ['Bank', '#f9a825'],
+      jail: ['Jail', '#455a64'],
       shop: ['Shop', '#fb8c00'],
       lot: ['Cars', '#43a047'],
       home: ['Home', '#e53935'],

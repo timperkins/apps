@@ -395,7 +395,7 @@ function renderPhone() {
   const pane = document.querySelector<HTMLElement>(`[data-pane="${phoneTab}"]`)!;
   if (phoneTab === 'map') {
     drawMinimap($<HTMLCanvasElement>('minimap'), g, mapNear);
-    $('where').textContent = g.scene === g.bank ? "You're inside the Bank." : g.vehicle?.kind === 'ship' ? "You're sailing the ship!" : 'The red dot is you.';
+    $('where').textContent = g.scene === g.bank ? "You're inside the Bank." : g.scene === g.jail ? "You're in the Jail. Jump across all 34 platforms!" : g.vehicle?.kind === 'ship' ? "You're sailing the ship!" : 'The red dot is you.';
   } else if (phoneTab === 'outfits') {
     const ds = SHOP_ITEMS.filter((i) => i.kind === 'disguise');
     pane.innerHTML =
