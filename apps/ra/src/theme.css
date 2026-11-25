@@ -82,6 +82,7 @@ body {
 #setReset,
 #unitsLink,
 #uiLink,
+#audioLink,
 #toolbar button,
 #selBar button,
 #build .close,
@@ -115,6 +116,7 @@ body {
   #setReset:hover,
   #unitsLink:hover,
   #uiLink:hover,
+  #audioLink:hover,
   #toolbar button:hover,
   #selBar button:hover:not(:disabled),
   #build .close:hover,
@@ -418,7 +420,8 @@ body {
 #settingsBtn,
 #setReset,
 #unitsLink,
-#uiLink {
+#uiLink,
+#audioLink {
   padding: 4px 22px 4px 6px;
 }
 #setBack {

@@ -7,6 +7,7 @@
 // starts on the first pointer or key press, and the clips load then.
 
 import { onSettings, settings } from './settings';
+import { ANNOUNCE, ANNOUNCE_GAP, UNIT_CLIPS } from './audio-config';
 
 export type UnitVoice = 'soldier' | 'tank' | 'copter' | 'scout' | 'harvester' | 'engineer' | 'dog' | 'commando' | 'flamer' | 'pilot' | 'navy';
 export type UnitLine = 'select' | 'move' | 'attack' | 'harvest' | 'full' | 'repair';
@@ -27,50 +28,8 @@ export type Announce =
   | 'para_ready'
   | 'tech_captured';
 
-const UNIT_CLIPS: Record<UnitVoice, Partial<Record<UnitLine, number>>> = {
-  soldier: { select: 5, move: 5, attack: 5 },
-  tank: { select: 4, move: 4, attack: 4 },
-  copter: { select: 4, move: 4, attack: 4 },
-  scout: { select: 4, move: 4, attack: 4 },
-  harvester: { select: 4, move: 4, harvest: 3, full: 2 },
-  engineer: { select: 4, move: 4, repair: 3 },
-  dog: { select: 2, move: 2, attack: 2 },
-  commando: { select: 4, move: 4, attack: 4 },
-  flamer: { select: 4, move: 4, attack: 4 },
-  pilot: { select: 4, move: 4, attack: 4 },
-  navy: { select: 4, move: 4, attack: 4 },
-};
-
-const ANNOUNCE: Announce[] = [
-  'building',
-  'training',
-  'construction_complete',
-  'unit_ready',
-  'insufficient_funds',
-  'low_power',
-  'power_restored',
-  'base_under_attack',
-  'harvester_under_attack',
-  'unit_lost',
-  'building_lost',
-  'new_options',
-  'rally_point',
-  'para_ready',
-  'tech_captured',
-];
-
-// The least time between two of the same announcement, in seconds: alerts
-// that can fire every frame of a fight are kept to one now and then.
-const ANNOUNCE_GAP: Partial<Record<Announce, number>> = {
-  insufficient_funds: 10,
-  base_under_attack: 25,
-  harvester_under_attack: 25,
-  unit_lost: 8,
-  building_lost: 4,
-  low_power: 10,
-  new_options: 6,
-  rally_point: 3,
-};
+// How many takes of each line (UNIT_CLIPS), the announcements and how often
+// each may play are in src/audio-config.ts.
 
 const base = import.meta.env.BASE_URL;
 const url = (voice: string, line: string, n: number) => `${base}voice/${voice}/${voice}_${line}_${n}.mp3`;
