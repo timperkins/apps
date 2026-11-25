@@ -1329,7 +1329,6 @@ select {
 }
 .k-pwr[data-level='low'] .fill {
   background: var(--danger);
-  animation: blink 0.8s steps(2) infinite;
 }
 .k-pwr[data-level='low'] {
   color: var(--danger);

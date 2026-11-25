@@ -375,7 +375,7 @@ function render() {
     </div>
     <div class="pg-grid">
       ${card('Tabs', `<div class="pg-tabs">${buildTabs(0)}</div>`, 'Base, Defense, Infantry, Vehicles, with a new-item alert', 'span2')}
-      ${card('Power meter', `<div class="pg-row pwrs">${power(0.8, 0.45, 'ok')}${power(0.6, 0.55, 'tight')}${power(0.4, 0.7, 'low')}</div>`, 'Enough, tight and short (blinks)', 'span2')}
+      ${card('Power meter', `<div class="pg-row pwrs">${power(0.8, 0.45, 'ok')}${power(0.6, 0.55, 'tight')}${power(0.4, 0.7, 'low')}</div>`, 'Enough, tight and short', 'span2')}
     </div>
 
     <h3 class="pg-h3">Selecting and orders</h3>

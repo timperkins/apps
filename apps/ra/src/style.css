@@ -984,10 +984,6 @@ body.sheet-open #selBar {
   flex: none;
 }
 
-#build .pwr[data-level='low'] .bolt {
-  animation: blink 0.8s steps(2) infinite;
-}
-
 #build .pwr .track {
   position: relative;
   flex: 1;
@@ -1022,10 +1018,6 @@ body.sheet-open #selBar {
 
 #build .pwr .use[hidden] {
   display: none;
-}
-
-#build .pwr[data-level='low'] .fill {
-  animation: blink 0.8s steps(2) infinite;
 }
 
 #build .main {
