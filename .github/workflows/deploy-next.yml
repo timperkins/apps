@@ -1,9 +1,13 @@
 name: deploy-next
 
-# Every push to the "next" branch deploys RA straight to prod (https://ra.trom.dev), as fast as
-# possible: no typecheck/lint/tests here, since each change is checked on its own PR branch
-# (preview.yml). Main is not hooked up to any deploy for now: the prod workflow (prod.yml, which
-# deploys on pushes to main) is disabled in the repo's Actions settings.
+# Every push to the "next" branch deploys each app that changed since its deployed/<name> tag straight
+# to its prod domain (RA to https://ra.trom.dev, Sky Defender to https://sky-defender.trom.dev, and so
+# on; the domain is in each app's app.json). It runs as fast as possible: no typecheck/lint/tests here,
+# since each change is checked on its own PR branch (preview.yml). A failed deploy leaves the tag where
+# it was, so the next push to next retries it. Main is not hooked up to any deploy for now: the prod
+# workflow (prod.yml, which deploys on pushes to main) is disabled in the repo's Actions settings.
+# A new app gets its Google resources from create-app on its own branch's preview run, before it
+# reaches next.
 
 on:
   push:
@@ -15,10 +19,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.changed.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: changed
+        run: |
+          git fetch --tags --force origin
+          apps=$(node scripts/changed-apps.mjs --deployed)
+          echo "Apps to deploy: $apps"
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+
   deploy:
+    needs: detect
+    if: needs.detect.outputs.apps != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect.outputs.apps) }}
     uses: ./.github/workflows/deploy-app.yml
     with:
-      app: ra
+      app: ${{ matrix.app }}
       target: prod
       skip_checks: true
     secrets: inherit

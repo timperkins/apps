@@ -1,6 +1,7 @@
 name: preview
 
-# Every push to a branch other than main deploys a preview of each app changed on that branch.
+# Every push to a branch other than main deploys a preview of each app changed on that branch
+# (compared with next, where branches are merged for now).
 # The "next" branch is left out: deploy-next.yml deploys it straight to prod.
 # Links go to the run summary, a commit status per app, and a comment on the branch's PR.
 # Each deploy job adds its own app to that comment, so there's no separate links job: Actions bills
@@ -26,12 +27,12 @@ jobs:
           fetch-depth: 0
       - id: changed
         run: |
-          apps=$(node scripts/changed-apps.mjs --base origin/main)
+          apps=$(node scripts/changed-apps.mjs --base origin/next)
           echo "Changed apps: $apps"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
       - id: new
         run: |
-          apps=$(node scripts/new-apps.mjs --base origin/main)
+          apps=$(node scripts/new-apps.mjs --base origin/next)
           echo "New apps: $apps"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
