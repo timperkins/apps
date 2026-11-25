@@ -51,6 +51,21 @@ export interface Robot {
   t: number;
   phase: number;
   face: number; // -1 left / 1 right
+  /** On a friend's game: where the host last had it, to glide toward. */
+  tx?: number;
+  ty?: number;
+}
+export interface Player { tx?: number; ty?: number; slot: number; x: number; y: number; dir: number; face: number; moving: boolean; walk: number; mining: number; swing: number; miningRock: number; wantMine: boolean }
+export const newPlayer = (slot: number, x = SPAWN.x, y = SPAWN.y): Player =>
+  ({ slot, x, y, dir: 1, face: 1, moving: false, walk: 0, mining: 0, swing: 0, miningRock: -1, wantMine: false });
+/** What the host sends friends about 12 times a second: everything but the cave walls (which never change). */
+export interface Snap {
+  money: number; earned: number; bag: Record<OreId, number>; tools: Tools; unlocked: number; speed: number; bagLv: number; golden: boolean; time: number;
+  rocks: [number, OreId, number][];
+  blds: [number, Kind, number, Partial<Record<OreId, number>>, BeltItem[], number, number, OreId | null][];
+  robots: [RobotKind, number, number, string, number, OreId[], number][];
+  players: [number, number, number, number, number, number, number, number, number][];
+  floaters: Floater[];
 }
 export interface Floater { x: number; y: number; text: string; color: string; t: number }
 export interface Particle { x: number; y: number; vx: number; vy: number; t: number; life: number; color: string; size: number }
@@ -110,13 +125,17 @@ export class Game {
   bagLv = 0;
   golden = false;
   time = 0;
-  player = { x: SPAWN.x, y: SPAWN.y, dir: 1, face: 1, moving: false, walk: 0, mining: 0, swing: 0 };
+  /** You. In co-op, friends are in `others` (on a friend's game, the host is in there too). */
+  player: Player = newPlayer(0);
+  others: Player[] = [];
   /** Set while the miner is chipping at a rock, for the pickaxe animation. */
-  miningRock = -1;
+  get miningRock() { return this.player.miningRock; }
   regrow = [0, 0, 0, 0, 0];
   onSound: (name: string) => void = () => {};
   onMsg: (text: string) => void = () => {};
   private coinCool = 0;
+  /** Floating texts already sent to friends. */
+  private sent = new WeakSet<Floater>();
 
   constructor(save?: SaveData) {
     this.buildMap();
@@ -354,8 +373,7 @@ export class Game {
   }
 
   // ---------- player ----------
-  private frontRock(): number {
-    const p = this.player;
+  private frontRock(p = this.player): number {
     const fx = Math.floor(p.x + DX[p.dir] * 0.85), fy = Math.floor(p.y + DY[p.dir] * 0.85);
     if (this.rocks.has(idx(fx, fy))) return idx(fx, fy);
     let best = -1, bd = 1.3;
@@ -372,12 +390,11 @@ export class Game {
     return best;
   }
 
-  nearShop() {
-    return Math.hypot(this.player.x - SHOP_SPOT.x, this.player.y - SHOP_SPOT.y) < 2;
+  nearShop(p = this.player) {
+    return Math.hypot(p.x - SHOP_SPOT.x, p.y - SHOP_SPOT.y) < 2;
   }
 
-  nearBoulder(): number {
-    const p = this.player;
+  nearBoulder(p = this.player): number {
     for (let k = 0; k < DIVIDERS.length; k++) {
       const d = DIVIDERS[k];
       if (this.tile(d, DOOR_Y0) !== Tile.Boulder) continue;
@@ -388,8 +405,7 @@ export class Game {
     return -1;
   }
 
-  nearCrate(): number {
-    const p = this.player;
+  nearCrate(p = this.player): number {
     let best = -1, bd = 1.3;
     for (let y = Math.floor(p.y) - 1; y <= Math.floor(p.y) + 1; y++)
       for (let x = Math.floor(p.x) - 1; x <= Math.floor(p.x) + 1; x++) {
@@ -405,9 +421,9 @@ export class Game {
   }
 
   /** E / Space pressed. Returns 'shop' when the shop should open. */
-  act(): 'shop' | null {
-    if (this.nearShop()) return 'shop';
-    const door = this.nearBoulder();
+  act(p = this.player): 'shop' | null {
+    if (this.nearShop(p)) return 'shop';
+    const door = this.nearBoulder(p);
     if (door >= 0) {
       if (door !== this.unlocked) return null;
       if (this.tools.dynamite > 0) {
@@ -417,7 +433,7 @@ export class Game {
       }
       return null;
     }
-    const c = this.nearCrate();
+    const c = this.nearCrate(p);
     if (c >= 0) {
       const b = this.blds.get(c)!;
       let n = 0;
@@ -429,7 +445,7 @@ export class Game {
       if (n) {
         this.onSound('pick');
         this.floaters.push({ x: (c % W) + 0.5, y: ((c / W) | 0) + 0.2, text: `took ${n}`, color: '#ffe6a8', t: 0 });
-      } else if (this.frontRock() < 0) this.onMsg('This crate is empty. Robots fill the nearest crate.');
+      } else if (this.frontRock(p) < 0) this.onMsg('This crate is empty. Robots fill the nearest crate.');
     }
     return null;
   }
@@ -469,8 +485,9 @@ export class Game {
   }
 
   // ---------- tick ----------
-  step(dt: number, mx: number, my: number, mining: boolean) {
-    this.time += dt;
+  /** `sim` is false on a friend's game: only your own miner moves here, the host runs the rest. */
+  step(dt: number, mx: number, my: number, mining: boolean, sim = true) {
+    if (sim) this.time += dt;
     this.coinCool -= dt;
     const p = this.player;
     const len = Math.hypot(mx, my);
@@ -478,33 +495,27 @@ export class Game {
     if (p.moving) {
       const sp = 4.2 * Math.min(1, len);
       const vx = (mx / len) * sp * dt, vy = (my / len) * sp * dt;
-      this.moveAxis(vx, 0);
-      this.moveAxis(0, vy);
+      this.moveAxis(p, vx, 0);
+      this.moveAxis(p, 0, vy);
       p.walk += dt * 10;
       if (Math.abs(mx) > Math.abs(my)) p.dir = mx > 0 ? 0 : 2;
       else p.dir = my > 0 ? 1 : 3;
       if (Math.abs(mx) > 0.2) p.face = mx > 0 ? 1 : -1;
     }
-    this.miningRock = -1;
-    if (mining) {
-      const i = this.frontRock();
-      if (i >= 0) {
-        const rock = this.rocks.get(i)!;
-        this.miningRock = i;
-        if (rock.x + 0.5 > p.x + 0.3) p.face = 1;
-        else if (rock.x + 0.5 < p.x - 0.3) p.face = -1;
-        p.mining += dt;
-        p.swing = (p.swing + dt * 6) % 1;
-        if (p.mining >= ORES[rock.ore].handTime) {
-          p.mining = 0;
-          this.mineOne(i, rock.x + 0.5, rock.y + 0.5, true);
-          this.onSound('tink');
-        }
-      } else p.mining = 0;
-    } else {
-      p.mining = 0;
-      p.swing = 0;
+    p.wantMine = mining;
+    this.minePlayer(p, dt, sim);
+    // glide the other miners (and, on a friend's game, the robots) toward where they last were
+    const k = Math.min(1, dt * 12);
+    for (const o of sim ? this.others : [...this.robots, ...this.others]) {
+      if (o.tx === undefined || o.ty === undefined) continue;
+      o.x += (o.tx - o.x) * k;
+      o.y += (o.ty - o.y) * k;
     }
+    if (!sim) {
+      this.stepEffects(dt);
+      return;
+    }
+    for (const o of this.others) this.minePlayer(o, dt, true);
 
     for (const r of this.robots) this.stepRobot(r, dt);
     this.stepBuildings(dt);
@@ -518,7 +529,33 @@ export class Game {
         if (n < ROCKS_PER_ZONE) this.spawnRock(z);
       }
     }
+    this.stepEffects(dt);
+  }
 
+  private minePlayer(p: Player, dt: number, sim: boolean) {
+    p.miningRock = -1;
+    if (p.wantMine) {
+      const i = this.frontRock(p);
+      if (i >= 0) {
+        const rock = this.rocks.get(i)!;
+        p.miningRock = i;
+        if (rock.x + 0.5 > p.x + 0.3) p.face = 1;
+        else if (rock.x + 0.5 < p.x - 0.3) p.face = -1;
+        p.mining += dt;
+        p.swing = (p.swing + dt * 6) % 1;
+        if (p.mining >= ORES[rock.ore].handTime) {
+          p.mining = 0;
+          if (sim) this.mineOne(i, rock.x + 0.5, rock.y + 0.5, true);
+          if (sim || p === this.player) this.onSound('tink');
+        }
+      } else p.mining = 0;
+    } else {
+      p.mining = 0;
+      p.swing = 0;
+    }
+  }
+
+  private stepEffects(dt: number) {
     for (const f of this.floaters) {
       f.t += dt;
       f.y -= dt * 0.8;
@@ -534,8 +571,8 @@ export class Game {
     this.particles = this.particles.filter((q) => q.t < q.life);
   }
 
-  private moveAxis(vx: number, vy: number) {
-    const p = this.player, rad = 0.28;
+  private moveAxis(p: Player, vx: number, vy: number) {
+    const rad = 0.28;
     const nx = p.x + vx, ny = p.y + vy;
     const hit = (x: number, y: number) =>
       this.solid(Math.floor(x - rad), Math.floor(y - rad)) || this.solid(Math.floor(x + rad), Math.floor(y - rad)) ||
@@ -726,6 +763,71 @@ export class Game {
         b.swing = Math.max(0, b.swing - dt * 3);
       }
     }
+  }
+
+  // ---------- co-op ----------
+  snap(): Snap {
+    const all = [this.player, ...this.others];
+    return {
+      money: this.money, earned: this.earned, bag: { ...this.bag }, tools: { ...this.tools }, unlocked: this.unlocked,
+      speed: this.speed, bagLv: this.bagLv, golden: this.golden, time: this.time,
+      rocks: [...this.rocks].map(([i, r]) => [i, r.ore, r.amt]),
+      blds: [...this.blds].map(([i, b]) => [i, b.k, b.dir, b.store, b.items, +b.t.toFixed(2), +b.swing.toFixed(2), b.held]),
+      robots: this.robots.map((r) => [r.kind, +r.x.toFixed(2), +r.y.toFixed(2), r.state, r.face, r.carry, +r.phase.toFixed(2)]),
+      players: all.map((p) => [p.slot, +p.x.toFixed(2), +p.y.toFixed(2), p.dir, p.face, p.moving ? 1 : 0, +p.walk.toFixed(1), +p.swing.toFixed(2), p.miningRock]),
+      floaters: this.floaters.filter((f) => !this.sent.has(f) && this.sent.add(f)),
+    };
+  }
+
+  /** On a friend's game: take the host's world, but keep your own miner where you put it. */
+  applySnap(s: Snap) {
+    this.money = s.money; this.earned = s.earned; this.bag = s.bag; this.tools = s.tools; this.speed = s.speed;
+    this.bagLv = s.bagLv; this.golden = s.golden; this.time = s.time;
+    if (s.unlocked !== this.unlocked) {
+      for (let k = 0; k < DIVIDERS.length; k++)
+        for (let y = DOOR_Y0; y < DOOR_Y0 + DOOR_H; y++) this.tiles[idx(DIVIDERS[k], y)] = k < s.unlocked ? Tile.Floor : Tile.Boulder;
+      if (s.unlocked > this.unlocked) this.onSound('boom');
+      this.unlocked = s.unlocked;
+    }
+    this.rocks.clear();
+    for (const [i, ore, amt] of s.rocks) this.rocks.set(i, { x: i % W, y: (i / W) | 0, ore, amt, max: ORES[ore].amt, claims: 0 });
+    this.blds.clear();
+    for (const [i, k, dir, store, items, t, swing, held] of s.blds) this.blds.set(i, { k, dir, store, items, t, swing, held });
+    const old = this.robots;
+    this.robots = s.robots.map(([kind, x, y, state, face, carry, phase], n) => {
+      const r = old[n] && old[n].kind === kind ? old[n] : this.newRobot(kind, x, y);
+      if (Math.hypot(r.x - x, r.y - y) > 3) { r.x = x; r.y = y; }
+      r.tx = x; r.ty = y;
+      r.state = state as Robot['state']; r.face = face; r.carry = carry; r.phase = phase;
+      return r;
+    });
+    const others: Player[] = [];
+    for (const [slot, x, y, dir, face, moving, walk, swing, miningRock] of s.players) {
+      if (slot === this.player.slot) continue;
+      const p = this.others.find((o) => o.slot === slot) ?? newPlayer(slot, x, y);
+      if (Math.hypot(p.x - x, p.y - y) > 3) { p.x = x; p.y = y; }
+      Object.assign(p, { tx: x, ty: y, dir, face, moving: !!moving, walk, swing, miningRock });
+      others.push(p);
+    }
+    this.others = others;
+    for (const f of s.floaters) this.floaters.push({ ...f });
+  }
+
+  /** On the host: where a friend says their miner is. */
+  setOther(slot: number, x: number, y: number, dir: number, face: number, moving: boolean, walk: number, mine: boolean) {
+    let p = this.others.find((o) => o.slot === slot);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (!p) this.others.push((p = newPlayer(slot, x, y)));
+    if (Math.hypot(p.x - x, p.y - y) > 3) { p.x = x; p.y = y; }
+    Object.assign(p, { tx: x, ty: y, dir, face, moving, walk, wantMine: mine });
+  }
+
+  removeOther(slot: number) {
+    this.others = this.others.filter((o) => o.slot !== slot);
+  }
+
+  other(slot: number) {
+    return this.others.find((o) => o.slot === slot);
   }
 
   // ---------- save ----------

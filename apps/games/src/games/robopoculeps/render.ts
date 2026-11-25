@@ -1,6 +1,7 @@
 // Robopoculeps drawing: a top-down mine lit by lanterns, the shop in the wall, robots and machines.
 import { ORES, ZONES, type Kind, type OreId } from './data';
-import { DIVIDERS, DOOR_H, DOOR_Y0, DX, DY, Game, H, SHOP_X, Tile, W, zoneOf, type Building, type Robot } from './game';
+import { DIVIDERS, DOOR_H, DOOR_Y0, DX, DY, Game, H, SHOP_X, Tile, W, zoneOf, type Building, type Player, type Robot } from './game';
+import { PLAYER_COLORS } from '../coop/session';
 
 export interface Cam { x: number; y: number; T: number; w: number; h: number }
 
@@ -150,7 +151,7 @@ export class Renderer {
     for (const [x, y, o] of items) this.oreChunk(ctx, x, y, o, 0.16);
     if (ghost) this.ghost(ctx, ghost);
     // player and robots, back to front
-    const actors: { y: number; draw: () => void }[] = [{ y: g.player.y, draw: () => this.miner(ctx, g, t) }];
+    const actors: { y: number; draw: () => void }[] = [g.player, ...g.others].map((p) => ({ y: p.y, draw: () => this.miner(ctx, p, t) }));
     for (const r of g.robots) actors.push({ y: r.y + 0.6, draw: () => this.robot(ctx, r, t, g.robotCap(r)) });
     actors.sort((a, b) => a.y - b.y);
     for (const a of actors) a.draw();
@@ -176,6 +177,21 @@ export class Renderer {
       ctx.fillStyle = f.color;
       ctx.fillText(f.text, f.x * T, f.y * T);
     }
+    ctx.globalAlpha = 1;
+    if (g.others.length) {
+      // a numbered dot over each miner when playing together
+      ctx.font = `800 ${Math.round(T * 0.26)}px system-ui, sans-serif`;
+      ctx.textBaseline = 'middle';
+      for (const p of [g.player, ...g.others]) {
+        ctx.fillStyle = PLAYER_COLORS[p.slot] ?? '#fff';
+        ctx.beginPath();
+        ctx.arc(p.x * T, (p.y - 0.98) * T, T * 0.17, 0, 7);
+        ctx.fill();
+        ctx.fillStyle = '#111';
+        ctx.fillText(String(p.slot + 1), p.x * T, (p.y - 0.97) * T);
+      }
+      ctx.textBaseline = 'alphabetic';
+    }
     ctx.restore();
     return c;
   }
@@ -198,6 +214,7 @@ export class Renderer {
       L.fillRect(sx - r, sy - r, r * 2, r * 2);
     };
     hole(g.player.x, g.player.y, 6.5, 1);
+    for (const o of g.others) hole(o.x, o.y, 4.5, 0.9);
     hole(SHOP_X + 0.5, 1.8, 4.5, 1);
     for (const l of g.lanterns) hole(l.x, l.y + 0.5, 3.6 + Math.sin(t * 3 + l.x) * 0.15, 0.9);
     for (const r of g.robots) hole(r.x, r.y, 2.2, 0.7);
@@ -534,8 +551,7 @@ export class Renderer {
     }
   }
 
-  private miner(ctx: CanvasRenderingContext2D, g: Game, t: number) {
-    const p = g.player;
+  private miner(ctx: CanvasRenderingContext2D, p: Player, t: number) {
     const x = p.x, y = p.y;
     const step = p.moving ? Math.sin(p.walk) * 0.06 : 0;
     ctx.fillStyle = 'rgba(0,0,0,.3)';
@@ -552,7 +568,7 @@ export class Renderer {
     ctx.fillStyle = '#3d5aa8';
     ctx.fillRect(x - 0.17, y - 0.12, 0.34, 0.24);
     // pickaxe
-    const swing = g.miningRock >= 0 ? Math.sin(p.swing * Math.PI * 2) : 0.3;
+    const swing = p.miningRock >= 0 ? Math.sin(p.swing * Math.PI * 2) : 0.3;
     ctx.save();
     ctx.translate(x + p.face * 0.2, y - 0.15);
     ctx.rotate(p.face * (0.4 + swing * 0.9));
@@ -576,8 +592,8 @@ export class Renderer {
       ctx.fillRect(x + p.face * 0.06 - 0.02, y - 0.47, 0.035, 0.05);
       ctx.fillRect(x + p.face * 0.06 + 0.06 * (p.face > 0 ? -1 : 1) - 0.02, y - 0.47, 0.035, 0.05);
     }
-    // helmet with lamp
-    ctx.fillStyle = '#f2c230';
+    // helmet with lamp, in the player's color
+    ctx.fillStyle = PLAYER_COLORS[p.slot] ?? '#f2c230';
     ctx.beginPath();
     ctx.arc(x, y - 0.5, 0.19, Math.PI, 0);
     ctx.fill();

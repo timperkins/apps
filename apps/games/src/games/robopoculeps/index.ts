@@ -2,7 +2,9 @@
 // that mine for you. Belts, grabbers and payers turn what the robots bring into money on their own.
 import './style.css';
 import type { GameModule } from '../types';
-import { Game, type RobotKind, type SaveData } from './game';
+import { Game, type RobotKind, type SaveData, type Snap } from './game';
+import { coopBadge, coopMenu, every } from '../coop/ui';
+import { PLAYER_NAMES, type FriendSession, type HostSession, type Session } from '../coop/session';
 import { Renderer } from './render';
 import { isMuted, setMuted, sfx } from './audio';
 import {
@@ -12,6 +14,17 @@ import {
 
 const SAVE_KEY = 'robopoculeps-save-v1';
 const MUTE_KEY = 'robopoculeps-muted';
+const COOP_PREFIX = 'trom-robopoculeps-';
+/** Sounds friends hear from the host's game (their own pickaxe they hear themselves). */
+const SHARED_SOUNDS = new Set(['coin', 'cash', 'buy', 'boom', 'crumble', 'place', 'win']);
+
+type ToHost =
+  | { t: 'me'; x: number; y: number; dir: number; face: number; moving: boolean; walk: number; mine: boolean }
+  | { t: 'buy'; what: string }
+  | { t: 'place'; x: number; y: number; k: Kind; dir: number }
+  | { t: 'remove'; x: number; y: number }
+  | { t: 'act' };
+type ToFriend = { t: 's'; s: Snap; snd: string[] } | { t: 'msg'; text: string } | { t: 'nope' };
 
 function readSave(): SaveData | null {
   try {
@@ -53,7 +66,7 @@ const CONTROLS = `
     <div><b>E</b> by the shop: shop · by a crate: take what's in it · by boulders: dynamite</div>
     <div><b>1–4</b> pick belt, grabber, payer, crate · <b>5</b> remove · <b>R</b> turn</div>
     <div><b>Click</b> to place (drag to lay belts) · <b>right-click</b> removes</div>
-    <div><b>Esc</b> menu · 💾 saves your game</div>
+    <div><b>Esc</b> menu · 💾 saves your game · <b>Play with friends</b> in the menu: up to 4 miners</div>
   </div>`;
 
 const LOGO = `<svg class="rp-logo-bot" viewBox="0 0 120 90" aria-hidden="true">
@@ -118,6 +131,11 @@ const game: GameModule = {
     let hover: { x: number; y: number } | null = null;
     let wasNearShop = false;
     let lastLine = -99;
+    let net: Session | null = null;
+    const badge = coopBadge(el);
+    const sendRate = every(15), snapRate = every(12);
+    let sounds: string[] = [];
+    let friendKey = '';
     let touchMode = !!window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
 
     // ---------- messages ----------
@@ -150,12 +168,124 @@ const game: GameModule = {
       }
     }
     function wire(gm: Game) {
-      gm.onSound = sfx;
+      gm.onSound = (n) => {
+        sfx(n);
+        if (net?.role === 'host' && SHARED_SOUNDS.has(n)) sounds.push(n);
+      };
       gm.onMsg = toast;
+    }
+
+    // ---------- playing together ----------
+    const isFriend = () => net?.role === 'friend';
+    function refreshBadge() {
+      if (!net) return badge.set('', [], 0);
+      if (net.role === 'host') badge.set(net.code, [0, ...net.friends()], 0);
+      else badge.set(net.code, [...new Set([0, net.slot, ...g.others.map((o) => o.slot)])].sort(), net.slot);
+    }
+    function endNet() {
+      net?.close();
+      net = null;
+      g.others = [];
+      refreshBadge();
+    }
+    function startHosting(s: HostSession) {
+      net = s;
+      sounds = [];
+      s.onJoin((slot) => {
+        g.setOther(slot, g.player.x, g.player.y, 1, 1, false, 0, false);
+        toast(`${PLAYER_NAMES[slot]} joined your mine!`);
+        sfx('buy');
+        refreshBadge();
+        s.send(slot, { t: 's', s: g.snap(), snd: [] } satisfies ToFriend);
+      });
+      s.onLeave((slot) => {
+        g.removeOther(slot);
+        toast(`${PLAYER_NAMES[slot]} left.`);
+        refreshBadge();
+      });
+      s.onMessage((slot, raw) => {
+        const m = raw as ToHost;
+        if (net !== s || !m) return;
+        if (m.t === 'me') g.setOther(slot, m.x, m.y, m.dir, m.face, m.moving, m.walk, m.mine);
+        else if (m.t === 'buy') {
+          const r = applyBuy(String(m.what));
+          if (!r) s.send(slot, { t: 'nope' } satisfies ToFriend);
+          if (r === 'win') win();
+          if (overlay === 'shop') renderShop();
+          renderBar();
+        } else if (m.t === 'place') {
+          if (g.place(m.x | 0, m.y | 0, m.k, m.dir & 3)) renderBar();
+        } else if (m.t === 'remove') {
+          if (g.remove(m.x | 0, m.y | 0)) renderBar();
+        } else if (m.t === 'act') {
+          const p = g.other(slot);
+          if (!p) return;
+          // messages from what they did go to them, not to you
+          g.onMsg = (text) => s.send(slot, { t: 'msg', text } satisfies ToFriend);
+          g.act(p);
+          g.onMsg = toast;
+        }
+      });
+      refreshBadge();
+      toast(`Friends can join with the code ${s.code}: Join a friend on the title screen.`);
+    }
+    function startFriend(s: FriendSession) {
+      endNet();
+      g = new Game();
+      wire(g);
+      g.rocks.clear();
+      g.player.slot = s.slot;
+      net = s;
+      friendKey = '';
+      mode = 'play';
+      overlay = 'none';
+      ui.innerHTML = '';
+      tool = null;
+      renderBar();
+      el.focus();
+      s.onMessage((raw) => {
+        const m = raw as ToFriend;
+        if (net !== s || !m) return;
+        if (m.t === 's') {
+          const wasGolden = g.golden;
+          g.applySnap(m.s);
+          for (const n of m.snd) sfx(n);
+          if (g.golden && !wasGolden) win();
+          const key = `${g.money}|${JSON.stringify(g.bag)}|${JSON.stringify(g.tools)}|${g.unlocked}|${g.speed}|${g.bagLv}|${g.golden}|${g.robots.length}`;
+          if (key !== friendKey) {
+            friendKey = key;
+            if (overlay === 'shop') renderShop();
+            renderBar();
+          }
+          refreshBadge();
+        } else if (m.t === 'msg') toast(m.text);
+        else if (m.t === 'nope') sfx('nope');
+      });
+      s.onClose(() => {
+        if (net !== s) return;
+        net = null;
+        title();
+        toast('The host stopped playing.');
+      });
+      toast(`You're ${PLAYER_NAMES[s.slot]}! Money, bags and robots are shared with everyone.`);
+    }
+    const toHost = (m: ToHost) => (net?.role === 'friend' ? net.send(m) : undefined);
+    function friendsMenu() {
+      overlay = 'menu';
+      coopMenu(el, {
+        title: 'Robopoculeps',
+        prefix: COOP_PREFIX,
+        canHost: mode === 'play' && !net,
+        canJoin: mode === 'title',
+        onHosted: (s) => { startHosting(s); resume(); },
+        onJoined: (s) => startFriend(s),
+        onClose: () => (mode === 'play' ? menu() : title()),
+      });
     }
 
     // ---------- screens ----------
     function title() {
+      if (net) endNet();
       mode = 'title';
       overlay = 'none';
       const s = readSave();
@@ -165,6 +295,7 @@ const game: GameModule = {
         <div class="rp-menu">
           ${s ? `<button class="rp-btn big" data-a="continue">Continue <small>${fmt(s.money)} · ${s.robots.length} robots · ${fmtTime(s.time)}</small></button>` : ''}
           <button class="rp-btn ${s ? '' : 'big'}" data-a="new">${s ? 'New game' : 'Start mining'}</button>
+          <button class="rp-btn" data-a="friends">Join a friend <small>Up to 4 miners together</small></button>
           <button class="rp-btn ghost" data-a="exit">Back to games</button>
         </div>
         ${CONTROLS}
@@ -192,15 +323,22 @@ const game: GameModule = {
 
     function menu() {
       overlay = 'menu';
-      ui.innerHTML = `<div class="rp-dim"><div class="rp-panel">
-        <h2>Paused</h2>
-        <p class="rp-dim-t">${fmt(g.earned)} earned · ${g.robots.length} robots · ${fmtTime(g.time)} played</p>
-        <div class="rp-menu">
-          <button class="rp-btn big" data-a="resume">Keep mining</button>
+      const together = net?.role === 'host'
+        ? `<p class="rp-dim-t">Playing together · code <b>${net.code}</b> · ${net.friends().length + 1} of 4 miners</p>`
+        : '';
+      const btns = isFriend()
+        ? `<button class="rp-btn big" data-a="resume">Keep mining</button>
+          <button class="rp-btn ghost" data-a="quit">Leave the game</button>`
+        : `<button class="rp-btn big" data-a="resume">Keep mining</button>
+          ${net ? '<button class="rp-btn" data-a="stopnet">Stop playing together</button>' : '<button class="rp-btn" data-a="friends">👥 Play with friends</button>'}
           <button class="rp-btn" data-a="save">💾 Save</button>
           <button class="rp-btn" data-a="savequit">Save and quit</button>
-          <button class="rp-btn ghost" data-a="quit">Quit without saving</button>
-        </div>
+          <button class="rp-btn ghost" data-a="quit">Quit without saving</button>`;
+      ui.innerHTML = `<div class="rp-dim"><div class="rp-panel">
+        <h2>${net ? 'Menu' : 'Paused'}</h2>
+        <p class="rp-dim-t">${fmt(g.earned)} earned · ${g.robots.length} robots · ${fmtTime(g.time)} played</p>
+        ${together}
+        <div class="rp-menu">${btns}</div>
         ${CONTROLS}
       </div></div>`;
     }
@@ -285,17 +423,30 @@ const game: GameModule = {
       if (panel) panel.scrollTop = scroll;
     }
 
-    function buy(what: string) {
+    /** Does a shop button on this (the real) game. */
+    function applyBuy(what: string): boolean | 'win' {
       const [a, b, c] = what.split(':');
       let ok = false;
       if (a === 'sell') ok = g.sell(b === 'all' ? undefined : (b as OreId)) > 0;
       else if (a === 'robot') {
+        if (b !== 'king' && !ORE_IDS.includes(b as OreId)) return false;
         ok = g.buyRobot(b as RobotKind);
-        if (ok && b === 'king') return win();
-      } else if (a === 'tool') ok = g.buyTool(b as Kind, Number(c));
+        if (ok && b === 'king') return 'win';
+      } else if (a === 'tool') ok = KINDS.includes(b as Kind) && g.buyTool(b as Kind, Math.max(1, Math.min(10, Number(c) | 0)));
       else if (a === 'dynamite') ok = g.buyTool('dynamite');
-      else if (a === 'up') ok = g.buyUpgrade(b as 'speed' | 'bag');
-      if (!ok) sfx('nope');
+      else if (a === 'up') ok = (b === 'speed' || b === 'bag') && g.buyUpgrade(b);
+      return ok;
+    }
+    function buy(what: string) {
+      if (isFriend()) {
+        // the host's game does it; the shop updates when the host's world comes back
+        toHost({ t: 'buy', what });
+        sfx('click');
+        return;
+      }
+      const r = applyBuy(what);
+      if (r === 'win') return win();
+      if (!r) sfx('nope');
       renderShop();
       renderBar();
     }
@@ -330,6 +481,11 @@ const game: GameModule = {
 
     function useTool(x: number, y: number) {
       if (!tool) return false;
+      if (isFriend()) {
+        if (tool === 'remove') toHost({ t: 'remove', x, y });
+        else toHost({ t: 'place', x, y, k: tool, dir });
+        return true;
+      }
       if (tool === 'remove') {
         if (g.remove(x, y)) renderBar();
         return true;
@@ -347,6 +503,7 @@ const game: GameModule = {
     let stick = { x: 0, y: 0 };
     function pressAct() {
       if (mode !== 'play' || overlay !== 'none') return;
+      if (isFriend() && !g.nearShop()) return toHost({ t: 'act' });
       if (g.act() === 'shop') {
         shop();
         shopkeeperSays();
@@ -401,7 +558,8 @@ const game: GameModule = {
       const t = tileAt(e);
       hover = t;
       if (e.button === 2) {
-        if (g.remove(t.x, t.y)) renderBar();
+        if (isFriend()) toHost({ t: 'remove', x: t.x, y: t.y });
+        else if (g.remove(t.x, t.y)) renderBar();
         return;
       }
       if (!tool) return;
@@ -421,7 +579,10 @@ const game: GameModule = {
         // drag lays a line of belts pointing the way you drag
         dir = t.x > dragLast.x ? 0 : t.y > dragLast.y ? 1 : t.x < dragLast.x ? 2 : 3;
         const prev = g.bldAt(dragLast.x, dragLast.y);
-        if (prev?.k === 'belt') prev.dir = dir;
+        if (prev?.k === 'belt') {
+          if (isFriend()) toHost({ t: 'place', x: dragLast.x, y: dragLast.y, k: 'belt', dir });
+          prev.dir = dir;
+        }
       }
       useTool(t.x, t.y);
       dragLast = t;
@@ -491,7 +652,7 @@ const game: GameModule = {
     });
     hud.addEventListener('click', (e) => {
       const a = (e.target as HTMLElement).closest<HTMLElement>('[data-a]')?.dataset.a;
-      if (a === 'save') doSave();
+      if (a === 'save') isFriend() ? toast('Only the host can save. Your share is in their game.') : doSave();
       else if (a === 'menu') overlay === 'none' ? menu() : resume();
       else if (a === 'mute') {
         setMuted(!isMuted());
@@ -510,6 +671,12 @@ const game: GameModule = {
       const a = t.closest<HTMLElement>('[data-a]')?.dataset.a;
       if (a === 'continue') startGame(readSave());
       else if (a === 'new') startGame(null);
+      else if (a === 'friends') friendsMenu();
+      else if (a === 'stopnet') {
+        endNet();
+        toast('Playing on your own again.');
+        menu();
+      }
       else if (a === 'exit') onExit();
       else if (a === 'resume' || a === 'close') resume();
       else if (a === 'save') {
@@ -531,6 +698,8 @@ const game: GameModule = {
       touchEl.hidden = !(show && touchMode && overlay === 'none');
       el.classList.toggle('touch', touchMode);
       if (!show) return;
+      // friends can't save: the world lives in the host's game
+      hud.querySelector<HTMLElement>('[data-a="save"]')!.hidden = isFriend();
       hudT -= dt;
       if (hudT > 0) return;
       hudT = 0.15;
@@ -556,7 +725,8 @@ const game: GameModule = {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       if (R.w !== cv.clientWidth || R.h !== cv.clientHeight) R.resize();
-      if (mode === 'play' && overlay !== 'menu' && overlay !== 'win') {
+      // with friends in your mine, the game keeps going while a menu is open
+      if (mode === 'play' && (net || (overlay !== 'menu' && overlay !== 'win'))) {
         let mx = stick.x, my = stick.y;
         if (overlay === 'none') {
           if (keys.has('arrowleft') || keys.has('a')) mx -= 1;
@@ -564,7 +734,14 @@ const game: GameModule = {
           if (keys.has('arrowup') || keys.has('w')) my -= 1;
           if (keys.has('arrowdown') || keys.has('s')) my += 1;
         } else mx = my = 0;
-        g.step(dt, mx, my, actHeld && overlay === 'none');
+        g.step(dt, mx, my, actHeld && overlay === 'none', !isFriend());
+        if (net?.role === 'friend' && sendRate(now)) {
+          const p = g.player;
+          toHost({ t: 'me', x: p.x, y: p.y, dir: p.dir, face: p.face, moving: p.moving, walk: p.walk, mine: p.wantMine });
+        } else if (net?.role === 'host' && net.friends().length && snapRate(now)) {
+          net.broadcast({ t: 's', s: g.snap(), snd: sounds } satisfies ToFriend);
+          sounds = [];
+        }
         const near = g.nearShop();
         if (near && !wasNearShop && overlay === 'none') {
           shop();
@@ -608,6 +785,7 @@ const game: GameModule = {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('touchstart', onTouch);
       if ('speechSynthesis' in window) speechSynthesis.cancel();
+      net?.close();
       el.remove();
     };
   },
