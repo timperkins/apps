@@ -22,6 +22,8 @@ export interface Room {
   h: number;
   cx: number;
   cy: number;
+  /** an outdoor area: grass, trees and daylight instead of stone and torches */
+  out?: boolean;
 }
 
 export interface Level {
@@ -30,6 +32,8 @@ export interface Level {
   tiles: Uint8Array;
   vary: Uint8Array;
   explored: Uint8Array;
+  /** 1 where a tile is outdoors */
+  out: Uint8Array;
   rooms: Room[];
   start: { x: number; y: number };
   bossRoom: number;
@@ -55,6 +59,7 @@ function blank(w: number, h: number): Level {
     tiles: new Uint8Array(w * h),
     vary: new Uint8Array(w * h),
     explored: new Uint8Array(w * h),
+    out: new Uint8Array(w * h),
     rooms: [],
     start: { x: 0, y: 0 },
     bossRoom: 0,
@@ -103,22 +108,37 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
     parent.push(pi);
     L.rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
   }
-  for (const rm of L.rooms) for (let y = rm.y; y < rm.y + rm.h; y++) for (let x = rm.x; x < rm.x + rm.w; x++) set(x, y, T.FLOOR);
+  // some areas are outside: you start outdoors, then go in and out on the way to the guardian
+  L.rooms.forEach((rm, i) => {
+    rm.out = i === 0 ? true : i === L.rooms.length - 1 ? false : r() < 0.42;
+  });
+  for (const rm of L.rooms)
+    for (let y = rm.y; y < rm.y + rm.h; y++)
+      for (let x = rm.x; x < rm.x + rm.w; x++) {
+        set(x, y, T.FLOOR);
+        if (rm.out) L.out[y * W + x] = 1;
+      }
 
   // corridors: chain plus a couple of loops
   const carve = (a: Room, b: Room) => {
     const wide = r() < 0.5 ? 2 : 3;
+    const outside = !!a.out && !!b.out;
+    const put = (x: number, y: number, t: number) => {
+      const inRoom = L.rooms.some((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
+      set(x, y, t);
+      if (!inRoom && x >= 0 && y >= 0 && x < W && y < H) L.out[y * W + x] = outside ? 1 : 0;
+    };
     let x = a.cx, y = a.cy;
     const horizFirst = r() < 0.5;
     const stepX = () => {
       while (x !== b.cx) {
-        for (let k = 0; k < wide; k++) set(x, y + k - 1, T.FLOOR);
+        for (let k = 0; k < wide; k++) put(x, y + k - 1, T.FLOOR);
         x += Math.sign(b.cx - x);
       }
     };
     const stepY = () => {
       while (y !== b.cy) {
-        for (let k = 0; k < wide; k++) set(x + k - 1, y, T.FLOOR);
+        for (let k = 0; k < wide; k++) put(x + k - 1, y, T.FLOOR);
         y += Math.sign(b.cy - y);
       }
     };
@@ -129,7 +149,7 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
       stepY();
       stepX();
     }
-    for (let k = -1; k <= 1; k++) for (let j = -1; j <= 1; j++) set(b.cx + k, b.cy + j, T.FLOOR);
+    for (let k = -1; k <= 1; k++) for (let j = -1; j <= 1; j++) put(b.cx + k, b.cy + j, T.FLOOR);
   };
   for (let i = 1; i < L.rooms.length; i++) carve(L.rooms[parent[i]], L.rooms[i]);
   for (let k = 0; k < 2 && L.rooms.length > 5; k++) {
@@ -144,6 +164,22 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
       let near = false;
       for (let j = -1; j <= 1 && !near; j++) for (let i = -1; i <= 1; i++) if (tileAt(L, x + i, y + j) === T.FLOOR) near = true;
       if (near) L.tiles[y * W + x] = T.WALL;
+    }
+  // walls that only touch outdoor ground are hedges; walls between inside and outside stay stone (a building's wall)
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      if (L.tiles[y * W + x] !== T.WALL) continue;
+      let o = 0, i = 0;
+      for (let j = -1; j <= 1; j++)
+        for (let k = -1; k <= 1; k++) {
+          if (tileAt(L, x + k, y + j) !== T.FLOOR) continue;
+          if (L.out[(y + j) * W + x + k]) o++;
+          else i++;
+        }
+      if (o && !i) {
+        L.tiles[y * W + x] = T.HEDGE;
+        L.out[y * W + x] = 1;
+      }
     }
   for (let i = 0; i < W * H; i++) L.vary[i] = Math.floor(r() * 256);
 
@@ -163,8 +199,19 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
   for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) occupied.add((first.cy + j) * W + first.cx + i);
 
   L.rooms.forEach((rm, idx) => {
-    // pillars in big rooms
-    if (rm.w >= 8 && rm.h >= 8 && idx !== 0) {
+    // trees and flowers outside, pillars inside
+    if (rm.out) {
+      const n = ri(2, 4) + (rm.w * rm.h > 70 ? 2 : 0);
+      for (let k = 0; k < n; k++) {
+        const x = ri(rm.x + 1, rm.x + rm.w - 2), y = ri(rm.y + 1, rm.y + rm.h - 2);
+        if (free(x, y) && !(idx === 0 && Math.abs(x - first.cx) < 3 && Math.abs(y - first.cy) < 3)) place(x, y, 'tree', true, 999, ri(0, 2));
+      }
+      for (let k = 0; k < 4; k++) {
+        const x = ri(rm.x, rm.x + rm.w - 1), y = ri(rm.y, rm.y + rm.h - 1);
+        if (free(x, y)) place(x, y, 'flowers', false, 1, ri(0, 3));
+      }
+    }
+    if (rm.w >= 8 && rm.h >= 8 && idx !== 0 && !rm.out) {
       for (const [px, py] of [[rm.x + 2, rm.y + 2], [rm.x + rm.w - 3, rm.y + 2], [rm.x + 2, rm.y + rm.h - 3], [rm.x + rm.w - 3, rm.y + rm.h - 3]])
         if (free(px, py)) {
           set(px, py, T.PILLAR);
@@ -177,9 +224,9 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
       const px = rm.x + Math.floor((rm.w - pw) / 2), py = rm.y + Math.floor((rm.h - ph) / 2);
       for (let y = py; y < py + ph; y++) for (let x = px; x < px + pw; x++) if (free(x, y)) set(x, y, T.HAZARD);
     }
-    // torches on the top walls
-    for (let x = rm.x + 1; x < rm.x + rm.w - 1; x += ri(3, 5)) if (tileAt(L, x, rm.y - 1) === T.WALL) L.props.push({ x, y: rm.y - 1, kind: 'torch', solid: true, hp: 1 });
-    for (let y = rm.y + 2; y < rm.y + rm.h - 1; y += ri(4, 6)) if (tileAt(L, rm.x - 1, y) === T.WALL) L.props.push({ x: rm.x - 1, y, kind: 'torch', solid: true, hp: 1 });
+    // torches on the top walls (indoors only)
+    if (!rm.out) for (let x = rm.x + 1; x < rm.x + rm.w - 1; x += ri(3, 5)) if (tileAt(L, x, rm.y - 1) === T.WALL) L.props.push({ x, y: rm.y - 1, kind: 'torch', solid: true, hp: 1 });
+    if (!rm.out) for (let y = rm.y + 2; y < rm.y + rm.h - 1; y += ri(4, 6)) if (tileAt(L, rm.x - 1, y) === T.WALL) L.props.push({ x: rm.x - 1, y, kind: 'torch', solid: true, hp: 1 });
     if (idx === L.bossRoom) return;
     // crates and barrels along the edges
     const n = ri(1, 4);

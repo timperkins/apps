@@ -192,6 +192,8 @@ interface Tileset {
   hazard: HTMLCanvasElement[];
   path: HTMLCanvasElement[];
   hedge: HTMLCanvasElement;
+  /** ground for outdoor areas */
+  grass: HTMLCanvasElement[];
   house: HTMLCanvasElement[];
   wallH: number;
 }
@@ -222,7 +224,18 @@ function makeTileset(def: LevelDef): Tileset {
       h: 2,
     }),
   );
-  return { floor, wall, pillar, hazard, path, hedge, house, wallH };
+  // outdoor ground and bushes, in each dungeon's own colors
+  const OUT: Record<string, [Pattern, string, string, string, string]> = {
+    crypt: ['grass', '#6fae4a', '#5f9a40', '#3f8a3a', '#2f6e2c'],
+    shroom: ['grass', '#5a9a7a', '#4a8a6a', '#3a7a6a', '#7a3a8a'],
+    frost: ['grass', '#e8f0f8', '#d4e2ee', '#dfeaf4', '#9ab8cc'],
+    forge: ['dirt', '#5a4a40', '#4a3a32', '#3a3a2a', '#5a2a1a'],
+    throne: ['grass', '#4a6a3a', '#3e5a32', '#2e4a2a', '#4a2a5a'],
+  };
+  const o = OUT[def.id] ?? OUT.crypt;
+  const grass = [0, 1, 2, 3].map((k) => bakeFlat(texture(o[0], k === 3 ? mix(o[1], '#ffe066', 0.12) : o[1], o[2], 120 + k)));
+  const outHedge = camp ? hedge : bakeCube({ top: texture('leaf', o[3], o[4], 130), left: texture('leaf', shade(o[3], 0.9), o[4], 131), right: texture('leaf', shade(o[3], 0.85), o[4], 132), h: 1.1 });
+  return { floor, wall, pillar, hazard, path, hedge: outHedge, house, wallH, grass };
 }
 
 // ---------- prop sprites ----------
@@ -377,7 +390,7 @@ function bakeProp(kind: Prop['kind'], v: number, def: LevelDef): HTMLCanvasEleme
 /** Draws a melee weapon from the hand at screen angle `ang`. `shape` picks the silhouette. */
 export function drawHeldWeapon(x: CanvasRenderingContext2D, hx: number, hy: number, ang: number, len: number, handle: string, blade: string, shape: MeleeShape, glow = false) {
   if (shape === 'fist') return;
-  const heavy = shape === 'axe' || shape === 'hammer' || shape === 'cleaver';
+  const heavy = shape === 'axe' || shape === 'hammer' || shape === 'cleaver' || shape === 'mace';
   const poled = shape === 'spear' || shape === 'glaive' || shape === 'scythe';
   const ex = hx + Math.cos(ang) * len, ey = hy + Math.sin(ang) * len;
   const gx = hx + Math.cos(ang) * len * (poled ? 0.85 : 0.28), gy = hy + Math.sin(ang) * len * (poled ? 0.85 : 0.28);
@@ -426,6 +439,24 @@ export function drawHeldWeapon(x: CanvasRenderingContext2D, hx: number, hy: numb
       x.moveTo(8, -14); x.lineTo(2, -18); x.lineTo(-6, -15); x.lineTo(-12, -18); x.lineTo(-18, -12);
       x.stroke();
       break;
+    case 'mace': {
+      // a round spiked head
+      x.arc(0, 0, 7, 0, Math.PI * 2);
+      x.fill();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        x.beginPath();
+        x.moveTo(Math.cos(a) * 11, Math.sin(a) * 11);
+        x.lineTo(Math.cos(a + 0.4) * 6, Math.sin(a + 0.4) * 6);
+        x.lineTo(Math.cos(a - 0.4) * 6, Math.sin(a - 0.4) * 6);
+        x.fill();
+      }
+      x.fillStyle = 'rgba(0,0,0,.25)';
+      x.beginPath();
+      x.arc(1.5, 2, 4, 0, Math.PI * 2);
+      x.fill();
+      break;
+    }
     case 'spear':
       x.moveTo(12, 0); x.lineTo(0, -4); x.lineTo(0, 4);
       x.fill();
@@ -457,15 +488,16 @@ export function drawHeldWeapon(x: CanvasRenderingContext2D, hx: number, hy: numb
       // swords and daggers: blade from the guard to the tip
       x.rotate(-ang);
       x.translate(-ex, -ey);
-      x.lineWidth = shape === 'daggers' ? 4 : 5;
+      x.lineWidth = shape === 'daggers' ? 4 : shape === 'katana' ? 3 : 5;
       x.beginPath();
       x.moveTo(gx, gy);
       x.lineTo(ex, ey);
       x.stroke();
       x.shadowBlur = 0;
-      x.strokeStyle = '#c9a040';
+      x.strokeStyle = shape === 'katana' ? '#1a1a1a' : '#c9a040';
       x.lineWidth = 3;
-      const px = -Math.sin(ang) * 6, py = Math.cos(ang) * 6;
+      const gw = shape === 'katana' ? 3.5 : 6;
+      const px = -Math.sin(ang) * gw, py = Math.cos(ang) * gw;
       x.beginPath();
       x.moveTo(gx - px, gy - py);
       x.lineTo(gx + px, gy + py);
@@ -616,7 +648,8 @@ export class Renderer {
         if (!seen(tx, ty)) continue;
         const sx = (tx - ty) * HW - HW, sy = (tx + ty) * HH;
         const v = L.vary[ty * L.w + tx];
-        if (t === T.FLOOR || t === T.PORTAL) x.drawImage(ts.floor[v % 7 === 0 ? 3 : v % 3], sx, sy);
+        if ((t === T.FLOOR || t === T.PORTAL) && !camp && L.out[ty * L.w + tx]) x.drawImage(ts.grass[v % 7 === 0 ? 3 : v % 3], sx, sy);
+        else if (t === T.FLOOR || t === T.PORTAL) x.drawImage(ts.floor[v % 7 === 0 ? 3 : v % 3], sx, sy);
         else if (t === T.PATH) x.drawImage(ts.path[v % 2], sx, sy);
         else if (t === T.HAZARD) x.drawImage(ts.hazard[(frame + v) % 4], sx, sy);
       }
@@ -646,7 +679,7 @@ export class Renderer {
         if (!camp && !this.nearSeen(L, tx, ty)) continue;
         const v = L.vary[ty * L.w + tx];
         const spr = t === T.WALL ? ts.wall[v % 9 === 0 ? 2 : v % 2] : t === T.PILLAR ? ts.pillar : t === T.HEDGE ? ts.hedge : ts.house[tx > 16 && ty < 8 ? 1 : 0];
-        const hgt = t === T.WALL ? ts.wallH : t === T.PILLAR ? 2.2 : t === T.HOUSE ? 2 : 1;
+        const hgt = t === T.WALL ? ts.wallH : t === T.PILLAR ? 2.2 : t === T.HOUSE ? 2 : camp ? 1 : 1.1;
         const k = tx + ty + 1;
         // fade walls that hide the hero
         const front = k > heroK && k - heroK < 3.2 && Math.abs(tx - ty - (g.x - g.y)) < 2.2;
@@ -698,7 +731,8 @@ export class Renderer {
       });
     for (const d of g.drops) list.push({ k: d.x + d.y, f: () => this.drop(d.kind, d.x, d.y, g.time + d.x) });
     for (const m of g.monsters) if (seen(Math.floor(m.x), Math.floor(m.y))) list.push({ k: m.x + m.y, f: () => this.monster(m, g) });
-    if (!g.dead || g.deadT < 0.6) list.push({ k: heroK, f: () => this.hero(g) });
+    const downOnTeam = g.dead && !!(g.remote ? g.mate : g.peers[0]);
+    if (!g.dead || g.deadT < 0.6 || downOnTeam) list.push({ k: heroK, f: () => this.hero(g) });
     const other = g.remote ? g.mate : g.peers[0];
     if (other) list.push({ k: other.x + other.y, f: () => this.mate(other, g) });
     for (const s of g.shots) list.push({ k: s.x + s.y, f: () => this.shot(s.x, s.y, s.z, s.vx, s.vy, s.kind, g, s.color) });
@@ -912,6 +946,8 @@ export class Renderer {
 
   /** the angle a model is shown at eases toward where it faces, so turning looks smooth */
   private turned = new WeakMap<object, number>();
+  /** 0 indoors, 1 outdoors (eased) */
+  private day = 0;
   private lastDraw = 0;
   private frameDt = 1 / 60;
   private ease(o: object, target: number, rate = 16): number {
@@ -934,7 +970,25 @@ export class Renderer {
       hurt: g.hurtT > 0 && Math.floor(g.time * 20) % 2 === 0,
       armor: g.save.armor, melee: g.save.melee, ranged: g.save.ranged, meleeLv: g.lvOf(g.save.melee),
     };
+    if (g.dead) this.x.globalAlpha = 0.4;
     this.drawHero(view, g);
+    this.x.globalAlpha = 1;
+    if (g.burnT > 0) this.flames(g.x, g.y, g.time);
+  }
+
+  private flames(wx: number, wy: number, t: number) {
+    const x = this.x;
+    const [sx, sy] = this.iso(wx, wy, 0.2);
+    x.save();
+    x.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 7; i++) {
+      const ph = (t * 3 + i * 0.37) % 1;
+      const ox = Math.sin(i * 2.3 + t * 5) * 9;
+      x.fillStyle = `rgba(255,${Math.round(120 + 100 * (1 - ph))},40,${(1 - ph) * 0.8})`;
+      const s = 7 * (1 - ph) + 2;
+      x.fillRect(sx + ox - s / 2, sy - ph * 34 - s / 2, s, s);
+    }
+    x.restore();
   }
 
   /** the other player on your team */
@@ -948,6 +1002,22 @@ export class Renderer {
     if (p.dead) x.globalAlpha = 0.35;
     this.drawHero(view, p);
     x.globalAlpha = 1;
+    if (p.dead) {
+      // a ring that fills while you hold E to revive them
+      const [rx, ry] = this.iso(p.x, p.y, 0.05);
+      x.save();
+      x.strokeStyle = 'rgba(0,0,0,.5)';
+      x.lineWidth = 6;
+      x.beginPath();
+      x.ellipse(rx, ry, 26, 13, 0, 0, Math.PI * 2);
+      x.stroke();
+      x.strokeStyle = '#ffe066';
+      x.lineWidth = 4;
+      x.beginPath();
+      x.ellipse(rx, ry, 26, 13, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, g.reviveT / 1.5));
+      x.stroke();
+      x.restore();
+    }
     // name tag and a small health bar
     const [sx, sy] = this.iso(p.x, p.y, 1.35);
     x.font = 'bold 12px system-ui, sans-serif';
@@ -1174,7 +1244,10 @@ export class Renderer {
     const s = lw / this.W;
     lx.globalCompositeOperation = 'source-over';
     lx.clearRect(0, 0, lw, lh);
-    lx.fillStyle = `rgba(0,0,0,${g.def.light})`;
+    // outdoors it's daytime: the dark lifts while you're outside
+    const outside = L.out[Math.floor(g.y) * L.w + Math.floor(g.x)] === 1;
+    this.day += ((outside ? 1 : 0) - this.day) * Math.min(1, this.frameDt * 3);
+    lx.fillStyle = `rgba(0,0,0,${g.def.light * (1 - 0.85 * this.day)})`;
     lx.fillRect(0, 0, lw, lh);
     lx.globalCompositeOperation = 'destination-out';
     const hole = (wx: number, wy: number, r: number, a = 1) => {
@@ -1233,7 +1306,7 @@ export class Renderer {
         if (t === T.VOID) continue;
         const [px, py] = P(tx, ty);
         if (px < -cell || py < -cell || px > w + cell || py > h + cell) continue;
-        x.fillStyle = t === T.WALL || t === T.PILLAR ? shade(g.def.wall[0], 0.95) : t === T.HAZARD ? (g.def.hazard === 'lava' ? '#e0581a' : g.def.hazard === 'ice' ? '#cfefff' : '#2e6a9a') : shade(g.def.floor[0], 0.75);
+        x.fillStyle = t === T.HEDGE ? '#3f7a34' : t === T.WALL || t === T.PILLAR ? shade(g.def.wall[0], 0.95) : t === T.HAZARD ? (g.def.hazard === 'lava' ? '#e0581a' : g.def.hazard === 'ice' ? '#cfefff' : '#2e6a9a') : L.out[ty * L.w + tx] && g.mode === 'dungeon' ? '#6a9a4a' : shade(g.def.floor[0], 0.75);
         x.beginPath();
         x.moveTo(px, py - cell * 0.25);
         x.lineTo(px + cell * 0.5, py);

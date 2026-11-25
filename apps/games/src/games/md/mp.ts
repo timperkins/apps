@@ -104,6 +104,9 @@ export class HostSession {
   gain(g: object) {
     this.send({ t: 'gain', g });
   }
+  revive() {
+    this.send({ t: 'revive' });
+  }
   bothDown() {
     this.send({ t: 'fail' });
   }
@@ -220,6 +223,9 @@ export class GuestSession {
         }
         break;
       }
+      case 'revive':
+        g.revived(g.mate?.name ?? 'Your teammate');
+        break;
       case 'fail':
         this.onFail();
         break;

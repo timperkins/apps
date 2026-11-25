@@ -3,7 +3,7 @@
 import './style.css';
 import type { GameModule } from '../types';
 import {
-  ARMOR, ARMOR_STOCK, ARTIFACTS, ARROWS, DIFFS, LEVELS, MAX_LEVEL, xpNeed, MYSTIC_STOCK, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
+  ARMOR, ARMOR_STOCK, ARTIFACTS, ARROWS, DIFFS, ENCHANTS, ENCH_SLOTS, HERO_MAX, heroXpNeed, type EnchId, enchantArmor, enchantMelee, enchantRanged, LEVELS, MAX_LEVEL, xpNeed, MYSTIC_STOCK, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
   armorOf, isArmor, isMelee, isRanged, itemName, meleeOf, parseKey, rangedOf,
   type ArtifactId, type GearId, type ItemKey, type SupplyId, type Trader,
 } from './data';
@@ -86,7 +86,7 @@ function writeSave(s: SaveData) {
   }
 }
 
-type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win' | 'slots' | 'join' | 'team';
+type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win' | 'slots' | 'join' | 'team' | 'ench';
 
 const LOGO = `<div class="md-logo"><span>M</span><i></i><span>D</span><i></i></div><div class="md-sub">MONSTER DUNGEONS</div>`;
 
@@ -100,7 +100,7 @@ const HELP = `
     <div><b>Option</b> (Alt): drink your Healing Draught. A new one brews every 20 seconds and you carry 1.</div>
     <div><b>B</b>: Fizz Bomb · <b>E</b>: talk, open, use · <b>Ctrl</b> or <b>I</b>: inventory · <b>M</b>: map · <b>Esc</b>: menu (save, load, team play, settings)</div>
     <div class="md-dim">🔥 Fire weapons and arrows burn and do +60% to ice monsters. ❄️ Ice ones slow enemies for 3 seconds and do +60% to fire monsters.</div>
-    <div class="md-dim">⭐ The set (weapon, bow, armor) levels up to 100 from beating mobs and opening chests. Pick Easy, Normal, Hard or Nightmare on the mission map; beat a dungeon to unlock the next difficulty there.</div>
+    <div class="md-dim">⭐ The set (weapon, bow, armor) levels up to 100 from beating mobs and opening chests. Pick a difficulty from I to VIII on the mission map; each is harder with better loot, and beating a dungeon unlocks the next one there.</div>
     <div class="md-dim">Auto-fire bows shoot by themselves when an enemy is close. In Settings, pick where bows aim: at the mouse, in front of you, or at the nearest enemy.</div>
     <div class="md-dim">On a phone: stick on the left, buttons on the right. Attacks aim at the nearest monster.</div>
   </div>`;
@@ -116,6 +116,7 @@ const game: GameModule = {
       <div class="md-hud" hidden>
         <div class="md-tl">
           <div class="md-hp"><i></i><span></span></div>
+          <div class="md-xp"><i></i></div>
           <div class="md-stats"></div>
           <div class="md-where"></div>
         </div>
@@ -235,6 +236,7 @@ const game: GameModule = {
       gm.onDeath = () => show('dead');
       gm.onEnter = (mode, idx, seed) => host?.entered(mode, idx, seed);
       gm.onFinish = () => host?.finished();
+      gm.onReviveMate = () => host?.revive();
       gm.onPeerHurt = (_id, dmg, fx, fy, effect) => host?.hurtPeer(dmg, fx, fy, effect);
       gm.onPeerGain = (_id, obj) => host?.gain(obj);
       gm.onBothDown = () => {
@@ -279,6 +281,7 @@ const game: GameModule = {
         if (overlay === 'none') show('menu');
         else if (overlay === 'menu' || overlay === 'settings' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help' || overlay === 'team') show('none');
         else if (overlay === 'slots' || overlay === 'join') show(playing ? 'menu' : 'title');
+        else if (overlay === 'ench') show('gear');
       } else if (k === 'i' && (overlay === 'none' || overlay === 'gear')) show(overlay === 'gear' ? 'none' : 'gear');
       else if (k === 'm' && (overlay === 'none' || overlay === 'map')) {
         if (g.mode === 'camp') {
@@ -381,6 +384,7 @@ const game: GameModule = {
         potion: p('alt') || p('q') || p('t:potion'),
         bomb: p('b') || p('t:bomb'),
         use: p('e') || p('enter') || p('t:use'),
+        useHeld: keys.has('e') || held.has('use'),
         artifact: p('z') ? 0 : p('x') ? 1 : p('c') ? 2 : p('t:artifact') ? Math.max(0, g.artCd.findIndex((c, i) => c <= 0 && !!g.save.slots[i])) : -1,
         cycleArrow: p('tab'),
         aimMode: touchMode && settings.aim === 'mouse' ? 'nearest' : settings.aim,
@@ -403,6 +407,8 @@ const game: GameModule = {
       hpEl.querySelector('i')!.setAttribute('style', `width:${pct(hpK)}`);
       hpEl.classList.toggle('low', hpK < 0.3);
       hpEl.querySelector('span')!.textContent = `${Math.ceil(g.hp)} / ${g.maxHp}`;
+      const lvNow = s.heroLv ?? 1;
+      el.querySelector<HTMLElement>('.md-xp i')!.style.width = lvNow >= HERO_MAX ? '100%' : pct((s.heroXp ?? 0) / heroXpNeed(lvNow));
       const st = topStats();
       if (statKey !== st) statsEl.innerHTML = statKey = st;
       whereEl.textContent = g.mode === 'camp' ? 'Hearthstead Camp' : `${g.def.name} · ${g.D.name} · ${g.monsters.length} monsters left`;
@@ -412,11 +418,18 @@ const game: GameModule = {
         bossEl.querySelector('b')!.textContent = gd.name;
         bossEl.querySelector('i')!.setAttribute('style', `width:${pct(Math.max(0, gd.hp / gd.maxHp))}`);
       } else bossEl.hidden = true;
-      if (g.near) {
+      if (g.reviveNear) {
+        promptEl.hidden = false;
+        const who = esc((g.remote ? g.mate : g.peers[0])?.name ?? 'your teammate');
+        promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> Hold to revive ${who} <span class="md-revive"><i style="width:${pct(g.reviveT / 1.5)}"></i></span>`;
+      } else if (g.dead && (host?.guest || guest)) {
+        promptEl.hidden = false;
+        promptEl.innerHTML = `💫 You’re down! Your teammate can revive you (hold E next to you) · up by yourself in ${Math.max(0, Math.ceil(30 - g.deadT))}s`;
+      } else if (g.near) {
         promptEl.hidden = false;
         promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> ${g.near.label}`;
       } else promptEl.hidden = true;
-      touchEl.querySelector<HTMLElement>('.md-tuse')!.style.visibility = g.near ? 'visible' : 'hidden';
+      touchEl.querySelector<HTMLElement>('.md-tuse')!.style.visibility = g.near || g.reviveNear ? 'visible' : 'hidden';
       const arts = s.slots.map((id, i) => (id ? (g.artCd[i] / ARTIFACTS[id].cooldown).toFixed(2) : '-')).join('/');
       const key = [arts, s.slots.join(), touchMode].join();
       if (key !== barKey) {
@@ -439,7 +452,8 @@ const game: GameModule = {
         ? `<span class="md-pot ready" title="Drink with Option (Alt)">🧪 ${touchMode ? 'Ready' : '<kbd>Option</kbd> Ready'}</span>`
         : `<span class="md-pot">🧪 ${Math.ceil(POTION_EVERY - g.potionT)}s</span>`;
       const team = host?.guest ? `<span class="md-team">👥 ${esc(host.guest.name)}</span>` : host ? '<span class="md-team">👥 Open</span>' : guest ? `<span class="md-team">👥 ${esc(g.mate?.name ?? 'Host')}</span>` : '';
-      return `<span>🪙 ${s.coins}</span>${pot}<span>${ak === 'normal' ? '🏹' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]} ${g.arrowCount()}</span>${team}`;
+      const pts = g.enchPoints;
+      return `<span class="md-hlv">⭐ Lv ${s.heroLv ?? 1}${pts ? ` · ✨${pts}` : ''}</span><span>🪙 ${s.coins}</span>${pot}<span>${ak === 'normal' ? '🏹' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]} ${g.arrowCount()}</span>${team}`;
     }
 
     // ---------- overlays ----------
@@ -463,6 +477,7 @@ const game: GameModule = {
       else if (o === 'slots') slotsPanel();
       else if (o === 'join') joinPanel();
       else if (o === 'team') teamPanel();
+      else if (o === 'ench') enchPanel();
       else if (o === 'dead' && guest) panel(`<h2 class="md-red">Your team fell!</h2><p>You and ${esc(g.mate?.name ?? 'your host')} were both knocked out. Your host picks what happens next.</p><p class="md-dim">Waiting for the host…</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button></div>`, { leave: () => leaveGuest('You left the team game.') });
       else if (o === 'dead') panel(`<h2 class="md-red">You fell!</h2><p>The monsters of ${g.def.name} got the better of you this time. You keep every coin and piece of gear you found.</p><p class="md-dim">Monsters beaten this run: ${g.kills} · coins found: ${g.runCoins}</p><div class="md-row"><button class="md-btn md-go" data-x="camp">Back to camp</button><button class="md-btn" data-x="retry">Try again</button></div>`, {
         camp: () => {
@@ -667,7 +682,7 @@ const game: GameModule = {
         acts.leave = () => leaveGuest('You left the team game.');
       } else if (host) {
         body = `<p>${host.guest ? `<b>${esc(host.guest.name)}</b> is on your team.` : 'Your game is open. On another device, your friend opens M.D. and picks <b>Join a friend</b> on the title screen.'}</p>
-          <p class="md-dim">You pick the dungeons. Monsters go after whoever is closest. If one of you falls, you get back up next to your teammate after 8 seconds.</p>
+          <p class="md-dim">You pick the dungeons. Monsters go after whoever is closest. If one of you falls, your teammate can revive you: stand next to them and hold E.</p>
           <div class="md-row"><button class="md-btn" data-x="close">Close the game to friends</button><button class="md-btn md-go" data-x="back">Back</button></div>`;
         acts.close = () => {
           void endTeam();
@@ -788,14 +803,14 @@ const game: GameModule = {
     function statLine(key: ItemKey | '', lv = key ? g.lvOf(key) : 1) {
       const { id } = key ? parseKey(key) : { id: '' as GearId };
       if (!key || isMelee(id)) {
-        const w = meleeOf(key, lv);
+        const w = enchantMelee(meleeOf(key, lv), key ? g.enchOf(key) : {});
         return `⚔️ ${w.dmg} dmg · ${(1 / w.rate).toFixed(1)}/s · reach ${w.reach}${w.arc >= 360 ? ' · all around' : w.arc >= 200 ? ' · wide sweep' : ''}${w.element ? elemTag(w.element) : w.effect ? ` · ${w.effect === 'burn' ? 'burns' : w.effect === 'slow' ? 'slows' : 'stuns'}` : ''}`;
       }
       if (isRanged(id)) {
-        const w = rangedOf(key, lv);
+        const w = enchantRanged(rangedOf(key, lv), g.enchOf(key));
         return `🏹 ${w.dmg} dmg${w.shots > 1 ? ` ×${w.shots}` : ''} · ${(1 / w.rate).toFixed(1)}/s${w.pierce ? ` · pierces ${w.pierce > 5 ? 'all' : w.pierce}` : ''}${w.auto ? ' · AUTO-FIRE' : ''}${w.element ? elemTag(w.element) : ''}`;
       }
-      const a = armorOf(key, lv);
+      const a = enchantArmor(armorOf(key, lv), g.enchOf(key));
       return `🛡️ blocks ${pct(a.block)}${a.regen ? ' · heals' : ''}${a.speed > 1 ? ` · ${pct(a.speed - 1)} faster` : a.speed < 1 ? ` · ${pct(1 - a.speed)} slower` : ''}${a.lavaproof ? ' · lavaproof' : ''}${a.quickroll ? ' · fast rolls' : ''}`;
     }
     function gearDesc(id: GearId) {
@@ -827,7 +842,7 @@ const game: GameModule = {
             ${own ? '<span class="md-tagx">Owned</span>' : `<button class="md-btn md-buy" data-art="${id}" ${g.save.coins < A.price ? 'disabled' : ''}>🪙 ${A.price}</button>`}</div>`);
         }
       } else {
-        const stock: GearId[] = t.id === 'smith' ? SMITH_STOCK : ARMOR_STOCK;
+        const stock: GearId[] = [...(t.id === 'smith' ? SMITH_STOCK : ARMOR_STOCK)].sort((a, b) => Number(isRanged(a)) - Number(isRanged(b)) || gearPrice(a) - gearPrice(b));
         for (const id of stock) {
           const own = g.owns(id);
           const price = gearPrice(id);
@@ -901,7 +916,9 @@ const game: GameModule = {
       const rank = { diamond: 0, gold: 1, normal: 2 };
       const card = (key: ItemKey) => {
         const r = parseKey(key).rarity;
-        return `<div class="md-item r-${r} ${isEquipped(key) ? 'eq' : ''}"><img src="${gearIcon(key)}" alt=""><div class="md-it"><b>${itemName(key)}${r !== 'normal' ? ` <span class="md-badge r-${r}">${r.toUpperCase()}</span>` : ''} ${lvBadge(key)}</b><small>${statLine(key)}</small></div>${isEquipped(key) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${key}">Equip</button>`}</div>`;
+        const en = g.enchOf(key);
+        const enTxt = Object.entries(en).map(([k, t]) => `${ENCHANTS[k as EnchId].icon}${'I'.repeat(t ?? 0)}`).join(' ');
+        return `<div class="md-item r-${r} ${isEquipped(key) ? 'eq' : ''}"><img src="${gearIcon(key)}" alt=""><div class="md-it"><b>${itemName(key)}${r !== 'normal' ? ` <span class="md-badge r-${r}">${r.toUpperCase()}</span>` : ''} ${lvBadge(key)}</b><small>${statLine(key)}</small>${enTxt ? `<small class="md-ench-t">${enTxt}</small>` : ''}</div><div class="md-btncol">${isEquipped(key) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${key}">Equip</button>`}<button class="md-btn md-enb" data-en="${key}">✨ Enchant</button></div></div>`;
       };
       const group = (title: string, test: (id: GearId) => boolean, extra = '') => {
         const keys = s.owned.filter((k) => test(parseKey(k).id)).sort((a, b) => rank[parseKey(a).rarity] - rank[parseKey(b).rarity]);
@@ -923,6 +940,7 @@ const game: GameModule = {
         <div class="md-gearhead"><div class="md-me"></div><div>
           <h2>Inventory</h2>
           <p>❤️ ${Math.ceil(g.hp)} / ${g.maxHp} · 🪙 ${s.coins} · 🧪 ${s.potions ? 'draught ready (Option)' : `next draught in ${Math.ceil(POTION_EVERY - g.potionT)}s`} · 💣 ${s.bombs} bombs (B)</p>
+          <p>⭐ Hero Lv ${s.heroLv ?? 1}${(s.heroLv ?? 1) < HERO_MAX ? ` · ${s.heroXp ?? 0} / ${heroXpNeed(s.heroLv ?? 1)} xp` : ''} · ✨ ${g.enchPoints} enchant point${g.enchPoints === 1 ? '' : 's'}</p>
           <p class="md-dim">Dungeons cleared: ${s.cleared.length} of ${LEVELS.length}</p>
           <button class="md-btn" data-x="settings">⚙️ Settings</button>
         </div></div>
@@ -949,6 +967,13 @@ const game: GameModule = {
           gearPanel();
         }),
       );
+      ui.querySelectorAll<HTMLElement>('[data-en]').forEach((b) =>
+        b.addEventListener('click', () => {
+          enchKey = b.dataset.en!;
+          sfx('click');
+          show('ench');
+        }),
+      );
       ui.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) =>
         b.addEventListener('click', () => {
           g.slotArtifact(b.dataset.slot as ArtifactId);
@@ -961,6 +986,45 @@ const game: GameModule = {
           g.save.arrowKind = b.dataset.arrow as 'normal';
           sfx('click');
           gearPanel();
+        }),
+      );
+    }
+
+    // --- enchanting ---
+    let enchKey = '';
+    function enchPanel() {
+      const key = enchKey;
+      const { id } = parseKey(key);
+      const kind = isMelee(id) ? 'melee' : isRanged(id) ? 'ranged' : 'armor';
+      const en = g.enchOf(key);
+      const used = Object.keys(en).length;
+      const rows = (Object.keys(ENCHANTS) as EnchId[])
+        .filter((k) => ENCHANTS[k].for === kind)
+        .map((k) => {
+          const E = ENCHANTS[k];
+          const t = en[k] ?? 0;
+          const full = !t && used >= ENCH_SLOTS;
+          const pips = [1, 2, 3].map((i) => `<i class="${i <= t ? 'on' : ''}"></i>`).join('');
+          const btn = t >= 3 ? '<span class="md-tagx">Max</span>' : `<button class="md-btn ${g.enchPoints >= t + 1 && !full ? 'md-go' : ''}" data-ench="${k}" ${g.enchPoints >= t + 1 && !full ? '' : 'disabled'}>✨ ${t + 1}</button>`;
+          return `<div class="md-item ${t ? 'eq' : ''}"><b class="md-eico">${E.icon}</b><div class="md-it"><b>${E.name} <span class="md-pips">${pips}</span></b><small>${t ? `Now: ${E.tiers[t - 1]}` : E.tiers.join(' → ')}${t && t < 3 ? ` · next: ${E.tiers[t]}` : ''}</small></div>${btn}</div>`;
+        })
+        .join('');
+      panel(`<h2>✨ Enchant: ${esc(itemName(key))}</h2>
+        <p>⭐ Hero Lv ${g.save.heroLv ?? 1} · <b>✨ ${g.enchPoints}</b> point${g.enchPoints === 1 ? '' : 's'} to spend · ${used} of ${ENCH_SLOTS} enchantments on this item</p>
+        <p class="md-dim">You get 1 point every time your hero levels up. Tier I costs 1 point, tier II 2 more, tier III 3 more.</p>
+        <div class="md-items md-small">${rows}</div>
+        <div class="md-row">${used ? '<button class="md-btn" data-x="reset">Take enchantments off (get points back)</button>' : ''}<button class="md-btn md-go" data-x="back">Done</button></div>`, {
+        back: () => show('gear'),
+        reset: () => {
+          g.disenchant(key);
+          enchPanel();
+        },
+      });
+      ui.querySelectorAll<HTMLElement>('[data-ench]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const err = g.enchant(key, b.dataset.ench as EnchId);
+          if (err) toast(err);
+          enchPanel();
         }),
       );
     }
@@ -1020,12 +1084,12 @@ const game: GameModule = {
     }
 
     // --- mission map (the camp's table) ---
-    let diffSel = 1;
-    const diffOpen = (lvId: string, d: number) => d <= 1 || (g.save.best?.[lvId] ?? -1) >= d - 1;
+    let diffSel = 0;
+    const diffOpen = (lvId: string, d: number) => d <= 0 || (g.save.best?.[lvId] ?? -1) >= d - 1;
     function openMission(sel: number) {
       show('mission');
       const s = g.save;
-      if (!diffOpen(LEVELS[sel].id, diffSel)) diffSel = 1;
+      if (!diffOpen(LEVELS[sel].id, diffSel)) diffSel = 0;
       const pts = LEVELS.map((L) => L.map);
       const camp = { x: 8, y: 92 };
       const path = [camp, ...pts].map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y * 0.7}`).join(' ');
@@ -1070,7 +1134,7 @@ const game: GameModule = {
             const beat = (s.best?.[L.id] ?? -1) >= i;
             return `<button class="md-diff ${i === diffSel ? 'on' : ''}" data-diff="${i}" ${open ? '' : 'disabled'} style="--c:${D.color}" title="${open ? D.desc : `Beat ${L.name} on ${DIFFS[i - 1].name} first`}">${open ? '' : '🔒 '}${D.name}${beat ? ' ⭐' : ''}</button>`;
           }).join('')}</div>
-          <p class="md-dim md-small-note">${DIFFS[diffSel].desc} Monsters ×${DIFFS[diffSel].hp} health, ×${DIFFS[diffSel].dmg} damage · gear xp ×${DIFFS[diffSel].xp}</p>
+          <p class="md-dim md-small-note">${DIFFS[diffSel].desc} Monsters ×${DIFFS[diffSel].hp} health, ×${DIFFS[diffSel].dmg} damage · loot: coins ×${DIFFS[diffSel].coins}, ${Math.round(DIFFS[diffSel].gear * 100)}% gear in chests${DIFFS[diffSel].startLv > 1 ? `, found gear starts at Lv ${DIFFS[diffSel].startLv}` : ''}, xp ×${DIFFS[diffSel].xp}</p>
           <p>Reward: 🪙 ${Math.round((s.cleared.includes(L.id) ? L.reward / 3 : L.reward) * DIFFS[diffSel].reward)}${s.cleared.includes(L.id) ? ' (replay)' : ''}${L.hazard ? ` · Watch for ${L.hazard === 'lava' ? 'lava' : L.hazard === 'ice' ? 'slippery ice' : 'deep water'}` : ''}</p>
           <div class="md-row">
             ${locked ? `<button class="md-btn" disabled>🔒 Clear ${LEVELS[sel - 1].name} first</button>` : '<button class="md-btn md-go" data-x="go">Enter dungeon</button>'}

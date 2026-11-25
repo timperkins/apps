@@ -1,6 +1,6 @@
 // M.D. simulation: the hero, monsters, projectiles, loot and level flow. No drawing here.
 import {
-  ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName, DIFFS, ELEMENT_BONUS, ICE_SLOW, MAX_LEVEL, xpNeed, type Element,
+  ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName, ENCHANTS, ENCH_SLOTS, HERO_MAX, enchCost, enchantArmor, enchantMelee, enchantRanged, heroXpNeed, type EnchId, type EnchSet, DIFFS, ELEMENT_BONUS, ICE_SLOW, MAX_LEVEL, xpNeed, type Element,
   type ArmorId, type ArrowKind, type ArtifactId, type Melee, type GearId, type ItemKey, type LevelDef, type MonsterDef, type MonsterKind, type Rarity, type Trader,
 } from './data';
 import { T, generateCamp, generateDungeon, isWallTile, rng, tileAt, type Level, type Prop } from './dungeon';
@@ -29,11 +29,16 @@ export interface SaveData {
   levels: Record<ItemKey, { lv: number; xp: number }>;
   /** the hardest difficulty beaten on each dungeon (index into DIFFS) */
   best: Record<string, number>;
+  /** your hero's own level (enchant points come from it) */
+  heroLv: number;
+  heroXp: number;
+  /** enchantments on each item */
+  ench: Record<ItemKey, EnchSet>;
 }
 
 export const newSave = (): SaveData => ({
   v: 1, coins: 30, owned: ['rusty-sword', 'shortbow', 'tunic'], melee: 'rusty-sword', ranged: 'shortbow', armor: 'tunic',
-  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0, levels: {}, best: {},
+  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0, levels: {}, best: {}, heroLv: 1, heroXp: 0, ench: {},
 });
 
 export interface Monster {
@@ -152,6 +157,8 @@ export interface Input {
   /** artifact slot pressed this frame (0..2), or -1 */
   artifact?: number;
   cycleArrow?: boolean;
+  /** E (or the hand button) is held down right now */
+  useHeld?: boolean;
   aimMode?: AimMode;
   autoFire?: boolean;
   /** the mouse moved in the last moment, so standing still you turn to it */
@@ -179,10 +186,11 @@ export interface Peer {
 }
 /** something the guest did that the host's game has to carry out */
 export type Act =
-  | { a: 'swing'; face: number; key: string; lv?: number }
-  | { a: 'shoot'; angle: number; key: string; ak: ArrowKind; lv?: number }
+  | { a: 'swing'; face: number; key: string; lv?: number; en?: EnchSet }
+  | { a: 'shoot'; angle: number; key: string; ak: ArrowKind; lv?: number; en?: EnchSet }
   | { a: 'art'; id: ArtifactId; x: number; y: number }
   | { a: 'bomb'; tx: number; ty: number }
+  | { a: 'revive' }
   | { a: 'chest'; i: number }
   | { a: 'portal' };
 interface Tgt {
@@ -212,7 +220,10 @@ export const CAMP_DEF: LevelDef = {
 const HERO_R = 0.3;
 const LOCAL_SOUNDS = new Set(['hurt', 'die', 'coin', 'pickup', 'drink', 'rare', 'buy', 'click', 'artifact', 'roll', 'bow', 'swing', 'punch', 'throw']);
 export const POTION_EVERY = 20;
-export const RESPAWN_AFTER = 8;
+/** on a team, if nobody revives you, you get up by yourself after this long */
+export const RESPAWN_AFTER = 30;
+/** seconds of holding E next to a downed teammate to revive them */
+export const REVIVE_TIME = 1.5;
 const MAX_HP = 100;
 
 export class Game {
@@ -268,6 +279,14 @@ export class Game {
   flow: Int16Array = new Int16Array(0);
   flowT = 0;
   near: { label: string; act: () => void } | null = null;
+  /** standing on lava sets you on fire: you burn for a few seconds instead of taking one big hit */
+  burnT = 0;
+  /** how long you've held E next to your downed teammate */
+  reviveT = 0;
+  /** your downed teammate is close enough to revive */
+  reviveNear = false;
+  /** host: you revived the guest */
+  onReviveMate: () => void = () => {};
   /** locked target (click a monster), 0 = none */
   targetId = 0;
   artCd = [0, 0, 0];
@@ -321,18 +340,52 @@ export class Game {
   }
 
   get melee() {
-    return meleeOf(this.save.melee, this.lvOf(this.save.melee));
+    return enchantMelee(meleeOf(this.save.melee, this.lvOf(this.save.melee)), this.enchOf(this.save.melee));
   }
   get ranged() {
-    return rangedOf(this.save.ranged, this.lvOf(this.save.ranged));
+    return enchantRanged(rangedOf(this.save.ranged, this.lvOf(this.save.ranged)), this.enchOf(this.save.ranged));
   }
   get armor() {
-    return armorOf(this.save.armor, this.lvOf(this.save.armor));
+    return enchantArmor(armorOf(this.save.armor, this.lvOf(this.save.armor)), this.enchOf(this.save.armor));
+  }
+  enchOf(key: ItemKey | ''): EnchSet {
+    return key ? (this.save.ench?.[key] ?? {}) : {};
+  }
+  /** enchant points spent on all your items */
+  get enchSpent() {
+    let n = 0;
+    for (const e of Object.values(this.save.ench ?? {})) for (const t of Object.values(e)) n += enchCost(t ?? 0);
+    return n;
+  }
+  /** one enchant point per hero level after the first */
+  get enchPoints() {
+    return Math.max(0, (this.save.heroLv ?? 1) - 1 - this.enchSpent);
+  }
+  /** adds a tier of an enchantment to an item; returns an error message or null */
+  enchant(key: ItemKey, id: EnchId): string | null {
+    if (!key) return 'Fists can’t be enchanted.';
+    const kind = isMelee(parseKey(key).id) ? 'melee' : isRanged(parseKey(key).id) ? 'ranged' : 'armor';
+    if (ENCHANTS[id].for !== kind) return 'That enchantment doesn’t fit this item.';
+    if (!this.save.ench) this.save.ench = {};
+    const e = (this.save.ench[key] ??= {});
+    const t = e[id] ?? 0;
+    if (t >= 3) return 'That enchantment is already at its best.';
+    if (!t && Object.keys(e).length >= ENCH_SLOTS) return `An item holds at most ${ENCH_SLOTS} different enchantments.`;
+    if (this.enchPoints < t + 1) return `You need ${t + 1} enchant point${t ? 's' : ''}. Level up your hero to get more.`;
+    e[id] = t + 1;
+    this.sound('artifact');
+    this.onSave();
+    return null;
+  }
+  /** takes every enchantment off an item and gives the points back */
+  disenchant(key: ItemKey) {
+    if (this.save.ench) delete this.save.ench[key];
+    this.onSave();
   }
   /** the difficulty of the dungeon you're in (or about to pick) */
-  diff = 1;
+  diff = 0;
   get D() {
-    return DIFFS[this.diff] ?? DIFFS[1];
+    return DIFFS[this.diff] ?? DIFFS[0];
   }
   lvOf(key: ItemKey | ''): number {
     return key ? (this.save.levels?.[key]?.lv ?? 1) : 1;
@@ -343,6 +396,21 @@ export class Game {
   /** the set (equipped weapon, bow and armor) gets xp only from beating mobs and opening chests */
   gainSetXp(n: number) {
     if (n <= 0) return;
+    // your hero levels up too, and every hero level is an enchant point
+    if (!this.save.heroLv) this.save.heroLv = 1;
+    if (this.save.heroLv < HERO_MAX) {
+      this.save.heroXp = (this.save.heroXp ?? 0) + n;
+      let up = false;
+      while (this.save.heroLv < HERO_MAX && this.save.heroXp >= heroXpNeed(this.save.heroLv)) {
+        this.save.heroXp -= heroXpNeed(this.save.heroLv);
+        this.save.heroLv++;
+        up = true;
+      }
+      if (up) {
+        this.onBanner(`Level ${this.save.heroLv}!`, `+1 enchant point. Spend it in your inventory (Ctrl) → ✨ Enchant.`);
+        this.ring(this.x, this.y, 2, '#ffe066', 0.6);
+      }
+    }
     if (!this.save.levels) this.save.levels = {};
     const ups: string[] = [];
     for (const key of [this.save.melee, this.save.ranged, this.save.armor]) {
@@ -365,7 +433,7 @@ export class Game {
     }
   }
   get rollMax() {
-    return this.armor.quickroll ? 0.42 : 0.85;
+    return (this.armor.quickroll ? 0.42 : 0.85) * (this.armor.rollMul ?? 1);
   }
   owns(id: GearId) {
     return this.save.owned.some((k) => parseKey(k).id === id);
@@ -427,7 +495,7 @@ export class Game {
     this.warns = [];
     this.vx = this.vy = 0;
     this.dead = false;
-    this.rollT = this.swingT = this.hurtT = this.slowT = 0;
+    this.rollT = this.swingT = this.hurtT = this.slowT = this.burnT = 0;
     this.kills = 0;
     this.runCoins = 0;
     this.bossAwake = false;
@@ -709,12 +777,16 @@ export class Game {
     this.meleeCd = w.rate;
     this.swingT = this.swingDur = Math.min(0.32, w.rate * 0.85);
     this.sound(w.shape === 'fist' ? 'punch' : w.effect === 'stun' ? 'slam' : 'swing');
-    if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee, lv: this.lvOf(this.save.melee) });
-    else this.meleeHit(this.x, this.y, this.face, w);
+    if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee, lv: this.lvOf(this.save.melee), en: this.enchOf(this.save.melee) });
+    else this.meleeHit(this.x, this.y, this.face, w, (n) => this.leechHeal(n));
   }
 
   /** the damage part of a swing, from any player (the host runs it for the guest too) */
-  meleeHit(x0: number, y0: number, face: number, w: Melee) {
+  private leechHeal(n: number) {
+    if (this.dead || this.hp >= this.maxHp) return;
+    this.hp = Math.min(this.maxHp, this.hp + n);
+  }
+  meleeHit(x0: number, y0: number, face: number, w: Melee, heal?: (n: number) => void) {
     const half = (w.arc * Math.PI) / 360;
     for (const m of this.monsters) {
       if (m.dead) continue;
@@ -725,7 +797,9 @@ export class Game {
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       if (w.arc < 360 && Math.abs(da) > half + 0.25 && d > 0.6) continue;
-      this.hurtMonster(m, w.dmg, x0, y0, w.knock, w.effect, w.element);
+      const fx = w.effect ?? (w.burnChance && Math.random() < w.burnChance ? 'burn' : w.slowChance && Math.random() < w.slowChance ? 'slow' : undefined);
+      this.hurtMonster(m, w.dmg, x0, y0, w.knock, fx, w.element);
+      if (w.leech && heal) heal(w.leech);
     }
     if (w.effect === 'stun') {
       this.ring(x0, y0, w.reach, '#ffe066', 0.35);
@@ -783,13 +857,13 @@ export class Game {
     this.rangedCd = w.rate;
     this.drawT = 0.18;
     this.sound('bow');
-    if (this.remote) this.onAct({ a: 'shoot', angle, key: this.save.ranged, ak, lv: this.lvOf(this.save.ranged) });
-    else this.fireArrows(this.x, this.y, angle, this.save.ranged, ak, this.lvOf(this.save.ranged));
+    if (this.remote) this.onAct({ a: 'shoot', angle, key: this.save.ranged, ak, lv: this.lvOf(this.save.ranged), en: this.enchOf(this.save.ranged) });
+    else this.fireArrows(this.x, this.y, angle, this.save.ranged, ak, this.lvOf(this.save.ranged), this.enchOf(this.save.ranged));
   }
 
   /** the arrows themselves, from any player */
-  fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, ak: ArrowKind, lv = 1) {
-    const w = rangedOf(rangedKey, lv);
+  fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, ak: ArrowKind, lv = 1, en: EnchSet = {}) {
+    const w = enchantRanged(rangedOf(rangedKey, lv), en);
     const { id, rarity } = parseKey(rangedKey);
     const kind = w.shape === 'crossbow' ? 'bolt' : id === 'starlight-bow' || id === 'storm-bow' || rarity !== 'normal' ? 'star' : 'arrow';
     const effect = ak === 'fire' || w.burn ? 'burn' : ak === 'frost' || w.chill ? 'slow' : ak === 'boom' ? 'boom' : undefined;
@@ -799,7 +873,8 @@ export class Game {
       const a = angle + (i - (w.shots - 1) / 2) * w.spread;
       this.shots.push({
         x: x0 + Math.cos(a) * 0.4, y: y0 + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, effect, element, color,
+        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, element, color,
+        effect: effect ?? (w.burnChance && Math.random() < w.burnChance ? 'burn' : w.slowChance && Math.random() < w.slowChance ? 'slow' : undefined),
       });
     }
   }
@@ -999,13 +1074,9 @@ export class Game {
       // on a team: get back up next to your teammate, unless they are down too
       const mate = this.remote ? this.mate : this.peers[0];
       if (mate && !mate.dead && this.deadT >= RESPAWN_AFTER) {
-        this.dead = false;
-        this.hp = Math.round(this.maxHp * 0.5);
         this.x = mate.x;
         this.y = mate.y;
-        this.hurtT = 1.5;
-        this.burst(this.x, this.y, 0.6, '#ffe066', 16, 2);
-        this.onMsg('Back on your feet!');
+        this.revived('');
       } else if (!this.remote && (!mate || mate.dead) && this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onBothDown();
     } else this.updateHero(dt, inp);
     if (this.remote) {
@@ -1115,8 +1186,22 @@ export class Game {
     if (this.moving || this.rollT > 0) this.walk += dt * 10;
     if (this.speedT > 0 && this.moving && Math.random() < dt * 14) this.burst(this.x, this.y, 0.1, '#b8a8ff', 1, 0.5);
     if (onHaz && this.def.hazard === 'lava' && this.rollT <= 0 && !this.armor.lavaproof) {
-      if (Math.random() < dt * 8) this.burst(this.x, this.y, 0.1, '#ff8a2a', 2, 1.5);
-      if (this.hurtT <= 0) this.hurtHero(12, this.x - this.vx, this.y - this.vy);
+      if (this.burnT <= 0) this.onMsg('You’re on fire! Get off the lava.');
+      this.burnT = 2.5;
+    }
+    if (this.burnT > 0) {
+      // burning: a little damage every moment, no knockback
+      this.burnT -= dt;
+      if (this.armor.lavaproof) this.burnT = 0;
+      this.hp -= 9 * dt * (1 - this.armor.block * 0.5) * (this.ironT > 0 ? 0.25 : 1);
+      if (Math.random() < dt * 18) this.burst(this.x, this.y, 0.5 + Math.random() * 0.5, Math.random() < 0.5 ? '#ff8a2a' : '#ffd040', 1, 1.2, 0.05);
+      if (this.hp <= 0) {
+        this.hp = 0;
+        this.dead = true;
+        this.deadT = 0;
+        this.burnT = 0;
+        this.sound('die');
+      }
     }
 
     if (inp.melee && this.meleeCd <= 0 && this.rollT <= 0) {
@@ -1137,7 +1222,23 @@ export class Game {
     if (inp.bomb && this.bombCd <= 0) this.throwBomb(inp.aim);
 
     // things to use nearby
-    this.near = this.findNear();
+    // a downed teammate next to you: hold E to get them back up
+    const mate = this.remote ? this.mate : this.peers[0];
+    this.reviveNear = !!mate && mate.dead && Math.hypot(mate.x - this.x, mate.y - this.y) < 1.4;
+    if (this.reviveNear && inp.useHeld) {
+      this.reviveT += dt;
+      if (Math.random() < dt * 20) this.burst(mate!.x, mate!.y, 0.4, '#ffe066', 1, 1.5);
+      if (this.reviveT >= REVIVE_TIME) {
+        this.reviveT = 0;
+        this.burst(mate!.x, mate!.y, 0.6, '#ffe066', 20, 2.5);
+        this.sound('artifact');
+        this.onMsg(`You revived ${mate!.name}!`);
+        mate!.dead = false;
+        if (this.remote) this.onAct({ a: 'revive' });
+        else this.onReviveMate();
+      }
+    } else this.reviveT = 0;
+    this.near = this.reviveNear ? null : this.findNear();
     if (inp.use && this.near) this.near.act();
   }
 
@@ -1172,13 +1273,14 @@ export class Game {
     // sometimes a piece of gear you don't have yet
     if (opener) {
       // the guest rolls their own gear from their own save
-      this.onPeerGain(opener, { gear: Math.random() < 0.45, special: Math.random() < 0.35 ? [['fire', 'frost', 'boom'][Math.floor(Math.random() * 3)], 6] : undefined });
-    } else if (Math.random() < 0.45) {
-      const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= this.levelIdx + 1);
+      this.onPeerGain(opener, { gear: Math.random() < this.D.gear, special: Math.random() < 0.35 ? [['fire', 'frost', 'boom'][Math.floor(Math.random() * 3)], 6] : undefined });
+    } else if (Math.random() < this.D.gear) {
+      const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= this.levelIdx + 1 + Math.floor(this.diff / 3));
       if (pool.length) {
         const g = pool[Math.floor(Math.random() * pool.length)];
         const key = this.grant(g);
-        if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}: equip it from your inventory (Ctrl).`);
+        this.startLevel(key);
+        if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}${this.lvOf(key) > 1 ? ` (Lv ${this.lvOf(key)})` : ''}: equip it from your inventory (Ctrl).`);
       }
     }
     if (!opener && Math.random() < 0.35) {
@@ -1190,10 +1292,19 @@ export class Game {
 
   /** a chest roll for this player (used when the guest opened one) */
   chestGear(level: number) {
-    const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= level + 1);
+    const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= level + 1 + Math.floor(this.diff / 3));
     if (!pool.length) return;
     const key = this.grant(pool[Math.floor(Math.random() * pool.length)]);
-    if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}: equip it from your inventory (Ctrl).`);
+    this.startLevel(key);
+    if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}${this.lvOf(key) > 1 ? ` (Lv ${this.lvOf(key)})` : ''}: equip it from your inventory (Ctrl).`);
+  }
+  /** gear found on harder difficulties starts at a higher level */
+  private startLevel(key: ItemKey) {
+    const lv = this.D.startLv;
+    if (lv <= 1) return;
+    if (!this.save.levels) this.save.levels = {};
+    const e = (this.save.levels[key] ??= { lv: 1, xp: 0 });
+    e.lv = Math.max(e.lv, lv);
   }
 
   finishLevel() {
@@ -1231,11 +1342,27 @@ export class Game {
   }
 
   /** the host carries out what the guest did */
+  /** back up after a teammate revived you (or after waiting) */
+  revived(by: string) {
+    if (!this.dead) return;
+    this.dead = false;
+    this.burnT = 0;
+    this.hp = Math.round(this.maxHp * 0.5);
+    this.hurtT = 1.5;
+    this.burst(this.x, this.y, 0.6, '#ffe066', 16, 2);
+    this.sound('artifact');
+    this.onMsg(by ? `${by} revived you!` : 'Back on your feet!');
+  }
+
   peerAct(id: string, a: Act) {
     const p = this.peers.find((q) => q.id === id);
+    if (a.a === 'revive') {
+      this.revived(p?.name ?? 'Your teammate');
+      return;
+    }
     if (!p || p.dead) return;
-    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, meleeOf(a.key, Math.min(MAX_LEVEL, a.lv ?? 1)));
-    else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, a.key, a.ak, Math.min(MAX_LEVEL, a.lv ?? 1));
+    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, enchantMelee(meleeOf(a.key, Math.min(MAX_LEVEL, a.lv ?? 1)), cleanEnch(a.en)), (n) => this.onPeerGain(id, { heal: n }));
+    else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, a.key, a.ak, Math.min(MAX_LEVEL, a.lv ?? 1), cleanEnch(a.en));
     else if (a.a === 'art') this.artifactAt(a.id, p.x, p.y);
     else if (a.a === 'bomb') this.bombs.push({ x: p.x, y: p.y, tx: a.tx, ty: a.ty, t: 0, fuse: 1.0 });
     else if (a.a === 'chest') {
@@ -1687,6 +1814,14 @@ export function gearName(id: GearId) {
   return isMelee(id) ? MELEE[id].name : isRanged(id) ? RANGED[id].name : ARMOR[id as ArmorId].name;
 }
 /** rough level a piece of gear belongs to, so chests don't hand out the best stuff early */
+/** an enchant set from the network, kept to real enchantments at tiers 1..3 */
+function cleanEnch(e?: EnchSet): EnchSet {
+  const out: EnchSet = {};
+  if (!e || typeof e !== 'object') return out;
+  for (const [k, v] of Object.entries(e)) if (k in ENCHANTS && typeof v === 'number') out[k as EnchId] = Math.max(1, Math.min(3, Math.round(v)));
+  return out;
+}
+
 export function gearTier(id: GearId) {
   const p = gearPrice(id);
   return p < 120 ? 0 : p < 230 ? 1 : p < 330 ? 2 : p < 500 ? 3 : 4;

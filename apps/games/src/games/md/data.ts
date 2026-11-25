@@ -3,8 +3,11 @@
 
 export type MeleeId =
   | 'rusty-sword' | 'twin-daggers' | 'battle-axe' | 'long-spear' | 'thunder-hammer' | 'frost-glaive' | 'ember-blade'
-  | 'sickle' | 'scythe' | 'obsidian-cleaver' | 'dragonfang' | 'rimeblade';
-export type RangedId = 'shortbow' | 'crossbow' | 'fan-bow' | 'starlight-bow' | 'rapid-repeater' | 'storm-bow' | 'thornspike-bow' | 'dragonbone-longbow' | 'glacier-bow';
+  | 'sickle' | 'scythe' | 'obsidian-cleaver' | 'dragonfang' | 'rimeblade'
+  | 'bone-club' | 'coral-cutlass' | 'shadow-katana' | 'moon-sickle' | 'blizzard-axe' | 'magma-axe' | 'spiked-mace' | 'frostbite-daggers'
+  | 'cinder-claws' | 'thunder-pike' | 'venom-spear' | 'crystal-greatsword' | 'volcano-hammer' | 'soul-scythe';
+export type RangedId = 'shortbow' | 'crossbow' | 'fan-bow' | 'starlight-bow' | 'rapid-repeater' | 'storm-bow' | 'thornspike-bow' | 'dragonbone-longbow' | 'glacier-bow'
+  | 'hunters-longbow' | 'twinstring-bow' | 'ember-crossbow' | 'frost-repeater' | 'thunderclap-crossbow' | 'phoenix-bow';
 export type ArmorId = 'tunic' | 'jerkin' | 'chainmail' | 'mossguard' | 'obsidian-plate' | 'scout-cloak' | 'knight-plate' | 'shadowweave' | 'dragonscale';
 export type GearId = MeleeId | RangedId | ArmorId;
 export type Rarity = 'normal' | 'gold' | 'diamond';
@@ -18,7 +21,7 @@ export const ELEMENT_BONUS = 1.6;
 /** how long ice keeps an enemy slowed (seconds) */
 export const ICE_SLOW = 3;
 
-export type MeleeShape = 'sword' | 'daggers' | 'axe' | 'spear' | 'hammer' | 'glaive' | 'sickle' | 'scythe' | 'cleaver' | 'fist';
+export type MeleeShape = 'sword' | 'daggers' | 'axe' | 'spear' | 'hammer' | 'glaive' | 'sickle' | 'scythe' | 'cleaver' | 'fist' | 'mace' | 'katana';
 
 export interface Melee {
   kind: 'melee';
@@ -40,6 +43,10 @@ export interface Melee {
   /** drawn with a glow */
   glow?: boolean;
   element?: Element;
+  burnChance?: number;
+  slowChance?: number;
+  /** health back per hit */
+  leech?: number;
 }
 export interface Ranged {
   kind: 'ranged';
@@ -62,6 +69,8 @@ export interface Ranged {
   element?: Element;
   /** every arrow slows enemies */
   chill?: boolean;
+  burnChance?: number;
+  slowChance?: number;
 }
 export interface Armor {
   kind: 'armor';
@@ -80,6 +89,8 @@ export interface Armor {
   quickroll?: boolean;
   /** horns, spikes or a hood on the helmet */
   helm?: 'horns' | 'hood' | 'crest' | 'spikes';
+  /** roll cooldown multiplier (Nimble) */
+  rollMul?: number;
 }
 
 export const MELEE: Record<MeleeId, Melee> = {
@@ -95,6 +106,20 @@ export const MELEE: Record<MeleeId, Melee> = {
   'obsidian-cleaver': { kind: 'melee', shape: 'cleaver', name: 'Obsidian Cleaver', desc: 'A jagged black slab with a glowing purple edge. Brutal.', dmg: 26, rate: 0.62, reach: 1.55, arc: 150, knock: 7, price: 380, color: '#1a1420', blade: '#2a2238', glow: true },
   'ember-blade': { kind: 'melee', shape: 'sword', name: 'Ember Blade', desc: 'A glowing blade that sets enemies on fire.', dmg: 16, rate: 0.4, reach: 1.45, arc: 120, knock: 3, effect: 'burn', price: 480, color: '#5a1d10', blade: '#ff8a3a', glow: true, element: 'fire' },
   dragonfang: { kind: 'melee', shape: 'sword', name: 'Dragonfang', desc: 'A blood-red blade carved from a dragon’s tooth. Burns and hits hard.', dmg: 22, rate: 0.44, reach: 1.6, arc: 130, knock: 5, effect: 'burn', price: 640, color: '#2a0e0e', blade: '#e0303a', glow: true, element: 'fire' },
+  'bone-club': { kind: 'melee', shape: 'mace', name: 'Bone Club', desc: 'A knobbly club with a skull-sized end. Cheap and thumpy.', dmg: 12, rate: 0.55, reach: 1.3, arc: 100, knock: 5, price: 50, color: '#d8ccb0', blade: '#efe6d0' },
+  'coral-cutlass': { kind: 'melee', shape: 'sword', name: 'Coral Cutlass', desc: 'A curved pink-and-teal blade found in a sunken chest.', dmg: 11, rate: 0.36, reach: 1.4, arc: 130, knock: 3, price: 95, color: '#1f6a6a', blade: '#ff8aa8' },
+  'spiked-mace': { kind: 'melee', shape: 'mace', name: 'Spiked Mace', desc: 'An iron ball covered in spikes. Big hits that stun.', dmg: 22, rate: 0.75, reach: 1.4, arc: 110, knock: 7, effect: 'stun', price: 190, color: '#4a3a2a', blade: '#7a828c' },
+  'shadow-katana': { kind: 'melee', shape: 'katana', name: 'Shadow Katana', desc: 'A long, thin black blade. Lightning-fast cuts.', dmg: 13, rate: 0.26, reach: 1.6, arc: 100, knock: 2, price: 290, color: '#1a1a22', blade: '#5a4a8a', glow: true },
+  'moon-sickle': { kind: 'melee', shape: 'sickle', name: 'Moon Sickle', desc: 'A pale sickle that glows like the moon. Its cold bite slows.', dmg: 12, rate: 0.24, reach: 1.25, arc: 150, knock: 2, effect: 'slow', price: 270, color: '#3a4a6a', blade: '#e8f4ff', glow: true, element: 'ice' },
+  'frostbite-daggers': { kind: 'melee', shape: 'daggers', name: 'Frostbite Daggers', desc: 'Two icicle daggers. Very fast, and every stab slows.', dmg: 8, rate: 0.18, reach: 1.1, arc: 80, knock: 1.5, effect: 'slow', price: 250, color: '#2a4a6a', blade: '#bff0ff', glow: true, element: 'ice' },
+  'cinder-claws': { kind: 'melee', shape: 'daggers', name: 'Cinder Claws', desc: 'Two glowing claw blades that leave enemies burning.', dmg: 8, rate: 0.18, reach: 1.1, arc: 80, knock: 1.5, effect: 'burn', price: 260, color: '#3a1a10', blade: '#ff7a2a', glow: true, element: 'fire' },
+  'venom-spear': { kind: 'melee', shape: 'spear', name: 'Venom Spear', desc: 'A green-tipped spear. Long reach; its poison slows.', dmg: 15, rate: 0.48, reach: 2.4, arc: 36, knock: 4, effect: 'slow', price: 230, color: '#3a5a2a', blade: '#7aff6a', glow: true },
+  'thunder-pike': { kind: 'melee', shape: 'spear', name: 'Thunder Pike', desc: 'A crackling pike that stuns whatever it skewers.', dmg: 19, rate: 0.55, reach: 2.4, arc: 40, knock: 5, effect: 'stun', price: 360, color: '#3b3f5a', blade: '#ffe066', glow: true },
+  'blizzard-axe': { kind: 'melee', shape: 'axe', name: 'Blizzard Axe', desc: 'A frozen double axe. Huge sweeps that slow everything.', dmg: 23, rate: 0.7, reach: 1.5, arc: 180, knock: 6, effect: 'slow', price: 400, color: '#2a3a5a', blade: '#aee8ff', glow: true, element: 'ice' },
+  'magma-axe': { kind: 'melee', shape: 'axe', name: 'Magma Axe', desc: 'Cracked black stone with lava in the cracks. Burns.', dmg: 24, rate: 0.7, reach: 1.5, arc: 180, knock: 6, effect: 'burn', price: 420, color: '#1a1010', blade: '#ff5a1a', glow: true, element: 'fire' },
+  'soul-scythe': { kind: 'melee', shape: 'scythe', name: 'Soul Scythe', desc: 'A ghostly green scythe. A wide, spooky sweep.', dmg: 21, rate: 0.62, reach: 2.1, arc: 240, knock: 4, price: 450, color: '#1a2a20', blade: '#6affb0', glow: true },
+  'crystal-greatsword': { kind: 'melee', shape: 'sword', name: 'Crystal Greatsword', desc: 'A huge sword of blue crystal. Slow, wide, freezing.', dmg: 30, rate: 0.7, reach: 1.9, arc: 150, knock: 7, effect: 'slow', price: 560, color: '#1a3a5a', blade: '#7ae0ff', glow: true, element: 'ice' },
+  'volcano-hammer': { kind: 'melee', shape: 'hammer', name: 'Volcano Hammer', desc: 'Slams the floor in a ring of fire that burns everything around you.', dmg: 32, rate: 1.0, reach: 2.0, arc: 360, knock: 8, effect: 'burn', price: 600, color: '#2a1010', blade: '#ff6a2a', glow: true, element: 'fire' },
 };
 
 /** what you swing with nothing equipped */
@@ -110,6 +135,12 @@ export const RANGED: Record<RangedId, Ranged> = {
   'starlight-bow': { kind: 'ranged', shape: 'bow', name: 'Starlight Bow', desc: 'Fast glowing arrows that pass through everything.', dmg: 14, rate: 0.32, speed: 17, shots: 1, spread: 0, pierce: 9, price: 520, color: '#e8e0ff', glow: true },
   'dragonbone-longbow': { kind: 'ranged', shape: 'longbow', name: 'Dragonbone Longbow', desc: 'A huge bow of bone and red string. Burning arrows that pierce three.', dmg: 30, rate: 0.85, speed: 19, shots: 1, spread: 0, pierce: 3, price: 680, color: '#e8dcc0', burn: true, element: 'fire' },
   'glacier-bow': { kind: 'ranged', shape: 'bow', name: 'Glacier Bow', desc: 'A bow of packed ice. Freezing arrows slow enemies and pierce one.', dmg: 13, rate: 0.5, speed: 15, shots: 1, spread: 0, pierce: 1, price: 460, color: '#8ad8f0', chill: true, glow: true, element: 'ice' },
+  'hunters-longbow': { kind: 'ranged', shape: 'longbow', name: "Hunter's Longbow", desc: 'A tall plain bow. Strong, far-flying arrows.', dmg: 16, rate: 0.7, speed: 18, shots: 1, spread: 0, pierce: 0, price: 120, color: '#7a5a32' },
+  'twinstring-bow': { kind: 'ranged', shape: 'bow', name: 'Twinstring Bow', desc: 'Two strings, two arrows every shot.', dmg: 8, rate: 0.5, speed: 14, shots: 2, spread: 0.08, pierce: 0, price: 160, color: '#5a6a3a' },
+  'ember-crossbow': { kind: 'ranged', shape: 'crossbow', name: 'Ember Crossbow', desc: 'Heavy burning bolts that punch through two enemies.', dmg: 24, rate: 1.0, speed: 18, shots: 1, spread: 0, pierce: 2, price: 340, color: '#5a2010', burn: true, glow: true, element: 'fire' },
+  'frost-repeater': { kind: 'ranged', shape: 'crossbow', name: 'Frost Repeater', desc: 'AUTO-FIRE: rattles off icy bolts that slow.', dmg: 7, rate: 0.3, speed: 15, shots: 1, spread: 0, pierce: 0, price: 380, color: '#3a5a7a', auto: true, chill: true, glow: true, element: 'ice' },
+  'thunderclap-crossbow': { kind: 'ranged', shape: 'crossbow', name: 'Thunderclap Crossbow', desc: 'Bolts that crack through every enemy in a line.', dmg: 26, rate: 1.05, speed: 20, shots: 1, spread: 0, pierce: 9, price: 500, color: '#3b3f5a', glow: true },
+  'phoenix-bow': { kind: 'ranged', shape: 'bow', name: 'Phoenix Bow', desc: 'A blazing orange bow: three burning arrows at once.', dmg: 12, rate: 0.6, speed: 15, shots: 3, spread: 0.18, pierce: 0, price: 620, color: '#ff8a2a', burn: true, glow: true, element: 'fire' },
 };
 
 export const ARMOR: Record<ArmorId, Armor> = {
@@ -212,6 +243,83 @@ export function gear(id: GearId): Melee | Ranged | Armor {
   return isMelee(id) ? MELEE[id] : isRanged(id) ? RANGED[id] : ARMOR[id as ArmorId];
 }
 
+// ---------- enchanting ----------
+export type EnchId =
+  | 'keen' | 'swift' | 'wildfire' | 'chill' | 'leech' | 'sweep'
+  | 'power' | 'quick' | 'pierce' | 'flametip' | 'frosttip'
+  | 'tough' | 'quickstep' | 'mend' | 'nimble';
+export interface Ench {
+  name: string;
+  icon: string;
+  for: 'melee' | 'ranged' | 'armor';
+  /** what each tier (1..3) does */
+  tiers: [string, string, string];
+}
+export const ENCHANTS: Record<EnchId, Ench> = {
+  keen: { name: 'Keen Edge', icon: '🗡️', for: 'melee', tiers: ['+12% damage', '+24% damage', '+36% damage'] },
+  swift: { name: 'Swift Strikes', icon: '💨', for: 'melee', tiers: ['8% faster', '16% faster', '24% faster'] },
+  sweep: { name: 'Wide Sweep', icon: '🌀', for: 'melee', tiers: ['+15° swing', '+30° swing', '+45° swing'] },
+  wildfire: { name: 'Wildfire', icon: '🔥', for: 'melee', tiers: ['30% of hits burn', '60% of hits burn', 'every hit burns'] },
+  chill: { name: 'Chilling', icon: '❄️', for: 'melee', tiers: ['30% of hits slow', '60% of hits slow', 'every hit slows'] },
+  leech: { name: 'Lifesteal', icon: '❤️', for: 'melee', tiers: ['heal 1 per hit', 'heal 2 per hit', 'heal 3 per hit'] },
+  power: { name: 'Power Draw', icon: '🏹', for: 'ranged', tiers: ['+12% damage', '+24% damage', '+36% damage'] },
+  quick: { name: 'Quick Nock', icon: '💨', for: 'ranged', tiers: ['8% faster', '16% faster', '24% faster'] },
+  pierce: { name: 'Piercing', icon: '➶', for: 'ranged', tiers: ['pierce +1', 'pierce +2', 'pierce +3'] },
+  flametip: { name: 'Flame Tips', icon: '🔥', for: 'ranged', tiers: ['40% of arrows burn', '70% of arrows burn', 'every arrow burns'] },
+  frosttip: { name: 'Frost Tips', icon: '❄️', for: 'ranged', tiers: ['40% of arrows slow', '70% of arrows slow', 'every arrow slows'] },
+  tough: { name: 'Toughness', icon: '🛡️', for: 'armor', tiers: ['+5% block', '+10% block', '+15% block'] },
+  quickstep: { name: 'Quickstep', icon: '👟', for: 'armor', tiers: ['+5% speed', '+10% speed', '+15% speed'] },
+  mend: { name: 'Mending', icon: '💚', for: 'armor', tiers: ['heal 0.8/s', 'heal 1.6/s', 'heal 2.4/s'] },
+  nimble: { name: 'Nimble', icon: '🤸', for: 'armor', tiers: ['rolls recharge 15% faster', '30% faster', '45% faster'] },
+};
+/** an item holds up to this many different enchantments */
+export const ENCH_SLOTS = 3;
+/** points to reach a tier: tier 1 costs 1, tier 2 costs 2 more, tier 3 costs 3 more */
+export const enchCost = (tier: number) => (tier * (tier + 1)) / 2;
+export type EnchSet = Partial<Record<EnchId, number>>;
+
+/** a melee weapon with its enchantments */
+export function enchantMelee(w: Melee, e: EnchSet = {}): Melee {
+  if (!Object.keys(e).length) return w;
+  const t = (k: EnchId) => e[k] ?? 0;
+  return {
+    ...w,
+    dmg: Math.round(w.dmg * (1 + 0.12 * t('keen'))),
+    rate: w.rate * (1 - 0.08 * t('swift')),
+    arc: w.arc >= 360 ? 360 : w.arc + 15 * t('sweep'),
+    burnChance: [0, 0.3, 0.6, 1][t('wildfire')],
+    slowChance: [0, 0.3, 0.6, 1][t('chill')],
+    leech: t('leech'),
+  };
+}
+export function enchantRanged(w: Ranged, e: EnchSet = {}): Ranged {
+  if (!Object.keys(e).length) return w;
+  const t = (k: EnchId) => e[k] ?? 0;
+  return {
+    ...w,
+    dmg: Math.round(w.dmg * (1 + 0.12 * t('power'))),
+    rate: w.rate * (1 - 0.08 * t('quick')),
+    pierce: w.pierce + t('pierce'),
+    burnChance: [0, 0.4, 0.7, 1][t('flametip')],
+    slowChance: [0, 0.4, 0.7, 1][t('frosttip')],
+  };
+}
+export function enchantArmor(a: Armor, e: EnchSet = {}): Armor {
+  if (!Object.keys(e).length) return a;
+  const t = (k: EnchId) => e[k] ?? 0;
+  return {
+    ...a,
+    block: Math.min(0.9, a.block + 0.05 * t('tough')),
+    speed: a.speed * (1 + 0.05 * t('quickstep')),
+    regen: a.regen + 0.8 * t('mend'),
+    rollMul: 1 - 0.15 * t('nimble'),
+  };
+}
+
+// ---------- hero level ----------
+export const HERO_MAX = 100;
+export const heroXpNeed = (lv: number) => 8 + lv * 4;
+
 // ---------- difficulty ----------
 export interface Difficulty {
   name: string;
@@ -223,14 +331,26 @@ export interface Difficulty {
   coins: number;
   xp: number;
   reward: number;
+  /** chance a chest has a new piece of gear */
+  gear: number;
+  /** the level new gear starts at */
+  startLv: number;
   color: string;
 }
-export const DIFFS: Difficulty[] = [
-  { name: 'Easy', desc: 'Weaker monsters. Good for learning a dungeon.', hp: 0.7, dmg: 0.6, more: 0, coins: 0.8, xp: 0.75, reward: 0.75, color: '#7ad07a' },
-  { name: 'Normal', desc: 'The dungeon as it was built.', hp: 1, dmg: 1, more: 0, coins: 1, xp: 1, reward: 1, color: '#e8d8b8' },
-  { name: 'Hard', desc: 'Tougher, angrier monsters and more of them. Double gear xp.', hp: 1.8, dmg: 1.5, more: 1, coins: 1.6, xp: 2, reward: 1.8, color: '#ffa040' },
-  { name: 'Nightmare', desc: 'Only for high-level gear. Triple gear xp and big rewards.', hp: 3, dmg: 2.2, more: 2, coins: 2.5, xp: 3, reward: 3, color: '#ff4a6a' },
-];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+const HP = [0.8, 1, 1.35, 1.8, 2.4, 3.2, 4.2, 5.5];
+const DMG = [0.7, 1, 1.25, 1.55, 1.9, 2.3, 2.8, 3.4];
+const LOOT = [1, 1.2, 1.5, 1.9, 2.4, 3, 3.8, 4.8];
+const XP = [1, 1.3, 1.7, 2.2, 2.8, 3.5, 4.3, 5.2];
+const START = [1, 1, 3, 6, 10, 15, 21, 28];
+const COLORS = ['#7ad07a', '#b8e07a', '#e8d870', '#ffc050', '#ff9a40', '#ff6a40', '#ff4a6a', '#d04aff'];
+/** difficulties I to VIII: each one is harder, with better loot */
+export const DIFFS: Difficulty[] = ROMAN.map((name, i) => ({
+  name,
+  desc: i === 0 ? 'The easiest. Good for learning a dungeon.' : i === 7 ? 'The hardest there is. The best loot there is.' : `Harder monsters${[0, 0, 1, 1, 2, 2, 3, 3][i] ? ' and more of them' : ''}, better loot.`,
+  hp: HP[i], dmg: DMG[i], more: [0, 0, 1, 1, 2, 2, 3, 3][i], coins: LOOT[i], xp: XP[i], reward: LOOT[i],
+  gear: 0.45 + i * 0.05, startLv: START[i], color: COLORS[i],
+}));
 
 // ---------- arrows ----------
 export type ArrowKind = 'normal' | 'fire' | 'frost' | 'boom';
@@ -373,7 +493,7 @@ export const TRADERS: Trader[] = [
   { id: 'mystic', name: 'Mira', title: 'Mystic', hello: 'Charms and relics, each with a little magic inside.', x: 21.5, y: 13.5, look: { robe: '#1f6a6a', trim: '#8af4e0', hat: '#123c3c', skin: '#d8a880' } },
 ];
 
-export const SMITH_STOCK: GearId[] = ['twin-daggers', 'sickle', 'long-spear', 'battle-axe', 'scythe', 'frost-glaive', 'thunder-hammer', 'obsidian-cleaver', 'rimeblade', 'ember-blade', 'dragonfang', 'crossbow', 'fan-bow', 'rapid-repeater', 'thornspike-bow', 'storm-bow', 'glacier-bow', 'starlight-bow', 'dragonbone-longbow'];
+export const SMITH_STOCK: GearId[] = ['twin-daggers', 'sickle', 'long-spear', 'battle-axe', 'scythe', 'frost-glaive', 'thunder-hammer', 'obsidian-cleaver', 'rimeblade', 'ember-blade', 'dragonfang', 'bone-club', 'coral-cutlass', 'spiked-mace', 'venom-spear', 'frostbite-daggers', 'cinder-claws', 'moon-sickle', 'shadow-katana', 'thunder-pike', 'blizzard-axe', 'magma-axe', 'soul-scythe', 'crystal-greatsword', 'volcano-hammer', 'crossbow', 'fan-bow', 'rapid-repeater', 'thornspike-bow', 'storm-bow', 'glacier-bow', 'starlight-bow', 'dragonbone-longbow', 'hunters-longbow', 'twinstring-bow', 'ember-crossbow', 'frost-repeater', 'thunderclap-crossbow', 'phoenix-bow'];
 export const ARMOR_STOCK: ArmorId[] = ['scout-cloak', 'jerkin', 'chainmail', 'shadowweave', 'mossguard', 'knight-plate', 'obsidian-plate', 'dragonscale'];
 export const PEDDLER_STOCK: SupplyId[] = ['arrows', 'fire-arrows', 'frost-arrows', 'boom-arrows', 'bomb', 'mystery'];
 export const MYSTIC_STOCK: ArtifactId[] = ['healing-totem', 'gust-horn', 'thunder-charm', 'ghost-boots', 'ironhide-charm', 'firework-crown'];

@@ -172,3 +172,16 @@
 .md-diff { border: 2px solid var(--c); background: rgba(0,0,0,.35); color: var(--c); font: 800 13px system-ui, sans-serif; padding: 5px 10px; cursor: pointer; }
 .md-diff.on { background: var(--c); color: #1a1008; }
 .md-diff:disabled { opacity: .45; cursor: not-allowed; }
+.md-revive { display: inline-block; width: 70px; height: 8px; margin-left: 8px; background: #2a2010; vertical-align: middle; }
+.md-revive i { display: block; height: 100%; background: #ffe066; }
+.md-xp { width: 230px; height: 5px; background: #1a1a10; border: 2px solid #120a0c; margin-top: -4px; }
+.md-xp i { display: block; height: 100%; background: linear-gradient(90deg, #ffe066, #ffb020); }
+.md-hlv { color: #ffe066 !important; border-color: #8a6a20 !important; }
+.md-btncol { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.md-enb { font-size: 12px !important; padding: 3px 8px !important; }
+.md-ench-t { color: #c8a8ff !important; }
+.md-eico { font-size: 26px; width: 40px; text-align: center; }
+.md-pips { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.md-pips i { width: 10px; height: 10px; background: #3a2a4a; border: 1px solid #6a4aa0; }
+.md-pips i.on { background: #c08aff; box-shadow: 0 0 6px #c08aff; }
+@media (max-width: 640px) { .md-xp { width: 160px; } }
