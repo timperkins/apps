@@ -12,7 +12,7 @@
 //
 // The host runs the game for everyone (see "Multiplayer" in src/v2/game.ts);
 // here is the lobby and the messages that carry the game once it starts.
-import { FACTIONS } from './v1/sprites';
+import { FACTIONS } from './factions';
 import { MAPS, mapPreview, mapsFor, worldOf } from './v2/maps';
 import type { Command, Player, Snapshot } from './v2/game';
 import { BOT_LEVELS, type BotLevel } from './v2/bot';

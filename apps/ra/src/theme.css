@@ -74,7 +74,6 @@ body {
 }
 /* Buttons */
 #menuBtn,
-#version,
 #pauseBtn,
 #regen,
 #leaveBtn,
@@ -410,7 +409,6 @@ body {
 
 /* ---------- Menu and settings ---------- */
 
-#version,
 #pauseBtn,
 #regen,
 #leaveBtn,
@@ -419,9 +417,6 @@ body {
 #setReset,
 #unitsLink {
   padding: 4px 22px 4px 6px;
-}
-#version {
-  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
 }
 #setBack {
   color: var(--ink);

@@ -6,7 +6,6 @@ import { GROUP_COUNT, type GameLike } from './types';
 import { Globe, View } from './planet';
 import { CH } from './tiles';
 import { ART } from './gfx';
-import { Game } from './v1/game';
 import { IsoGame } from './v2/game';
 import { setMood, setMusicPaused } from './music';
 import { play, setWorldLevel, ui } from './sfx';
@@ -34,7 +33,6 @@ const ctx = canvas.getContext('2d', { alpha: false })!;
 const mini = document.querySelector<HTMLCanvasElement>('#mini')!;
 const mctx = mini.getContext('2d')!;
 const regen = document.querySelector<HTMLButtonElement>('#regen')!;
-const versionEl = document.querySelector<HTMLSelectElement>('#version')!;
 const menuBtn = document.querySelector<HTMLButtonElement>('#menuBtn')!;
 const menu = document.querySelector<HTMLDivElement>('#menu')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
@@ -58,16 +56,7 @@ const rerollBtn = document.querySelector<HTMLButtonElement>('#reroll')!;
 const pickClose = document.querySelector<HTMLButtonElement>('#pickClose')!;
 const pickStages = picker.querySelector<HTMLDivElement>('.stages')!;
 
-const VERSIONS: Record<string, (seed: number) => GameLike> = {
-  '1': (seed) => new Game(ctx, seed),
-  '2': (seed) => new IsoGame(ctx, seed),
-};
-
-// Version comes from ?v=, then the last one picked, then the newest.
 const params = new URLSearchParams(location.search);
-let version = params.get('v') ?? load('ra-version') ?? '2';
-if (!VERSIONS[version]) version = '2';
-versionEl.value = version;
 
 function load(key: string): string | null {
   try {
@@ -621,14 +610,14 @@ async function track(work: Promise<unknown>[], p0: number, p1: number, text: str
   await Promise.all(work.map((w) => w.then(() => live() && showLoading(p0 + ((p1 - p0) * ++done) / work.length, text))));
 }
 
-// Versions with a choice of maps ask which one first.
-function start(v: string): void {
+// A game with a choice of maps asks which one first.
+function start(): void {
   stopAttract();
   showLoading(0.05, 'Loading');
-  if (v === '2') startArtPool();
+  startArtPool();
   requestAnimationFrame(() =>
     setTimeout(() => {
-      game = VERSIONS[v](seed);
+      game = new IsoGame(ctx, seed);
       game.onSelect = showSelection;
       build.reset();
       built = { w: 0, h: 0 };
@@ -836,13 +825,12 @@ function stopAttract(): void {
 const leaveBtn = document.querySelector<HTMLButtonElement>('#leaveBtn')!;
 const lobbyBtn = document.querySelector<HTMLButtonElement>('#lobbyBtn')!;
 const banner = document.querySelector<HTMLDivElement>('#banner')!;
-// the menu has New map and the versions in single player, Leave game in multiplayer
+// the menu has New map in single player, Leave game in multiplayer
 function showMpMenu(): void {
   const mp = !!match;
   regen.hidden = mp;
   pauseBtn.hidden = mp;
   if (mp) setPaused(false);
-  versionEl.closest('label')!.hidden = mp;
   leaveBtn.hidden = !mp;
   lobbyBtn.hidden = mp;
 }
@@ -1053,11 +1041,11 @@ rerollBtn.addEventListener('click', () => {
 pickClose.addEventListener('click', () => {
   picker.hidden = true;
 });
-// Test mode (single player) at /test, or with ?solo or a version in the
+// Test mode (single player) at /test, or with ?solo (or the old ?v=) in the
 // URL; a room at /CODE (back into it after a reload); the lobby otherwise.
 const atPath = location.pathname.replace(/\/+$/, '');
 showMpMenu();
-if (atPath === '/test' || params.has('solo') || params.has('v')) start(version);
+if (atPath === '/test' || params.has('solo') || params.has('v')) start();
 else if (Lobby.pathCode()) void lobby.enter(Lobby.pathCode());
 else showPlayGate();
 
@@ -1091,17 +1079,6 @@ function showPlayGate(): void {
   gate.append(btn);
   document.body.append(gate);
 }
-
-versionEl.addEventListener('change', () => {
-  version = versionEl.value;
-  save('ra-version', version);
-  const url = new URL(location.href);
-  url.searchParams.set('v', version);
-  history.replaceState(null, '', url);
-  setMenu(false);
-  start(version);
-  versionEl.blur();
-});
 
 let resizeTimer = 0;
 window.addEventListener('resize', () => {

@@ -1,8 +1,7 @@
-// v2: the same sandbox as v1, drawn in 2:1 isometric with shaded voxel art.
+// The game: a sandbox on a small planet, drawn in 2:1 isometric with shaded voxel art.
 import type { BotLevel } from './bot';
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
-import { STATS } from '../v1/game';
 import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
 import { COMBAT_CREDITS, COMBAT_STORE, DERRICK, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
@@ -59,10 +58,17 @@ import {
   makePumpBeam,
 } from './sprites';
 
-// v2 adds the Mobile Foundry to v1's units.
 type Kind = UnitKind;
 const UNIT: Record<Kind, { name: string; speed: number; turn: number; r: number; hp: number }> = {
-  ...STATS,
+  light: { name: 'Lancer tank', speed: 24, turn: 3.2, r: 7, hp: 0.8 },
+  heavy: { name: 'Bastion tank', speed: 14, turn: 2, r: 9, hp: 1 },
+  buggy: { name: 'Scout buggy', speed: 40, turn: 5, r: 6, hp: 0.6 },
+  hauler: { name: 'Ore hauler', speed: 13, turn: 1.8, r: 9, hp: 0.9 },
+  arty: { name: 'Howler artillery', speed: 13, turn: 2, r: 8, hp: 0.7 },
+  boat: { name: 'Patrol boat', speed: 20, turn: 1.6, r: 10, hp: 0.85 },
+  heli: { name: 'Kestrel copter', speed: 34, turn: 3, r: 9, hp: 0.75 },
+  inf: { name: 'G.I.', speed: 9, turn: 99, r: 4, hp: 1 },
+  rocket: { name: 'Rocketeer', speed: 8, turn: 99, r: 4, hp: 0.9 },
   mcv: { name: 'MCU', speed: 10, turn: 1.3, r: 15, hp: 1 },
   apc: { name: 'Mule APC', speed: 26, turn: 3, r: 9, hp: 1 },
   gren: { name: 'Grenadier', speed: 8.5, turn: 99, r: 4, hp: 1 },

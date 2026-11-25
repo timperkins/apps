@@ -1,4 +1,4 @@
-// Combat for v2: what each unit and building is armed with and armored in,
+// Combat: what each unit and building is armed with and armored in,
 // the shots in flight, and the flashes, sparks, explosions, fire and smoke.
 //
 // The rules follow the classic RTS scheme: every weapon has a warhead, every
