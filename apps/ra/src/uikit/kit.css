@@ -128,6 +128,27 @@ select {
 .pg-back:hover {
   color: var(--page-ink);
 }
+/* The test pages: test mode, units and this page, this one lit. */
+.pg-pages {
+  display: flex;
+  gap: 6px;
+}
+.pg-pages a {
+  color: var(--page-dim);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--page-ink) 20%, transparent);
+  border-radius: 4px;
+}
+.pg-pages a:hover {
+  color: var(--page-ink);
+}
+.pg-pages a[aria-current='page'] {
+  color: var(--page);
+  background: var(--page-ink);
+  border-color: var(--page-ink);
+}
 /* ---------- The tweak panel ---------- */
 /* A column on the right on a wide screen; a sheet from the bottom on a phone,
    opened with the Tweak button. It is the page's own tool, not part of the

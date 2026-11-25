@@ -698,7 +698,6 @@ let netPaused = false;
 // the host runs the computer players
 let bots: Bot[] = [];
 const lobby = new Lobby({
-  solo: () => goTo('/test'),
   start: (m) => startMatch(m),
   showing: (on) => (on ? startAttract() : stopAttract()),
   quit: () => leaveGame(),
@@ -1052,7 +1051,7 @@ else showPlayGate();
 // The landing page opens on a big Play button over the drifting world.
 // Browsers keep a page silent until it is tapped, so this is that tap: it
 // starts the sound (src/voice.ts listens for it) and the music comes in as
-// the lobby appears.
+// the lobby appears. Test mode and its pages are in the top right corner.
 function showPlayGate(): void {
   startAttract();
   const gate = document.createElement('div');
@@ -1071,12 +1070,18 @@ function showPlayGate(): void {
   // (Enter or Space works too, from the keyboard)
   const key = (e: KeyboardEvent): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target === test) return;
     e.preventDefault();
     go();
   };
+  const test = document.createElement('a');
+  test.className = 'testMode';
+  test.href = '/test' + location.search;
+  test.title = 'Play alone against the computer, with the test stages';
+  test.textContent = 'Test mode';
   btn.addEventListener('click', go);
   window.addEventListener('keydown', key);
-  gate.append(btn);
+  gate.append(btn, test);
   document.body.append(gate);
 }
 
