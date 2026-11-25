@@ -1295,8 +1295,8 @@ function working(s: Scene, kind: BuildingKind, b: V2BuildingArt, fi: number, art
       emit(0, 'soot', 2);
       break;
     case 'derrick': {
-      // the pumpjack nodding (still when nobody holds it), the holder's flag and the beacon
-      const k = fi === NEUTRAL_F ? 0 : Math.floor(phase * DERRICK.strokes * PUMP_FRAMES) % PUMP_FRAMES;
+      // the pumpjack rocking up and down, the holder's flag and the beacon
+      const k = Math.floor(phase * DERRICK.strokes * PUMP_FRAMES) % PUMP_FRAMES;
       const set = (pumps[fi] ??= []);
       s.blit((set[k] ??= makePumpBeam(f, k)), 0, 0, 0);
       const [x, y] = fx(1);
