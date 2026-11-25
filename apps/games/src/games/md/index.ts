@@ -10,6 +10,7 @@ import {
 import { Game, gearName, gearPrice, newSave, POTION_EVERY, type AimMode, type Input, type SaveData } from './game';
 import { GuestSession, HostSession } from './mp';
 import { listHosts, type HostInfo } from './net';
+import { CHAPTERS, chapter, traderLine, type Speaker } from './story';
 import { Renderer, portrait, heroParts, traderParts } from './render';
 import { artifactIcon, gearIcon, monsterIcon, supplyIcon } from './art';
 import { isMuted, setMuted, sfx } from './audio';
@@ -86,7 +87,7 @@ function writeSave(s: SaveData) {
   }
 }
 
-type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win' | 'slots' | 'join' | 'team' | 'ench';
+type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win' | 'slots' | 'join' | 'team' | 'ench' | 'story' | 'chapters';
 
 const LOGO = `<div class="md-logo"><span>M</span><i></i><span>D</span><i></i></div><div class="md-sub">MONSTER DUNGEONS</div>`;
 
@@ -245,9 +246,9 @@ const game: GameModule = {
       };
       gm.onLevelDone = (def, reward) => {
         lastDone = { name: def.name, reward };
-        show('done');
+        playStoryOnce(`after:${def.id}`, () => show('done'));
       };
-      gm.onWin = () => show('win');
+      gm.onWin = () => playStoryOnce('ending', () => show('win'));
     }
     wire(g);
     let lastDone = { name: '', reward: 0 };
@@ -273,6 +274,11 @@ const game: GameModule = {
       keys.add(k);
       if (k === 'tab' || k === ' ' || k === 'control' || k === 'alt') e.preventDefault();
       if (overlay === 'title') return;
+      if (overlay === 'story') {
+        if (k === ' ' || k === 'enter' || k === 'e') storyNext();
+        else if (k === 'escape') storyEnd();
+        return;
+      }
       if (k === 'control' && (overlay === 'none' || overlay === 'gear')) {
         show(overlay === 'gear' ? 'none' : 'gear');
         return;
@@ -282,6 +288,7 @@ const game: GameModule = {
         else if (overlay === 'menu' || overlay === 'settings' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help' || overlay === 'team') show('none');
         else if (overlay === 'slots' || overlay === 'join') show(playing ? 'menu' : 'title');
         else if (overlay === 'ench') show('gear');
+        else if (overlay === 'chapters') show('menu');
       } else if (k === 'i' && (overlay === 'none' || overlay === 'gear')) show(overlay === 'gear' ? 'none' : 'gear');
       else if (k === 'm' && (overlay === 'none' || overlay === 'map')) {
         if (g.mode === 'camp') {
@@ -478,6 +485,8 @@ const game: GameModule = {
       else if (o === 'join') joinPanel();
       else if (o === 'team') teamPanel();
       else if (o === 'ench') enchPanel();
+      else if (o === 'story') storyPanel();
+      else if (o === 'chapters') chaptersPanel();
       else if (o === 'dead' && guest) panel(`<h2 class="md-red">Your team fell!</h2><p>You and ${esc(g.mate?.name ?? 'your host')} were both knocked out. Your host picks what happens next.</p><p class="md-dim">Waiting for the host…</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button></div>`, { leave: () => leaveGuest('You left the team game.') });
       else if (o === 'dead') panel(`<h2 class="md-red">You fell!</h2><p>The monsters of ${g.def.name} got the better of you this time. You keep every coin and piece of gear you found.</p><p class="md-dim">Monsters beaten this run: ${g.kills} · coins found: ${g.runCoins}</p><div class="md-row"><button class="md-btn md-go" data-x="camp">Back to camp</button><button class="md-btn" data-x="retry">Try again</button></div>`, {
         camp: () => {
@@ -548,8 +557,70 @@ const game: GameModule = {
     function start() {
       playing = true;
       g.enterCamp();
-      show('none');
-      banner('Hearthstead Camp', 'Talk to the traders, then use the mission table by the fire.');
+      playStoryOnce('intro', () => {
+        show('none');
+        banner('Hearthstead Camp', 'Talk to the traders, then use the mission table by the fire.');
+      });
+    }
+
+    // --- story ---
+    let story: { id: string; page: number; then: () => void } | null = null;
+    const seenStory = (id: string) => (g.save.seen ?? []).includes(id);
+    /** plays a chapter the first time only; otherwise goes straight on */
+    function playStoryOnce(id: string, then: () => void) {
+      if (seenStory(id) || !chapter(id)) return then();
+      playStory(id, then);
+    }
+    function playStory(id: string, then: () => void) {
+      if (!g.save.seen) g.save.seen = [];
+      if (!g.save.seen.includes(id)) g.save.seen.push(id);
+      save();
+      story = { id, page: 0, then };
+      show('story');
+    }
+    function storyNext() {
+      if (!story) return;
+      const ch = chapter(story.id)!;
+      sfx('click');
+      if (story.page < ch.pages.length - 1) {
+        story.page++;
+        storyPanel();
+      } else storyEnd();
+    }
+    function storyEnd() {
+      const s = story;
+      story = null;
+      if (s) s.then();
+      else show('none');
+    }
+    const SPEAKER: Record<Speaker, string> = { narrator: 'The Storyteller', crown: 'The Hollow Crown', smith: 'Bram the Weaponsmith', armorer: 'Tilda the Armorer', peddler: 'Old Pip the Peddler', mystic: 'Mira the Mystic' };
+    function storyPanel() {
+      if (!story) return show('none');
+      const ch = chapter(story.id)!;
+      const pg = ch.pages[story.page];
+      const dots = ch.pages.map((_, i) => `<i class="${i === story!.page ? 'on' : ''}"></i>`).join('');
+      ui.innerHTML = `<div class="md-panel md-story ${pg.who === 'crown' ? 'crown' : ''}">
+        <div class="md-story-t">${esc(ch.title)}</div>
+        <div class="md-story-row"><div class="md-story-face"></div><div class="md-story-say"><b>${SPEAKER[pg.who]}</b><p>${esc(pg.text)}</p></div></div>
+        <div class="md-row"><span class="md-story-dots">${dots}</span><button class="md-btn md-dim" data-x="skip">Skip</button><button class="md-btn md-go" data-x="next">${story.page < ch.pages.length - 1 ? 'Next ▶' : 'Continue ▶'}</button></div>
+        <p class="md-dim md-small-note">${touchMode ? 'Tap Next' : 'Space or Enter: next · Esc: skip'}</p></div>`;
+      const face = ui.querySelector('.md-story-face')!;
+      const t = TRADERS.find((q) => q.id === pg.who);
+      if (t) face.appendChild(portrait(traderParts(t, 0), Math.PI / 2, 120, 140, 1, 2.6));
+      else face.innerHTML = pg.who === 'crown' ? `<img src="${monsterIcon('hollow-crown', 112)}" alt="">` : '<span class="md-story-book">📜</span>';
+      ui.querySelector('[data-x="next"]')!.addEventListener('click', storyNext);
+      ui.querySelector('[data-x="skip"]')!.addEventListener('click', () => (sfx('click'), storyEnd()));
+    }
+    /** chapters you've seen, or reached (for saves from before the story existed) */
+    const found = (id: string) => seenStory(id) || id === 'intro' || (id === 'ending' && g.save.won) || g.save.cleared.includes(id.split(':')[1] ?? '-');
+    function chaptersPanel() {
+      const list = CHAPTERS.filter((c) => found(c.id))
+        .map((c) => `<div class="md-item"><b class="md-eico">📜</b><div class="md-it"><b>${esc(c.title)}</b><small>${esc(c.pages[0].text.slice(0, 90))}…</small></div><button class="md-btn" data-ch="${c.id}">Replay</button></div>`)
+        .join('');
+      panel(`<h2>📜 The story so far</h2><p class="md-dim">${CHAPTERS.filter((c) => found(c.id)).length} of ${CHAPTERS.length} chapters found. Clear dungeons to find the rest.</p>
+        <div class="md-items md-small">${list || '<p class="md-dim">Nothing yet.</p>'}</div>
+        <div class="md-row"><button class="md-btn" data-x="back">Back</button></div>`, { back: () => show('menu') });
+      ui.querySelectorAll<HTMLElement>('[data-ch]').forEach((b) => b.addEventListener('click', () => playStory(b.dataset.ch!, () => show('chapters'))));
     }
 
     function menu() {
@@ -563,6 +634,7 @@ const game: GameModule = {
           ${guest ? '' : '<button class="md-btn" data-x="load">📂 Load</button>'}
           <button class="md-btn" data-x="savequit">💾 Save &amp; quit</button>
           <button class="md-btn" data-x="team">${team}</button>
+          <button class="md-btn" data-x="story">📜 Story so far</button>
           ${inDungeon && !guest ? '<button class="md-btn" data-x="camp">Leave the dungeon (back to camp)</button>' : ''}
           <button class="md-btn" data-x="settings">⚙️ Settings</button>
           <button class="md-btn" data-x="help">How to play</button>
@@ -579,6 +651,7 @@ const game: GameModule = {
           } else openSlots('savequit');
         },
         team: () => show('team'),
+        story: () => show('chapters'),
         camp: () => {
           g.enterCamp();
           save();
@@ -851,7 +924,7 @@ const game: GameModule = {
         }
       }
       ui.innerHTML = `<div class="md-panel md-shop">
-        <div class="md-shophead"><div class="md-face"></div><div><h2>${t.name} <small>the ${t.title}</small></h2><p class="md-say">“${t.hello}”</p></div><div class="md-purse">🪙 ${g.save.coins}</div></div>
+        <div class="md-shophead"><div class="md-face"></div><div><h2>${t.name} <small>the ${t.title}</small></h2><p class="md-say">“${traderLine(t.id, g.save.cleared.length, g.save.won) ?? t.hello}”</p></div><div class="md-purse">🪙 ${g.save.coins}</div></div>
         ${t.id === 'smith' || t.id === 'armorer' || t.id === 'peddler' ? RARE_NOTE : ''}
         <div class="md-items">${items.join('')}</div>
         <div class="md-row"><button class="md-btn" data-x="close">Done</button></div></div>`;
@@ -1157,6 +1230,14 @@ const game: GameModule = {
       );
       ui.querySelector('[data-x="go"]')?.addEventListener('click', () => {
         g.diff = diffSel;
+        if (!guest && !host?.guest && !g.save.cleared.includes(L.id) && !seenStory(`before:${L.id}`)) {
+          playStory(`before:${L.id}`, () => {
+            g.enterLevel(sel);
+            save();
+            show('none');
+          });
+          return;
+        }
         g.enterLevel(sel);
         save();
         show('none');

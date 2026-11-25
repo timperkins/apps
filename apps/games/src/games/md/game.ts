@@ -34,11 +34,13 @@ export interface SaveData {
   heroXp: number;
   /** enchantments on each item */
   ench: Record<ItemKey, EnchSet>;
+  /** story chapters already shown */
+  seen: string[];
 }
 
 export const newSave = (): SaveData => ({
   v: 1, coins: 30, owned: ['rusty-sword', 'shortbow', 'tunic'], melee: 'rusty-sword', ranged: 'shortbow', armor: 'tunic',
-  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0, levels: {}, best: {}, heroLv: 1, heroXp: 0, ench: {},
+  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0, levels: {}, best: {}, heroLv: 1, heroXp: 0, ench: {}, seen: [],
 });
 
 export interface Monster {
