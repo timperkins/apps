@@ -2,7 +2,7 @@
 // from eight angles and doing the things it does in the game, on plain grass
 // (and the boats and ships on open water).
 import './showcase.css';
-import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
+import { ART, RGB, css, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, KNEEL_DROP, NEUTRAL_F, PUMP_FRAMES, factionOf, makePumpBeam, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
 import { BOOM, CARRIER_SLOTS, DECK_Z, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx, KNOCK_EASE, PIECE_S, QUAKE, QUAKE_S, Shot, UnitKind, type DefenseKind, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './v2/combat';
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
@@ -540,7 +540,7 @@ function impactFx(fx: Fx, kind: Shot['kind'], s: Shot, soft: boolean): void {
 
 // Firing at a spot on the ground in front of it, as fast as it reloads
 // (artillery a little faster, so there is something to see).
-function attackCell(kind: UnitKind | DefenseKind, box: Box, draw: (s: Scene, t: number, kick: boolean) => void, from: () => [number, number, number][], to: [number, number, number], weapon?: Weapon, label = 'Attack'): Cell {
+function attackCell(kind: UnitKind | DefenseKind, box: Box, draw: (s: Scene, t: number, kick: boolean, since: number) => void, from: () => [number, number, number][], to: [number, number, number], weapon?: Weapon, label = 'Attack'): Cell {
   const w = weapon ?? WEAPON[kind]!;
   let cool = 0.4;
   let clock = 0;
@@ -560,10 +560,12 @@ function attackCell(kind: UnitKind | DefenseKind, box: Box, draw: (s: Scene, t: 
           const sc = w.scatter ?? (w.shot === 'bullet' ? 2 : 0.5);
           const aim: [number, number, number] = [to[0] + (Math.random() - 0.5) * sc * 2, to[1] + (Math.random() - 0.5) * sc * 2, to[2]];
           if (w.shot === 'beam') s.fx.beam(sx, sy, ...toScreen(...aim));
-          s.fx.fire(makeShot(w.shot, m, aim, w.speed, (sh) => impactFx(s.fx, w.shot, sh, true)));
+          const shot = makeShot(w.shot, m, aim, w.speed, (sh) => impactFx(s.fx, w.shot, sh, true));
+          if (w.shot === 'missile') shot.color = css(FACTIONS[0].main);
+          s.fx.fire(shot);
         }
       }
-      draw(s, t, clock - fired < (w.shot === 'grenade' ? 0.35 : 0.1));
+      draw(s, t, clock - fired < (w.shot === 'grenade' ? 0.35 : 0.1), clock - fired);
     },
   };
 }
@@ -627,7 +629,8 @@ interface Fighter {
   air?: number;
   soft?: boolean; // a soldier: a smaller bang, smaller pieces
   hullOff?: number; // a tank's hull turned this far from where its turret aims
-  draw: (s: Scene, x: number, y: number, a: number, tur: number, t: number, kick: boolean) => void;
+  // (since: seconds since it last fired, in its Attack cell)
+  draw: (s: Scene, x: number, y: number, a: number, tur: number, t: number, kick: boolean, since?: number) => void;
   // the sprites it is drawn with at the origin, facing the viewer, and where
   // (world point and height), to blow to pieces
   parts: [StackSprite, number, number, number][];
@@ -649,7 +652,7 @@ function combatCells(o: Fighter): Cell[] {
     const moved: Box = { l: still.l, r: still.r, u: still.u + 12, d: still.d - 12 };
     // anti-air only: it shoots up at the sky
     const sky = w.air && !w.ground;
-    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: sky || w.shot === 'missile' ? 40 : 0, d: far + 6 }), (s, t, kick) => o.draw(s, ux, uy, ha, A, t, kick), () => muzzles(o.kind, ux, uy, z, ha, A), sky ? [far * 1.5, far * 1.5, 60] : [far, far, 0]));
+    cells.push(attackCell(o.kind, union(moved, { l: 8, r: 8, u: sky || w.shot === 'missile' ? 40 : 0, d: far + 6 }), (s, t, kick, since) => o.draw(s, ux, uy, ha, A, t, kick, since), () => muzzles(o.kind, ux, uy, z, ha, A), sky ? [far * 1.5, far * 1.5, 60] : [far, far, 0]));
   }
   const bar = { x: 0, y: -still.u - 3, w: Math.max(10, Math.round((still.l + still.r) * 0.6)) };
   const withBar = union(still, { l: bar.w / 2 + 1, r: bar.w / 2 + 1, u: still.u + 5, d: 0 });
@@ -803,9 +806,11 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       kind,
       spr: pick(me)[0],
       // (the howitzer rolls back on its tracks as it fires)
-      draw: (s, x, y, a, _tur, t, kick) => {
+      draw: (s, x, y, a, _tur, t, kick, since) => {
         const back = (kind === 'arty' || kind === 'comet') && kick ? 1 : 0;
-        s.blit(pick(me)[di(a)], x - Math.cos(a) * back, y - Math.sin(a) * back, 0);
+        // the Comet's rail stands bare once its rocket is away, until the next is loaded
+        const bare = kind === 'comet' && since !== undefined && since < Math.min(WEAPON.comet!.rof, 2.4) - 0.6;
+        s.blit((bare ? me.cometEmpty : pick(me))[di(a)], x - Math.cos(a) * back, y - Math.sin(a) * back, 0);
         if (kind === 'buggy') drawBuggyLights(s.c, x, y, 0, a, t);
       },
       parts: [[pick(me)[di(A)], 0, 0, 0]],

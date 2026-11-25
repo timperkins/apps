@@ -21,7 +21,7 @@ import { Shroud } from './shroud';
 import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, versus, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -6094,6 +6094,7 @@ export class IsoGame implements GameLike {
         aim = track()!;
       }
       const shot = makeShot(w.shot, m, aim, w.speed, (s) => this.impact(s, w, t, src), track);
+      if (w.shot === 'missile') shot.color = css(FACTIONS[src.f].main);
       this.fx.fire(shot);
       if (w.shot === 'beam') {
         const [ex, ey] = toScreen(...aim);
@@ -6193,12 +6194,12 @@ export class IsoGame implements GameLike {
         const d = this.reach(s.x, s.y, o);
         if (d >= R) continue;
         this.shove(o, knockback(w, o.kind, 1 - d / R), o.x - s.x, o.y - s.y);
-        this.damage(o, w.dmg * VERSUS[w.wh][UNIT_DEF[o.kind].armor] * (1 - (d / R) * 0.6), src);
+        this.damage(o, w.dmg * versus(w, UNIT_DEF[o.kind].armor) * (1 - (d / R) * 0.6), src);
       }
       for (const b of [...this.buildings]) {
         if (b.f === src.f || b.dead) continue;
         const d = this.reach(s.x, s.y, b);
-        if (d < R) this.damage(b, w.dmg * VERSUS[w.wh][BUILDING_DEF[b.kind].armor] * (1 - (d / R) * 0.6), src);
+        if (d < R) this.damage(b, w.dmg * versus(w, BUILDING_DEF[b.kind].armor) * (1 - (d / R) * 0.6), src);
       }
       return;
     }
@@ -6217,7 +6218,7 @@ export class IsoGame implements GameLike {
     if (t.dead) return;
     if (!isB(t)) this.shove(t, knockback(w, t.kind), s.x1 - s.x0, s.y1 - s.y0);
     const arm = isB(t) ? structDef(t).armor : UNIT_DEF[t.kind].armor;
-    this.damage(t, w.dmg * VERSUS[w.wh][arm], src);
+    this.damage(t, w.dmg * versus(w, arm), src);
   }
 
   // Knock u back by d world units along (dx, dy), on top of any knock it is already taking.
