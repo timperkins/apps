@@ -1327,7 +1327,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
         draw: (s, t) => {
           const a = Math.PI / 4;
           draw(me)(s, 0, 0, a, t);
-          for (const [u, v] of CARRIER_SLOTS) s.blit(me.jet[di(a)], Math.cos(a) * u - Math.sin(a) * v, Math.sin(a) * u + Math.cos(a) * v, DECK_Z + Math.sin(t * 1.4) * 0.4);
+          for (const [u, v, h] of CARRIER_SLOTS) s.blit(me.jetFolded[di(a + h)], Math.cos(a) * u - Math.sin(a) * v, Math.sin(a) * u + Math.cos(a) * v, DECK_Z + Math.sin(t * 1.4) * 0.4);
         },
       });
     if (kind === 'cruiser') cells.push({ label: 'Launchers turn', box, anim: true, draw: (s, t) => draw(me)(s, 0, 0, Math.PI / 4, t, Math.PI / 4 + t * 1.4) });

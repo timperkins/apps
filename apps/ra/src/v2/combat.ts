@@ -73,21 +73,26 @@ export const NAVAL: ReadonlySet<string> = new Set<UnitKind>(['boat', 'destroyer'
 export const isNaval = (k: string): boolean => NAVAL.has(k);
 
 // The carrier has no guns of its own: it carries up to CARRIER_JETS Swift
-// jets, parked on the starboard side of its deck at these spots ([along,
-// across] from its middle, in world units, facing the bow) at height DECK_Z.
-// They taxi across to the runway down the port side (CARRIER_RUNWAY: across,
-// the stern end and the bow end), roll off the bow to fight, come back in
-// over the stern to land on it, and taxi back to their spots to rearm and be
-// mended. (They match the deck in sprites.ts.)
+// jets, parked with their wings folded on the starboard side of its deck at
+// these spots ([along, across] from its middle, in world units, and which
+// way each faces from the bow), at height DECK_Z: angled in towards the
+// runway along the deck edge, with two inboard of the island. They taxi
+// down to the stern end of the runway on the port side (CARRIER_RUNWAY:
+// across, the stern end and the bow end), roll off the bow to fight, come
+// back in over the stern to land on it, and taxi back to their spots to
+// rearm and be mended. CARRIER_LANE is the line across that they taxi up
+// and down, clear of the noses of those parked. (They match the deck in
+// sprites.ts.)
 export const CARRIER_JETS = 12;
 export const DECK_Z = 14;
-export const CARRIER_RUNWAY: readonly [number, number, number] = [-17, -64, 74];
-export const CARRIER_SLOTS: readonly [number, number][] = [
-  // the outer row, aft of the island and forward of it (filled first: it is
-  // the furthest from the runway)
-  [-60, 17.5], [-42, 17.5], [-24, 17.5], [34, 17.5], [52, 17.5],
-  // and the inner row, along the edge of the runway
-  [48, 1], [30, 1], [12, 1], [-6, 1], [-24, 1], [-42, 1], [-60, 1],
+export const CARRIER_RUNWAY: readonly [number, number, number] = [-12.5, -86, 98];
+export const CARRIER_LANE = -4.5;
+const ANGLED = -Math.PI / 3;
+export const CARRIER_SLOTS: readonly [number, number, number][] = [
+  // forward of the island first, then beside it, then aft
+  [62, 9.5, ANGLED], [51, 9.5, ANGLED], [40, 9.5, ANGLED],
+  [22, 5.5, 0], [0, 5.5, 0],
+  [-17, 9.5, ANGLED], [-28, 9.5, ANGLED], [-39, 9.5, ANGLED], [-50, 9.5, ANGLED], [-61, 9.5, ANGLED], [-72, 9.5, ANGLED], [-83, 9.5, ANGLED],
 ];
 // The buildings that fight back on their own.
 export type DefenseKind = 'tower' | 'pillbox' | 'prism' | 'aa';

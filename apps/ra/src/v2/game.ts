@@ -22,7 +22,7 @@ import { DROP_S, FOLD_S, chuteInAir, drawChute, drawChuteShadow, dropAlt, swingO
 import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_RUNWAY, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, FIXED_GUN, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, versus, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_LANE, CARRIER_RUNWAY, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, FIXED_GUN, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, versus, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -423,7 +423,7 @@ const structDef = (t: Building | Bridge) => (isBridge(t) ? BRIDGE_DEF[t.style] :
 const ROUTE_MS = 6;
 // How far from the shore a ship keeps its middle (world units): the carrier
 // is too big to come in close, or into narrow channels.
-const SEA_CLEAR: Partial<Record<Kind, number>> = { carrier: 60 };
+const SEA_CLEAR: Partial<Record<Kind, number>> = { carrier: 70 };
 // What a jet on a carrier is doing (and its number, for the snapshot): see deckJet.
 type DeckOp = 'out' | 'roll' | 'app' | 'final' | 'brake' | 'in';
 const DECK_OPS: (DeckOp | undefined)[] = [undefined, 'out', 'roll', 'app', 'final', 'brake', 'in'];
@@ -1603,7 +1603,7 @@ export class IsoGame implements GameLike {
           if (kind === 'carrier') {
             const u = this.newUnit(kind, this.me, yard.x, yard.y, rand() * Math.PI * 2);
             const p = this.launchSpot(u, yard);
-            if (p) [u.x, u.y, u.tx, u.ty] = [p[0], p[1], p[0], p[1]];
+            if (p) [u.x, u.y, u.tx, u.ty, u.a] = [p[0], p[1], p[0], p[1], p[2]];
             else this.units.splice(this.units.indexOf(u), 1);
             continue;
           }
@@ -2054,10 +2054,9 @@ export class IsoGame implements GameLike {
         if (b.kind === 'navy' && kind === 'carrier') {
           const p = this.launchSpot(u, b);
           if (p) {
-            [u.x, u.y] = p;
-            u.a = Math.atan2(p[1] - b.y, p[0] - b.x);
+            [u.x, u.y, u.a] = p;
             // (it stays there, unless the yard has a rally point it can get to)
-            if (!b.rally || !this.seaReach(u, u.tx, u.ty)) [u.tx, u.ty] = p;
+            if (!b.rally || !this.seaReach(u, u.tx, u.ty)) [u.tx, u.ty] = [p[0], p[1]];
           }
         }
       }
@@ -3120,26 +3119,44 @@ export class IsoGame implements GameLike {
 
   // Where a new carrier is launched off Naval yard b: the nearest open water
   // it fits in, clear of the yard and of the other ships.
-  private launchSpot(u: Unit, b: Building): [number, number] | null {
+  private launchSpot(u: Unit, b: Building): [number, number, number] | null {
     const r = UNIT[u.kind].r;
-    const free = (x: number, y: number) =>
-      this.okAt(u, x, y) &&
+    const T = this.terrain;
+    const clear = (x: number, y: number, m: number) =>
+      T.k(x, y) === K.Water &&
       this.buildings.every((o) => {
         const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
-        return Math.abs(ox - x) > o.art.rx + r * 0.6 || Math.abs(oy - y) > o.art.ry + r * 0.6;
-      }) &&
+        return Math.abs(ox - x) > o.art.rx + m || Math.abs(oy - y) > o.art.ry + m;
+      });
+    const free = (x: number, y: number) =>
+      this.okAt(u, x, y) &&
+      clear(x, y, r * 0.6) &&
       this.units.every((o) => {
         if (o === u || !isNaval(o.kind)) return true;
         const [ox, oy] = this.nearPoint(x, y, o.x, o.y);
         return Math.hypot(ox - x, oy - y) > r + UNIT[o.kind].r * 0.8;
       });
-    for (let d = 0; d <= 600; d += 8) {
+    // (the whole long hull lies on open water, clear of the yard: try
+    // lying pointing away from it first, then round from there)
+    const lies = (x: number, y: number, a: number) => {
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      for (const s of [-96, -72, -48, 48, 72, 98])
+        for (const w of [-22, 0, 22]) if (!clear(x + s * ca - w * sa, y + s * sa + w * ca, 6)) return false;
+      return true;
+    };
+    for (let d = 0; d <= 700; d += 8) {
       const n = Math.max(8, Math.round(d / 3));
       for (let i = 0; i < n; i++) {
         const a = (i / n) * Math.PI * 2;
         const x = b.x + Math.cos(a) * d;
         const y = b.y + Math.sin(a) * d;
-        if (free(x, y)) return [x, y];
+        if (!free(x, y)) continue;
+        if (u.kind !== 'carrier') return [x, y, a];
+        for (let k = 0; k < 8; k++) {
+          const h = a + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 4);
+          if (lies(x, y, h)) return [x, y, h];
+        }
       }
     }
     return null;
@@ -3307,7 +3324,7 @@ export class IsoGame implements GameLike {
       if (c) {
         if (u.dop) return DECK_Z;
         const [lu, lv] = this.deckLocal(c, u.x, u.y);
-        if (lu > -72 && lu < 78 && Math.abs(lv) < 28) return DECK_Z;
+        if (lu > -94 && lu < 99 && Math.abs(lv) < 23) return DECK_Z;
       }
     }
     const dz = this.deckZ(u.x, u.y);
@@ -3730,7 +3747,7 @@ export class IsoGame implements GameLike {
         // (a carrier lies off the yard, on the nearest open water it fits in)
         if (u.kind === 'carrier') {
           const p = this.launchSpot(u, b) ?? [u.x, u.y];
-          const [tx, ty] = this.nearPoint(u.x, u.y, ...p);
+          const [tx, ty] = this.nearPoint(u.x, u.y, p[0], p[1]);
           moves.push([u.id, tx, ty]);
           u.aim = undefined;
           return;
@@ -5763,23 +5780,23 @@ export class IsoGame implements GameLike {
     };
     for (const sd of [-1, 1]) {
       for (let i = n(45); i--; ) {
-        const [x, y] = at(64 + Math.random() * 8, sd * (6 + Math.random() * 5));
+        const [x, y] = at(86 + Math.random() * 6, sd * (3 + Math.random() * 5));
         const [vx, vy] = vel(-2, sd * (11 + Math.random() * 6) * k);
         this.particles.push({ x, y, vx, vy, life: 0, max: 2.6 + Math.random(), kind: 'foam', size: 1.1 });
       }
       for (let i = n(50); i--; ) {
-        const [x, y] = at(-64 + Math.random() * 120, sd * (24 + Math.random() * 4));
+        const [x, y] = at(-86 + Math.random() * 160, sd * (21 + Math.random() * 3));
         const [vx, vy] = vel(0, sd * 6);
         this.particles.push({ x, y, vx, vy, life: 0, max: 1.2 + Math.random() * 0.8, kind: 'foam', size: 0.9 });
       }
       for (let i = n(22); i--; ) {
-        const [x, y] = at(64 + Math.random() * 6, sd * (3 + Math.random() * 4), 1);
+        const [x, y] = at(88 + Math.random() * 6, sd * (2 + Math.random() * 3), 1);
         const [vx, vy] = vel(4, sd * (14 + Math.random() * 14));
         this.particles.push({ x, y, vx, vy: vy - 22 - Math.random() * 18, life: 0, max: 0.5 + Math.random() * 0.4, kind: 'spray', size: 1 });
       }
     }
     for (let i = n(30); i--; ) {
-      const [x, y] = at(-70 - Math.random() * 8, (Math.random() - 0.5) * 30);
+      const [x, y] = at(-92 - Math.random() * 8, (Math.random() - 0.5) * 24);
       this.particles.push({ x, y, vx: 0, vy: 0, life: 0, max: 2.4 + Math.random(), kind: Math.random() < 0.5 ? 'wake' : 'foam', size: 1.6 });
     }
   }
@@ -5801,12 +5818,23 @@ export class IsoGame implements GameLike {
   // back to its spot.
   private deckJet(u: Unit, c: Unit, dt: number): void {
     const host = this.net !== 'client';
-    const ca = Math.cos(c.a);
-    const sa = Math.sin(c.a);
-    const at = (lu: number, lv: number): [number, number] => [c.x + lu * ca - lv * sa, c.y + lu * sa + lv * ca];
+    const cc = Math.cos(c.a);
+    const cs = Math.sin(c.a);
+    const at = (lu: number, lv: number): [number, number] => [c.x + lu * cc - lv * cs, c.y + lu * cs + lv * cc];
     const [lu, lv] = this.deckLocal(c, u.x, u.y);
-    const [su, sv] = CARRIER_SLOTS[u.padI ?? 0] ?? CARRIER_SLOTS[0];
+    const [su, sv, sa] = CARRIER_SLOTS[u.padI ?? 0] ?? CARRIER_SLOTS[0];
     const [rv, ru0, ru1] = CARRIER_RUNWAY;
+    const LANE = CARRIER_LANE;
+    // the ways out to the runway (from its spot, or from the lane) and back
+    // in to its spot from the lane (in from aft of it, nose first: it turns
+    // round on the spot at the end)
+    const toRunway = (from: [number, number][]): [number, number][] => [...from, [ru0 + 8, LANE], [ru0, rv]];
+    const outOfSpot = (): [number, number][] => {
+      if (!sa) return [[su + 10, sv], [su + 16, LANE]];
+      const k = (LANE - sv) / Math.sin(sa);
+      return [[su + Math.cos(sa) * k, LANE]];
+    };
+    const intoSpot = (): [number, number][] => [[su - (sa ? 8 : 10), LANE], [su, sv]];
     const busy = u.moving || !!u.target;
     const fly = u.fly ?? 0;
     // at its spot
@@ -5814,7 +5842,7 @@ export class IsoGame implements GameLike {
     if (parked && !(busy && host)) {
       [u.x, u.y] = at(su, sv);
       if (!u.moving) [u.tx, u.ty] = [u.x, u.y];
-      u.a = c.a;
+      u.a = c.a + sa;
       u.fly = 0;
       // (being mended: sparks fly)
       if (u.hp < 1 && Math.random() < dt * 5) {
@@ -5833,12 +5861,8 @@ export class IsoGame implements GameLike {
     // given somewhere to go: off to the runway
     if (parked) {
       u.dop = 'out';
-      u.dl = [su, sv, 0];
-      u.dpath = [
-        [Math.max(ru0 + 6, su - 10), -3],
-        [ru0 + 8, rv + 4],
-        [ru0, rv],
-      ];
+      u.dl = [su, sv, sa];
+      u.dpath = toRunway(outOfSpot());
     }
     // on the deck: everything is in the ship's own terms, so it rides along
     // as the ship sails and turns
@@ -5847,17 +5871,10 @@ export class IsoGame implements GameLike {
       // (told to go while taxiing back, or the order called off on the way out)
       if (u.dop === 'in' && busy) {
         u.dop = 'out';
-        u.dpath = [
-          [L[0], rv + 4],
-          [ru0 + 8, rv + 4],
-          [ru0, rv],
-        ];
+        u.dpath = toRunway([[L[0], LANE]]);
       } else if (u.dop === 'out' && !busy) {
         u.dop = 'in';
-        u.dpath = [
-          [su, -3],
-          [su, sv],
-        ];
+        u.dpath = [[L[0], LANE], ...intoSpot()];
       }
       const turnTo = (want: number, rate: number) => {
         const diff = angDiff(want, L[2]);
@@ -5889,8 +5906,8 @@ export class IsoGame implements GameLike {
             L[0] += Math.cos(want) * sp;
             L[1] += Math.sin(want) * sp;
           }
-        } else if (turnTo(0, 1.6)) {
-          // there, facing the bow: off down the runway, or parked
+        } else if (turnTo(u.dop === 'out' ? 0 : sa, 1.6)) {
+          // there, facing the bow down the runway (off it goes), or parked
           if (u.dop === 'out') {
             u.dop = 'roll';
             u.spd = 0;
@@ -5914,11 +5931,7 @@ export class IsoGame implements GameLike {
         L[0] += u.spd * dt;
         if (u.spd <= TAXI_SPEED) {
           u.dop = 'in';
-          u.dpath = [
-            [L[0] + 6, rv + 6],
-            [su, -3],
-            [su, sv],
-          ];
+          u.dpath = [[L[0] + 6, LANE], ...intoSpot()];
         }
       }
       if (u.dl) {
@@ -5963,12 +5976,14 @@ export class IsoGame implements GameLike {
     if (u.dop === 'app') {
       // round to a point well out astern, in line with the runway
       u.fly = Math.min(1, fly + dt * 0.7);
-      const [ax, ay] = this.nearPoint(u.x, u.y, ...at(ru0 + 6 - DECK_APPROACH, rv));
+      // (one at a time: while another is coming in, it circles out there,
+      // each jet round its own spot so they don't bunch up)
+      const busyRunway = this.units.some((o) => o !== u && o.deck === c.id && !o.dead && (o.dop === 'final' || o.dop === 'brake'));
+      const k = u.padI ?? 0;
+      const [ax, ay] = this.nearPoint(u.x, u.y, ...at(ru0 + 6 - DECK_APPROACH - (busyRunway ? 40 + (k % 3) * 45 : 0), rv + (busyRunway ? ((k % 4) - 1.5) * 55 : 0)));
       const off = steer(ax, ay, 2.4);
       ahead(UNIT.jet.speed * dt);
       const d = Math.hypot(ax - u.x, ay - u.y);
-      // (one at a time: it circles out there while another is coming in)
-      const busyRunway = this.units.some((o) => o !== u && o.deck === c.id && !o.dead && (o.dop === 'final' || o.dop === 'brake'));
       if (!busyRunway && (d < 24 || (d < 90 && off > 1.6))) {
         u.dop = 'final';
         u.dtime = 0;
@@ -7929,7 +7944,9 @@ export class IsoGame implements GameLike {
       case 'jet': {
         // a little wobble in the hover, none on its pad; a hot exhaust
         const z = u.z + this.alt(u) + Math.sin(u.anim * 2.6) * 0.6 * (u.fly ?? 0);
-        this.blit(art.jet[di], u.x, u.y, z);
+        // (on a carrier's deck, parked or taxiing, its wings are folded up)
+        const folded = u.deck !== undefined && (u.fly ?? 0) < 0.05 && u.dop !== 'roll' && u.dop !== 'brake';
+        this.blit((folded ? art.jetFolded : art.jet)[di], u.x, u.y, z);
         if ((u.fly ?? 0) > 0.02) {
           const [ex, ey] = toScreen(u.x - Math.cos(u.a) * 9.6, u.y - Math.sin(u.a) * 9.6, z + 3.4);
           const c = this.ctx;

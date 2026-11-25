@@ -826,7 +826,8 @@ function heron(f: Faction): Shape {
 
 // The Swift jet: a small swept-wing jump jet with a bubble canopy, two
 // missile rails under the wings and its landing legs down.
-function jet(f: Faction): Shape {
+// folded: parked on a carrier, with the outer wings folded up to save room.
+function jet(f: Faction, folded = false): Shape {
   return (u, v, z) => {
     const av = Math.abs(v);
     // the fuselage: a long tapering body, pointed nose
@@ -843,7 +844,12 @@ function jet(f: Faction): Shape {
     if (u > -0.6 && u < 2.6 && Math.abs(av - 1.6) < 0.5 && Math.abs(z - 3.4) < 0.7) return u > 2 ? BLACK : f.dark;
     // swept wings, a little anhedral, tipped in the light color
     const sweep = -av * 0.55;
-    if (av < 7 && u < 1.6 + sweep && u > -2.4 + sweep && Math.abs(z - (3.1 - av * 0.06)) < 0.35) return av > 6 ? f.light : Math.abs(av - 4) < 0.3 ? f.dark : g(mix(f.main, f.light, 0.2), u, v, z);
+    if (folded && av > 3.4) {
+      // the outer panel stands up off its hinge
+      const s = z - 3.1;
+      const sw = -(3.4 + s) * 0.55;
+      if (av < 3.9 && s > -0.2 && s < 3.6 && u < 1.6 + sw && u > -2.4 + sw) return s > 2.6 ? f.light : g(mix(f.main, f.light, 0.2), u, v, z);
+    } else if (av < 7 && u < 1.6 + sweep && u > -2.4 + sweep && Math.abs(z - (3.1 - av * 0.06)) < 0.35) return av > 6 ? f.light : Math.abs(av - 4) < 0.3 ? f.dark : g(mix(f.main, f.light, 0.2), u, v, z);
     // missiles under the wings
     if (Math.abs(av - 3.6) < 0.4 && u > -2.6 + sweep * 0.3 && u < 2.4 && Math.abs(z - 2.4) < 0.4) return u > 1.8 ? RED : WHITE;
     // tailplanes and a fin
@@ -1066,65 +1072,170 @@ function cruiser(f: Faction, part: 'hull' | 'top'): Shape {
   };
 }
 
-// How much bigger the carrier is drawn than the shape below is modelled:
-// it is the largest ship afloat, with room on deck for a dozen Swift jets
-// (see CARRIER_SLOTS in combat.ts, which must match).
-export const CARRIER_SCALE = 2.5;
-
-// The carrier: a long flat flight deck over a broad hull, with a runway
-// down the port side (where its jets land and take off) and room to park on
-// the starboard side, round an island tower. (The jets are drawn on their
-// own; the runway and spots match CARRIER_RUNWAY and CARRIER_SLOTS.)
-function carrier(f: Faction): Shape {
-  const at = carrierAt(f);
-  const s = 1 / CARRIER_SCALE;
-  return (u, v, z) => at(u * s, v * s, z * s);
+// The carrier, modelled at full size (world units, bow along +u, starboard
+// along +v): a long, narrow hull flaring out under an overhanging flight
+// deck, with a runway down the port side (where its jets land and take off)
+// and the starboard side for parking, round a tall island. (The jets are
+// drawn on their own; the runway and spots match CARRIER_RUNWAY and
+// CARRIER_SLOTS in combat.ts.)
+const CV_HULL = hex('#8f9597');
+const CV_DECK = hex('#4b4f51');
+const CV_RWY = hex('#3f4345');
+const CV_LIFT = hex('#575b5d');
+const CV_BOOT = hex('#26282a');
+const CV_ORANGE = hex('#f08a2c');
+const CV_GREEN = hex('#5fd06a');
+// The carrier's number, painted on the bow end of the deck: two digits, as
+// segments (a b c d e f g).
+const SEG: Record<string, string> = { '7': 'abc', '3': 'abcdg' };
+function segAt(digit: string, x: number, y: number): boolean {
+  // x across 0..4, y down 0..7, strokes a unit wide
+  const on = SEG[digit] ?? '';
+  const hz = (yy: number) => Math.abs(y - yy) < 0.6 && x > 0.4 && x < 3.6;
+  if (on.includes('a') && hz(0.5)) return true;
+  if (on.includes('g') && hz(3.5)) return true;
+  if (on.includes('d') && hz(6.5)) return true;
+  if (on.includes('b') && x > 3 && x < 4 && y > 0 && y < 3.8) return true;
+  if (on.includes('c') && x > 3 && x < 4 && y > 3.2 && y < 7) return true;
+  if (on.includes('f') && x > 0 && x < 1 && y > 0 && y < 3.8) return true;
+  if (on.includes('e') && x > 0 && x < 1 && y > 3.2 && y < 7) return true;
+  return false;
 }
 
-function carrierAt(f: Faction): Shape {
-  const H = 4.6;
-  const DK = hex('#55595b');
-  const RW = hex('#45494b'); // the runway, a shade darker
-  const RV = -6.8; // the runway's middle line, across
+function carrier(f: Faction): Shape {
+  const HT = 11.5; // the hull's top, under the deck
+  const DT = 14; // the deck's top (DECK_Z)
+  const RV = -12.5; // the runway's middle line, across
+  // the deck's half-width on each side at u: straight sides, a taper to the
+  // bow and the stern corners rounded off
+  const port = (u: number) => (u > 62 ? 20 - (u - 62) * (14 / 36) : 20) - (u < -88 ? (-88 - u) * 1.2 : 0);
+  const stbd = (u: number) => (u > 70 ? 20 - (u - 70) * (14 / 28) : 20) - (u < -88 ? (-88 - u) * 1.2 : 0);
+  // the hull's half-width at height z and u: narrow at the water, flaring
+  // out towards the deck, a raked stem at the bow and a square transom
+  const hullW = (u: number, z: number) => {
+    const w = 11.5 + (z / HT) * 4;
+    const stem = 88 + z * 0.75; // the bow rakes forward as it rises
+    if (u > stem) return -1;
+    if (u > 40) return w * Math.sqrt(Math.max(0, (stem - u) / (stem - 40)));
+    if (u < -90) return -1;
+    if (u < -78) return w * (1 - (-78 - u) * 0.02);
+    return w;
+  };
+  // the island: its blocks, [u0, u1, v0, v1, z top]
+  const ISLE: [number, number, number, number, number][] = [
+    [4, 28, 13.5, 19.5, 26],
+    [7, 26, 14.2, 19.2, 32],
+    [11, 23, 14.8, 18.8, 36],
+  ];
   return (u, v, z) => {
-    const av = Math.abs(v);
-    if (u < -28.5 || u > 30.5 || av > 11 || z > 17) return null;
-    // the hull, narrower than the deck
-    if (z < H) {
-      const hull = hullAt(u, v, z, f, -27.5, 28.5, 7.6, H);
-      return hull === undefined ? null : hull;
-    }
-    // the flight deck: a slab that overhangs the hull, tapering at the bow
-    const dw = u > 20 ? 10.6 * Math.sqrt(Math.max(0, (30.5 - u) / 10.5)) : 10.6;
-    if (z < H + 1 && av < dw && u > -27.8) {
-      if (z < H + 0.6) return av > dw - 0.5 ? f.dark : shade(DK, -0.2);
-      if (av > dw - 0.5) return HAZ; // a yellow edge
-      const rv = v - RV;
-      if (v < -3.3) {
-        // the runway: edge lines, a dashed middle line, stripes at the stern
-        // end, touchdown marks and the arresting wires
-        if (v > -3.7) return WHITE;
-        if (u < -24.6 && u > -26.6) return mod(v, 1.1) < 0.55 ? WHITE : RW;
-        if (u > -20 && u < -16.5 && Math.abs(rv) > 1.2 && Math.abs(rv) < 2.6) return WHITE;
-        if ((Math.abs(u + 22.4) < 0.15 || Math.abs(u + 21.2) < 0.15 || Math.abs(u + 14.6) < 0.15) && Math.abs(rv) < 2.8) return GUN_D;
-        if (Math.abs(rv) < 0.25 && mod(u, 4) < 2) return WHITE;
-        return g(RW, u, v, z, 0.04);
+    if (u < -94 || u > 99 || v < -23 || v > 23 || z > 43) return null;
+    // ---- the hull
+    if (z < HT) {
+      const hw = hullW(u, z);
+      if (hw < 0 || Math.abs(v) > hw) return null;
+      const side = Math.abs(v) > hw - 0.9;
+      if (!side) return shade(CV_HULL, -0.25); // (hidden under the deck)
+      if (z < 1.3) return CV_BOOT; // the boot topping at the waterline
+      if (z > HT - 1.2) return f.main; // a band of the side's color under the deck
+      // the anchors either side of the bow, and the hull number
+      if (Math.hypot(u - 80, z - 8) < 1.3) return CV_BOOT;
+      if (u > 62 && u < 74 && z > 4 && z < 9) {
+        const dig = u < 68 ? '7' : '3';
+        if (segAt(dig, ((u - (u < 68 ? 62.5 : 68.5)) / 5) * 4, ((9 - z) / 5) * 7)) return WHITE;
       }
-      // the parking side: a yellow line along the runway, and the bow's number block
-      if (v < -2.6 && v > -3) return mod(u, 2) < 1.2 ? HAZ : DK;
-      if (u > 24 && u < 27 && av < 3 && mod(Math.floor(v), 2)) return HAZ;
-      return g(DK, u, v, z, 0.05);
+      // a row of portholes and the plating
+      if (Math.abs(z - 8.4) < 0.35 && mod(u, 4) < 0.7 && u > -80 && u < 60) return GUN_D;
+      if (mod(u, 12) < 0.3) return shade(CV_HULL, -0.08);
+      return g(CV_HULL, u, v, z, 0.04);
     }
-    // the island on the starboard side: a stepped tower with a bridge, a mast and radar
-    if (v > 6.6 && v < 9.6 && u > -4 && u < 9 && z < 13) {
-      if (z > 10.4 && z < 11.6 && (u > 8.4 || v < 7.2)) return mod(u + v, 2) < 0.4 ? f.dark : GLASS_L;
-      if (z > 12.4) return g(f.main, u, v, z);
-      if (u < 0 && z > 9) return null;
-      return g(shade(HULL, 0.06), u, v, z);
+    // ---- catwalks and nets just below the deck edge, all round
+    const pw = port(u);
+    const sw = stbd(u);
+    const onDeck = u > -92 && u < 98.5 && v > -pw && v < sw;
+    if (z < DT - 1.6) {
+      const out = u > -92 && u < 96 && ((v < -pw && v > -pw - 1.6) || (v > sw && v < sw + 1.6));
+      if (out && z > HT + 0.4) return mod(u, 1.5) < 0.5 ? GUN_D : GUN;
+      // the landing officer's platform and the lens (port, aft)
+      if (u > -70 && u < -63 && v < -pw && v > -pw - 3 && z > HT) return GUN;
+      return onDeck && z > HT ? shade(CV_DECK, -0.3) : null;
     }
-    if (Math.abs(u - 4) < 0.4 && Math.abs(v - 8.1) < 0.4 && z < 16.6) return z > 16 ? RED : GUN_D;
-    if (Math.abs(u - 4) < 0.5 && Math.abs(v - 8.1) < 2.4 && Math.abs(z - 14.4) < 0.35) return STEEL;
-    if (cyl(u, v, -2, 8.2, 1.1) && z < 11.4) return z > 10.8 ? BLACK : GUN;
+    // ---- the flight deck
+    if (z < DT && onDeck) {
+      if (z < DT - 0.6) return shade(CV_DECK, -0.25);
+      const ep = v + pw; // how far in from each edge
+      const es = sw - v;
+      if (ep < 0.6 || es < 0.6 || u < -91.4) return shade(WHITE, -0.15); // the edge line
+      if (v < -5) {
+        // the runway: white edge lines, a dashed middle line, the round-down
+        // stripes at the stern, touchdown bars, the arresting wires and the
+        // catapult track up to the bow
+        const rv = v - RV;
+        if (v > -5.6) return WHITE;
+        if (ep < 1.3) return WHITE;
+        if (u < -86) return mod(v, 2.4) < 1.2 ? WHITE : BLACK;
+        if (u > -62 && u < -55 && Math.abs(rv) > 3 && Math.abs(rv) < 5.6) return WHITE;
+        for (const w of [-74, -70, -66, -62]) if (Math.abs(u - w) < 0.3 && Math.abs(rv) < 6.6) return STEEL;
+        if (Math.abs(rv) < 0.45 && mod(u, 8) < 4 && u > -84 && u < 40) return WHITE;
+        if (u > 40 && u < 92 && Math.abs(rv - 1.8) < 0.3) return STEEL;
+        if (u > 40 && u < 92 && Math.abs(rv) < 0.45 && mod(u, 4) < 1.2) return HAZ;
+        return g(CV_RWY, u, v, z, 0.05);
+      }
+      // the foul line: red and white, along the runway's edge
+      if (v < -4) return mod(u, 3) < 1.5 ? RED : WHITE;
+      // the deck-edge lifts on the starboard side, outlined in yellow and black
+      for (const [l0, l1] of [
+        [-62, -46],
+        [36, 52],
+        [56, 70],
+      ]) {
+        if (u > l0 && u < l1 && v > 12.5) {
+          if (u < l0 + 0.6 || u > l1 - 0.6 || v < 13.1) return mod(u + v, 2) < 1 ? HAZ : BLACK;
+          return g(CV_LIFT, u, v, z, 0.04);
+        }
+      }
+      // the yellow taxi line just off the runway, and leads in to the spots
+      if (Math.abs(v + 2.4) < 0.3 && mod(u, 6) < 4) return HAZ;
+      // the number on the bow end
+      if (u > 82 && u < 94 && v > -4 && v < 4) {
+        const x = ((v + 4) / 8) * 9;
+        const y = ((94 - u) / 12) * 7;
+        if (x < 4 ? segAt('7', x, y) : x > 5 && segAt('3', x - 5, y)) return WHITE;
+      }
+      return g(CV_DECK, u, v, z, 0.06);
+    }
+    // ---- on deck: the island, with its bridge windows, radar panels and mast
+    for (let i = 0; i < ISLE.length; i++) {
+      const [u0, u1, v0, v1, top] = ISLE[i];
+      if (u <= u0 || u >= u1 || v <= v0 || v >= v1 || z >= top) continue;
+      const face = u < u0 + 0.7 || u > u1 - 0.7 || v < v0 + 0.7 || v > v1 - 0.7;
+      if (z > top - 0.6) return i === 2 ? f.main : shade(CV_HULL, -0.12);
+      if (face) {
+        // windows: the bridge all round, flight control looking over the deck
+        if (i === 1 && z > 28.6 && z < 30.6) return mod(u + v, 3) < 0.4 ? GUN_D : GLASS_L;
+        if (i === 2 && z > 33.6 && z < 35.2 && (v < v0 + 0.7 || u > u1 - 0.7)) return mod(u, 2.5) < 0.4 ? GUN_D : GLASS;
+        // the flat radar faces, and the island's number
+        if (i === 0 && z > 19 && z < 24 && ((v < v0 + 0.7 && u > 18 && u < 23) || (u > u1 - 0.7 && v > 15 && v < 18.4) || (u < u0 + 0.7 && v > 15 && v < 18.4))) return GUN_D;
+        if (i === 0 && v < v0 + 0.7 && u > 7 && u < 15 && z > 17 && z < 23) {
+          const x = ((u - 7) / 8) * 9;
+          const y = ((23 - z) / 6) * 7;
+          if (x < 4 ? segAt('7', x, y) : x > 5 && segAt('3', x - 5, y)) return WHITE;
+        }
+        if (mod(z - DT, 4) < 0.35) return shade(CV_HULL, -0.1);
+      }
+      return g(shade(CV_HULL, 0.04), u, v, z, 0.04);
+    }
+    // the mast: a pole with a yard, a radar bar and a light at the top
+    if (Math.abs(u - 17) < 0.45 && Math.abs(v - 16.8) < 0.45 && z < 42.6) return z > 42 ? RED : STEEL;
+    if (Math.abs(u - 17) < 0.35 && Math.abs(v - 16.8) < 3.4 && Math.abs(z - 40) < 0.35) return STEEL;
+    if (Math.abs(u - 17) < 3.2 && Math.abs(v - 16.8) < 0.5 && Math.abs(z - 38) < 0.5) return GUN_D;
+    if (cyl(u, v, 21, 16.8, 1.3) && z < 38.6) return z > 38 ? WHITE : STEEL; // a radome
+    // deck gear: a crash crane and a fire truck by the island, a tow tractor
+    if (u > -2 && u < 3 && v > 12 && v < 15.5 && z < DT + 3) return z > DT + 2.4 ? BLACK : HAZ;
+    if (u > -1 && u < 0 && v > 9 && v < 12 && Math.abs(z - (DT + 2.6)) < 0.4) return HAZ; // its boom
+    if (u > -7 && u < -3 && v > 16 && v < 18.6 && z < DT + 1.8) return z > DT + 1.2 && u > -4.2 ? GLASS_D : RED;
+    if (u > 30 && u < 33 && v > 10.5 && v < 12.5 && z < DT + 1.4) return z > DT + 0.9 ? GUN_D : HAZ;
+    // the landing lens on the port side, its lights showing the glide path
+    if (u > -52 && u < -49 && v > -22.5 && v < -20.5 && z < DT + 2.4) return z > DT + 1.2 ? (mod(z, 0.6) < 0.3 ? CV_ORANGE : CV_GREEN) : GUN;
     return null;
   };
 }
@@ -1614,6 +1725,7 @@ export interface V2FactionArt {
   aaGun: StackSprite[];
   heron: StackSprite[];
   jet: StackSprite[];
+  jetFolded: StackSprite[];
   plane: StackSprite[];
   otter: StackSprite[];
   destroyer: StackSprite[];
@@ -1673,12 +1785,13 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     skyguardTurret: renderDirs(skyguardTurret(f), DIRS, { r: 8, zmax: 15 }, k('skyguardTurret')),
     heron: renderDirs(heron(f), DIRS, { r: 13, zmax: 11 }, k('heron')),
     jet: renderDirs(jet(f), DIRS, { r: 11, zmax: 8 }, k('jet')),
+    jetFolded: renderDirs(jet(f, true), DIRS, { r: 11, zmax: 8 }, k('jetFolded')),
     plane: renderDirs(cargoPlane(f), DIRS, { r: 21, zmax: 11 }, k('plane')),
     otter: renderDirs(hovercraft(f), DIRS, { r: 13, zmax: 9, bakeShadow: true, shadowAlpha: 0.2 }, k('otter')),
     destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
     cruiser: renderDirs(cruiser(f, 'hull'), DIRS, { r: 20.5, zmax: 6, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
     cruiserTop: renderDirs(cruiser(f, 'top'), DIRS, { r: 7, zmax: 16 }, k('cruiserTop')),
-    carrier: renderDirs(carrier(f), DIRS, { r: 80, zmax: 43, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
+    carrier: renderDirs(carrier(f), DIRS, { r: 100, zmax: 43, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
     sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
     drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
