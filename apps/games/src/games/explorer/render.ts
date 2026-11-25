@@ -1,10 +1,10 @@
 // Draws the world in 3D with three.js: the land in 32×32 chunks around you (it wraps, so positions are
 // measured from you), villages, machines, animals, players and cars, caves, the space ship and effects.
 import * as THREE from 'three';
-import { BUILDS, CHUNK, DESTINATIONS, MOBS, ROCK_COLOR, WATER_LEVEL, type Biome } from './data';
+import { BUILDS, CHUNK, DESTINATIONS, MOBS, ROCK_COLOR, WATER_LEVEL, type Biome, type BuildId } from './data';
 import type { Building, Dim, Fx, Game, Mob, Player, Target, Vehicle } from './game';
 import { DIRS } from './game';
-import { GeoBuilder, T, ball, box, buildingModel, carModel, itemColor, mat, mobModel, personModel, rocketModel, type Rig } from './models';
+import { GeoBuilder, T, ball, botModel, box, buildingModel, carModel, itemColor, mat, mobModel, personModel, rocketModel, type Rig } from './models';
 import { CAVE_SIZE, key, wd, wrap, type Feature } from './world';
 
 const VIEW = 5; // chunks each way
@@ -42,6 +42,11 @@ export class Renderer {
   private planet: THREE.Mesh;
   private streaks: THREE.LineSegments;
   private bObjs = new Map<number, THREE.Group>();
+  private gObjs = new Map<number, THREE.Group>();
+  private botObjs = new Map<number, THREE.Group>();
+  private bpObjs: THREE.Group[] = [];
+  /** The box you drag out with B. */
+  sel: THREE.Mesh;
   private mObjs = new Map<number, Rig>();
   private pObjs = new Map<number, Rig & { label: THREE.Sprite; held: THREE.Group; heldId: string }>();
   private cObjs = new Map<number, THREE.Group>();
@@ -92,6 +97,9 @@ export class Renderer {
     this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#40ff60', transparent: true, opacity: 0.35, depthWrite: false }));
     this.ghost.visible = false;
     this.scene.add(this.ghost);
+    this.sel = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#4fb8ff', transparent: true, opacity: 0.25, depthWrite: false }));
+    this.sel.visible = false;
+    this.scene.add(this.sel);
     this.hl = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#ffffff', wireframe: true, transparent: true, opacity: 0.6 }));
     this.hl.visible = false;
     this.scene.add(this.hl);
@@ -403,6 +411,8 @@ export class Renderer {
       this.dimShown = dim;
       for (const o of this.bObjs.values()) o.removeFromParent();
       this.bObjs.clear();
+      for (const o of this.gObjs.values()) o.removeFromParent();
+      this.gObjs.clear();
     }
     this.earth.visible = dim === 'earth';
     this.cave.visible = dim !== 'earth' && dim !== 'space';
@@ -462,6 +472,8 @@ export class Renderer {
     this.lamp.position.set(0, me.y + 2.2, 0);
 
     this.updateBuildings(g, dim, dt);
+    this.updateGhosts(g, dim);
+    this.updateBots(g, dim, dt);
     this.updateMobs(g, dim, dt);
     this.updatePlayers(g, dim, dt);
     this.updateCars(g, dim);
@@ -545,6 +557,87 @@ export class Renderer {
       this.animateBuilding(o, b, dt);
     }
     for (const [id, o] of this.bObjs) if (!seen.has(id)) { o.removeFromParent(); this.bObjs.delete(id); }
+  }
+  private ghostModel(type: BuildId, dir: number, id: number): THREE.Group {
+    const o = buildingModel({ id, type, dim: 'earth', x: 0, z: 0, dir, hp: 1 });
+    o.traverse((c) => {
+      c.userData = { ...c.userData, b: undefined, ghost: id };
+      if ((c as THREE.Mesh).isMesh) (c as THREE.Mesh).material = GHOST_MAT;
+    });
+    const s = BUILDS[type].size;
+    for (const c of o.children) c.position.x -= s / 2, c.position.z -= s / 2;
+    // flat things are hard to see as ghosts: lift them a little
+    if (BUILDS[type].flat) o.children.forEach((c) => { c.position.y += 0.05; });
+    return o;
+  }
+  private updateGhosts(g: Game, dim: Dim) {
+    const seen = new Set<number>();
+    for (const gh of g.ghosts.values()) {
+      if (gh.dim !== dim) continue;
+      const px = this.sx(gh.x, dim), pz = this.sz(gh.z, dim);
+      if (Math.abs(px) > 110 || Math.abs(pz) > 110) continue;
+      seen.add(gh.id);
+      let o = this.gObjs.get(gh.id);
+      if (!o || o.userData.ver !== `${gh.type}${gh.dir}`) {
+        if (o) o.removeFromParent();
+        o = this.ghostModel(gh.type, gh.dir, gh.id);
+        o.userData.ver = `${gh.type}${gh.dir}`;
+        this.scene.add(o);
+        this.gObjs.set(gh.id, o);
+      }
+      const s = BUILDS[gh.type].size;
+      const gy = dim === 'earth' ? g.w.heightAt(gh.x + s / 2, gh.z + s / 2) : 0;
+      o.position.set(px + s / 2, gy, pz + s / 2);
+      o.rotation.y = s > 1 ? 0 : Math.atan2(DIRS[gh.dir][0], DIRS[gh.dir][1]);
+    }
+    for (const [id, o] of this.gObjs) if (!seen.has(id)) { o.removeFromParent(); this.gObjs.delete(id); }
+  }
+  private updateBots(g: Game, dim: Dim, dt: number) {
+    const seen = new Set<number>();
+    for (const r of g.bots) {
+      if (r.dim !== dim) continue;
+      seen.add(r.id);
+      let o = this.botObjs.get(r.id);
+      if (!o) { o = botModel(); this.scene.add(o); this.botObjs.set(r.id, o); o.position.set(this.sx(r.x, dim), r.y, this.sz(r.z, dim)); }
+      const tx = this.sx(r.x, dim), tz = this.sz(r.z, dim);
+      // friends get robots 10 times a second: glide between
+      const k = g.remote ? Math.min(1, dt * 12) : 1;
+      const dx = tx - o.position.x, dz = tz - o.position.z;
+      if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) o.rotation.y = Math.atan2(dx, dz);
+      o.position.set(o.position.x + dx * k, r.y + Math.sin(performance.now() / 200 + r.id) * 0.06, o.position.z + dz * k);
+      (o.userData.rotors as THREE.Object3D).rotation.y += dt * 30;
+      const carry = o.userData.carry as THREE.Mesh;
+      carry.visible = !!r.carry;
+      if (r.carry) carry.material = mat(itemColor(r.carry));
+    }
+    for (const [id, o] of this.botObjs) if (!seen.has(id)) { o.removeFromParent(); this.botObjs.delete(id); }
+  }
+  /** Blue see-through buildings that follow the mouse while you hold a blueprint. */
+  showBlueprint(g: Game, dim: Dim, x0: number, z0: number, list: [BuildId, number, number, number][] | null) {
+    if (!list) { for (const o of this.bpObjs) o.visible = false; return; }
+    const sig = JSON.stringify(list);
+    if (this.bpObjs.length === 0 || (this.bpObjs[0].userData.sig as string) !== sig) {
+      for (const o of this.bpObjs) o.removeFromParent();
+      this.bpObjs = list.slice(0, 400).map(([type, , , dir]) => { const o = this.ghostModel(type, dir, -1); o.traverse((c) => { c.userData.ghost = undefined; }); this.scene.add(o); return o; });
+      if (this.bpObjs[0]) this.bpObjs[0].userData.sig = sig;
+    }
+    this.bpObjs.forEach((o, i) => {
+      const [type, dx, dz, dir] = list[i];
+      const s = BUILDS[type].size;
+      const x = x0 + dx, z = z0 + dz;
+      const gy = dim === 'earth' ? g.w.heightAt(x + s / 2, z + s / 2) : 0;
+      o.visible = true;
+      o.position.set(this.sx(x, dim) + s / 2, gy + 0.02, this.sz(z, dim) + s / 2);
+      o.rotation.y = s > 1 ? 0 : Math.atan2(DIRS[dir][0], DIRS[dir][1]);
+    });
+  }
+  /** The rectangle you're copying with B. */
+  showSelection(g: Game, dim: Dim, x0: number, z0: number, x1: number, z1: number) {
+    const w = x1 - x0 + 1, d = z1 - z0 + 1;
+    const y = dim === 'earth' ? g.w.heightAt(x0 + w / 2, z0 + d / 2) : 0;
+    this.sel.visible = true;
+    this.sel.position.set(this.sx(x0, dim) + w / 2, y + 0.6, this.sz(z0, dim) + d / 2);
+    this.sel.scale.set(w, 1.6, d);
   }
   private animateBuilding(o: THREE.Group, b: Building, dt: number) {
     const p = o.userData.parts as Record<string, THREE.Object3D>;
@@ -765,8 +858,10 @@ export class Renderer {
         break;
       }
       case 'boom': {
-        P(30, '#ffb030', 7, 0.6, 0.3, 2, 2);
-        P(15, '#555', 3, 1.2, 0.5, -1, 1);
+        // bigger booms throw more fire further (r is the blast radius)
+        const k = Math.max(1, (f.n ?? 3) / 3);
+        P(Math.round(30 * Math.min(k, 5)), '#ffb030', 7 * k, 0.6 + 0.15 * k, 0.3 * Math.sqrt(k), 2, 2 * k);
+        P(Math.round(15 * Math.min(k, 5)), '#555', 3 * k, 1.2 + 0.3 * k, 0.5 * Math.sqrt(k), -1, k);
         const m = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: '#ffd080', transparent: true, opacity: 0.8 }));
         this.scene.add(m);
         this.booms.push({ mesh: m, life: 0.4, r: f.n ?? 3 });
@@ -864,13 +959,13 @@ export class Renderer {
     void me;
   }
 
-  showGhost(dim: Dim, x: number, z: number, size: number, ok: boolean, g: Game, dir: number) {
+  showGhost(dim: Dim, x: number, z: number, size: number, ok: boolean, g: Game, dir: number, plan = false) {
     this.ghost.visible = true;
     const y = dim === 'earth' ? g.w.heightAt(x + size / 2, z + size / 2) : 0;
     this.ghost.position.set(this.sx(x + size / 2, dim), y + 0.5, this.sz(z + size / 2, dim));
     this.ghost.scale.set(size, 1, size);
     this.ghost.rotation.y = Math.atan2(DIRS[dir][0], DIRS[dir][1]);
-    (this.ghost.material as THREE.MeshBasicMaterial).color.set(ok ? '#40ff60' : '#ff4040');
+    (this.ghost.material as THREE.MeshBasicMaterial).color.set(!ok ? '#ff4040' : plan ? '#4fb8ff' : '#40ff60');
   }
 
   /** What's under the screen point (-1..1)? */
@@ -879,6 +974,7 @@ export class Renderer {
     const objs: THREE.Object3D[] = [];
     for (const r of this.mObjs.values()) objs.push(r.root);
     for (const o of this.bObjs.values()) objs.push(o);
+    for (const o of this.gObjs.values()) objs.push(o);
     for (const o of this.cObjs.values()) objs.push(o);
     for (const o of this.rObjs.values()) objs.push(o);
     if (dim === 'earth') for (const c of this.chunks.values()) { if (Math.abs(c.group.position.x + 16) < 80 && Math.abs(c.group.position.z + 16) < 80) { objs.push(c.terrain); if (c.feats) objs.push(c.feats); } }
@@ -892,6 +988,7 @@ export class Renderer {
     const ud = h.object.userData;
     if (ud.mob !== undefined) return { target: { k: 'mob', id: ud.mob }, point: p, wx, wz };
     if (ud.b !== undefined) return { target: { k: 'build', id: ud.b }, point: p, wx, wz };
+    if (ud.ghost !== undefined) return { target: { k: 'ghost', id: ud.ghost }, point: p, wx, wz };
     if (ud.rock !== undefined) return { target: { k: 'rock', id: ud.rock }, point: p, wx, wz };
     if (ud.car !== undefined) return { target: null, point: p, wx, wz };
     if (ud.cave) {
@@ -933,6 +1030,7 @@ export class Renderer {
 function verOf(b: Building) { return `${b.type}${b.hub ? 'h' : ''}${b.ug ?? ''}`; }
 
 const TERRAIN_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
+const GHOST_MAT = new THREE.MeshLambertMaterial({ color: '#7fc8ff', emissive: '#1a4a80', transparent: true, opacity: 0.45, depthWrite: false });
 const WATER_GEO = new THREE.PlaneGeometry(CHUNK, CHUNK).rotateX(-Math.PI / 2);
 const WATER_MAT = new THREE.MeshLambertMaterial({ color: '#2f7fc8', transparent: true, opacity: 0.72, depthWrite: false });
 const ROCK_GEO = new THREE.DodecahedronGeometry(0.5, 0);
