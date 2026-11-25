@@ -4,6 +4,7 @@ import { drawItem } from './art';
 import type { Creature, Game } from './game';
 import { DX, DY, type Machine } from './sim';
 import { hash2 } from './world';
+import { PLAYER_COLORS } from '../coop/session';
 
 type C = CanvasRenderingContext2D;
 
@@ -242,7 +243,6 @@ export class Renderer {
       if (!byRow.has(ry)) byRow.set(ry, []);
       byRow.get(ry)!.push(cr);
     }
-    const prow = Math.floor(g.py);
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const b = w.b(x, y);
@@ -254,7 +254,10 @@ export class Renderer {
       for (const s of w.stones) if (s.y === y && s.x >= x0 && s.x <= x1) this.waystone(s.x, s.y, s.found, time);
       for (const ch of w.chests) if (!ch.opened && ch.y === y && ch.x >= x0 && ch.x <= x1) this.treasure(ch.x, ch.y, time);
       for (const cr of byRow.get(y) ?? []) this.creature(cr, time);
-      if (y === prow) this.player(g, time);
+      for (const h of g.heroes) {
+        const hy = h === g.active ? g.py : h.py;
+        if (Math.floor(hy) === y) g.as(h, () => this.player(g, time));
+      }
     }
 
     // placement ghost
@@ -326,6 +329,23 @@ export class Renderer {
       c.fillText(f.text, sx, sy);
     }
     c.globalAlpha = 1;
+    if (g.others.length) {
+      // a numbered dot over each hero when playing together
+      c.font = `900 ${Math.round(ts * 0.3)}px ui-rounded, system-ui, sans-serif`;
+      c.textBaseline = 'middle';
+      for (const h of g.heroes) {
+        const hx = h === g.active ? g.px : h.px, hy = h === g.active ? g.py : h.py;
+        if ((h === g.active ? g.dead : h.dead) > 0) continue;
+        const sx = ox + hx * ts, sy = oy + (hy - 1.25) * ts;
+        c.fillStyle = PLAYER_COLORS[h.slot] ?? '#fff';
+        c.beginPath();
+        c.arc(sx, sy, ts * 0.2, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = '#111';
+        c.fillText(String(h.slot + 1), sx, sy + 1);
+      }
+      c.textBaseline = 'alphabetic';
+    }
 
     if (g.dead) {
       c.fillStyle = `rgba(20,0,10,${Math.min(0.7, (2.2 - g.dead) * 0.6)})`;
@@ -984,8 +1004,8 @@ export class Renderer {
     c.fillStyle = '#3e3a5a';
     c.fillRect(x - 0.15, y - 0.05, 0.12, 0.26 + walk * 0.05);
     c.fillRect(x + 0.03, y - 0.05, 0.12, 0.26 - walk * 0.05);
-    // body
-    c.fillStyle = '#2f8a74';
+    // body (friends wear their own color)
+    c.fillStyle = g.active.slot ? PLAYER_COLORS[g.active.slot] : '#2f8a74';
     c.beginPath();
     c.roundRect(x - 0.22, y - 0.5, 0.44, 0.5, 0.1);
     c.fill();
