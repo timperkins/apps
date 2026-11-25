@@ -18,6 +18,24 @@ import {
   type Tool,
 } from './game';
 import { Renderer, type Ghost } from './render';
+import type { Snap, Sound } from './game';
+import { coopBadge, coopMenu, every } from '../coop/ui';
+import { PLAYER_NAMES, type FriendSession, type HostSession, type Session } from '../coop/session';
+
+const COOP_PREFIX = 'trom-north-pole-';
+type Buyable = 'tower' | 'belt' | 'grabber' | 'villager';
+type ToHost =
+  | { t: 'me'; x: number; y: number; dir: Dir; aim: number; step: number }
+  | { t: 'act' }
+  | { t: 'shoot'; ang: number }
+  | { t: 'load' }
+  | { t: 'place'; tool: Tool; x: number; y: number; dir: Dir }
+  | { t: 'pick'; x: number; y: number }
+  | { t: 'buy'; id: Buyable; n: number };
+type ToFriend =
+  | { t: 'init'; trees: number[][] }
+  | { t: 's'; s: Snap; snd: Sound[] }
+  | { t: 'msg'; list: { toast?: string; banner?: string }[] };
 
 // Several villages can be saved on this device. Each one is its own slot.
 const OLD_SAVE_KEY = 'north-pole-save-v1';
@@ -123,6 +141,7 @@ const HELP = `
   </ul>
   <h3>Keys</h3>
   <p><kbd>WASD</kbd>/arrows move · <kbd>Space</kbd>/<kbd>E</kbd> use · click to shoot or build · <kbd>1</kbd>–<kbd>5</kbd> pick · <kbd>R</kbd> turn · <kbd>X</kbd> pick up a thing · <kbd>L</kbd> load tower · <kbd>B</kbd> shop · <kbd>H</kbd> help</p>
+  <p>👥 <b>Play together</b>: up to 4 players, each on their own phone or computer. Tap 👥 while playing to get a code; friends tap <b>Join a friend</b> on the start screen. Wood, arrows and gold are shared, bears go after whoever is closest, and a villager carries anyone who gets knocked out back to base.</p>
   <p>💾 Your village saves by itself every few seconds. Tap 💾 to save right now. Pick a saved village on the start screen.</p>`;
 
 const game: GameModule = {
@@ -134,6 +153,7 @@ const game: GameModule = {
       <div class="np-goal"></div>
       <div class="np-top">
         <button data-b="shop" title="Shop (B)">🛒 Shop</button>
+        <button data-b="friends" title="Play with friends">👥</button>
         <button data-b="save" title="Save your village">💾</button>
         <button data-b="help" title="Help (H)">?</button>
         <button data-b="mute" title="Sound"></button>
@@ -185,6 +205,131 @@ const game: GameModule = {
     let rot: Dir = 0;
     let stopped = false;
 
+    // ---------- playing together ----------
+    let net: Session | null = null;
+    const badge = coopBadge(wrap, { top: 'calc(max(10px, env(safe-area-inset-top)) + 44px)' });
+    const sendRate = every(15), snapRate = every(12);
+    let netSounds: Sound[] = [];
+    const isFriend = () => net?.role === 'friend';
+    const toHost = (m: ToHost) => (net?.role === 'friend' ? net.send(m) : undefined);
+    const refreshBadge = () => {
+      if (!net) return badge.set('', [], 0);
+      if (net.role === 'host') badge.set(net.code, [0, ...net.friends()], 0);
+      else badge.set(net.code, [...new Set([0, net.slot, ...g.others.map((o) => o.slot)])].sort(), net.slot);
+    };
+    const endNet = () => {
+      net?.close();
+      net = null;
+      g.others = [];
+      g.p = g.me;
+      refreshBadge();
+    };
+    const startHosting = (s: HostSession) => {
+      net = s;
+      netSounds = [];
+      s.onJoin((slot) => {
+        g.others.push(Game.newPlayer(slot));
+        g.toast(`${PLAYER_NAMES[slot]} joined your village!`);
+        g.sounds.push('coin');
+        refreshBadge();
+        s.send(slot, { t: 'init', trees: g.treeList() } satisfies ToFriend);
+        s.send(slot, { t: 's', s: g.snap(), snd: [] } satisfies ToFriend);
+      });
+      s.onLeave((slot) => {
+        g.removeOther(slot);
+        g.toast(`${PLAYER_NAMES[slot]} left.`);
+        refreshBadge();
+      });
+      s.onMessage((slot, raw) => {
+        const m = raw as ToHost;
+        const o = g.other(slot);
+        if (net !== s || !m || !o) return;
+        if (m.t === 'me') g.setOther(slot, m.x, m.y, m.dir, m.aim, m.step);
+        else if (m.t === 'act') g.as(o, () => g.act());
+        else if (m.t === 'shoot') g.as(o, () => g.shoot(Number(m.ang) || 0));
+        else if (m.t === 'load') g.as(o, () => g.loadTower());
+        else if (m.t === 'place' && TOOLS.includes(m.tool)) g.as(o, () => g.place(m.tool, m.x | 0, m.y | 0, (m.dir & 3) as Dir));
+        else if (m.t === 'pick') g.pickUp(m.x | 0, m.y | 0);
+        else if (m.t === 'buy' && m.id in PRICES)
+          g.as(o, () => (g.buy(m.id, Math.max(1, Math.min(10, m.n | 0))) ? g.toast('Bought! It is in everyone’s hotbar.') : g.toast('Not enough gold coins yet. Sell meat to villagers!')));
+        lastHud = '';
+      });
+      refreshBadge();
+      g.toast(`Friends can join with the code ${s.code}: Join a friend on the start screen.`);
+    };
+    const startFriend = (s: FriendSession) => {
+      endNet();
+      g = new Game();
+      g.objs.clear();
+      g.occ.fill(null);
+      g.setTrees([]);
+      g.villagers = [];
+      g.p = g.me = Game.newPlayer(s.slot);
+      net = s;
+      slot = null; // friends don't save: the village lives in the host's game
+      ren.camX = -1e6;
+      titleEl.hidden = true;
+      playing = true;
+      lastHud = '';
+      s.onMessage((raw) => {
+        const m = raw as ToFriend;
+        if (net !== s || !m) return;
+        if (m.t === 'init') g.setTrees(m.trees);
+        else if (m.t === 's') {
+          g.applySnap(m.s);
+          g.sounds.push(...m.snd);
+          refreshBadge();
+        } else if (m.t === 'msg')
+          for (const x of m.list) {
+            if (x.toast) g.toasts.push(x.toast);
+            if (x.banner) g.showBanner(x.banner);
+          }
+      });
+      s.onClose(() => {
+        if (net !== s) return;
+        net = null;
+        toTitle();
+        g.toast('The host stopped playing.');
+      });
+      g.toast(`You're ${PLAYER_NAMES[s.slot]}! Wood, arrows and gold are shared with everyone.`);
+    };
+    const friendsMenu = (fromTitle: boolean) => {
+      if (net?.role === 'host') {
+        endNet();
+        return g.toast('Playing on your own again.');
+      }
+      if (isFriend()) return g.toast('You are playing in a friend’s village. ✕ leaves it.');
+      coopMenu(wrap, {
+        title: 'North Pole Village',
+        prefix: COOP_PREFIX,
+        canHost: !fromTitle,
+        canJoin: fromTitle,
+        onHosted: startHosting,
+        onJoined: startFriend,
+      });
+    };
+    // what you do: on a friend's game it goes to the host
+    const doAct = () => {
+      if (!isFriend()) return g.act();
+      if (g.p.down || g.p.actCool > 0) return;
+      // a hair longer than the host's own wait, so none get turned away
+      g.p.actCool = 0.3;
+      toHost({ t: 'act' });
+    };
+    const doShoot = (ang: number) => {
+      if (!isFriend()) return g.shoot(ang);
+      if (g.p.down || g.p.shootCool > 0) return;
+      if (g.inv.arrows <= 0) {
+        g.toast('No arrows! Make some: sticks from the pile go in the arrow machine.');
+        g.p.shootCool = 0.8;
+        return;
+      }
+      g.p.aim = ang;
+      g.p.shootCool = 0.37;
+      toHost({ t: 'shoot', ang });
+    };
+    const doLoad = () => (isFriend() ? toHost({ t: 'load' }) : g.loadTower());
+
     // ---------- saving ----------
     let slot: SaveMeta | null = null;
     const save = (): boolean => {
@@ -211,6 +356,7 @@ const game: GameModule = {
         <p>Chop trees, build fences and keep the polar bears out!</p>
         ${saves.length ? `<div class="np-saves"><h3>💾 Your saved villages</h3>${rows}</div>` : ''}
         <button class="np-btn ${saves.length ? 'np-alt' : ''}" data-go="new">${saves.length ? '➕ New village' : 'Start'}</button>
+        <button class="np-btn np-alt" data-go="join">👥 Join a friend</button>
         <button class="np-btn np-alt" data-go="help">How to play</button>
         <button class="np-btn np-alt" data-go="exit">Back to games</button>
       </div>`;
@@ -221,6 +367,7 @@ const game: GameModule = {
       unlockAudio();
       const go = b.dataset.go;
       if (go === 'help') return (helpEl.hidden = false);
+      if (go === 'join') return friendsMenu(true);
       if (go === 'exit') return exit();
       if (go === 'del') {
         if (b.dataset.sure !== '1') {
@@ -358,7 +505,14 @@ const game: GameModule = {
     shopEl.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-buy]');
       if (!b) return;
-      const id = b.dataset.buy as 'tower' | 'belt' | 'grabber' | 'villager';
+      const id = b.dataset.buy as Buyable;
+      if (isFriend()) {
+        if (g.inv.gold < PRICES[id] * Number(b.dataset.n)) g.toast('Not enough gold coins yet. Sell meat to villagers!');
+        else toHost({ t: 'buy', id, n: Number(b.dataset.n) });
+        if (id !== 'villager') tool = id;
+        lastHud = '';
+        return;
+      }
       if (g.buy(id, Number(b.dataset.n))) {
         if (id !== 'villager') {
           tool = id;
@@ -377,7 +531,9 @@ const game: GameModule = {
       el.addEventListener('click', (e) => {
         if (e.target === el || (e.target as HTMLElement).closest('[data-close]')) el.hidden = true;
       });
-    const paused = () => !playing || !shopEl.hidden || !helpEl.hidden;
+    // with friends, the village keeps going while the shop or help is open
+    const paused = () => !playing || (!net && (!shopEl.hidden || !helpEl.hidden));
+    const inMenu = () => !shopEl.hidden || !helpEl.hidden;
 
     $('.np-top').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-b]');
@@ -385,7 +541,9 @@ const game: GameModule = {
       unlockAudio();
       const k = b.dataset.b;
       if (k === 'shop') toggle(shopEl);
+      if (k === 'friends') friendsMenu(false);
       if (k === 'save') {
+        if (isFriend()) return g.toast('Only the host can save. This village lives in their game.');
         const ok = save();
         g.toast(ok ? `Saved ${slot?.name ?? 'your village'}! 💾` : 'Could not save on this device.');
         if (ok) g.sounds.push('coin');
@@ -400,6 +558,7 @@ const game: GameModule = {
     // ✕ saves and goes back to the start screen, where you can pick another village
     const toTitle = () => {
       save();
+      endNet();
       shopEl.hidden = helpEl.hidden = true;
       showTitle();
     };
@@ -430,14 +589,20 @@ const game: GameModule = {
       const k = `${t.x},${t.y}`;
       if (quiet && k === lastPlaced) return;
       lastPlaced = k;
-      if (g.place(tool, t.x, t.y, rot)) return;
+      if (isFriend()) {
+        if (g.canPlace(tool, t.x, t.y)) return toHost({ t: 'place', tool, x: t.x, y: t.y, dir: rot });
+      } else if (g.place(tool, t.x, t.y, rot)) return;
       if (quiet) return;
       if (tool === 'fence' && g.inv.wood <= 0) g.toast('You need wood to build fences. Chop trees!');
       else if (tool !== 'fence' && g.inv[tool] <= 0) g.toast(`You have no ${TOOL_INFO[tool].name.toLowerCase()}s. Buy some in the 🛒 Shop.`);
     };
     const tryPick = () => {
       const t = targetTile();
-      if (!g.pickUp(t.x, t.y)) g.toast('Nothing to pick up there.');
+      if (isFriend()) {
+        const o = g.at(t.x, t.y);
+        if (o && o.kind !== 'base' && o.kind !== 'machine' && o.kind !== 'sticks') toHost({ t: 'pick', x: t.x, y: t.y });
+        else g.toast('Nothing to pick up there.');
+      } else if (!g.pickUp(t.x, t.y)) g.toast('Nothing to pick up there.');
     };
     const turn = () => {
       rot = ((rot + 1) % 4) as Dir;
@@ -463,11 +628,11 @@ const game: GameModule = {
       }
       if (k === 'b') return toggle(shopEl);
       if (k === 'h' || k === '?') return toggle(helpEl);
-      if (paused()) return;
+      if (paused() || inMenu()) return;
       keys.add(k);
       if (k >= '1' && k <= '5') pickTool(TOOLS[Number(k) - 1]);
       else if (k === 'r') turn();
-      else if (k === 'l') g.loadTower();
+      else if (k === 'l') doLoad();
       else if (k === 'x') tryPick();
       else if (k === ' ' || k === 'e') e.preventDefault();
       if (k.startsWith('arrow') || k === ' ') e.preventDefault();
@@ -547,7 +712,7 @@ const game: GameModule = {
         b.classList.add('down');
         held.add(t);
         lastPlaced = '';
-        if (t === 'load') g.loadTower();
+        if (t === 'load') doLoad();
         if (t === 'turn') turn();
         if (t === 'pick') tryPick();
         if (t === 'fire' && tool !== 'crossbow') tryPlace();
@@ -573,29 +738,46 @@ const game: GameModule = {
       const t = now / 1000;
       if (import.meta.env.DEV) (window as unknown as { np: Game }).np = g;
       if (!paused()) {
+        const menuOpen = inMenu();
         let mx = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
         let my = (keys.has('s') || keys.has('arrowdown') ? 1 : 0) - (keys.has('w') || keys.has('arrowup') ? 1 : 0);
         if (stick.id >= 0) {
           mx = stick.x;
           my = stick.y;
         }
+        if (menuOpen) mx = my = 0;
         // aim with the mouse on a computer
         if (!touchMode && mouse.in && !g.p.down && g.p.swing <= 0) {
           const w = ren.toWorld(mouse.x, mouse.y);
           g.p.aim = Math.atan2(w.y - g.p.y, w.x - g.p.x);
         } else if (touchMode && (mx || my) && g.p.swing <= 0) g.p.aim = Math.atan2(my, mx);
-        if (keys.has(' ') || keys.has('e') || held.has('use')) g.act();
-        if (mouseDown && tool === 'crossbow') {
-          const w = ren.toWorld(mouse.x, mouse.y);
-          g.shoot(Math.atan2(w.y - g.p.y, w.x - g.p.x));
+        if (!menuOpen) {
+          if (keys.has(' ') || keys.has('e') || held.has('use')) doAct();
+          if (mouseDown && tool === 'crossbow') {
+            const w = ren.toWorld(mouse.x, mouse.y);
+            doShoot(Math.atan2(w.y - g.p.y, w.x - g.p.x));
+          }
+          if (held.has('fire')) {
+            if (tool === 'crossbow') doShoot(g.autoAim());
+            else tryPlace(true);
+          }
         }
-        if (held.has('fire')) {
-          if (tool === 'crossbow') g.shoot(g.autoAim());
-          else tryPlace(true);
+        g.update(dt, { x: mx, y: my }, !isFriend());
+        if (net?.role === 'friend' && sendRate(now)) {
+          toHost({ t: 'me', x: Math.round(g.me.x), y: Math.round(g.me.y), dir: g.me.dir, aim: +g.me.aim.toFixed(2), step: +g.me.step.toFixed(1) });
+        } else if (net?.role === 'host') {
+          for (const [slot, list] of g.outbox) net.send(slot, { t: 'msg', list } satisfies ToFriend);
+          g.outbox.clear();
+          if (net.friends().length && snapRate(now)) {
+            net.broadcast({ t: 's', s: g.snap(), snd: netSounds } satisfies ToFriend);
+            netSounds = [];
+          }
         }
-        g.update(dt, { x: mx, y: my });
       }
-      for (const s of g.sounds.splice(0)) play(s);
+      for (const s of g.sounds.splice(0)) {
+        play(s);
+        if (net?.role === 'host' && netSounds.length < 30) netSounds.push(s);
+      }
       ren.draw(g, ghost(), t, paused() ? 0 : dt);
       if (playing) {
         renderHud();
@@ -614,6 +796,7 @@ const game: GameModule = {
     return () => {
       stopped = true;
       save();
+      net?.close();
       cancelAnimationFrame(raf);
       clearInterval(saveTimer);
       removeEventListener('keydown', onKey);

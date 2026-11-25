@@ -30,6 +30,7 @@ Build a village at the North Pole and keep the polar bears out. Code in `src/gam
 - Shoot bears with the crossbow for meat, sell meat to villagers for gold coins, and buy crossbow towers (load them with L), conveyor belts, grabbers and new villagers (10,000 gold; they chop trees for you).
 - A stick pile in the back never runs out; the arrow machine turns each stick into two arrows. Grabbers take from behind and put in front, so sticks → machine → towers can run by itself.
 - Touch controls on phones (joystick, Use, Shoot/Place, Load, Turn, Pick up). Saves in localStorage under `north-pole-save-v1`.
+- Co-op for up to 4 players, each on their own phone or computer: tap 👥 while playing to get a code; friends tap Join a friend on the start screen. Wood, sticks, arrows, meat and gold are shared. Each bear goes after the nearest player who is still up, and a villager carries whoever gets knocked out back to base. Friends wear their own coat colors and have a number over their head. The host's game runs the village (using the shared module in `src/games/coop/`) and only the host saves.
 
 ## Jobville
 
