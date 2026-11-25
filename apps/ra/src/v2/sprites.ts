@@ -1733,7 +1733,7 @@ export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy' | 'derrick';
+export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'pillbox' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy' | 'derrick';
 
 // The colors of a tech building nobody holds yet (side NEUTRAL_F).
 export const NEUTRAL: Faction = { name: 'Neutral', main: hex('#9c9583'), light: hex('#e4ddc8'), dark: hex('#5d584c') };
@@ -2474,7 +2474,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       return { shape, rx: 27, ry: 19, zmax: 27, fx: [{ x: -23.5, y: -11, z: 25 }, { x: 23.5, y: -11, z: 25 }] };
     }
     case 'tower': {
-      // Gun tower: a tall round bunker with a sloped skirt, firing slits and
+      // Turret: a tall round bunker with a sloped skirt, firing slits and
       // a band of the side's color; the game draws the turning guns on top.
       const H = 9;
       const shape: Shape = (u, v, z) => {
@@ -2497,6 +2497,57 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
         return null;
       };
       return { shape, rx: 8, ry: 8, zmax: 10, fx: [{ x: 0, y: 0, z: H }] };
+    }
+    case 'pillbox': {
+      // Pillbox: a squat eight-sided concrete bunker dug half into the
+      // ground, a firing slit on every face with a machine gun poking out of
+      // the ones that face the viewer, a thick roof slab over it with a band
+      // of the side's color, a round hatch and a periscope on top, and a low
+      // curve of sandbags in front. Its guns don't turn: it fires out of
+      // whichever slit faces the target. fx[0] is where they fire from.
+      const H = 4.6; // top of the roof slab
+      const oct = (u: number, v: number) => Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.7071);
+      const shape: Shape = (u, v, z) => {
+        const d = oct(u, v);
+        const a = Math.atan2(v, u);
+        const face = Math.round(a / (Math.PI / 4));
+        const off = a - face * (Math.PI / 4);
+        // the walls, sloping in a little as they rise
+        if (z < 3.4 && d < 6.6 - z * 0.3) {
+          if (z < 0.9) return grime(CONC_D, a * 6, z, H, 19);
+          if (z > 1.8 && z < 2.6 && Math.abs(off) < 0.24) return z < 1.95 ? CONC_L : BLACK; // firing slits
+          if (Math.abs(off) > 0.36) return shade(g(CONC, u, v, z), -0.06); // the corners
+          return grime(g(CONC, u, v, z, 0.07), a * 6, z, H, 19);
+        }
+        // the machine guns in the slits that face the viewer
+        for (const k of [0, 1, 2]) {
+          const ga = (k * Math.PI) / 4;
+          const along = u * Math.cos(ga) + v * Math.sin(ga);
+          const across = -u * Math.sin(ga) + v * Math.cos(ga);
+          if (along > 5 && along < 7.6 && Math.hypot(across, z - 2.2) < 0.4) return along > 7.2 ? GUN_D : GUN;
+        }
+        // the roof slab, a little wider than the walls
+        if (z >= 3.4 && z < H && d < 6.2) {
+          if (z < 3.7) return d > 5.6 ? CONC_D : CONC;
+          if (d > 5.5) return z > H - 0.35 ? CONC_L : g(f.main, u, v, z);
+          if (z > H - 0.4) return mod(u + v, 3.2) < 0.3 ? CONC_D : g(CONC_L, u, v, z, 0.08);
+          return g(CONC, u, v, z);
+        }
+        // a round hatch and a periscope on the roof
+        const hd = Math.hypot(u + 1.6, v + 1.4);
+        if (z >= H && z < H + 0.7 && hd < 1.7) return hd < 1.1 && z > H + 0.4 ? GUN_D : GUN;
+        if (inBox(u, v, z, 1.4, 2.4, -2.6, -1.6, H, H + 1.8)) return z > H + 1.2 ? (u > 2.1 ? BLACK : GUN_L) : GUN;
+        // a low curve of sandbags in front
+        const sd = Math.hypot(u, v);
+        if (sd > 7.1 && sd < 8.3 && z < 1.5 && a > -0.15 && a < Math.PI / 2 + 0.15 && Math.abs(a - Math.PI / 4) > 0.14) {
+          const course = Math.floor(z / 0.75);
+          const along = a * 5 + course * 0.5;
+          if (mod(along, 1) < 0.14 || z - course * 0.75 < 0.15) return shade(SAND_BAG, -0.3);
+          return shade(SAND_BAG, (hash2(Math.floor(along), course, 19) - 0.5) * 0.22);
+        }
+        return null;
+      };
+      return { shape, rx: 8, ry: 8, zmax: 7, fx: [{ x: 0, y: 0, z: 2.2 }] };
     }
     case 'silo': {
       // Ore silos: a tall rounded tank and a smaller one, each with a glowing
@@ -3369,7 +3420,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18, pillbox: 19 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {
