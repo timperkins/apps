@@ -116,3 +116,13 @@
 .ex-touch [data-t="rot"] { right: 190px; bottom: 120px; width: 50px; height: 50px; font-size: 20px; }
 .ex-wrap.touch .ex-hotbar .ex-slot { width: 38px; height: 38px; }
 .ex-wrap.touch .ex-hint { bottom: 70px; font-size: 12px; }
+.ex-join { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.45); padding: 10px; z-index: 5; }
+.ex-join[hidden], .ex-coop[hidden] { display: none; }
+.ex-coop { position: absolute; top: calc(max(10px, env(safe-area-inset-top)) + 54px); right: 10px; display: flex; gap: 4px; align-items: center; background: rgba(0,0,0,.5); border-radius: 999px; padding: 4px 10px; font-size: 13px; font-weight: 700; pointer-events: none; }
+.ex-coop i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #000; font-style: normal; font-size: 11px; }
+.ex-name { font: inherit; padding: 6px 10px; border-radius: 8px; border: 2px solid #3a4560; background: #111827; color: #fff; width: 200px; }
+.ex-alert { position: absolute; bottom: 132px; left: 50%; transform: translateX(-50%); background: rgba(190,20,20,.9); border: 2px solid #ff8080; border-radius: 10px; padding: 6px 14px; font-weight: 800; white-space: nowrap; max-width: 94vw; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.ex-alert[hidden] { display: none; }
+.ex-alert.flash { animation: ex-flash .5s 3; }
+@keyframes ex-flash { 50% { background: rgba(255,80,40,.95); } }
+.ex-btn[data-robo]:not(.on) { background: #4a5468; border-bottom-color: #2d3444; }

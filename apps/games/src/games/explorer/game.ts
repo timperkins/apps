@@ -63,6 +63,22 @@ export interface Building {
   water?: boolean; // has water (steam engine)
   owner?: number;
   hub?: boolean;
+  /** Roboports: where robots may get things for ghosts. */
+  fromChests?: boolean;
+  fromBelts?: boolean;
+}
+
+/** A see-through plan of a building: it does nothing until a robot (or you) builds the real thing there. */
+export interface Ghost { id: number; type: BuildId; dim: Dim; x: number; z: number; dir: number; owner: number }
+
+/** A flying robot out on a job. */
+export interface Bot {
+  id: number; dim: Dim; x: number; y: number; z: number;
+  home: number; // roboport id
+  ghost: number; // the ghost it is building
+  src: number; // where it gets the thing from (0 = going home)
+  carry: ItemId | null;
+  stage: 'fetch' | 'build' | 'home';
 }
 
 export interface Mob {
@@ -118,9 +134,12 @@ export type Target =
   | { k: 'build'; id: number }
   | { k: 'cave'; x: number; z: number }
   | { k: 'ground'; x: number; z: number }
-  | { k: 'rock'; id: number };
+  | { k: 'rock'; id: number }
+  | { k: 'ghost'; id: number };
 
 export const PLAYER_RADIUS = 0.35;
+/** Crafting by hand takes a little while (Tim: "crafting should take a little time"). */
+export const handTime = (t: number) => Math.max(0.6, t * 1.6);
 export const REACH = 6;
 const TICK = 0.05;
 const BELT_SPEED = 1.9;
@@ -154,6 +173,9 @@ export class Game {
   me: Player;
   buildings = new Map<number, Building>();
   occ = new Map<string, number>(); // `dim|x,z` -> building id
+  ghosts = new Map<number, Ghost>();
+  gocc = new Map<string, number>(); // `dim|x,z` -> ghost id
+  bots: Bot[] = [];
   mobs = new Map<number, Mob>();
   cars = new Map<number, Vehicle>();
   shots: Shot[] = [];
@@ -309,6 +331,8 @@ export class Game {
     this.tickPower();
     for (const b of this.buildings.values()) this.tickBuilding(b, dt);
     this.tickMobs(dt);
+    this.tickAlerts(dt);
+    this.tickBots(dt);
     this.tickShots(dt);
     this.tickShip(dt);
     this.spawnT -= dt;
@@ -372,6 +396,37 @@ export class Game {
       case 'hit': return this.melee(p, args.tg as Target);
       case 'fire': return this.fire(p, num('x'), num('y'), num('z'));
       case 'place': return this.place(p, num('slot'), num('x'), num('z'), num('dir') & 3);
+      case 'ghost': {
+        // hold Ctrl: a plan of the building in your hand, without using it up
+        const sl = p.inv[num('slot')];
+        const type = sl ? ITEMS[sl.id]?.build : undefined;
+        if (!type) return;
+        const why = this.placeGhost(p, type, num('x'), num('z'), num('dir') & 3, true);
+        if (why) { this.toast(why, p); this.sfx('nope', p.x, p.y, p.z, p.dim); } else this.sfx('click', p.x, p.y, p.z, p.dim);
+        return;
+      }
+      case 'ghosts': {
+        // a blueprint: lots of ghosts at once
+        const list = Array.isArray(args.list) ? (args.list as unknown[]).slice(0, 2000) : [];
+        let ok = 0, bad = 0;
+        for (const e of list) {
+          const [type, x, z, dir] = e as [BuildId, number, number, number];
+          if (!BUILDS[type] || type === 'space_platform' || type === 'house' || !Number.isFinite(x) || !Number.isFinite(z)) continue;
+          if (this.placeGhost(p, type, Math.floor(x), Math.floor(z), (dir | 0) & 3, false)) bad++; else ok++;
+        }
+        this.toast(ok ? `Placed ${ok} ghost${ok > 1 ? 's' : ''}${bad ? ` (${bad} didn’t fit)` : ''}. Robots from a roboport will build them.` : 'None of it fits there.', p);
+        this.sfx(ok ? 'place' : 'nope', p.x, p.y, p.z, p.dim);
+        return;
+      }
+      case 'unghost': { const gh = this.ghosts.get(num('id')); if (gh && gh.dim === p.dim) { this.removeGhost(gh); this.sfx('pickup', gh.x + 0.5, p.y, gh.z + 0.5, p.dim); } return; }
+      case 'robo': {
+        const b = this.buildings.get(num('id'));
+        if (!b || b.type !== 'roboport') return;
+        if (args.chests !== undefined) b.fromChests = args.chests === true;
+        if (args.belts !== undefined) b.fromBelts = args.belts === true;
+        this.bchanged(b);
+        return;
+      }
       case 'pickup': return this.pickUp(p, num('id'));
       case 'eat': return this.eat(p, num('slot'));
       case 'swap': return this.swap(p, num('a'), num('b'));
@@ -432,7 +487,7 @@ export class Game {
     const last = steps[steps.length - 1];
     for (const s of steps) {
       const rr = RECIPE[s.id];
-      for (let i = 0; i < s.times; i++) p.craftQ.push({ id: s.id, left: rr.time, total: rr.time, part: s !== last, req, refund: s === last && i === s.times - 1 ? refund : undefined } as Player['craftQ'][number]);
+      for (let i = 0; i < s.times; i++) p.craftQ.push({ id: s.id, left: handTime(rr.time), total: handTime(rr.time), part: s !== last, req, refund: s === last && i === s.times - 1 ? refund : undefined } as Player['craftQ'][number]);
     }
     this.sfx('click', p.x, p.y, p.z, p.dim);
     this.dirty(p);
@@ -644,6 +699,34 @@ export class Game {
     }
     this.shots = this.shots.filter((s) => s.life > -99);
   }
+  private alertT = 0;
+  private alertN = 0;
+  private alertWhat = '';
+  /** A building got destroyed: it blows up, and everyone sees an alert by the hotbar (at most one every 10 seconds). */
+  blowUp(b: Building, by: string) {
+    const size = BUILDS[b.type].size;
+    const big = b.type === 'rocket_silo' || b.type === 'steam_engine';
+    const cx = b.x + size / 2, cz = b.z + size / 2, y = this.groundY(b.dim, cx, cz) + 0.6;
+    this.removeBuilding(b);
+    const r = (big ? 4 : 1) * Math.max(1.6, size * 0.9);
+    this.fx.push({ k: 'chips', x: cx, y, z: cz, dim: b.dim, c: '#6b6f78', n: big ? 40 : 14 });
+    this.explode(b.dim, cx, y, cz, r, big ? 40 : 10, { k: 'b', id: -1 });
+    if (big) this.sfx('boom', cx, y, cz, b.dim);
+    this.alertN++;
+    this.alertWhat = `${by} destroyed ${this.alertN > 1 ? `${this.alertN} buildings` : `a ${BUILDS[b.type].name.toLowerCase()}`}`;
+    this.alertAt = { x: Math.round(cx), z: Math.round(cz), dim: b.dim };
+    if (this.alertT <= 0) this.sendAlert();
+  }
+  private alertAt = { x: 0, z: 0, dim: 'earth' as Dim };
+  private sendAlert() {
+    if (!this.alertN) return;
+    this.events.push({ t: 'alert', s: `⚠️ ${this.alertWhat}!`, x: this.alertAt.x, z: this.alertAt.z, dim: this.alertAt.dim });
+    this.alertN = 0;
+    this.alertT = 10;
+  }
+  tickAlerts(dt: number) {
+    if (this.alertT > 0) { this.alertT -= dt; if (this.alertT <= 0) this.sendAlert(); }
+  }
   explode(dim: Dim, x: number, y: number, z: number, r: number, dmg: number, by: { k: 'p' | 'm' | 'b'; id: number }) {
     this.fx.push({ k: 'boom', x, y, z, dim, n: r });
     this.sfx('boom', x, y, z, dim);
@@ -730,7 +813,7 @@ export class Game {
   }
 
   // ---------- building ----------
-  canPlace(p: Player, type: BuildId, x: number, z: number, dim: Dim): string | null {
+  canPlace(p: Player | null, type: BuildId, x: number, z: number, dim: Dim, ghost = false): string | null {
     const def = BUILDS[type];
     if (def.spaceOnly && dim !== 'space') return 'That only works on a space platform.';
     if (dim === 'space' && !def.space) return 'That doesn’t work in space.';
@@ -748,7 +831,7 @@ export class Game {
         if (this.w.villageBuildingAt(tx, tz)) return 'A village house is in the way.';
         if (this.w.isWater(tx, tz) && type !== 'water_pump') return 'You can’t build on water.';
         if (this.w.tileSlope(tx, tz) > 1.6 && !def.flat) return 'Too steep here.';
-        for (const q of this.players.values()) if (q.dim === dim && !def.flat && Math.floor(q.x) === wrap(tx) && Math.floor(q.z) === wrap(tz)) return 'Step out of the way first.';
+        if (!ghost) for (const q of this.players.values()) if (q.dim === dim && !def.flat && Math.floor(q.x) === wrap(tx) && Math.floor(q.z) === wrap(tz)) return 'Step out of the way first.';
       } else if (dim === 'space') {
         if (!this.ship.tiles.has(key(tx, tz))) return 'Build on the platform.';
       } else {
@@ -835,6 +918,9 @@ export class Game {
     if (type === 'underground_belt' || type === 'underground_pipe') this.pairUnderground(b);
     this.buildings.set(b.id, b);
     for (let ox = 0; ox < def.size; ox++) for (let oz = 0; oz < def.size; oz++) this.occ.set(this.occKey(dim, x + ox, z + oz), b.id);
+    // building over ghosts replaces them
+    this.clearGhosts(dim, x, z, def.size);
+    if (type === 'roboport') { b.fromChests = true; b.fromBelts = false; }
     this.powerDirty = this.fluidDirty = true;
     this.events.push({ t: 'b+', b });
     return b;
@@ -915,7 +1001,7 @@ export class Game {
       return true;
     };
     switch (b.type) {
-      case 'chest': case 'house':
+      case 'chest': case 'house': case 'roboport':
         if (!b.inv || room(b.inv, id) < 1) return false;
         if (doIt) add(b.inv, id, 1);
         return true;
@@ -1037,6 +1123,168 @@ export class Game {
     this.dirty(p);
   }
 
+  // ---------- ghosts ----------
+  ghostAt(dim: Dim, x: number, z: number): Ghost | null {
+    const id = this.gocc.get(this.occKey(dim, x, z));
+    return id ? this.ghosts.get(id) ?? null : null;
+  }
+  /** Puts a ghost down; returns why not, or null. */
+  placeGhost(p: Player, type: BuildId, x: number, z: number, dir: number, near: boolean): string | null {
+    if (type === 'space_platform') return 'Platform can’t be a ghost.';
+    if (near && !this.near(p, x + 0.5, z + 0.5, REACH + 4)) return 'Too far away.';
+    const dim = p.dim === 'silo' ? 'earth' : p.dim;
+    if (dim === 'earth') { x = wrap(x); z = wrap(z); }
+    const why = this.canPlace(p, type, x, z, dim, true);
+    if (why) return why;
+    const size = BUILDS[type].size;
+    const same = this.ghostAt(dim, x, z);
+    if (same && same.type === type && same.x === x && same.z === z && same.dir === dir) return null;
+    this.clearGhosts(dim, x, z, size);
+    this.addGhost({ id: this.nextId++, type, dim, x, z, dir, owner: p.slot });
+    return null;
+  }
+  addGhost(gh: Ghost) {
+    if (gh.id >= this.nextId) this.nextId = gh.id + 1;
+    this.ghosts.set(gh.id, gh);
+    const size = BUILDS[gh.type].size;
+    for (let ox = 0; ox < size; ox++) for (let oz = 0; oz < size; oz++) this.gocc.set(this.occKey(gh.dim, gh.x + ox, gh.z + oz), gh.id);
+    this.events.push({ t: 'g+', g: gh });
+  }
+  removeGhost(gh: Ghost) {
+    if (!this.ghosts.delete(gh.id)) return;
+    const size = BUILDS[gh.type].size;
+    for (let ox = 0; ox < size; ox++) for (let oz = 0; oz < size; oz++) if (this.gocc.get(this.occKey(gh.dim, gh.x + ox, gh.z + oz)) === gh.id) this.gocc.delete(this.occKey(gh.dim, gh.x + ox, gh.z + oz));
+    this.events.push({ t: 'g-', id: gh.id });
+  }
+  clearGhosts(dim: Dim, x: number, z: number, size: number) {
+    for (let ox = 0; ox < size; ox++) for (let oz = 0; oz < size; oz++) { const gh = this.ghostAt(dim, x + ox, z + oz); if (gh) this.removeGhost(gh); }
+  }
+
+  // ---------- flying robots ----------
+  private botT = 0;
+  private stuck = new Map<number, number>(); // ghost id -> time it can be tried again
+  private tickRoboport(b: Building, dt: number) {
+    b.on = this.bots.some((r) => r.home === b.id);
+    void dt;
+  }
+  private inRange(port: Building, dim: Dim, x: number, z: number) {
+    if (port.dim !== dim) return false;
+    const r = BUILDS.roboport.robo!;
+    const dx = dim === 'earth' ? wd(x, port.x + 1) : x - port.x - 1, dz = dim === 'earth' ? wd(z, port.z + 1) : z - port.z - 1;
+    return Math.abs(dx) <= r && Math.abs(dz) <= r;
+  }
+  /** Something in range that has this item: the roboport itself, chests, or (if allowed) belts. */
+  private findSource(port: Building, id: ItemId, gx: number, gz: number): Building | null {
+    if (port.inv && port.inv.some((s) => s?.id === id)) return port;
+    let best: Building | null = null, bd = Infinity;
+    for (const o of this.buildings.values()) {
+      if (o === port || o.dim !== port.dim) continue;
+      let has = false;
+      if (o.type === 'chest' && port.fromChests !== false) has = !!o.inv?.some((s) => s?.id === id);
+      else if ((o.type === 'belt' || o.type === 'underground_belt') && port.fromBelts) has = !!o.items?.some((i) => i.id === id);
+      if (!has || !this.inRange(port, o.dim, o.x, o.z)) continue;
+      const d = dist2(o.x, o.z, gx, gz);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+  private takeFrom(src: Building, id: ItemId): boolean {
+    if (src.type === 'belt' || src.type === 'underground_belt') {
+      const i = src.items?.findIndex((x) => x.id === id) ?? -1;
+      if (i < 0) return false;
+      src.items!.splice(i, 1);
+      return true;
+    }
+    if (!src.inv || !src.inv.some((s) => s?.id === id)) return false;
+    remove(src.inv, id, 1);
+    this.bchanged(src);
+    return true;
+  }
+  private tickBots(dt: number) {
+    // send robots out to ghosts
+    this.botT -= dt;
+    if (this.botT <= 0 && this.ghosts.size) {
+      this.botT = 0.5;
+      const busy = new Set(this.bots.map((r) => r.ghost));
+      const now = this.time;
+      for (const port of this.buildings.values()) {
+        if (port.type !== 'roboport' || (port.power ?? 0) <= 0 || !port.inv) continue;
+        let sent = 0;
+        for (const gh of this.ghosts.values()) {
+          if (sent >= 3 || !port.inv.some((s) => s?.id === 'robot')) break;
+          if (busy.has(gh.id) || (this.stuck.get(gh.id) ?? 0) > now || !this.inRange(port, gh.dim, gh.x, gh.z)) continue;
+          const src = this.findSource(port, gh.type, gh.x, gh.z);
+          if (!src) continue;
+          remove(port.inv, 'robot', 1);
+          const y = this.groundY(port.dim, port.x + 1, port.z + 1) + 2.2;
+          this.bots.push({ id: this.nextId++, dim: port.dim, x: port.x + 1, y, z: port.z + 1, home: port.id, ghost: gh.id, src: src.id, carry: null, stage: 'fetch' });
+          busy.add(gh.id);
+          sent++;
+          this.bchanged(port);
+          this.sfx('whoosh', port.x + 1, y, port.z + 1, port.dim);
+        }
+      }
+    }
+    const SPEED = 9;
+    for (const r of this.bots) {
+      let tx: number, tz: number;
+      const gh = this.ghosts.get(r.ghost);
+      const home = this.buildings.get(r.home);
+      if (r.stage === 'fetch') {
+        const src = this.buildings.get(r.src);
+        if (!src || !gh) { r.stage = 'home'; continue; }
+        tx = src.x + 0.5; tz = src.z + 0.5;
+      } else if (r.stage === 'build') {
+        if (!gh) { r.stage = 'home'; continue; }
+        const sz = BUILDS[gh.type].size;
+        tx = gh.x + sz / 2; tz = gh.z + sz / 2;
+      } else {
+        if (!home) { // its roboport is gone: it drops what it had and is lost
+          if (r.carry) this.toast(`A robot lost its roboport.`);
+          r.stage = 'home'; (r as { dead?: boolean }).dead = true; continue;
+        }
+        tx = home.x + 1; tz = home.z + 1;
+      }
+      const dx = r.dim === 'earth' ? wd(tx, r.x) : tx - r.x, dz = r.dim === 'earth' ? wd(tz, r.z) : tz - r.z;
+      const d = Math.hypot(dx, dz);
+      const want = this.groundY(r.dim, r.x, r.z) + 2.2;
+      r.y += (want - r.y) * Math.min(1, dt * 3);
+      if (d > 0.3) {
+        const st = Math.min(d, SPEED * dt);
+        r.x += (dx / d) * st; r.z += (dz / d) * st;
+        if (r.dim === 'earth') { r.x = wrap(r.x); r.z = wrap(r.z); }
+        continue;
+      }
+      // arrived
+      if (r.stage === 'fetch') {
+        const src = this.buildings.get(r.src)!;
+        if (this.takeFrom(src, gh!.type)) { r.carry = gh!.type; r.stage = 'build'; this.sfx('grab', r.x, r.y, r.z, r.dim); }
+        else {
+          const port = home ? this.findSource(home, gh!.type, gh!.x, gh!.z) : null;
+          if (port) r.src = port.id; else r.stage = 'home';
+        }
+      } else if (r.stage === 'build') {
+        const g2 = gh!;
+        const why = this.canPlace(null, g2.type, g2.x, g2.z, g2.dim);
+        if (!why) {
+          this.addBuilding(g2.type, g2.dim, g2.x, g2.z, g2.dir, g2.owner);
+          const sz = BUILDS[g2.type].size;
+          this.fx.push({ k: 'puff', x: g2.x + sz / 2, y: this.groundY(g2.dim, g2.x + 0.5, g2.z + 0.5) + 0.2, z: g2.z + sz / 2, dim: g2.dim, c: '#9fd8ff', n: 10 });
+          this.sfx('place', g2.x + 0.5, r.y, g2.z + 0.5, g2.dim);
+          r.carry = null;
+        } else this.stuck.set(g2.id, this.time + 10); // a tree, an animal or a player in the way: try again later
+        r.stage = 'home';
+      } else if (home) {
+        // back home: the robot and anything it still carries go in the roboport
+        if (home.inv) { add(home.inv, 'robot', 1); if (r.carry) add(home.inv, r.carry, 1); }
+        r.carry = null;
+        (r as { dead?: boolean }).dead = true;
+        this.bchanged(home);
+      }
+    }
+    if (this.bots.some((r) => (r as { dead?: boolean }).dead)) this.bots = this.bots.filter((r) => !(r as { dead?: boolean }).dead);
+  }
+
   // ---------- electricity and pipes ----------
   private netOf = new Map<number, number>(); // building -> power network id (a pole id)
   private nets = new Map<number, { supply: number; demand: number; engines: Building[] }>();
@@ -1139,6 +1387,7 @@ export class Game {
       case 'crusher': return this.tickCrusher(b, dt);
       case 'turret': return this.tickTurret(b, dt);
       case 'rocket_silo': return this.tickSilo(b, dt);
+      case 'roboport': return this.tickRoboport(b, dt);
       case 'campfire':
         for (const p of this.players.values()) if (p.dim === b.dim && p.hp < MAX_HP && dist2(p.x, p.z, b.x + 0.5, b.z + 0.5) < 9) { p.hp = Math.min(MAX_HP, p.hp + dt * 4); this.dirty(p); }
         return;
@@ -1890,7 +2139,7 @@ export class Game {
             if (b) {
               b.hp -= def.dmg;
               this.fx.push({ k: 'spark', x: b.x + 0.5, y: this.groundY(b.dim, b.x, b.z) + 0.8, z: b.z + 0.5, dim: b.dim, c: '#ffcc66', n: 5 });
-              if (b.hp <= 0) { this.removeBuilding(b); this.fx.push({ k: 'puff', x: b.x + 0.5, y: m.y + 0.5, z: b.z + 0.5, dim: b.dim, c: '#888', n: 14 }); m.tgt = null; m.raid = false; }
+              if (b.hp <= 0) { this.blowUp(b, 'Alien bugs'); m.tgt = null; m.raid = false; }
             }
           }
         }
@@ -1918,6 +2167,9 @@ export class Game {
       owned: [...this.owned].filter(([, o]) => o.slot === 0),
       cars: [...this.cars.values()].filter((c) => c.owner === 0).map((c) => ({ ...c, driver: null })),
       pets: [...this.mobs.values()].filter((m) => m.owner === 0).map((m) => m.type),
+      ghosts: [...this.ghosts.values()],
+      // robots out flying go back in their roboport when the world loads
+      botsOut: this.bots.map((r) => [r.home, r.carry] as [number, ItemId | null]),
     };
   }
   static load(s: ReturnType<Game['save']>): Game {
@@ -1941,7 +2193,9 @@ export class Game {
     g.ship.made = !!s.ship?.made;
     for (const [k, o] of s.owned ?? []) g.owned.set(k, o);
     for (const c of s.cars ?? []) g.cars.set(c.id, c);
-    g.nextId = Math.max(s.nextId, ...[...g.buildings.keys()].map((n) => n + 1), 1);
+    for (const gh of s.ghosts ?? []) g.addGhost(gh);
+    for (const [home, carry] of s.botsOut ?? []) { const b = g.buildings.get(home); if (b?.inv) { add(b.inv, 'robot', 1); if (carry) add(b.inv, carry, 1); } }
+    g.nextId = Math.max(s.nextId, ...[...g.buildings.keys()].map((n) => n + 1), ...[...g.ghosts.keys()].map((n) => n + 1), 1);
     for (const t of s.pets ?? []) { const m = g.spawnMob(t, p.dim === 'space' ? 'space' : p.dim, p.x + 1, p.z + 1); m.owner = 0; }
     if (p.dim === 'earth') p.y = g.groundY('earth', p.x, p.z) + 0.2;
     g.events = [];

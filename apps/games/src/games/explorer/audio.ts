@@ -81,6 +81,7 @@ export function sfx(name: string, v = 1) {
     case 'pickup': tone(660, 0.06, 'triangle', 0.1 * V); tone(990, 0.08, 'triangle', 0.08 * V, 0, 0.05); break;
     case 'drop': tone(400, 0.06, 'triangle', 0.1 * V, -100); break;
     case 'eat': for (let i = 0; i < 3; i++) noise(0.06, 0.25 * V, 1800, 'bandpass', i * 0.12, 2); break;
+    case 'alarm': for (let i = 0; i < 3; i++) { tone(880, 0.12, 'square', 0.09 * V, 0, i * 0.3); tone(660, 0.12, 'square', 0.09 * V, 0, i * 0.3 + 0.14); } break;
     case 'nope': tone(200, 0.15, 'square', 0.08 * V, -60); break;
     case 'cash': tone(1200, 0.08, 'square', 0.08 * V); tone(1600, 0.15, 'square', 0.08 * V, 0, 0.08); break;
     case 'gun': noise(0.12, 0.5 * V, 1800, 'bandpass', 0, 0.8); tone(150, 0.08, 'square', 0.12 * V, -80); break;

@@ -35,7 +35,14 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   steel: { name: 'Steel', icon: '🔩', stack: 100, sell: 20 },
   brick: { name: 'Brick', icon: '🧱', stack: 100, sell: 5 },
   gear: { name: 'Gear', icon: '⚙️', stack: 100, sell: 16 },
+  copper_cable: { name: 'Copper cable', icon: '〰️', stack: 200, sell: 4 },
+  iron_stick: { name: 'Iron stick', icon: '🥢', stack: 100, sell: 4 },
   circuit: { name: 'Circuit', icon: '🟩', stack: 100, sell: 22 },
+  advanced_circuit: { name: 'Advanced circuit', icon: '🟥', stack: 100, sell: 60 },
+  motor: { name: 'Electric motor', icon: '🌀', stack: 50, sell: 40 },
+  engine_unit: { name: 'Engine', icon: '🔧', stack: 50, sell: 55 },
+  battery: { name: 'Battery', icon: '🔋', stack: 100, sell: 25 },
+  robot: { name: 'Flying robot', icon: '🛸', stack: 50, sell: 150 },
   plastic: { name: 'Plastic', icon: '🟪', stack: 100, sell: 12 },
   fuel: { name: 'Fuel', icon: '🛢️', stack: 50, fuel: 30, sell: 15 },
   oil: { name: 'Crude oil', icon: '🛢️', stack: 50, sell: 8 },
@@ -54,7 +61,7 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   // space
   space_unit: { name: 'Space unit', icon: '🛰️', stack: 50, sell: 60 },
   space_starter: { name: 'Space starter', icon: '🗝️', stack: 5 },
-  thruster_fuel: { name: 'Thruster fuel', icon: '🔋', stack: 50 },
+  thruster_fuel: { name: 'Thruster fuel', icon: '🧪', stack: 50 },
   rusty_rock: { name: 'Little rusty asteroid', icon: '🟤', stack: 50 },
   carbon_rock: { name: 'Little carbon asteroid', icon: '⚫', stack: 50 },
   cryser_rock: { name: 'Little cryser asteroid', icon: '🔷', stack: 50 },
@@ -75,7 +82,7 @@ export type BuildId =
   | 'chest' | 'furnace' | 'steel_furnace' | 'miner' | 'belt' | 'underground_belt' | 'grabber' | 'long_grabber' | 'bulk_grabber'
   | 'assembler' | 'power_pole' | 'big_power_pole' | 'substation' | 'steam_engine' | 'water_pump' | 'pipe' | 'underground_pipe'
   | 'pumpjack' | 'oil_refinery' | 'turret' | 'road' | 'roundabout' | 'stop_light' | 'house' | 'rocket_silo'
-  | 'space_platform' | 'thruster' | 'crusher' | 'asteroid_grabber' | 'wall' | 'campfire' | 'torch';
+  | 'space_platform' | 'thruster' | 'crusher' | 'asteroid_grabber' | 'wall' | 'campfire' | 'torch' | 'roboport';
 
 export interface BuildDef {
   name: string;
@@ -95,6 +102,8 @@ export interface BuildDef {
   wire?: number;
   area?: number;
   slots?: number;
+  /** Roboports: robots build ghosts this many tiles around it. */
+  robo?: number;
 }
 
 export const BUILDS: Record<BuildId, BuildDef> = {
@@ -130,6 +139,7 @@ export const BUILDS: Record<BuildId, BuildDef> = {
   wall: { name: 'Stone wall', size: 1, hp: 350, space: true },
   campfire: { name: 'Campfire', size: 1, hp: 50 },
   torch: { name: 'Torch', size: 1, hp: 30, space: true },
+  roboport: { name: 'Roboport', size: 2, hp: 500, power: 50, space: true, slots: 10, robo: 25 },
 };
 
 // every building is also an item you carry
@@ -138,7 +148,7 @@ for (const [id, b] of Object.entries(BUILDS)) {
     chest: '📦', furnace: '🔥', steel_furnace: '🏭', miner: '⛏️', belt: '➡️', underground_belt: '⤵️', grabber: '🦾', long_grabber: '🦿',
     bulk_grabber: '🤖', assembler: '🛠️', power_pole: '🔌', big_power_pole: '🗼', substation: '⚡', steam_engine: '♨️', water_pump: '🚰',
     pipe: '🪈', underground_pipe: '↘️', pumpjack: '🛢️', oil_refinery: '🏗️', turret: '🔫', road: '🛣️', roundabout: '⭕', stop_light: '🚦',
-    house: '🏠', rocket_silo: '🚀', space_platform: '⬛', thruster: '🔥', crusher: '🪓', asteroid_grabber: '🧲', wall: '🧱', campfire: '🏕️', torch: '🕯️',
+    house: '🏠', rocket_silo: '🚀', space_platform: '⬛', thruster: '🔥', crusher: '🪓', asteroid_grabber: '🧲', wall: '🧱', campfire: '🏕️', torch: '🕯️', roboport: '📡',
   };
   ITEMS[id] = { name: b.name, icon: icons[id] ?? '📦', stack: id === 'road' || id === 'belt' || id === 'pipe' || id === 'space_platform' || id === 'wall' ? 100 : 50, build: id as BuildId };
 }
@@ -149,15 +159,21 @@ export interface Recipe {
   n: number;
   inp: [ItemId, number][];
   time: number; // seconds by hand
-  group: 'basics' | 'logistics' | 'power' | 'production' | 'town' | 'combat' | 'space';
+  group: 'basics' | 'parts' | 'logistics' | 'power' | 'production' | 'town' | 'combat' | 'space';
 }
 
 const R = (out: ItemId, n: number, inp: [ItemId, number][], time: number, group: Recipe['group']): Recipe => ({ id: out, out, n, inp, time, group });
 
 /** No research needed for anything. */
 export const RECIPES: Recipe[] = [
-  R('gear', 1, [['iron', 2]], 0.5, 'basics'),
-  R('circuit', 1, [['iron', 1], ['copper', 2]], 0.6, 'basics'),
+  R('gear', 1, [['iron', 2]], 0.5, 'parts'),
+  R('copper_cable', 2, [['copper', 1]], 0.4, 'parts'),
+  R('iron_stick', 2, [['iron', 1]], 0.4, 'parts'),
+  R('circuit', 1, [['iron', 1], ['copper_cable', 3]], 0.6, 'parts'),
+  R('motor', 1, [['gear', 1], ['iron', 1], ['copper_cable', 3]], 1, 'parts'),
+  R('engine_unit', 1, [['steel', 1], ['gear', 1], ['pipe', 2]], 1.5, 'parts'),
+  R('battery', 1, [['iron', 1], ['copper', 1], ['coal', 1]], 1, 'parts'),
+  R('advanced_circuit', 1, [['circuit', 2], ['plastic', 2], ['copper_cable', 4]], 2, 'parts'),
   R('chest', 1, [['wood', 8]], 0.5, 'basics'),
   R('furnace', 1, [['stone', 5]], 0.5, 'basics'),
   R('campfire', 1, [['wood', 5], ['stone', 3]], 0.5, 'basics'),
@@ -165,9 +181,9 @@ export const RECIPES: Recipe[] = [
   R('wall', 2, [['stone', 5]], 0.5, 'basics'),
   R('steel_pickaxe', 1, [['steel', 5], ['wood', 2]], 1, 'basics'),
   R('steel_furnace', 1, [['brick', 20], ['iron', 10], ['circuit', 5]], 2, 'production'),
-  R('miner', 1, [['circuit', 3], ['gear', 5], ['iron', 10]], 2, 'production'),
-  R('assembler', 1, [['circuit', 3], ['gear', 5], ['iron', 9]], 2, 'production'),
-  R('pumpjack', 1, [['steel', 5], ['gear', 10], ['circuit', 5], ['pipe', 10]], 3, 'production'),
+  R('miner', 1, [['circuit', 3], ['gear', 3], ['motor', 1], ['iron', 10]], 2, 'production'),
+  R('assembler', 1, [['circuit', 3], ['gear', 3], ['motor', 1], ['iron', 9]], 2, 'production'),
+  R('pumpjack', 1, [['steel', 5], ['engine_unit', 2], ['circuit', 5], ['pipe', 10]], 3, 'production'),
   R('oil_refinery', 1, [['steel', 15], ['gear', 10], ['circuit', 10], ['brick', 10], ['pipe', 10]], 5, 'production'),
   R('belt', 2, [['gear', 1], ['iron', 1]], 0.5, 'logistics'),
   R('underground_belt', 2, [['iron', 10], ['belt', 5]], 1, 'logistics'),
@@ -175,10 +191,12 @@ export const RECIPES: Recipe[] = [
   R('long_grabber', 1, [['grabber', 1], ['gear', 1], ['iron', 1]], 0.5, 'logistics'),
   R('bulk_grabber', 1, [['grabber', 1], ['gear', 5], ['circuit', 5]], 1, 'logistics'),
   R('pipe', 1, [['iron', 1]], 0.3, 'logistics'),
+  R('robot', 1, [['motor', 1], ['battery', 2], ['circuit', 3], ['steel', 2]], 2, 'logistics'),
+  R('roboport', 1, [['steel', 20], ['gear', 10], ['circuit', 10], ['battery', 5], ['motor', 4]], 4, 'logistics'),
   R('underground_pipe', 2, [['pipe', 5], ['iron', 5]], 1, 'logistics'),
-  R('power_pole', 2, [['wood', 1], ['copper', 2]], 0.5, 'power'),
-  R('big_power_pole', 1, [['iron', 5], ['steel', 2], ['copper', 5]], 1, 'power'),
-  R('substation', 1, [['steel', 10], ['circuit', 5], ['copper', 5]], 2, 'power'),
+  R('power_pole', 2, [['wood', 1], ['copper_cable', 2]], 0.5, 'power'),
+  R('big_power_pole', 1, [['iron_stick', 4], ['steel', 2], ['copper_cable', 5]], 1, 'power'),
+  R('substation', 1, [['steel', 10], ['circuit', 5], ['copper_cable', 10]], 2, 'power'),
   R('steam_engine', 1, [['gear', 8], ['pipe', 10], ['iron', 5]], 2, 'power'),
   R('water_pump', 1, [['circuit', 2], ['pipe', 1], ['gear', 1]], 1, 'power'),
   R('road', 4, [['stone', 2]], 0.3, 'town'),
@@ -196,9 +214,9 @@ export const RECIPES: Recipe[] = [
   R('grenade', 1, [['coal', 5], ['iron', 5]], 0.8, 'combat'),
   R('rocket_silo', 1, [['stone', 1000], ['iron', 1000]], 10, 'space'),
   R('space_unit', 1, [['iron', 10], ['copper', 1]], 1, 'space'),
-  R('space_starter', 1, [['steel', 10], ['circuit', 10], ['plastic', 5]], 3, 'space'),
+  R('space_starter', 1, [['steel', 10], ['advanced_circuit', 5], ['battery', 5]], 3, 'space'),
   R('space_platform', 1, [['steel', 2], ['iron', 5]], 0.5, 'space'),
-  R('thruster', 1, [['steel', 10], ['gear', 5], ['circuit', 5], ['pipe', 5]], 2, 'space'),
+  R('thruster', 1, [['steel', 10], ['engine_unit', 3], ['circuit', 5], ['pipe', 5]], 2, 'space'),
   R('thruster_fuel', 1, [['crystal', 1], ['water', 100]], 1, 'space'),
   R('crusher', 1, [['steel', 10], ['gear', 5], ['circuit', 5]], 2, 'space'),
   R('asteroid_grabber', 1, [['steel', 5], ['gear', 5], ['circuit', 5]], 1, 'space'),

@@ -119,6 +119,7 @@ export const ITEM_COLOR: Record<string, string> = {
   wood: '#8a5a2b', stone: '#9a958c', coal: '#222', iron_ore: '#6f87a8', copper_ore: '#d07a3a', iron: '#cfd6de', copper: '#e08a4a', steel: '#8fa0b0',
   brick: '#b5523b', gear: '#9aa0a8', circuit: '#2fa84a', plastic: '#c070e0', fuel: '#e0b030', carbon: '#333', ice: '#bfe8ff', crystal: '#7fe0ff',
   sand: '#e0cf8a', dirt: '#7a5a3a', ammo: '#e0c040', advanced_ammo: '#d04030', rusty_rock: '#a55a33', carbon_rock: '#35363b', cryser_rock: '#7fc8ef',
+  copper_cable: '#e8803a', iron_stick: '#b8c0c8', advanced_circuit: '#d03838', motor: '#5a7fb0', engine_unit: '#7a6a5a', battery: '#e0d040', robot: '#e8eef8',
   space_unit: '#e8e8f0', thruster_fuel: '#40d0a0', water: '#4aa0ff', rocket: '#d04030', bug_shell: '#5ef2c4', fur: '#c9a77a', bone: '#eee',
 };
 export const itemColor = (id: ItemId) => ITEM_COLOR[id] ?? '#c8c0b0';
@@ -295,6 +296,19 @@ export function buildingModel(b: Building): THREE.Group {
       cyl(0.04, 1, 0.5, 0.5, 0.5, '#6b4423', g);
       parts.glow = ball(0.1, 0.5, 1.05, 0.5, '#ffc040', g, '#ff9000');
       break;
+    case 'roboport': {
+      // a 2×2 base with landing pads and an antenna
+      box(2, 0.7, 2, 1, 0.35, 1, '#c9ced6', g);
+      box(1.9, 0.08, 1.9, 1, 0.74, 1, '#3d4654', g);
+      for (const [px, pz] of [[0.5, 0.5], [1.5, 0.5], [0.5, 1.5], [1.5, 1.5]]) box(0.6, 0.04, 0.6, px, 0.8, pz, '#f2c230', g);
+      cyl(0.05, 1.3, 1, 1.4, 1, '#888', g);
+      parts.glow = ball(0.12, 1, 2.1, 1, '#40c0ff', g, '#2090ff');
+      parts.spin = new THREE.Group();
+      parts.spin.position.set(1, 1.75, 1);
+      box(0.9, 0.05, 0.12, 0, 0, 0, '#ddd', parts.spin);
+      g.add(parts.spin);
+      break;
+    }
     case 'space_platform':
       break;
   }
@@ -440,5 +454,22 @@ export function rocketModel(): THREE.Group {
   const flame = cone(0.4, 1.6, 0, -0.8, 0, '#ffb030', g);
   flame.rotation.x = Math.PI;
   (flame as THREE.Mesh).material = mat('#ffb030', { emissive: '#ff7000' });
+  return g;
+}
+
+// ---------- flying robots ----------
+export function botModel(): THREE.Group {
+  const g = new THREE.Group();
+  box(0.42, 0.18, 0.42, 0, 0, 0, '#e8eef8', g);
+  box(0.3, 0.08, 0.3, 0, 0.12, 0, '#4a7fd0', g);
+  ball(0.06, 0, -0.04, 0.22, '#40e0ff', g, '#20c0ff');
+  const rotors = new THREE.Group();
+  for (const [x, z] of [[-0.28, -0.28], [0.28, -0.28], [-0.28, 0.28], [0.28, 0.28]]) {
+    box(0.06, 0.04, 0.3, x, 0.12, z, '#333', rotors);
+    box(0.3, 0.04, 0.06, x, 0.12, z, '#333', rotors);
+  }
+  g.add(rotors);
+  const carry = box(0.2, 0.2, 0.2, 0, -0.22, 0, '#fff', g);
+  g.userData = { rotors, carry };
   return g;
 }

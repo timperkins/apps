@@ -3,19 +3,21 @@
 import './style.css';
 import type { GameModule } from '../types';
 import {
-  BIOME_NAME, BUILDS, CARS, DESTINATIONS, FOOD_MENU, HOMES, ITEMS, MAX_HP, MOBS, PETS, RECIPE, RECIPES, SHOP_NAME, SILO_CARGO, SPACE_UNITS_TO_LAUNCH,
+  BIOME_NAME, BUILDS, type BuildId, CARS, DESTINATIONS, FOOD_MENU, HOMES, ITEMS, MAX_HP, MOBS, PETS, RECIPE, RECIPES, SHOP_NAME, SILO_CARGO, SPACE_UNITS_TO_LAUNCH,
   STORE_STOCK, WEAPONS, WORLD, type CarId, type ItemId, type Recipe, type ShopKind,
 } from './data';
-import { DIRS, Game, REACH, newPlayer, type Building, type Dim, type Fx, type Mob, type Player, type Target, type Vehicle } from './game';
+import { DIRS, Game, REACH, newPlayer, type Bot, type Building, type Dim, type Fx, type Ghost, type Mob, type Player, type Target, type Vehicle } from './game';
 import { craftable, type Inv, type Slot } from './inventory';
 import { Renderer } from './render';
 import { ambience, isMuted, setMuted, sfx, stopAudio, unlockAudio } from './audio';
 import { CAVE_SIZE, dist2, wd, wrap, type VillageBuilding } from './world';
-import { coopBadge, coopMenu, every } from '../coop/ui';
-import { PLAYER_NAMES, type FriendSession, type HostSession, type Session } from '../coop/session';
+import { every } from '../coop/ui';
+import { MAX_PLAYERS, hostWorld, joinWorld, listHosts, type FriendSession, type HostInfo, type HostSession, type Session } from './net';
 
 const SAVE_KEY = 'explorer-save-v1';
-const COOP_PREFIX = 'trom-explorer-';
+const NAME_KEY = 'explorer-name';
+const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
+const PLAYER_COLORS = ['#ffd23f', '#4fc3f7', '#ff6b9d', '#7ddc6a'];
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const money = (n: number) => `$${Math.floor(n).toLocaleString()}`;
 const icon = (id: ItemId) => ITEMS[id]?.icon ?? '❔';
@@ -29,6 +31,7 @@ type Panel =
   | { k: 'map' }
   | { k: 'ship' }
   | { k: 'pause' }
+  | { k: 'host' }
   | { k: 'help' };
 
 // what friends send the host, and the host sends friends
@@ -40,19 +43,23 @@ type Snap = {
   cs: [number, CarId, number, number, number, number, number | null, number, number | null][];
   bs: [number, boolean, [ItemId, number][] | null, Slot | null, number, number, number, number][];
   rocks: [number, string, number, number, number, number][] | null;
+  bots: [number, number, number, number, ItemId | null][];
   ship: { at: number; dest: number; moving: boolean; km: number };
   fx: Fx[];
 };
 
-const GROUPS: [Recipe['group'], string][] = [['basics', '🪵 Basics'], ['production', '🏭 Production'], ['logistics', '➡️ Logistics'], ['power', '⚡ Power & oil'], ['combat', '🔫 Combat'], ['town', '🏘️ Town'], ['space', '🚀 Space']];
+const GROUPS: [Recipe['group'], string][] = [['basics', '🪵 Basics'], ['parts', '🔧 Parts'], ['production', '🏭 Production'], ['logistics', '➡️ Logistics'], ['power', '⚡ Power & oil'], ['combat', '🔫 Combat'], ['town', '🏘️ Town'], ['space', '🚀 Space']];
 
 const HELP = `
 <h3>Getting around</h3>
-<p><b>WASD</b> or arrows walk · <b>Space</b> jump · hold <b>Ctrl</b> to run · drag with the <b>right mouse button</b> (or <b>Z</b>/<b>C</b>) to turn the camera · <b>mouse wheel</b> zooms.</p>
+<p><b>WASD</b> or arrows walk · <b>Space</b> jump · hold <b>Q</b> to run · drag with the <b>right mouse button</b> (or <b>Z</b>/<b>C</b>) to turn the camera · <b>mouse wheel</b> zooms.</p>
 <h3>Doing things</h3>
 <p><b>Left click</b> (hold) to chop trees, break rocks, mine ore, dig the ground, punch, or shoot with a gun in your hand. <b>E</b> uses things: shop doors, cars, caves, mine shafts and machines. <b>1–0</b> pick from your hotbar. With a building in your hand, left click puts it down and <b>R</b> turns it. <b>X</b> picks a building back up. <b>F</b> eats food.</p>
 <h3>Crafting</h3>
-<p>Press <b>Shift</b> (or <b>Tab</b>) for your inventory and the crafting list. No research needed: everything can be made right away if you have the stuff. Parts like gears and circuits get made for you on the way.</p>
+<p>Press <b>Shift</b> (or <b>Tab</b>) for your inventory and the crafting list. No research needed: everything can be made right away if you have the stuff. Crafting takes a little time. Parts (gears, copper cable, circuits, motors, batteries, engines…) get made for you on the way.</p>
+<h3>Ghosts, robots and blueprints</h3>
+<p>Hold <b>Ctrl</b> while you place a building and you put down a <b>ghost</b>: a see-through plan that doesn't use up the building and doesn't work. Put the real thing on a ghost to replace it, or press <b>X</b> on a ghost to remove it. A <b>roboport</b> with power and <b>flying robots</b> in it sends robots to build ghosts within 25 tiles. They get the buildings from chests (and the roboport itself); in the roboport you can let them take things off belts too.</p>
+<p><b>Blueprints:</b> hold <b>B</b> over one corner, move to the other corner and let go. That copies everything in the box. Then click to put the copy down as ghosts, <b>R</b> turns it, <b>Esc</b> puts it away.</p>
 <h3>Factories</h3>
 <p>Drills go on ore patches and run on electricity or coal. Furnaces smelt ore into plates (and the steel furnace turns iron into steel). Grabbers take from behind them and put in front. Belts carry things. For electricity: a water pump at the water's edge, pipes to a steam engine with coal in it, and power poles from the engine to your machines. Pumpjacks pump oil (dark puddles) through pipes to an oil refinery for fuel and plastic.</p>
 <h3>To space</h3>
@@ -67,12 +74,13 @@ const game: GameModule = {
       <div class="ex-hud" hidden>
         <div class="ex-top">
           <div class="ex-stats"><div class="ex-hp"><i></i><span></span></div><div class="ex-line ex-money"></div><div class="ex-line ex-where"></div><div class="ex-line ex-small ex-clock"></div></div>
-          <div class="ex-btns"><button data-b="bag" title="Inventory and crafting (Shift)">🎒</button><button data-b="map" title="Map (M)">🗺️</button><button data-b="friends" title="Play with friends">👥</button><button data-b="mute" title="Sound">🔊</button><button data-b="pause" title="Menu (Esc)">⏸</button></div>
+          <div class="ex-btns"><button data-b="bag" title="Inventory and crafting (Shift)">🎒</button><button data-b="map" title="Map (M)">🗺️</button><button data-b="friends" title="Host this world for friends">👥</button><button data-b="mute" title="Sound">🔊</button><button data-b="pause" title="Menu (Esc)">⏸</button></div>
         </div>
         <div class="ex-toasts"></div>
         <div class="ex-hint"></div>
         <div class="ex-cross">+</div>
         <div class="ex-queue"></div>
+        <div class="ex-alert" hidden></div>
         <div class="ex-hotbar"></div>
         <div class="ex-touch"><div class="ex-stick"><i></i></div><button data-t="jump">⤒</button><button data-t="use">E</button><button data-t="act">⛏️</button><button data-t="bag">🎒</button><button data-t="rot">⟳</button></div>
       </div>
@@ -84,6 +92,8 @@ const game: GameModule = {
         <p class="ex-small ex-tip">Designed by Tim. 1,000,000 tiles around · biomes · villages · factories · rockets · up to 4 players</p>
       </div>
       <div class="ex-loading" hidden>Building the world…</div>
+      <div class="ex-join" hidden></div>
+      <div class="ex-coop" hidden></div>
     </div>`;
     const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
     const wrapEl = $('.ex-wrap');
@@ -112,13 +122,15 @@ const game: GameModule = {
 
     // ---------- playing together ----------
     let net: Session | null = null;
-    const badge = coopBadge(wrapEl, { top: 'calc(max(10px, env(safe-area-inset-top)) + 54px)', right: '10px', left: 'auto' });
+    const badgeEl = $('.ex-coop'), joinEl = $('.ex-join');
     const meRate = every(15), snapRate = every(10), bRate = every(4);
     const isFriend = () => net?.role === 'friend';
     const refreshBadge = () => {
-      if (!net || !g) return badge.set('', [], 0);
-      if (net.role === 'host') badge.set(net.code, [0, ...net.friends()], 0);
-      else badge.set(net.code, [...g.players.keys()].sort(), net.slot);
+      badgeEl.hidden = !net || !g;
+      if (!net || !g) return;
+      const slots = net.role === 'host' ? [0, ...net.friends()] : [...g.players.keys()].sort();
+      const dots = slots.map((s) => `<i style="background:${PLAYER_COLORS[s]}" title="${PLAYER_NAMES[s]}${s === g!.me.slot ? ' (you)' : ''}">${s + 1}</i>`).join('');
+      badgeEl.innerHTML = `<span>${net.role === 'host' ? `Hosting · ${slots.length}/${MAX_PLAYERS}` : `In ${esc(net.name)}’s world`}</span>${dots}`;
     };
     const act = (a: string, args: Record<string, unknown> = {}) => {
       if (!g) return;
@@ -152,6 +164,7 @@ const game: GameModule = {
           t: 'init', seed: g.w.seed, time: g.time, you: p,
           buildings: [...g.buildings.values()], removed: [...g.w.removed], ore: [...g.w.oreLeft], dug: [...g.w.dug], caveDug: [...g.w.caveDug],
           tiles: [...g.ship.tiles], made: g.ship.made, owned: [...g.owned].map(([k, o]) => [k, o.slot]), cars: [...g.cars.values()],
+          ghosts: [...g.ghosts.values()],
         });
       });
       s.onLeave((slot) => { dropFriend(slot); g?.toast(`${PLAYER_NAMES[slot]} left.`); refreshBadge(); });
@@ -167,7 +180,7 @@ const game: GameModule = {
         } else if (m.t === 'do' && typeof m.a === 'string') g.action(p, m.a, (m.args ?? {}) as Record<string, unknown>);
       });
       refreshBadge();
-      g.toast(`Friends can join with the code ${s.code} (Join a friend on the start screen).`);
+      g.toast(`Your world is open! Friends pick “${s.name}” under Join game.`);
     };
     const startFriend = (s: FriendSession) => {
       net = s;
@@ -191,6 +204,8 @@ const game: GameModule = {
           ng.ship.made = !!m.made;
           for (const [k, slot] of m.owned as [string, number][]) ng.owned.set(k, { slot, inv: [] });
           for (const c of m.cars as Vehicle[]) ng.cars.set(c.id, c);
+          for (const gh of (m.ghosts as Ghost[] | undefined) ?? []) ng.addGhost(gh);
+          ng.events = [];
           g = ng;
           startPlaying();
           g.toast(`You're ${PLAYER_NAMES[s.slot]}! You're in your friend's world. Your things stay with this game.`);
@@ -210,11 +225,67 @@ const game: GameModule = {
         toast('The host stopped playing.');
       });
     };
-    const friendsMenu = (fromTitle: boolean) => {
-      if (net?.role === 'host') { endNet(); g?.toast('Playing on your own again.'); return; }
+    const friendsMenu = () => {
+      if (net?.role === 'host') { endNet(); g?.toast('Your world is closed to friends again.'); return; }
       if (isFriend()) { toast('You are in a friend’s world. Quit from the menu to leave.'); return; }
-      coopMenu(wrapEl, { title: 'Explorer', prefix: COOP_PREFIX, canHost: !fromTitle, canJoin: fromTitle, onHosted: startHosting, onJoined: startFriend });
+      openPanel({ k: 'host' });
     };
+    const myName = () => localStorage.getItem(NAME_KEY) || '';
+    async function openWorld(name: string) {
+      if (!g || g.remote || net) return;
+      name = name.trim().slice(0, 24) || 'Explorer';
+      localStorage.setItem(NAME_KEY, name);
+      const gg = g;
+      toast('Opening your world to friends…');
+      try {
+        const s = await hostWorld(name, `Day ${gg.day}`);
+        if (g !== gg || net) { s.close(); return; }
+        startHosting(s);
+      } catch (err) {
+        console.warn(err);
+        toast('Couldn’t open your world. Check the internet and try again.');
+      }
+    }
+    // ---------- the Join list (from the start screen or the Esc menu) ----------
+    let joinList: HostInfo[] | null = null, joinMsg = '', joining = false;
+    async function showJoin() {
+      joinEl.hidden = false;
+      joinList = null; joinMsg = '';
+      drawJoin();
+      try { joinList = await listHosts(); }
+      catch (err) { console.warn(err); joinList = []; joinMsg = 'Couldn’t get the list. Check the internet and try again.'; }
+      drawJoin();
+    }
+    function drawJoin() {
+      const ago = (t: number) => { const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? 'just now' : `${Math.round(s / 60)} min ago`; };
+      joinEl.innerHTML = `<div class="ex-box"><button class="ex-x" data-j="close">✕</button><h2>👥 Join game</h2>
+        <p class="ex-small">Worlds your friends are hosting right now. Your own world stays saved on this device.</p>
+        <div class="ex-list">${joinList === null ? '<p>Looking for worlds…</p>' : joinList.length ? joinList.map((h) => `<div class="ex-li"><span class="ic">🌍</span><b>${esc(h.name)}</b><small>${esc(h.world)} · ${h.players}/${MAX_PLAYERS} players · ${ago(h.updated)}</small><button data-join="${esc(h.id)}" ${h.players >= MAX_PLAYERS || joining ? 'disabled' : ''}>${h.players >= MAX_PLAYERS ? 'Full' : 'Join'}</button></div>`).join('') : '<p>Nobody is hosting right now. Ask a friend to press Esc → Host world.</p>'}</div>
+        ${joinMsg ? `<p class="ex-status">${esc(joinMsg)}</p>` : ''}
+        <div class="ex-row"><button class="ex-btn" data-j="refresh">🔄 Refresh</button><button class="ex-btn ghost" data-j="close">Back</button></div></div>`;
+    }
+    joinEl.addEventListener('click', async (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('button');
+      if (!el) { if (e.target === joinEl) joinEl.hidden = true; return; }
+      sfx('click');
+      if (el.dataset.j === 'close') { joinEl.hidden = true; return; }
+      if (el.dataset.j === 'refresh') { void showJoin(); return; }
+      const id = el.dataset.join;
+      const info = joinList?.find((h) => h.id === id);
+      if (!info || joining) return;
+      joining = true; joinMsg = `Joining ${info.name}…`; drawJoin();
+      try {
+        const s = await joinWorld(info);
+        joining = false;
+        joinEl.hidden = true;
+        if (g) toTitle(true);
+        startFriend(s);
+      } catch (err) {
+        joining = false;
+        joinMsg = err instanceof Error ? err.message : 'Couldn’t join.';
+        drawJoin();
+      }
+    });
 
     function putBuilding(gg: Game, b: Building) {
       const old = gg.buildings.get(b.id);
@@ -256,6 +327,7 @@ const game: GameModule = {
         if (items) b.items = items.map(([iid, p]) => ({ id: iid, p }));
         b.hold = hold; b.swing = swing; b.aim = aim; b.units = units; b.launch = launch;
       }
+      if (s.bots) gg.bots = s.bots.map(([id, x, y, z, carry]) => ({ id, x, y, z, carry, dim: gg.me.dim === 'silo' ? 'earth' : gg.me.dim, home: 0, ghost: 0, src: 0, stage: 'home' }) as Bot);
       if (s.rocks) gg.ship.rocks = s.rocks.map(([id, kind, size, x, z, rot]) => ({ id, kind: kind as 'rusty', size: size as 0, x, z, vx: 0, vz: 0, hp: 1, rot }));
       Object.assign(gg.ship, s.ship);
       for (const f of s.fx) gg.fx.push(f);
@@ -272,6 +344,7 @@ const game: GameModule = {
       }
       return {
         t: 's', time: gg.time, ps, ms, cs, bs,
+        bots: gg.bots.filter((r) => r.dim === p.dim).map((r) => [r.id, +r.x.toFixed(2), +r.y.toFixed(2), +r.z.toFixed(2), r.carry]),
         rocks: p.dim === 'space' ? gg.ship.rocks.map((r) => [r.id, r.kind, r.size, +r.x.toFixed(2), +r.z.toFixed(2), +r.rot.toFixed(2)]) : null,
         ship: { at: gg.ship.at, dest: gg.ship.dest, moving: gg.ship.moving, km: gg.ship.km },
         fx: [],
@@ -291,16 +364,40 @@ const game: GameModule = {
         case 'dig': { const k = e.k as string; if (g.remote) { if (e.v) g.w.dug.set(k, e.v as number); else g.w.dug.delete(k); } const [x, z] = k.split(',').map(Number); ren.markChunk(x, z); break; }
         case 'cdig': if (g.remote) g.w.caveDug.add(e.k as string); ren.markCave(); break;
         case 'tile': if (g.remote) g.ship.tiles.add(e.k as string); break;
+        case 'g+': if (g.remote) { const gh = e.g as Ghost; const old = g.ghosts.get(gh.id); if (old) g.removeGhost(old); g.addGhost(gh); } break;
+        case 'g-': if (g.remote) { const gh = g.ghosts.get(e.id as number); if (gh) g.removeGhost(gh); } break;
         case 'car+': if (g.remote) g.cars.set((e.c as Vehicle).id, e.c as Vehicle); break;
         case 'car-': if (g.remote) g.cars.delete(e.id as number); break;
         case 'own': { if (g.remote) g.owned.set(e.id as string, { slot: e.slot as number, inv: [] }); const v = g.w.villageAt(g.me.x, g.me.z); if (v) ren.markChunk(v.x, v.z), ren.markChunk(v.x - 32, v.z), ren.markChunk(v.x + 32, v.z), ren.markChunk(v.x, v.z - 32), ren.markChunk(v.x, v.z + 32), ren.markChunk(v.x - 32, v.z - 32), ren.markChunk(v.x + 32, v.z + 32), ren.markChunk(v.x - 32, v.z + 32), ren.markChunk(v.x + 32, v.z - 32); break; }
         case 'toast': if (to === mySlot) toast(e.s as string); break;
+        case 'alert': showAlert(e.s as string, e.x as number, e.z as number, e.dim as Dim); break;
         case 'got': if (to === mySlot) gotPopup(e.id as ItemId, e.n as number); break;
         case 'hinv': if (to === mySlot) houseInv = e.inv as Inv; break;
         case 'tp': if (to === mySlot && g.remote) { Object.assign(g.me, { x: e.x, y: e.y, z: e.z, dim: e.dim }); if (e.yaw !== undefined) g.me.yaw = e.yaw as number; g.me.vy = 0; } break;
       }
     }
     let houseInv: Inv = [];
+
+    // ---------- alerts by the hotbar ----------
+    const alertEl = $('.ex-alert');
+    let alertTimer = 0;
+    function showAlert(s: string, x: number, z: number, dim: Dim) {
+      if (!g) return;
+      const me = g.me;
+      let where = '';
+      if (dim === me.dim || (dim === 'earth' && me.dim === 'silo')) {
+        const dx = dim === 'earth' ? wd(x, me.x) : x - me.x, dz = dim === 'earth' ? wd(z, me.z) : z - me.z;
+        const d = Math.round(Math.hypot(dx, dz));
+        const dir = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'][(Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) + 8) % 8];
+        where = d < 4 ? ' (right here)' : ` (${d} tiles ${dir})`;
+      } else where = dim === 'space' ? ' (on your ship)' : dim === 'earth' ? ' (on Earth)' : ' (underground)';
+      alertEl.textContent = s + where;
+      alertEl.hidden = false;
+      alertEl.classList.remove('flash'); void alertEl.offsetWidth; alertEl.classList.add('flash');
+      sfx('alarm');
+      clearTimeout(alertTimer);
+      alertTimer = window.setTimeout(() => { alertEl.hidden = true; }, 6000);
+    }
 
     // ---------- toasts ----------
     function toast(s: string) {
@@ -333,7 +430,7 @@ const game: GameModule = {
       menu.innerHTML = `
         ${s ? `<button class="ex-btn big" data-m="continue">▶ Continue<small>Day ${Math.floor(s.time / 600) + 1} · ${money(s.me.money)}</small></button>` : ''}
         <button class="ex-btn ${s ? '' : 'big'}" data-m="new">🌍 New world</button>
-        <button class="ex-btn" data-m="join">👥 Join a friend</button>
+        <button class="ex-btn" data-m="join">👥 Join game</button>
         <button class="ex-btn" data-m="help">❓ How to play</button>
         <button class="ex-btn ghost" data-m="exit">← Back to games</button>`;
     }
@@ -348,10 +445,17 @@ const game: GameModule = {
         startPlaying();
         toast('Welcome to Explorer! Chop trees and break rocks (hold left click), then press Shift to craft.');
         setTimeout(() => toast('There’s a village just east of you, with stores, food, cars and pets.'), 4500);
-      } else if (m === 'join') friendsMenu(true);
+      } else if (m === 'join') void showJoin();
       else if (m === 'help') openPanel({ k: 'help' });
       else if (m === 'exit') onExit();
     });
+    let armed = '', armedAt = 0;
+    function confirmArm(msg: string) {
+      if (armed === msg && Date.now() - armedAt < 4000) { armed = ''; return true; }
+      armed = msg; armedAt = Date.now();
+      toast(msg);
+      return false;
+    }
     let confirmArmed = 0;
     function confirmNew() {
       if (Date.now() - confirmArmed < 4000) return true;
@@ -368,8 +472,8 @@ const game: GameModule = {
       lastHotbar = '';
       if (g) { ren.camYaw = g.me.yaw + Math.PI; }
     }
-    function toTitle() {
-      if (g && !g.remote) doSave(true);
+    function toTitle(save = true) {
+      if (save && g && !g.remote) doSave(true);
       endNet();
       playing = false;
       g = null;
@@ -387,14 +491,21 @@ const game: GameModule = {
       if (!playing || !g) return;
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
       const k = e.key.toLowerCase();
-      if (e.type === 'keyup') { keys.delete(k); return; }
+      if (e.type === 'keyup') {
+        keys.delete(k);
+        if (k === 'b' && bSel) finishBlueprint();
+        return;
+      }
       unlockAudio();
       if (k === 'shift' || k === 'tab' || k === 'i') { e.preventDefault(); if (panel?.k === 'bag') closePanel(); else openPanel({ k: 'bag' }); return; }
-      if (k === 'escape') { if (panel) closePanel(); else openPanel({ k: 'pause' }); return; }
+      if (k === 'escape') { if (bp || bSel) { bp = null; bSel = null; ren.sel.visible = false; toast('Blueprint put away.'); return; } if (panel) closePanel(); else openPanel({ k: 'pause' }); return; }
+      if (k === 'b') { if (!e.repeat && !panel && !bSel) startBlueprint(); return; }
+      if (k === 'r' && bp) { rotateBlueprint(); sfx('click'); return; }
+      if (k === 'control') e.preventDefault();
       if (k === 'm') { if (panel?.k === 'map') closePanel(); else openPanel({ k: 'map' }); return; }
       if (k === 'e') { interact(); return; }
       if (k === 'r') { placeDir = (placeDir + 1) & 3; sfx('click'); return; }
-      if (k === 'x') { if (target?.k === 'build') act('pickup', { id: target.id }); return; }
+      if (k === 'x') { if (target?.k === 'build') act('pickup', { id: target.id }); else if (target?.k === 'ghost') act('unghost', { id: target.id }); return; }
       if (k === 'f') { act('eat', { slot: g.me.hand }); return; }
       if (k >= '0' && k <= '9') { act('hand', { i: k === '0' ? 9 : Number(k) - 1 }); g.me.hand = k === '0' ? 9 : Number(k) - 1; return; }
       if (k === ' ') e.preventDefault();
@@ -402,6 +513,62 @@ const game: GameModule = {
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
+    const onBlur = () => { keys.clear(); if (bSel) { bSel = null; ren.sel.visible = false; } };
+    window.addEventListener('blur', onBlur);
+
+    // ---------- blueprints: hold B over one corner, let go over the other ----------
+    type BpEntry = [BuildId, number, number, number];
+    let bp: { list: BpEntry[]; w: number; h: number } | null = null;
+    let bSel: { x: number; z: number; dim: Dim } | null = null;
+    const curTile = (): [number, number] => [Math.floor(pickWx), Math.floor(pickWz)];
+    function startBlueprint() {
+      if (!g || !pickPoint) { toast('Point at the ground to start a blueprint.'); return; }
+      if (g.me.dim === 'silo') return;
+      const [x, z] = curTile();
+      bSel = { x, z, dim: g.me.dim };
+      bp = null;
+    }
+    function selRect(): [number, number, number, number] | null {
+      if (!g || !bSel) return null;
+      const [ex, ez] = curTile();
+      const earth = bSel.dim === 'earth';
+      let dx = earth ? Math.round(wd(ex, bSel.x)) : ex - bSel.x, dz = earth ? Math.round(wd(ez, bSel.z)) : ez - bSel.z;
+      dx = Math.max(-59, Math.min(59, dx)); dz = Math.max(-59, Math.min(59, dz));
+      const x0 = bSel.x + Math.min(0, dx), z0 = bSel.z + Math.min(0, dz);
+      return [x0, z0, x0 + Math.abs(dx), z0 + Math.abs(dz)];
+    }
+    function finishBlueprint() {
+      const r = selRect();
+      const dim = bSel?.dim;
+      bSel = null;
+      ren.sel.visible = false;
+      if (!g || !r || !dim) return;
+      const [x0, z0, x1, z1] = r;
+      const earth = dim === 'earth';
+      const rel = (a: number, b: number) => (earth ? Math.round(wd(a, b)) : a - b);
+      const list: BpEntry[] = [];
+      const take = (type: BuildId, x: number, z: number, dir: number) => {
+        const dx = rel(x, x0), dz = rel(z, z0);
+        if (dx < 0 || dz < 0 || dx > x1 - x0 || dz > z1 - z0) return;
+        if (type === 'space_platform' || type === 'house') return;
+        list.push([type, dx, dz, dir]);
+      };
+      for (const b of g.buildings.values()) if (b.dim === dim && !b.hub) take(b.type, b.x, b.z, b.dir);
+      for (const gh of g.ghosts.values()) if (gh.dim === dim) take(gh.type, gh.x, gh.z, gh.dir);
+      if (!list.length) { toast('Nothing to copy there. Hold B over one corner of your buildings and let go over the other corner.'); return; }
+      bp = { list, w: x1 - x0 + 1, h: z1 - z0 + 1 };
+      sfx('craft');
+      toast(`Blueprint of ${list.length} thing${list.length > 1 ? 's' : ''}! Click to put it down as ghosts. R turns it, Esc puts it away.`);
+    }
+    function rotateBlueprint() {
+      if (!bp) return;
+      // turn a quarter to the right: tile (x, z) goes to (h-1-z, x)
+      bp = { w: bp.h, h: bp.w, list: bp.list.map(([type, dx, dz, dir]) => [type, bp!.h - dz - BUILDS[type].size, dx, (dir + 1) & 3] as BpEntry) };
+    }
+    function bpOrigin(): [number, number] {
+      if (!bp) return [0, 0];
+      return [Math.floor(pickWx - bp.w / 2 + 0.5), Math.floor(pickWz - bp.h / 2 + 0.5)];
+    }
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
       if (!playing) return;
@@ -492,7 +659,7 @@ const game: GameModule = {
       unlockAudio();
       if (b === 'bag') panel?.k === 'bag' ? closePanel() : openPanel({ k: 'bag' });
       else if (b === 'map') panel?.k === 'map' ? closePanel() : openPanel({ k: 'map' });
-      else if (b === 'friends') friendsMenu(false);
+      else if (b === 'friends') { if (isFriend()) toast(`You're in ${net!.name}'s world.`); else friendsMenu(); }
       else if (b === 'pause') openPanel({ k: 'pause' });
       else if (b === 'mute') { setMuted(!isMuted()); updateMuteBtn(); }
     });
@@ -513,15 +680,29 @@ const game: GameModule = {
       pickWx = r.wx; pickWz = r.wz;
       pickPoint = r.point ? { x: r.point.x, y: r.point.y, z: r.point.z } : null;
       // the far-off ground isn't a target
-      if (target && pickPoint && (target.k === 'ground' || target.k === 'feat' || target.k === 'cave' || target.k === 'build')) {
+      if (target && pickPoint && (target.k === 'ground' || target.k === 'feat' || target.k === 'cave' || target.k === 'build' || target.k === 'ghost')) {
         if (Math.hypot(pickPoint.x, pickPoint.z) > REACH + 1) target = null;
       }
     }
     function clickAct() {
       if (!g || panel) return;
       const me = g.me;
+      if (bp) {
+        if (!pickPoint) return;
+        const [x0, z0] = bpOrigin();
+        act('ghosts', { list: bp.list.map(([type, dx, dz, dir]) => [type, x0 + dx, z0 + dz, dir]) });
+        mouseDown = false;
+        return;
+      }
       const h = heldItem();
       const it = h ? ITEMS[h.id] : null;
+      // hold Ctrl to put down a ghost: a plan robots will build
+      if (it?.build && keys.has('control') && target?.k !== 'mob') {
+        const [x, z] = placeSpot();
+        act('ghost', { slot: me.hand, x, z, dir: placeDir });
+        mouseDown = false;
+        return;
+      }
       if (it?.weapon && pickPoint) {
         const wx = me.dim === 'earth' ? wrap(me.x + pickPoint.x) : me.x + pickPoint.x;
         const wz = me.dim === 'earth' ? wrap(me.z + pickPoint.z) : me.z + pickPoint.z;
@@ -650,12 +831,19 @@ const game: GameModule = {
           <div><h3>Your bag (click to store)</h3>${bagHtml('hput')}</div></div>`;
       } else if (p.k === 'map') html = `<h2>🗺️ Map</h2><canvas class="ex-map" width="420" height="420"></canvas><div class="ex-row"><button data-zoom="-1">−</button><span>${mapZoom * 105} tiles across</span><button data-zoom="1">+</button></div><p class="ex-small">${mapInfo()}</p>`;
       else if (p.k === 'ship') html = shipPanel();
-      else if (p.k === 'pause') html = `<h2>⏸ Paused</h2><p class="ex-small">(The world keeps going while menus are open.)</p><div class="ex-stack">
+      else if (p.k === 'pause') html = `<h2>⏸ Menu</h2><p class="ex-small">(The world keeps going while menus are open.)</p><div class="ex-stack">
         <button class="ex-btn" data-c="close">▶ Back to the game</button>
-        ${g.remote ? '' : '<button class="ex-btn" data-c="save">💾 Save</button>'}
-        <button class="ex-btn" data-c="friends">👥 ${net?.role === 'host' ? 'Stop playing with friends' : 'Play with friends'}</button>
-        <button class="ex-btn" data-c="help">❓ How to play</button>
-        <button class="ex-btn ghost" data-c="quit">${g.remote ? 'Leave this world' : 'Save and quit'}</button></div>`;
+        ${g.remote ? '<button class="ex-btn ghost" data-c="quit">🚪 Leave this world</button>' : `
+        <button class="ex-btn" data-c="savequit">💾 Save &amp; quit</button>
+        <button class="ex-btn" data-c="save">💾 Save</button>
+        <button class="ex-btn" data-c="load" ${readSave() ? '' : 'disabled'}>📂 Load${readSave() ? ` <small>(day ${Math.floor(readSave()!.time / 600) + 1})</small>` : ''}</button>
+        <button class="ex-btn ghost" data-c="quitnosave">🚪 Quit without saving</button>`}
+        <button class="ex-btn" data-c="join">👥 Join game</button>
+        ${g.remote ? '' : `<button class="ex-btn" data-c="friends">🌐 ${net?.role === 'host' ? 'Stop hosting' : 'Host world'}</button>`}
+        <button class="ex-btn ghost" data-c="help">❓ How to play</button></div>`;
+      else if (p.k === 'host') html = `<h2>🌐 Host world</h2><p>Friends (up to ${MAX_PLAYERS - 1}) will see your world in their <b>Join game</b> list and can play in it with you. It stays open until you stop hosting or quit.</p>
+        <p>Your name: <input class="ex-name" maxlength="24" placeholder="Explorer" value="${esc(myName())}"></p>
+        <div class="ex-row"><button class="ex-btn" data-c="openworld">🌐 Open my world</button><button class="ex-btn ghost" data-c="close">Cancel</button></div>`;
       else if (p.k === 'help') html = `<h2>❓ How to play</h2><div class="ex-help">${HELP}</div><button class="ex-btn" data-c="close">Got it</button>`;
       panelEl.innerHTML = `<div class="ex-box ${p.k === 'bag' || p.k === 'build' || p.k === 'shop' || p.k === 'house' ? 'wide' : ''}"><button class="ex-x" data-c="close">✕</button>${html}</div>`;
       if (p.k === 'map') drawMap();
@@ -729,6 +917,18 @@ const game: GameModule = {
         case 'underground_belt': case 'underground_pipe': body = `<p>${b.ug === 'out' ? 'Way out' : b.pair ? 'Way in (linked)' : 'Way in: put another one ahead (same way) to link them'}.</p>`; break;
         case 'power_pole': case 'big_power_pole': case 'substation': body = `<p>Wires reach ${def.wire} tiles. Powers machines within ${def.area} tiles.</p>`; break;
         case 'campfire': body = '<p>🔥 Stand near it to heal faster.</p>'; break;
+        case 'roboport': {
+          const home = (b.inv ?? []).reduce((a, s) => a + (s?.id === 'robot' ? s.n : 0), 0);
+          const out = g.bots.filter((r) => r.home === b.id).length;
+          const R = BUILDS.roboport.robo!;
+          const inRange = [...g.ghosts.values()].filter((gh) => gh.dim === b.dim && Math.abs(b.dim === 'earth' ? wd(gh.x, b.x + 1) : gh.x - b.x - 1) <= R && Math.abs(b.dim === 'earth' ? wd(gh.z, b.z + 1) : gh.z - b.z - 1) <= R).length;
+          body = `<p>🛸 Robots: <b>${home}</b> home${out ? ` · <b>${out}</b> out building` : ''} · 👻 ${inRange} ghost${inRange === 1 ? '' : 's'} to build within ${R} tiles</p>
+            <p>Robots get the buildings for ghosts from:</p>
+            <div class="ex-row"><button class="ex-btn ${b.fromChests !== false ? 'on' : ''}" data-robo="chests">${b.fromChests !== false ? '☑' : '☐'} Chests</button><button class="ex-btn ${b.fromBelts ? 'on' : ''}" data-robo="belts">${b.fromBelts ? '☑' : '☐'} Off the belts</button></div>
+            <p class="ex-small">They always use what's in the roboport too. Put flying robots (and buildings) in here:</p>
+            <div class="ex-inv">${(b.inv ?? []).map((s, i) => slotHtml(s, `data-btake="inv" data-bid="${b.id}" data-i="${i}"`)).join('')}</div>`;
+          break;
+        }
         default: body = '';
       }
       return `<h2>${ITEMS[b.type]?.icon ?? ''} ${esc(b.hub ? 'Ship hub' : def.name)}</h2>${status}${powerLine}${body}
@@ -784,9 +984,23 @@ const game: GameModule = {
       sfx('click');
       if (d.c === 'close') return closePanel();
       if (d.c === 'save') { doSave(); return closePanel(); }
-      if (d.c === 'friends') { closePanel(); return friendsMenu(false); }
-      if (d.c === 'help') return openPanel({ k: 'help' });
+      if (d.c === 'savequit') { doSave(true); return toTitle(false); }
       if (d.c === 'quit') return toTitle();
+      if (d.c === 'quitnosave') { if (!confirmArm('Quit without saving? Click it again to be sure.')) return; return toTitle(false); }
+      if (d.c === 'load') {
+        const sv = readSave();
+        if (!sv) return;
+        if (!confirmArm('Load your last save? What happened since then is lost. Click Load again to be sure.')) return;
+        endNet();
+        try { g = Game.load(sv); } catch { toast('That save didn’t load.'); return; }
+        startPlaying();
+        toast('Loaded your save.');
+        return;
+      }
+      if (d.c === 'join') { closePanel(); void showJoin(); return; }
+      if (d.c === 'friends') { closePanel(); return friendsMenu(); }
+      if (d.c === 'openworld') { const n = panelEl.querySelector<HTMLInputElement>('.ex-name')?.value ?? ''; closePanel(); void openWorld(n); return; }
+      if (d.c === 'help') return openPanel({ k: 'help' });
       if (d.c === 'cancel') return act('cancel');
       if (d.c === 'ship') return openPanel({ k: 'ship' });
       if (d.c === 'down') { act('down'); return closePanel(); }
@@ -800,6 +1014,11 @@ const game: GameModule = {
       if (d.zoom) { mapZoom = Math.max(1, Math.min(32, d.zoom === '1' ? mapZoom / 2 : mapZoom * 2)); panelSig = ''; return; }
       if (d.travel) { act('travel', { dest: Number(d.travel) }); return; }
       if (d.launch && panel.k === 'build') { act('launch', { id: panel.id, ride: d.launch === 'ride' }); return; }
+      if (d.robo && panel.k === 'build') {
+        const b = g.buildings.get(panel.id);
+        if (b) act('robo', d.robo === 'chests' ? { id: b.id, chests: b.fromChests === false } : { id: b.id, belts: !b.fromBelts });
+        return;
+      }
       if (d.btake !== undefined) return act('btake', { id: Number(d.bid), from: d.btake, i: Number(d.i ?? 0) });
       if (d.htake !== undefined && panel.k === 'house') return act('htake', { vb: panel.vb, i: Number(d.htake) });
       if (d.buy && panel.k === 'shop') return act('buy', { shop: panel.shop, id: d.buy, n: Number(d.n), vb: d.vb ?? '' });
@@ -916,8 +1135,12 @@ const game: GameModule = {
         else if (target?.k === 'feat') { const f = g.w.feature(target.x, target.z); if (f?.kind === 'cave') hint = 'E: go into the cave'; else if (f?.kind === 'shaft') hint = 'E: climb down the mine shaft'; else if (f?.kind === 'ore') hint = `${iname(f.ore!)} (${f.amount} left) · hold click to mine`; else if (f?.kind === 'nest') hint = '🐛 Alien bug nest · hit it to destroy it (the bugs will defend it!)'; else if (f?.kind === 'oil') hint = 'Oil · put a pumpjack here'; else if (f) hint = 'Hold click'; }
         else if (target?.k === 'build') { const b = g.buildings.get(target.id); if (b) hint = `${b.hub ? 'Ship hub' : BUILDS[b.type].name} · click to open · X to pick up`; }
         else if (target?.k === 'mob') { const m = g.mobs.get(target.id); if (m) hint = `${MOBS[m.type].name}${m.owner !== undefined ? ` (${PLAYER_NAMES[m.owner]}'s pet)` : MOBS[m.type].hostile ? ' ⚠️' : ''}`; }
+        if (target?.k === 'ghost') { const gh = g.ghosts.get(target.id); if (gh) hint = `👻 Ghost of a ${BUILDS[gh.type].name.toLowerCase()} · a roboport's robots will build it · X to remove`; }
         const h = heldItem();
-        if (h && ITEMS[h.id]?.build) hint = `${iname(h.id)}: click to place · R to turn (${['north', 'east', 'south', 'west'][placeDir]})`;
+        if (bp) hint = `📐 Blueprint (${bp.list.length} things): click to put down ghosts · R to turn · Esc to put it away`;
+        else if (bSel) hint = '📐 Let go of B over the other corner';
+        else if (h && ITEMS[h.id]?.build && keys.has('control')) hint = `👻 Ghost of a ${iname(h.id).toLowerCase()}: click to plan it (doesn't use it up) · R to turn`;
+        else if (h && ITEMS[h.id]?.build) hint = `${iname(h.id)}: click to place · hold Ctrl for a ghost · R to turn (${['north', 'east', 'south', 'west'][placeDir]})`;
         else if (h && ITEMS[h.id]?.weapon) hint = `${iname(h.id)}: click to ${h.id === 'grenade' ? 'throw' : 'shoot'} · needs ${WEAPONS[ITEMS[h.id].weapon!].ammo.map(iname).join(' or ')}`;
       }
       hintEl.textContent = hint;
@@ -977,7 +1200,7 @@ const game: GameModule = {
           // walk relative to where the camera looks
           const cy = Math.cos(ren.camYaw), sy = Math.sin(ren.camYaw);
           const wx = mx * cy + mz * sy, wz = -mx * sy + mz * cy;
-          gg.movePlayer(me, wx, wz, keys.has(' '), keys.has('control'), dt);
+          gg.movePlayer(me, wx, wz, keys.has(' '), keys.has('q'), dt);
           if (Math.hypot(mx, mz) > 0.1 && now - lastStepSound > 330 && me.y <= gg.groundY(me.dim, me.x, me.z) + 0.1) { lastStepSound = now; sfx('step', 0.6); }
         }
       }
@@ -1007,12 +1230,19 @@ const game: GameModule = {
       } else if (!mouseDown) mineT = 0;
       // the placement preview
       const held = heldItem();
-      if (held && ITEMS[held.id]?.build && !panel && pickPoint) {
-        const type = ITEMS[held.id].build!;
-        const [x, z] = placeSpot();
-        const why = gg.canPlace(me, type, x, z, me.dim);
-        ren.showGhost(me.dim, x, z, BUILDS[type].size, !why, gg, placeDir);
-      } else ren.ghost.visible = false;
+      const pdim = me.dim === 'silo' ? 'earth' : me.dim;
+      if (bSel) { const r = selRect(); if (r) ren.showSelection(gg, pdim, r[0], r[1], r[2], r[3]); }
+      if (bp && !panel && pickPoint) { const [x0, z0] = bpOrigin(); ren.showBlueprint(gg, pdim, x0, z0, bp.list); ren.ghost.visible = false; }
+      else {
+        ren.showBlueprint(gg, pdim, 0, 0, null);
+        if (held && ITEMS[held.id]?.build && !panel && pickPoint) {
+          const type = ITEMS[held.id].build!;
+          const [x, z] = placeSpot();
+          const ghostMode = keys.has('control');
+          const why = gg.canPlace(me, type, x, z, me.dim, ghostMode);
+          ren.showGhost(me.dim, x, z, BUILDS[type].size, !why, gg, placeDir, ghostMode);
+        } else ren.ghost.visible = false;
+      }
       // world events
       for (const e of gg.events) applyEvent(e as Ev, me.slot);
       if (net?.role === 'host' && gg.events.length) net.broadcast({ t: 'ev', list: gg.events });
@@ -1100,6 +1330,7 @@ const game: GameModule = {
       stopAudio();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
+      window.removeEventListener('blur', onBlur);
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onHide);
       ren.dispose();
