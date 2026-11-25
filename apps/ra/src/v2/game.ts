@@ -41,6 +41,11 @@ import {
   makeOre,
   makeFactionArt,
   makeBuildingStates,
+  LINK_E,
+  LINK_S,
+  LINK_W,
+  LINK_N,
+  LINK_PIER,
   OreArt,
   makeRocks,
   makeTrees,
@@ -175,6 +180,9 @@ const PRISM_ADD = 0.5;
 // seconds to make one.
 const WALL_GRID = 8;
 const WALL_S = 0.6;
+// A wall put down in a straight line with another of yours, up to this many
+// cells short of it, fills in the gap: one purchase builds the whole run.
+const WALL_FILL = 6;
 // A Service depot: health a second it gives back to a vehicle standing on its
 // pad (as a share of full), and what it costs, as a share of the vehicle's
 // price, for a full repair.
@@ -895,6 +903,70 @@ export class IsoGame implements GameLike {
 
   private selB(): Building | undefined {
     return this.buildings.find((b) => b.sel);
+  }
+
+  // A wall segment's look, which depends on the segments next to it (see
+  // wallShape in sprites.ts): small, so drawn here when first wanted.
+  private wArt = new Map<string, V2BuildingArt>();
+  private wStates = new Map<string, BuildingStates>();
+  private wallArt(link: number, f: number): V2BuildingArt {
+    const key = `${link}-${f}`;
+    let a = this.wArt.get(key);
+    if (!a) this.wArt.set(key, (a = makeBuilding('wall', factionOf(f), link)));
+    return a;
+  }
+  private wallHurt(link: number, f: number): BuildingStates {
+    const key = `${link}-${f}`;
+    let s = this.wStates.get(key);
+    if (!s) this.wStates.set(key, (s = makeBuildingStates('wall', factionOf(f), link)));
+    return s;
+  }
+
+  // Where each side's wall segments stand (grid cells), for joining them up.
+  private wallSet(): Set<string> {
+    const at = new Set<string>();
+    for (const b of this.buildings) if (b.kind === 'wall' && !b.sold) at.add(wallKey(b.f, b.x, b.y));
+    return at;
+  }
+
+  // How the wall segment of side f at (x, y) joins the ones round it, given
+  // where they stand: which neighbors hold wall, and a pier every third
+  // segment along a straight run.
+  private wallLink(at: Set<string>, f: number, x: number, y: number): number {
+    const G = WALL_GRID;
+    const bare = (x: number, y: number) =>
+      (at.has(wallKey(f, x + G, y)) ? LINK_E : 0) | (at.has(wallKey(f, x, y + G)) ? LINK_S : 0) | (at.has(wallKey(f, x - G, y)) ? LINK_W : 0) | (at.has(wallKey(f, x, y - G)) ? LINK_N : 0);
+    const m = bare(x, y);
+    // (not right next to a corner or an end, which has a pier of its own)
+    const run = m === (LINK_E | LINK_W) ? [x, G, 0] : m === (LINK_S | LINK_N) ? [y, 0, G] : null;
+    if (run && ((Math.round(run[0] / G) % 3) + 3) % 3 === 0 && bare(x + run[1], y + run[2]) === m && bare(x - run[1], y - run[2]) === m) return m | LINK_PIER;
+    return m;
+  }
+
+  // The cells a wall put down by side f at (x, y) would fill: just that one,
+  // or, when another of its walls stands in a straight line with it a few
+  // cells off, the run up to that wall (the nearest, if there are several),
+  // as long as all of the ground between is open.
+  private wallRun(f: number, x: number, y: number, at = this.wallSet()): [number, number][] {
+    const G = WALL_GRID;
+    const one: [number, number][] = [[x, y]];
+    if (at.has(wallKey(f, x, y))) return one;
+    const art = this.buildingArt('wall', f);
+    let best: [number, number][] | null = null;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const cells: [number, number][] = [[x, y]];
+      for (let i = 1; i <= WALL_FILL + 1; i++) {
+        const cx = x + dx * i * G;
+        const cy = y + dy * i * G;
+        if (at.has(wallKey(f, cx, cy))) {
+          if (i > 1 && (!best || cells.length < best.length)) best = cells;
+          break;
+        }
+        if (this.placeWhy(padOf('wall', art, cx, cy), f, false, false)) break;
+        cells.push([cx, cy]);
+      }
+    }
+    return best ?? one;
   }
 
   private buildingArt(kind: BuildingKind, f: number): V2BuildingArt {
@@ -1661,7 +1733,8 @@ export class IsoGame implements GameLike {
   }
   private known = new Set<string>(); // items that have been on the menu
   private fresh = new Set<string>(); // ...and those not looked at yet
-  private ghost: { tech: Tech; x: number; y: number; pad: Rect; why: string } | null = null;
+  // (a wall's ghost also has the cells of the run it would fill, see wallRun)
+  private ghost: { tech: Tech; x: number; y: number; pad: Rect; why: string; cells?: [number, number][] } | null = null;
   private icons = new Map<string, string>();
   onNotice: (msg: string) => void = () => {};
   private noted = new Map<string, number>();
@@ -2203,16 +2276,26 @@ export class IsoGame implements GameLike {
     gh.y = wy;
     gh.pad = padOf(gh.tech.building!, art, wx, wy);
     gh.why = this.placeWhy(gh.pad, this.me, gh.tech.building === 'navy');
+    gh.cells = undefined;
+    if (gh.tech.building === 'wall' && !gh.why) {
+      // the whole run it would fill, under one outline
+      gh.cells = this.wallRun(this.me, wx, wy);
+      const xs = gh.cells.map((c) => c[0]);
+      const ys = gh.cells.map((c) => c[1]);
+      gh.pad = { x: Math.min(...xs) - art.rx, y: Math.min(...ys) - art.ry, w: Math.max(...xs) - Math.min(...xs) + art.rx * 2, h: Math.max(...ys) - Math.min(...ys) + art.ry * 2 };
+    }
   }
 
   // Why a building can't go on pad r ('' if it can): it needs clear, level
   // ground next to the rest of your base.
-  private placeWhy(r: Rect, f: number, wet = false): string {
+  // (reach false: for the gap a wall run fills, which needn't be near the base itself)
+  private placeWhy(r: Rect, f: number, wet = false, reach = true): string {
     // (a wall's pad has no margin round it, so it may butt up against the next)
     const tight = r.w <= WALL_GRID;
     if (wet) {
       if (!this.waterOk(r)) return 'Blocked: needs open water';
     } else if (!this.siteOk(tight ? { x: r.x + 1, y: r.y + 1, w: r.w - 2, h: r.h - 2 } : r, tight ? 0 : 1)) return 'Blocked: needs open, level ground';
+    if (!reach) return '';
     const [gsx, gsy] = toScreen(r.x + r.w / 2, r.y + r.h / 2);
     for (const b of this.buildings) {
       if (b.f !== f) continue;
@@ -2249,12 +2332,17 @@ export class IsoGame implements GameLike {
       this.tell(f, why);
       return;
     }
-    const b = this.addBuilding({ id: 0, kind: t.building, f, x, y, art, phase: 0, gun: 0, gunGoal: 0, pad, sel: false, rise: 0, hp: 1 });
-    this.clearSite(pad, null);
-    this.setPad(pad, true);
-    this.puff(b, 12);
-    this.sound(b.x, b.y, 'build_place');
-    this.sound(b.x, b.y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
+    // (a wall fills the gap to the next one in line with it, see wallRun)
+    const cells = t.building === 'wall' ? this.wallRun(f, x, y) : [[x, y]];
+    for (const [cx, cy] of cells) {
+      const p = padOf(t.building, art, cx, cy);
+      const b = this.addBuilding({ id: 0, kind: t.building, f, x: cx, y: cy, art, phase: 0, gun: 0, gunGoal: 0, pad: p, sel: false, rise: 0, hp: 1 });
+      this.clearSite(p, null);
+      this.setPad(p, true);
+      this.puff(b, cells.length > 1 ? 6 : 12);
+    }
+    this.sound(x, y, 'build_place');
+    this.sound(x, y, 'build_rise', 1, { delay: 0.15, rate: 1.1 });
     const e = this.eco[f];
     e.jobs.delete(t.tab);
     // the next wall segment is ready straight away, while there are credits for it
@@ -7343,7 +7431,8 @@ export class IsoGame implements GameLike {
       if (front) items.push({ k: k + r, draw: draw(front) });
       if (b.c4 !== undefined && !b.dead) items.push({ k: k + r + 1, draw: () => this.drawCharge(b.x, b.y, BRIDGE_Z[b.style] + 1) });
     }
-    for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b) });
+    const walls = this.wallSet();
+    for (const b of this.buildings) if (seen(b.x, b.y, 10)) items.push({ k: b.x + b.y + Math.min(b.art.rx, b.art.ry), draw: () => this.drawBuilding(b, walls) });
     for (const r of this.ruins) if (seen(r.x, r.y, 4)) items.push({ k: r.x + r.y + Math.min(r.states.ruin.rx, r.states.ruin.ry), draw: () => this.drawRuin(r) });
     for (const [i, f] of this.fires.entries()) if (seen(f.x, f.y, f.z)) items.push({ k: f.x + f.y + f.z * 2, draw: () => this.drawFire(f, i) });
     const ore = this.oreInView(x0 - pad, y0 - pad, x1 + pad, y1 + pad * 1.5).filter((n) => n.amt >= 10);
@@ -7418,9 +7507,16 @@ export class IsoGame implements GameLike {
     const gh = this.ghost;
     if (gh && seen(gh.x, gh.y, 10)) {
       const col = gh.why ? '#ff6a5a' : '#9dff9d';
-      this.drawFoot(gh.pad, col, 1.5, true, false);
+      // (a wall run gets an outline too, round all of what one purchase will build)
+      this.drawFoot(gh.pad, col, 1.5, true, !!gh.cells);
       c.globalAlpha = 0.65;
-      this.blit(this.buildingArt(gh.tech.building!, this.me).spr, gh.x, gh.y, 0);
+      if (gh.cells) {
+        // a wall run: each segment joined to the rest and to the walls it meets
+        const at = this.wallSet();
+        for (const [x, y] of gh.cells) at.add(wallKey(this.me, x, y));
+        const order = [...gh.cells].sort((p, q) => p[0] + p[1] - q[0] - q[1]);
+        for (const [x, y] of order) this.blit(this.wallArt(this.wallLink(at, this.me, x, y), this.me).spr, x, y, 0);
+      } else this.blit(this.buildingArt(gh.tech.building!, this.me).spr, gh.x, gh.y, 0);
       c.globalAlpha = 1;
     }
   }
@@ -7860,8 +7956,9 @@ export class IsoGame implements GameLike {
     }
   }
 
-  private drawBuilding(b: Building): void {
+  private drawBuilding(b: Building, walls?: Set<string>): void {
     const c = this.ctx;
+    const link = b.kind === 'wall' ? this.wallLink(walls ?? this.wallSet(), b.f, b.x, b.y) : null;
     if (b.rise < 1) {
       // going up (or coming down): revealed from the ground up, inside the
       // site's outline
@@ -7869,13 +7966,15 @@ export class IsoGame implements GameLike {
       // stage, inside the site's outline
       const [sx, sy] = toScreen(b.x, b.y, 0);
       this.drawFoot(b.pad, '#ffe08a', 0.8);
-      drawGoingUp(c, this.riseArt(b.kind, b.f), b.art.spr, b.rise, sx, sy);
+      // (a wall segment is too small to need stages: it just goes up)
+      if (link !== null) drawGoingUp(c, null, this.wallArt(link, b.f).spr, b.rise, sx, sy);
+      else drawGoingUp(c, this.riseArt(b.kind, b.f), b.art.spr, b.rise, sx, sy);
       return;
     }
-    const hurt = b.hp <= DAMAGED ? this.states(b.kind, b.f).damaged : null;
+    const hurt = b.hp <= DAMAGED ? (link !== null ? this.wallHurt(link, b.f) : this.states(b.kind, b.f)).damaged : null;
     this.lit = this.justHit(b) ? 0.22 : 0;
     this.aimed = this.aimFlash(b);
-    this.blit(hurt ? hurt.spr : b.art.spr, b.x, b.y, 0);
+    this.blit(hurt ? hurt.spr : link !== null ? this.wallArt(link, b.f).spr : b.art.spr, b.x, b.y, 0);
     this.lit = 0;
     this.aimed = 0;
     const door = b.door ? doorOf(b.kind) : null;
@@ -7981,6 +8080,11 @@ export class IsoGame implements GameLike {
 // The ground a building of this kind standing at (x, y) takes up: its
 // footprint and a margin round it (none for a wall segment, which lines up
 // with the next).
+// The key a wall segment of side f at (x, y) is found by, cell by cell.
+function wallKey(f: number, x: number, y: number): string {
+  return `${f}:${Math.round(x / WALL_GRID)},${Math.round(y / WALL_GRID)}`;
+}
+
 function padOf(kind: BuildingKind, art: { rx: number; ry: number }, x: number, y: number): Rect {
   const m = kind === 'wall' ? 0 : 3;
   return { x: x - art.rx - m, y: y - art.ry - m, w: art.rx * 2 + m * 2, h: art.ry * 2 + m * 2 };
