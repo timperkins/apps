@@ -183,4 +183,24 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./md/index'),
   },
+  {
+    id: 'explorer',
+    title: 'Explorer',
+    tagline: 'A whole round 3D earth: mine, craft, build factories, visit villages, rent a car and launch a rocket to space.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#8ec9ff"/>
+      <path d="M0 50L20 30L34 40L52 18L70 38L84 28L120 52V80H0Z" fill="#8a8a80"/>
+      <path d="M44 26L52 18L60 26L56 28L52 24L48 28Z" fill="#f4f8fb"/>
+      <path d="M0 58Q30 50 60 58T120 56V80H0Z" fill="#6db04a"/>
+      <path d="M0 70Q40 64 80 70T120 68V80H0Z" fill="#3f8a35"/>
+      <rect x="86" y="44" width="16" height="12" fill="#e8d5b7"/><path d="M84 45L94 37L104 45Z" fill="#a83a2c"/>
+      <g transform="translate(18 56)"><rect x="-1.5" y="0" width="3" height="8" fill="#7a5230"/><path d="M-7 2L0-14L7 2Z" fill="#245c3a"/></g>
+      <g transform="translate(30 60)"><rect x="-1.5" y="0" width="3" height="7" fill="#7a5230"/><circle cy="-4" r="7" fill="#4c9a3a"/></g>
+      <g transform="translate(62 62)"><rect x="-3" y="-8" width="6" height="7" rx="1.5" fill="#ffd23f"/><circle cy="-11" r="3.2" fill="#f1c9a0"/><rect x="-3" y="-1" width="2.4" height="5" fill="#3a4a6a"/><rect x=".6" y="-1" width="2.4" height="5" fill="#3a4a6a"/></g>
+      <g transform="translate(104 20) rotate(20)"><rect x="-3" y="-10" width="6" height="16" rx="2" fill="#f0f0f4"/><path d="M-3-10L0-16L3-10Z" fill="#d03030"/><path d="M-2 6Q0 14 2 6Z" fill="#ffb030"/></g>
+      <circle cx="16" cy="14" r="7" fill="#fff4b0"/>
+      <text x="60" y="13" font-size="11" font-weight="900" text-anchor="middle" fill="#ffe066" stroke="#7a3a0a" stroke-width="1" paint-order="stroke" font-family="sans-serif" letter-spacing="2">EXPLORER</text>
+    </svg>`,
+    load: () => import('./explorer/index'),
+  },
 ];

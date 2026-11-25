@@ -10,11 +10,13 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "@types/three": "^0.181.0",
     "typescript": "5.9.3",
     "vite": "7.3.7"
   },
   "dependencies": {
     "firebase": "^12.19.0",
-    "peerjs": "^1.5.5"
+    "peerjs": "^1.5.5",
+    "three": "^0.181.0"
   }
 }
