@@ -1,4 +1,4 @@
-// The showcase page (/units/): every unit and building in v2, one row each,
+// The showcase page (/units/): every unit and building, one row each,
 // from eight angles and doing the things it does in the game, on plain grass.
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
@@ -767,7 +767,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
     });
     addRow(parent, name, blurbOf(kind), unitCells(pick(me)[0], draw(me), draw(foe), { R, speed, more: [...more(draw(me)), ...fight] }));
   };
-  // (turn: the game's turn rate for it, from STATS in v1/game.ts)
+  // (turn: the game's turn rate for it, from UNIT in v2/game.ts)
   const idleShuffle = (sprs: StackSprite[], turn: number) => (draw: Draw): Cell[] => [
     { label: 'Idle', box: union(...[-0.6, 0, 0.6].map((k) => boxOf(sprs[di(Math.PI / 4 + k)]))), anim: true, draw: shuffler(draw, turn) },
   ];

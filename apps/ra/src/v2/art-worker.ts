@@ -1,7 +1,7 @@
 // Renders sprites off the main thread for art-pool.ts. It builds the same
 // shapes as the game (makeFactionArt, makeBuilding, makeDish) and draws the
 // one asked for, sending it back as bitmaps.
-import { FACTIONS } from '../v1/sprites';
+import { FACTIONS } from '../factions';
 import { BuildingKind, V2FactionArt, factionOf, factionSet, makeBuilding, makeBuildingGlow, makeConstruction, makeDish, makeFactionArt } from './sprites';
 import { StackSprite } from './stack';
 import { bridgeFromKey } from './bridge-art';

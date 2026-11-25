@@ -1,8 +1,8 @@
-// Isometric art for v2: units, buildings and props as shaded voxel shapes.
+// Isometric art: units, buildings and props as shaded voxel shapes.
 // Everything is modelled in world units (one unit is one pixel across the
 // ground) down to half a unit, which is the finest the renderer samples.
 import { RGB, dirIndex, hash2, hex, mix, rng, shade, vnoise } from '../gfx';
-import { FACTIONS, Faction } from '../v1/sprites';
+import { FACTIONS, Faction } from '../factions';
 import { Shape, StackOpts, StackSprite, columnMap, inBox, renderDirs, renderStack, toScreen } from './stack';
 
 export { FACTIONS };
