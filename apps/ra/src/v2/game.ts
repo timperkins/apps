@@ -552,7 +552,7 @@ const COMBAT_EXTRA: [Kind, number][] = [
   ['heron', 1],
   ['mcv', 1],
 ];
-const COMBAT_SHIPS: Kind[] = ['otter', 'destroyer', 'sub', 'cruiser', 'carrier'];
+const COMBAT_SHIPS: Kind[] = ['carrier', 'otter', 'destroyer', 'sub', 'cruiser'];
 
 // Height of each unit's visual center above the ground (for picking and brackets).
 // Which of the hauler's three pictures to show for a load: empty, partly
@@ -1156,10 +1156,59 @@ export class IsoGame implements GameLike {
       const [sx, sy] = findLand(p[0] * w, p[1] * h) ?? [p[0] * w, p[1] * h];
       return { sx, sy, f };
     };
+    // open sea round a world point, with room for a carrier
+    const openSea = (x: number, y: number) => {
+      if (T.k(x, y) !== K.Water) return false;
+      for (const r of [40, 80])
+        for (let i = 0; i < 16; i++) if (T.k(x + Math.cos((i / 16) * Math.PI * 2) * r, y + Math.sin((i / 16) * Math.PI * 2) * r) !== K.Water) return false;
+      return true;
+    };
+    // a little water a world point's Naval yard could sit on
+    const pondAt = (x: number, y: number) => T.k(x, y) === K.Water && T.k(x + 30, y) === K.Water && T.k(x - 30, y) === K.Water && T.k(x, y + 30) === K.Water && T.k(x, y - 30) === K.Water;
+    // ...a short sail from a screen point (in reach of a base round it)
+    const bySea = (sx: number, sy: number, wet: (x: number, y: number) => boolean) => {
+      const [x, y] = T.at(sx, sy);
+      for (let d = 110; d <= 230; d += 24)
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          if (wet(x + Math.cos(a) * d, y + Math.sin(a) * d)) return true;
+        }
+      return false;
+    };
+    // In the Combat stage your base goes on the coast nearest its usual spot,
+    // so it has a Naval yard and every ship too: open sea with room for the
+    // carrier if there's any in reach, or else a lake, no nearer the enemy
+    // than about two thirds of the usual way. Back on the usual spot if
+    // there's no water at all.
+    const coastal = (p: [number, number], foe: Site): Site => {
+      const sx0 = p[0] * w;
+      const sy0 = p[1] * h;
+      const [ex, ey] = nearestCopy(sx0, sy0, foe.sx, foe.sy, w, h);
+      const apart = Math.hypot(ex - sx0, ey - sy0);
+      for (const [wet, reach] of [
+        [openSea, 2400],
+        [pondAt, 1600],
+      ] as const)
+        for (let r = 0; r < reach; r += 24)
+          for (let t = 0; t < Math.max(1, r / 12); t++) {
+            const a = rand() * Math.PI * 2;
+            const [sx, sy] = wrapS(sx0 + Math.cos(a) * r, sy0 + Math.sin(a) * r * 0.5);
+            if (!flat(sx, sy) || !bySea(sx, sy, wet)) continue;
+            const [nx, ny] = nearestCopy(sx, sy, foe.sx, foe.sy, w, h);
+            if (Math.hypot(nx - sx, ny - sy) < apart * 0.65) continue;
+            return { sx, sy, f: this.me };
+          }
+      return at(p, this.me);
+    };
     // where each side starts: in single player you, then the enemy base
     const sites: Site[] = mp
       ? startsFor(def, this.players!.length).map((p, i) => at(p, this.players![i].f))
-      : [at(combat ? combatHome(def) : def.home, this.me), at(def.enemy, ENEMY)];
+      : combat
+        ? (() => {
+            const foe = at(def.enemy, ENEMY);
+            return [coastal(combatHome(def), foe), foe];
+          })()
+        : [at(def.home, this.me), at(def.enemy, ENEMY)];
     const homeSite = sites.find((st) => st.f === this.me) ?? sites[0];
     const foe = sites[1] ?? sites[0];
 
@@ -1232,8 +1281,22 @@ export class IsoGame implements GameLike {
       place(COMBAT_B, this.me, homeSite.sx, homeSite.sy);
       // the Naval yard, on the nearest open water to the base
       const yd = this.buildings.find((b) => b.f === this.me && b.kind === 'yard');
+      // (by open sea, with room for the carrier, rather than a pond if there's a choice)
+      const seaNear = ([x, y]: [number, number]) => {
+        for (let d = 40; d <= 220; d += 20) for (let i = 0; i < 16; i++) if (openSea(x + Math.cos((i / 16) * Math.PI * 2) * d, y + Math.sin((i / 16) * Math.PI * 2) * d)) return true;
+        return false;
+      };
       let wet: [number, number] | null = null;
-      for (const b of this.buildings) if (!wet && b.f === this.me) wet = this.findSite(this.me, 'navy', b.x, b.y, rand);
+      let pond: [number, number] | null = null;
+      for (const b of this.buildings) {
+        if (wet || b.f !== this.me) continue;
+        for (let t = 0; t < 4 && !wet; t++) {
+          const p = this.findSite(this.me, 'navy', b.x, b.y, rand);
+          if (p && seaNear(p)) wet = p;
+          else pond ??= p;
+        }
+      }
+      wet ??= pond;
       if (wet && yd) {
         const art = this.buildingArt('navy', this.me);
         const pad = padOf('navy', art, wet[0], wet[1]);
