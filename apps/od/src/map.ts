@@ -20,6 +20,10 @@ export const T = {
   Counter: 17,
   Laser: 18,
   Crate: 19,
+  Pit: 20, // the jail course: fall in and start over
+  Block: 21, // a parkour platform
+  Bounce: 22, // a springy pad that throws you up high
+  Trophy: 23,
 } as const;
 export type Tile = (typeof T)[keyof typeof T];
 
@@ -32,7 +36,7 @@ export interface Label {
 }
 
 export interface GameMap {
-  name: 'city' | 'bank';
+  name: 'city' | 'bank' | 'jail';
   w: number;
   h: number;
   tiles: Uint8Array;
@@ -42,6 +46,14 @@ export interface GameMap {
   places: Map<number, string>;
   labels: Label[];
   spawns: Record<string, { x: number; y: number }[]>;
+  /** Jail course: platform number (1..34) for each tile, 0 elsewhere. */
+  course?: Int16Array;
+  /** Jail course: the tile that shows each platform's number. */
+  courseLabels?: Map<number, number>;
+  /** Jail course: platforms that blink on and off. */
+  blinks?: { tiles: number[]; h: number; phase: number }[];
+  /** Blinking platforms about to vanish. */
+  warn?: Set<number>;
 }
 
 /** Building colours: top, left face, right face. */
@@ -58,6 +70,14 @@ export const PALETTE: [string, string, string][] = [
   ['#7a7f8c', '#5f6370', '#4c505c'], // 9 bank wall dark
   ['#9aa3ad', '#7b848f', '#646c77'], // 10 vent metal
   ['#a07850', '#80603e', '#664c30'], // 11 wood counter
+  ['#ef9a9a', '#d77b7b', '#bb6262'], // 12 jail course red
+  ['#90caf9', '#6fa8dc', '#5a8fc2'], // 13 jail course blue
+  ['#a5d6a7', '#82b885', '#6b9d6e'], // 14 jail course green
+  ['#ffe082', '#e0bd5c', '#c4a144'], // 15 jail course yellow
+  ['#ce93d8', '#ae73b8', '#935c9d'], // 16 jail course purple
+  ['#ffab91', '#e08a70', '#c47358'], // 17 jail course orange
+  ['#80deea', '#5fbcc8', '#4aa1ad'], // 18 jail course cyan (blinking)
+  ['#6d7380', '#545a66', '#434852'], // 19 jail stone
 ];
 
 // 14 x 14 city blocks, 12 tiles apart (about 10 times the area of the first version).
@@ -77,13 +97,23 @@ export function tileAt(m: GameMap, x: number, y: number): number {
 
 export function isTall(t: number): boolean {
   return (
-    t === T.Building || t === T.Tree || t === T.Wall || t === T.Vent || t === T.Locked || t === T.Vault || t === T.Counter || t === T.Crate
+    t === T.Building ||
+    t === T.Tree ||
+    t === T.Wall ||
+    t === T.Vent ||
+    t === T.Locked ||
+    t === T.Vault ||
+    t === T.Counter ||
+    t === T.Crate ||
+    t === T.Block ||
+    t === T.Bounce ||
+    t === T.Trophy
   );
 }
 
 /** Low blocks you can jump up onto. */
 export function isPlatform(t: number): boolean {
-  return t === T.Crate || t === T.Counter;
+  return t === T.Crate || t === T.Counter || t === T.Block || t === T.Bounce;
 }
 
 export function walkable(t: number, inVent: boolean): boolean {
@@ -163,6 +193,7 @@ const SPECIAL: Record<string, string> = {
   '6,0': 'park',
   '8,6': 'park',
   '4,4': 'park',
+  '4,0': 'jail',
   '13,8': 'park',
   '1,12': 'park',
   '10,1': 'park',
@@ -267,6 +298,12 @@ function fillBlock(m: GameMap, kind: string, x0: number, y0: number, x1: number,
       addDoor(m, x0 + 3, y0 + 5, 'bank');
       addDoor(m, x0 + 4, y0 + 5, 'bank');
       m.labels.push({ x: x0 + 4, y: y0 + 2.5, z: 3.4, text: 'BANK', color: '#8a6d00' });
+      return;
+    case 'jail':
+      rect(m, x0, y0, x1, y1, T.Plaza);
+      rect(m, x0, y0, x1, y0 + 4, T.Building, 2.2, 19);
+      addDoor(m, x0 + 4, y0 + 5, 'jail');
+      m.labels.push({ x: x0 + 4, y: y0 + 2.5, z: 3.2, text: 'JAIL', color: '#37474f' });
       return;
     case 'park':
       trees(m, x0, y0, x1, y1, r, 0.3);
@@ -374,4 +411,100 @@ export function buildBank(): GameMap {
   m.spawns.entry = [{ x: 8.5, y: 13.2 }];
   m.labels.push({ x: 3.5, y: 1.5, z: 2.2, text: 'VAULT', color: '#8a6d00' });
   return m;
+}
+
+// The jail: a huge parkour course. 34 platforms over a deep pit, from START to the golden trophy.
+// [x, y, width, depth, height, kind]: b block, k blinks on and off, s springy pad.
+export const COURSE: [number, number, number, number, number, 'b' | 'k' | 's'][] = [
+  [10, 25, 2, 2, 0.4, 'b'], // 1
+  [13, 25, 1, 1, 0.7, 'b'],
+  [15, 26, 1, 1, 0.9, 'b'],
+  [17, 25, 2, 1, 0.6, 'b'],
+  [20, 25, 1, 1, 0.6, 'k'], // 5
+  [22, 24, 1, 1, 0.8, 'b'],
+  [24, 24, 1, 1, 0.3, 's'],
+  [26, 23, 2, 2, 2.2, 'b'],
+  [29, 23, 1, 1, 2.0, 'b'],
+  [31, 24, 1, 1, 1.6, 'b'], // 10
+  [33, 25, 3, 1, 1.0, 'b'],
+  [37, 25, 1, 1, 0.6, 'k'],
+  [37, 22, 1, 1, 0.9, 'b'],
+  [36, 19, 2, 1, 1.2, 'b'],
+  [37, 17, 1, 1, 0.5, 'k'], // 15
+  [36, 14, 1, 2, 0.8, 'b'],
+  [34, 13, 1, 1, 1.1, 'b'],
+  [31, 12, 2, 1, 1.4, 'b'],
+  [29, 11, 1, 1, 0.3, 's'],
+  [26, 10, 2, 2, 2.4, 'b'], // 20
+  [23, 11, 1, 1, 2.0, 'b'],
+  [21, 12, 1, 1, 1.6, 'k'],
+  [18, 12, 2, 1, 1.2, 'b'],
+  [16, 11, 1, 1, 1.4, 'b'],
+  [14, 12, 1, 1, 1.0, 'b'], // 25
+  [11, 12, 1, 3, 0.7, 'b'],
+  [8, 13, 1, 1, 0.5, 'k'],
+  [5, 12, 2, 2, 0.8, 'b'],
+  [5, 9, 1, 1, 1.1, 'b'],
+  [6, 7, 1, 1, 0.3, 's'], // 30
+  [8, 5, 2, 1, 2.2, 'b'],
+  [11, 4, 1, 1, 1.8, 'k'],
+  [14, 4, 1, 1, 1.4, 'b'],
+  [17, 2, 4, 3, 1.0, 'b'], // 34: the finish
+];
+
+export function buildJail(): GameMap {
+  const w = 40;
+  const h = 30;
+  const m = blank('jail', w, h, T.Pit);
+  m.course = new Int16Array(w * h);
+  m.courseLabels = new Map();
+  m.blinks = [];
+  m.warn = new Set();
+  rect(m, 0, 0, w - 1, 0, T.Wall, 1.6, 19);
+  rect(m, 0, 0, 0, h - 1, T.Wall, 1.6, 19);
+  rect(m, w - 1, 0, w - 1, h - 1, T.Wall, 0.35, 19);
+  rect(m, 0, h - 1, w - 1, h - 1, T.Wall, 0.35, 19);
+  // the start: solid floor by the door
+  rect(m, 1, 24, 8, 28, T.Floor);
+  addDoor(m, 4, h - 1, 'exit');
+  const colors = [12, 13, 14, 15, 16, 17];
+  COURSE.forEach(([x, y, cw, cd, ch, kind], k) => {
+    const n = k + 1;
+    const t = kind === 's' ? T.Bounce : T.Block;
+    const pal = kind === 'k' ? 18 : kind === 's' ? 12 : colors[k % colors.length];
+    rect(m, x, y, x + cw - 1, y + cd - 1, t, ch, pal);
+    const tiles: number[] = [];
+    for (let yy = y; yy < y + cd; yy++)
+      for (let xx = x; xx < x + cw; xx++) {
+        m.course![idx(m, xx, yy)] = n;
+        tiles.push(idx(m, xx, yy));
+      }
+    m.courseLabels!.set(idx(m, x + cw - 1, y + cd - 1), n);
+    if (kind === 'k') m.blinks!.push({ tiles, h: ch, phase: n * 0.7 });
+  });
+  // the golden trophy waits at the end of platform 34
+  rect(m, 21, 3, 21, 3, T.Trophy, 1.3, 15);
+  m.spawns.entry = [{ x: 4.5, y: 27.5 }];
+  m.spawns.start = [{ x: 5.5, y: 25.5 }];
+  m.labels.push({ x: 5, y: 24.5, z: 1.2, text: 'START', color: '#2e7d32' });
+  m.labels.push({ x: 19, y: 3, z: 2.6, text: 'FINISH', color: '#b8860b' });
+  return m;
+}
+
+export const BLINK_CYCLE = 3.4;
+export const BLINK_ON = 2.4;
+
+/** Turn the blinking platforms on and off for the time t. */
+export function jailTick(m: GameMap, t: number) {
+  if (!m.blinks || !m.warn) return;
+  m.warn.clear();
+  for (const b of m.blinks) {
+    const local = (t + b.phase) % BLINK_CYCLE;
+    const on = local < BLINK_ON;
+    for (const i of b.tiles) {
+      m.tiles[i] = on ? T.Block : T.Pit;
+      m.heights[i] = on ? b.h : 0;
+      if (on && local > BLINK_ON - 0.7) m.warn.add(i);
+    }
+  }
 }
