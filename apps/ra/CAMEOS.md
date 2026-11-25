@@ -31,7 +31,8 @@ What is used now, so a new one can be different:
 | uplink | huge white dish on a tall pylon over a domed drum, beam into the sky | white, steel grey | frosty tundra, starry night |
 | helipad | round pad with a yellow H, windsock | asphalt | lakeshore |
 | lab | geodesic glass dome glowing from inside, raised on a round-cornered podium, slender spire with two floating halo rings, glass-faced tower | clear glass, off-white concrete, warm white light | summer meadow, dusk |
-| tower | tall round bunker with firing slits and a twin-gun turret | pale concrete, gunmetal | forest edge |
+| tower | (the Turret) tall round bunker with firing slits and a twin-gun turret | pale concrete, gunmetal | forest edge |
+| pillbox | squat eight-sided concrete bunker, machine guns in the slits, one firing, curve of sandbags in front | weathered grey concrete, sand-tan bags | muddy moor, rain, overcast |
 | depot | round repair pad, four arched orange pylons meeting in a ring, hoist | orange girders, asphalt | industrial yard, dusk, floodlights |
 | wall | run of crenellated concrete block wall with a corner | grey concrete | autumn hills |
 | aa | four-tube missile launcher tilted up, firing, sandbagged pad | khaki, olive | steppe, big cloudy sky |
@@ -103,8 +104,8 @@ What is used now, so a new one can be different:
 
 ## Making a tab icon
 
-The tab buttons show a cut-out subject with no background (power plant, gun
-tower, soldier's head and shoulders, tank).
+The tab buttons show a cut-out subject with no background (power plant,
+Turret, soldier's head and shoulders, tank).
 
 1. Generate a render as above, but on a plain background, which cuts out
    cleanly: "isolated on a plain flat light grey studio background with

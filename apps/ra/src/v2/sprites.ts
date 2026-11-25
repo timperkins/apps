@@ -1071,9 +1071,10 @@ function cruiser(f: Faction, part: 'hull' | 'top'): Shape {
 // (see CARRIER_SLOTS in combat.ts, which must match).
 export const CARRIER_SCALE = 2.5;
 
-// The carrier: a long flat flight deck over a broad hull, an island tower
-// on the starboard side and deck markings. (The jets it carries park on the
-// deck; they are drawn on their own.)
+// The carrier: a long flat flight deck over a broad hull, with a runway
+// down the port side (where its jets land and take off) and room to park on
+// the starboard side, round an island tower. (The jets are drawn on their
+// own; the runway and spots match CARRIER_RUNWAY and CARRIER_SLOTS.)
 function carrier(f: Faction): Shape {
   const at = carrierAt(f);
   const s = 1 / CARRIER_SCALE;
@@ -1083,36 +1084,47 @@ function carrier(f: Faction): Shape {
 function carrierAt(f: Faction): Shape {
   const H = 4.6;
   const DK = hex('#55595b');
+  const RW = hex('#45494b'); // the runway, a shade darker
+  const RV = -6.8; // the runway's middle line, across
   return (u, v, z) => {
     const av = Math.abs(v);
-    if (u < -27 || u > 28 || av > 10 || z > 17) return null;
+    if (u < -28.5 || u > 30.5 || av > 11 || z > 17) return null;
     // the hull, narrower than the deck
     if (z < H) {
-      const hull = hullAt(u, v, z, f, -26, 27, 7.4, H);
+      const hull = hullAt(u, v, z, f, -27.5, 28.5, 7.6, H);
       return hull === undefined ? null : hull;
     }
-    // the flight deck: a slab that overhangs the hull, angled to port
-    const dw = u > 18 ? 9.4 * Math.sqrt(Math.max(0, (28 - u) / 10)) : 9.4;
-    const portCut = v < -6.5 && u > 4; // the angled deck sticks out to port further back
-    if (z < H + 1 && av < dw && u > -26.5 && !portCut) {
+    // the flight deck: a slab that overhangs the hull, tapering at the bow
+    const dw = u > 20 ? 10.6 * Math.sqrt(Math.max(0, (30.5 - u) / 10.5)) : 10.6;
+    if (z < H + 1 && av < dw && u > -27.8) {
       if (z < H + 0.6) return av > dw - 0.5 ? f.dark : shade(DK, -0.2);
-      // markings: a dashed white centre line, an angled landing line, and a yellow edge
-      if (av > dw - 0.5) return HAZ;
-      if (av < 0.3 && mod(u, 4) < 2) return WHITE;
-      if (Math.abs(v + 2 - (u + 26) * 0.12) < 0.25 && u < 10) return WHITE;
-      if (u > 20 && u < 23 && av < 3 && mod(Math.floor(v), 2)) return HAZ; // the bow's number block
+      if (av > dw - 0.5) return HAZ; // a yellow edge
+      const rv = v - RV;
+      if (v < -3.3) {
+        // the runway: edge lines, a dashed middle line, stripes at the stern
+        // end, touchdown marks and the arresting wires
+        if (v > -3.7) return WHITE;
+        if (u < -24.6 && u > -26.6) return mod(v, 1.1) < 0.55 ? WHITE : RW;
+        if (u > -20 && u < -16.5 && Math.abs(rv) > 1.2 && Math.abs(rv) < 2.6) return WHITE;
+        if ((Math.abs(u + 22.4) < 0.15 || Math.abs(u + 21.2) < 0.15 || Math.abs(u + 14.6) < 0.15) && Math.abs(rv) < 2.8) return GUN_D;
+        if (Math.abs(rv) < 0.25 && mod(u, 4) < 2) return WHITE;
+        return g(RW, u, v, z, 0.04);
+      }
+      // the parking side: a yellow line along the runway, and the bow's number block
+      if (v < -2.6 && v > -3) return mod(u, 2) < 1.2 ? HAZ : DK;
+      if (u > 24 && u < 27 && av < 3 && mod(Math.floor(v), 2)) return HAZ;
       return g(DK, u, v, z, 0.05);
     }
     // the island on the starboard side: a stepped tower with a bridge, a mast and radar
-    if (v > 5.6 && v < 8.6 && u > -7 && u < 6 && z < 13) {
-      if (z > 10.4 && z < 11.6 && (u > 5.4 || v < 6.2)) return mod(u + v, 2) < 0.4 ? f.dark : GLASS_L;
+    if (v > 6.6 && v < 9.6 && u > -4 && u < 9 && z < 13) {
+      if (z > 10.4 && z < 11.6 && (u > 8.4 || v < 7.2)) return mod(u + v, 2) < 0.4 ? f.dark : GLASS_L;
       if (z > 12.4) return g(f.main, u, v, z);
-      if (u < -3 && z > 9) return null;
+      if (u < 0 && z > 9) return null;
       return g(shade(HULL, 0.06), u, v, z);
     }
-    if (Math.abs(u - 1) < 0.4 && Math.abs(v - 7) < 0.4 && z < 16.6) return z > 16 ? RED : GUN_D;
-    if (Math.abs(u - 1) < 0.5 && Math.abs(v - 7) < 2.4 && Math.abs(z - 14.4) < 0.35) return STEEL;
-    if (cyl(u, v, -5, 7.1, 1.1) && z < 11.4) return z > 10.8 ? BLACK : GUN;
+    if (Math.abs(u - 4) < 0.4 && Math.abs(v - 8.1) < 0.4 && z < 16.6) return z > 16 ? RED : GUN_D;
+    if (Math.abs(u - 4) < 0.5 && Math.abs(v - 8.1) < 2.4 && Math.abs(z - 14.4) < 0.35) return STEEL;
+    if (cyl(u, v, -2, 8.2, 1.1) && z < 11.4) return z > 10.8 ? BLACK : GUN;
     return null;
   };
 }
@@ -1666,7 +1678,7 @@ export function makeFactionArt(f: Faction): V2FactionArt {
     destroyer: renderDirs(destroyer(f), DIRS, { r: 21, zmax: 15, bakeShadow: true, shadowAlpha: 0.2 }, k('destroyer')),
     cruiser: renderDirs(cruiser(f, 'hull'), DIRS, { r: 20.5, zmax: 6, bakeShadow: true, shadowAlpha: 0.2 }, k('cruiser')),
     cruiserTop: renderDirs(cruiser(f, 'top'), DIRS, { r: 7, zmax: 16 }, k('cruiserTop')),
-    carrier: renderDirs(carrier(f), DIRS, { r: 73, zmax: 43, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
+    carrier: renderDirs(carrier(f), DIRS, { r: 80, zmax: 43, bakeShadow: true, shadowAlpha: 0.2 }, k('carrier')),
     sub: renderDirs(submarine(f), DIRS, { r: 17, zmax: 8 }, k('sub')),
     drone: renderDirs(drone(f), DIRS, { r: 3.5, zmax: 1.5 }, k('drone')),
     infantry: inf('gi', 'infantry', [0, 1, 2]),
@@ -1721,7 +1733,7 @@ export const FACTORY_DOOR: [number, number, number] = [0, 12, 17];
 /** The Barracks' door, on its end (+x) wall at u = 14: its middle across the wall, half width and height. */
 export const BARRACKS_DOOR: [number, number, number] = [0, 2.8, 7];
 
-export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy' | 'derrick';
+export type BuildingKind = 'yard' | 'lab' | 'power' | 'barracks' | 'refinery' | 'radar' | 'factory' | 'tower' | 'pillbox' | 'silo' | 'helipad' | 'prism' | 'aa' | 'depot' | 'wall' | 'uplink' | 'navy' | 'derrick';
 
 // The colors of a tech building nobody holds yet (side NEUTRAL_F).
 export const NEUTRAL: Faction = { name: 'Neutral', main: hex('#9c9583'), light: hex('#e4ddc8'), dark: hex('#5d584c') };
@@ -2576,7 +2588,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       return { shape, rx: 27, ry: 19, zmax: 27, fx: [{ x: -23.5, y: -11, z: 25 }, { x: 23.5, y: -11, z: 25 }] };
     }
     case 'tower': {
-      // Gun tower: a tall round bunker with a sloped skirt, firing slits and
+      // Turret: a tall round bunker with a sloped skirt, firing slits and
       // a band of the side's color; the game draws the turning guns on top.
       const H = 9;
       const shape: Shape = (u, v, z) => {
@@ -2599,6 +2611,57 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
         return null;
       };
       return { shape, rx: 8, ry: 8, zmax: 10, fx: [{ x: 0, y: 0, z: H }] };
+    }
+    case 'pillbox': {
+      // Pillbox: a squat eight-sided concrete bunker dug half into the
+      // ground, a firing slit on every face with a machine gun poking out of
+      // the ones that face the viewer, a thick roof slab over it with a band
+      // of the side's color, a round hatch and a periscope on top, and a low
+      // curve of sandbags in front. Its guns don't turn: it fires out of
+      // whichever slit faces the target. fx[0] is where they fire from.
+      const H = 4.6; // top of the roof slab
+      const oct = (u: number, v: number) => Math.max(Math.abs(u), Math.abs(v), (Math.abs(u) + Math.abs(v)) * 0.7071);
+      const shape: Shape = (u, v, z) => {
+        const d = oct(u, v);
+        const a = Math.atan2(v, u);
+        const face = Math.round(a / (Math.PI / 4));
+        const off = a - face * (Math.PI / 4);
+        // the walls, sloping in a little as they rise
+        if (z < 3.4 && d < 6.6 - z * 0.3) {
+          if (z < 0.9) return grime(CONC_D, a * 6, z, H, 19);
+          if (z > 1.8 && z < 2.6 && Math.abs(off) < 0.24) return z < 1.95 ? CONC_L : BLACK; // firing slits
+          if (Math.abs(off) > 0.36) return shade(g(CONC, u, v, z), -0.06); // the corners
+          return grime(g(CONC, u, v, z, 0.07), a * 6, z, H, 19);
+        }
+        // the machine guns in the slits that face the viewer
+        for (const k of [0, 1, 2]) {
+          const ga = (k * Math.PI) / 4;
+          const along = u * Math.cos(ga) + v * Math.sin(ga);
+          const across = -u * Math.sin(ga) + v * Math.cos(ga);
+          if (along > 5 && along < 7.6 && Math.hypot(across, z - 2.2) < 0.4) return along > 7.2 ? GUN_D : GUN;
+        }
+        // the roof slab, a little wider than the walls
+        if (z >= 3.4 && z < H && d < 6.2) {
+          if (z < 3.7) return d > 5.6 ? CONC_D : CONC;
+          if (d > 5.5) return z > H - 0.35 ? CONC_L : g(f.main, u, v, z);
+          if (z > H - 0.4) return mod(u + v, 3.2) < 0.3 ? CONC_D : g(CONC_L, u, v, z, 0.08);
+          return g(CONC, u, v, z);
+        }
+        // a round hatch and a periscope on the roof
+        const hd = Math.hypot(u + 1.6, v + 1.4);
+        if (z >= H && z < H + 0.7 && hd < 1.7) return hd < 1.1 && z > H + 0.4 ? GUN_D : GUN;
+        if (inBox(u, v, z, 1.4, 2.4, -2.6, -1.6, H, H + 1.8)) return z > H + 1.2 ? (u > 2.1 ? BLACK : GUN_L) : GUN;
+        // a low curve of sandbags in front
+        const sd = Math.hypot(u, v);
+        if (sd > 7.1 && sd < 8.3 && z < 1.5 && a > -0.15 && a < Math.PI / 2 + 0.15 && Math.abs(a - Math.PI / 4) > 0.14) {
+          const course = Math.floor(z / 0.75);
+          const along = a * 5 + course * 0.5;
+          if (mod(along, 1) < 0.14 || z - course * 0.75 < 0.15) return shade(SAND_BAG, -0.3);
+          return shade(SAND_BAG, (hash2(Math.floor(along), course, 19) - 0.5) * 0.22);
+        }
+        return null;
+      };
+      return { shape, rx: 8, ry: 8, zmax: 7, fx: [{ x: 0, y: 0, z: 2.2 }] };
     }
     case 'silo': {
       // Ore silos: a tall rounded tank and a smaller one, each with a glowing
@@ -3471,7 +3534,7 @@ export interface BuildingStates {
   ruin: V2BuildingArt; // burnt-out rubble; its fx are where smoke rises
 }
 
-const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18 };
+const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18, pillbox: 19 };
 
 // A building badly hit, and what is left of it once it is destroyed.
 export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {

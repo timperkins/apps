@@ -38,28 +38,13 @@ jobs:
     with:
       app: ${{ matrix.app }}
       target: prod
+      # After the prod deploy, the same job rebuilds each Hosting app with the preview environment
+      # and puts it on the app's fixed "latest" preview link, so that link also tracks main.
+      # (One job instead of a second deploy-app run: Actions bills every job as at least a minute.)
+      # App Hosting apps are skipped.
+      with_latest: true
     secrets: inherit
     permissions:
       contents: write
       statuses: write
-      pull-requests: read
-
-  # After a merge, rebuild each deployed Hosting app with the preview environment and put it on the
-  # app's fixed "latest" preview link, so that link also tracks main. App Hosting apps are skipped.
-  latest:
-    needs: [detect, deploy]
-    if: always() && needs.detect.outputs.apps != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        app: ${{ fromJSON(needs.detect.outputs.apps) }}
-    uses: ./.github/workflows/deploy-app.yml
-    with:
-      app: ${{ matrix.app }}
-      target: preview
-      latest_only: true
-    secrets: inherit
-    permissions:
-      contents: write
-      statuses: write
-      pull-requests: read
+      pull-requests: write
