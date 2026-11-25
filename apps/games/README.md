@@ -78,6 +78,7 @@ A mining game designed by Tim (original code and art). You're in a mine: dig sto
 - Five caves in a row (Stone Hollow, Coal Cavern, Iron Depths, Gold Grotto, Diamond Deep), each blocked by boulders. Dynamite from the shop ($150, $600, $2,000, $6,000) blasts them open and unlocks that cave's robots. Rocks grow back over time.
 - Upgrades: turbo propellers (faster robots) and bigger robot bags. The $50,000 Golden Robot King mines every ore 3× faster and wins the game.
 - 💾 saves (localStorage, `robopoculeps-save-v1`); Continue on the title screen loads it. Phones get a joystick, a mine button, and tap-to-build.
+- Co-op for up to 4 miners, each on their own phone or computer: the host picks 👥 Play with friends in the menu and gets a code; friends pick Join a friend on the title screen. Money, the bag, machines and robots are shared. Each miner has a colored helmet and a number. The host's game runs the mine and sends it out about 12 times a second; friends walk on their own screen and send their spot, mining, building and shop buttons to the host. Only the host saves.
 
 ## Survivle (Long Edition)
 
@@ -98,6 +99,10 @@ npm run dev
 npm run build
 ```
 
+
+### Playing together (`src/games/coop/`)
+
+Shared by the games that got co-op later (Robopoculeps first): `net.ts` is the PeerJS link (each game passes its own code prefix, up to 4 players), `session.ts` gives each player a slot (0 is the host) and turns away a fifth player, and `ui.ts` has the Play with friends panel and the badge with the code and the players' colored numbers. To try it on one computer, run a PeerJS server (`npx peerjs --port 9000 --path /myapp`) and open the game with `?peer=localhost:9000/myapp`.
 ## Emberwild
 
 An open-world adventure with block mining and building and factory automation. Original code, art and sounds. Code in `src/games/emberwild/`.
