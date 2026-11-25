@@ -6,8 +6,37 @@ import { isMuted, setMuted, sfx, startMusic, stopMusic } from './audio';
 import { GRID_X0, H, LOT, LOTS, LOT_BY_ID, SOLID, T, W, hash, idx, inLot, inMap, lotAt, makeWorld, type Building, type Lot, type World } from './world';
 import { FUN_ITEMS, INGS, MENU_MAX, RECIPES, RECIPE_BY_ID, SEATS, STATIONS, type Ing, type Recipe } from './recipes';
 import { CATS, CAT_ICON, ITEMS, ITEM_BY_ID, LEVEL_TITLES, NAMES, ROLES, type Item } from './build';
+import { coopBadge, coopMenu, every } from '../coop/ui';
+import { PLAYER_COLORS, PLAYER_NAMES, type FriendSession, type HostSession, type Session } from '../coop/session';
 
 const SAVE_KEY = 'jobville-save-v1';
+const COOP_PREFIX = 'trom-jobville-';
+
+/** What each player tells the others about themselves, about 10 times a second. */
+interface Friend {
+  slot: number;
+  x: number;
+  y: number;
+  fx: number;
+  fy: number;
+  moving: boolean;
+  walk: number;
+  scene: 'town' | 'shop';
+  shirt: string;
+  job: JobId | null;
+  money: number;
+  hat: number;
+  won: boolean;
+  say?: string;
+  sayT?: number;
+  /** where they're gliding toward */
+  tx?: number;
+  ty?: number;
+}
+type CoopMsg =
+  | { t: 'me'; f: Friend }
+  | { t: 'all'; list: Friend[] }
+  | { t: 'ev'; slot: number; kind: 'wave' | 'won' | 'gift'; to?: number; n?: number };
 
 interface Save {
   money: number;
@@ -231,6 +260,10 @@ function loadSave(): Save {
 }
 
 function mount(root: HTMLElement, opts: { onExit: () => void }) {
+  let net: Session | null = null;
+  /** Everyone else in the village, by slot. */
+  const friends = new Map<number, Friend>();
+  const sendRate = every(10);
   const world: World = makeWorld();
   let save = loadSave();
   setMuted(save.muted);
@@ -2370,6 +2403,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       <div class="jv-menu">
         <button data-m="resume">▶ Keep playing</button>
         <button data-m="save">💾 Save game</button>
+        <button data-m="friends">${net ? (net.role === 'host' ? `👥 Code ${net.code} · stop playing together` : '👥 Leave your friend’s village') : '👥 Play with friends'}</button>
         <button data-m="sound">${isMuted() ? '🔇 Sound: off' : '🔊 Sound: on'}</button>
         <button data-m="music">${save.music ? '🎵 Music: on' : '🎵 Music: off'}</button>
         <button data-m="photo">📸 Photo mode</button>
@@ -2384,7 +2418,13 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
         if (!b) return;
         const m = b.dataset.m;
         if (m === 'resume') closeModal();
-        else if (m === 'save') {
+        else if (m === 'friends') {
+          closeModal();
+          if (net) {
+            endNet();
+            toast('Playing on your own again.');
+          } else friendsMenu();
+        } else if (m === 'save') {
           saveNow();
           b.textContent = '✅ Saved!';
         } else if (m === 'sound') {
@@ -2588,6 +2628,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     else if (k === 'escape' && build.on) setBuild(false);
     else if (k === 'escape' || k === 'p') openMenu();
     else if (k === 'm') openMap();
+    else if (k === 'g') wave();
     else keys.add(k);
   };
   const onKeyUp = (e: KeyboardEvent) => {
@@ -3166,6 +3207,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
       emoji(m.icon, m.x * ts + ts * 0.3, m.y * ts - ts * 0.1, ts * 0.4);
     }
     drawPet();
+    drawFriends();
     drawPlayer();
     if (save.won) drawStatue();
 
@@ -3868,6 +3910,7 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
 
     for (const pd of PODIUMS) drawPodium(pd.x, pd.y, pd.id);
     drawPet();
+    drawFriends();
     drawPlayer();
     drawWorldFx();
     g.restore();
@@ -4038,10 +4081,171 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
     const dt = Math.min(0.05, (t - last) / 1000);
     last = t;
     if (!paused) update(dt);
+    coopTick(dt, t);
     render();
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
+
+  // ---------- playing together ----------
+  // Everyone keeps their own job, money and shop (and their own save); you share the village and see each other.
+  const badge = coopBadge(el);
+  function meState(slot: number): Friend {
+    return { slot, x: +p.x.toFixed(2), y: +p.y.toFixed(2), fx: p.fx, fy: p.fy, moving: p.moving, walk: +p.walk.toFixed(1), scene, shirt: save.shirt, job: save.job, money: Math.floor(save.money), hat: tier('hat'), won: save.won };
+  }
+  function refreshBadge() {
+    if (!net) return badge.set('', [], 0);
+    if (net.role === 'host') return badge.set(net.code, [0, ...net.friends()], 0);
+    badge.set(net.code, [...new Set([0, net.slot, ...friends.keys()])].sort(), net.slot);
+  }
+  function endNet() {
+    net?.close();
+    net = null;
+    friends.clear();
+    refreshBadge();
+  }
+  function takeFriend(f: Friend) {
+    const old = friends.get(f.slot);
+    if (old && dist(old.x, old.y, f.x, f.y) < 6) {
+      Object.assign(old, { ...f, x: old.x, y: old.y, tx: f.x, ty: f.y, say: old.say, sayT: old.sayT });
+    } else friends.set(f.slot, { ...f, tx: f.x, ty: f.y });
+  }
+  function onEvent(m: Extract<CoopMsg, { t: 'ev' }>) {
+    const f = friends.get(m.slot);
+    const who = PLAYER_NAMES[m.slot] ?? 'A friend';
+    if (m.kind === 'wave' && f) {
+      f.say = '👋';
+      f.sayT = 2;
+    } else if (m.kind === 'won') toast(`🏆 ${who} bought the Golden Trophy!`);
+    else if (m.kind === 'gift') {
+      const me = net?.role === 'friend' ? net.slot : 0;
+      if (m.to === me && m.n) {
+        save.money += m.n;
+        toast(`🎁 ${who} gave you ${fmt(m.n)}!`);
+        sfx.coin();
+      }
+    }
+  }
+  function sendEvent(e: Extract<CoopMsg, { t: 'ev' }>) {
+    if (net?.role === 'host') net.broadcast(e);
+    else net?.send(e);
+  }
+  function startHosting(s: HostSession) {
+    net = s;
+    s.onJoin((slot) => {
+      toast(`${PLAYER_NAMES[slot]} came to your village! Press G to wave, or next to them to give them $10.`);
+      refreshBadge();
+    });
+    s.onLeave((slot) => {
+      friends.delete(slot);
+      toast(`${PLAYER_NAMES[slot]} went home.`);
+      s.broadcast({ t: 'all', list: [meState(0), ...friends.values()] } satisfies CoopMsg);
+      refreshBadge();
+    });
+    s.onMessage((slot, raw) => {
+      const m = raw as CoopMsg;
+      if (net !== s || !m) return;
+      if (m.t === 'me' && m.f && Number.isFinite(m.f.x)) takeFriend({ ...m.f, slot });
+      else if (m.t === 'ev') {
+        // pass it on to everyone else
+        const e = { ...m, slot };
+        for (const o of s.friends()) if (o !== slot) s.send(o, e);
+        onEvent(e);
+      }
+    });
+    refreshBadge();
+    toast(`Friends can join with the code ${s.code}: ⏸ menu → 👥 Play with friends.`);
+  }
+  function startFriend(s: FriendSession) {
+    net = s;
+    s.onMessage((raw) => {
+      const m = raw as CoopMsg;
+      if (net !== s || !m) return;
+      if (m.t === 'all') {
+        const seen = new Set<number>();
+        for (const f of m.list) {
+          if (f.slot === s.slot) continue;
+          seen.add(f.slot);
+          takeFriend(f);
+        }
+        for (const k of [...friends.keys()]) if (!seen.has(k)) friends.delete(k);
+        refreshBadge();
+      } else if (m.t === 'ev') onEvent(m);
+    });
+    s.onClose(() => {
+      if (net !== s) return;
+      net = null;
+      friends.clear();
+      refreshBadge();
+      toast('Your friend stopped hosting. You are back in your own village.');
+    });
+    refreshBadge();
+    toast(`You're ${PLAYER_NAMES[s.slot]}! Your job, money and shop stay your own. Press G to wave, or next to a friend to give them $10.`);
+  }
+  function friendsMenu() {
+    coopMenu(el, {
+      title: 'Jobville',
+      prefix: COOP_PREFIX,
+      onHosted: startHosting,
+      onJoined: startFriend,
+    });
+  }
+  let wasWon = save.won;
+  function coopTick(dt: number, t: number) {
+    for (const f of friends.values()) {
+      if (f.tx !== undefined && f.ty !== undefined) {
+        const k = Math.min(1, dt * 10);
+        f.x += (f.tx - f.x) * k;
+        f.y += (f.ty - f.y) * k;
+      }
+      if (f.sayT) f.sayT = Math.max(0, f.sayT - dt);
+    }
+    if (!net || !sendRate(t)) return;
+    if (save.won && !wasWon) sendEvent({ t: 'ev', slot: 0, kind: 'won' });
+    wasWon = save.won;
+    if (net.role === 'host') {
+      if (net.friends().length) net.broadcast({ t: 'all', list: [meState(0), ...friends.values()].map((f) => ({ ...f, tx: undefined, ty: undefined, say: undefined, sayT: undefined })) } satisfies CoopMsg);
+    } else net.send({ t: 'me', f: meState(net.slot) } satisfies CoopMsg);
+  }
+  /** The friend standing next to you, if any. */
+  function friendNear() {
+    let best: Friend | null = null, bd = 1.6;
+    for (const f of friends.values()) {
+      const d = dist(f.x, f.y, p.x, p.y);
+      if (f.scene === scene && d < bd) {
+        bd = d;
+        best = f;
+      }
+    }
+    return best;
+  }
+  function wave() {
+    if (!net) return;
+    const near = friendNear();
+    const me = net.role === 'host' ? 0 : net.slot;
+    if (near && save.money >= 10) {
+      // next to a friend: hand them $10
+      save.money -= 10;
+      sendEvent({ t: 'ev', slot: me, kind: 'gift', to: near.slot, n: 10 });
+      floats.push({ x: p.x, y: p.y - 0.8, text: `-$10 for ${PLAYER_NAMES[near.slot]}`, color: '#ffd166', t: 0 });
+    } else sendEvent({ t: 'ev', slot: me, kind: 'wave' });
+    meSay = 2;
+  }
+  let meSay = 0;
+  function drawFriends() {
+    meSay = Math.max(0, meSay - 1 / 60);
+    for (const f of friends.values()) {
+      if (f.scene !== scene) continue;
+      drawPerson(f.x, f.y, f.shirt, '#f1c27d', '#4a2c17', f.walk, f.moving);
+      const hat = ['', '🧢', '🎩', '👑'][f.hat] ?? '';
+      if (hat) emoji(hat, f.x * ts, f.y * ts - ts * 0.6, ts * 0.38);
+      const job = f.job ? JOB_BY_ID[f.job] : null;
+      nameTag(f.x, f.y, `${f.slot + 1} · ${job ? job.icon + ' ' : ''}${fmt(f.money)}${f.won ? ' 🏆' : ''}`, PLAYER_COLORS[f.slot] === '#ffd23f' ? '#b8860b' : PLAYER_COLORS[f.slot] ?? '#555');
+      if (f.sayT && f.say) bubble(f.x * ts, f.y * ts - ts * 1.25, f.say);
+    }
+    if (meSay > 0 && net) bubble(p.x * ts, p.y * ts - ts * 1.25, '👋');
+  }
+
   if (!save.intro) showIntro();
   if (save.music) startMusic();
 
@@ -4050,6 +4254,8 @@ function mount(root: HTMLElement, opts: { onExit: () => void }) {
 
   return () => {
     writeSave();
+    net?.close();
+    badge.remove();
     stopMusic();
     cancelAnimationFrame(raf);
     ro.disconnect();
