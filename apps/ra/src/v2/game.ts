@@ -557,13 +557,13 @@ const BASE_B: BuildingKind[] = ['power', 'factory', 'barracks', 'refinery', 'sil
 const COMBAT_B: BuildingKind[] = ['yard', 'radar', 'factory', 'refinery', 'barracks', 'lab', 'helipad', 'depot', 'silo', 'uplink', 'power', 'power', 'power', 'power', 'power', 'power', 'tower', 'pillbox', 'aa', 'prism', 'wall'];
 // ...and one of every unit (as well as the army it starts with): these on
 // land, Swift jets and the Paratrooper plane on the Air command's stands,
-// and ships by the Naval yard.
+// and ships by the Naval yard. (The MCU comes already deployed, as the
+// Construction yard: pack that up to drive it.)
 const COMBAT_EXTRA: [Kind, number][] = [
   ['eng', 1],
   ['cmdo', 1],
   ['apc', 1],
   ['heron', 1],
-  ['mcv', 1],
 ];
 const COMBAT_SHIPS: Kind[] = ['carrier', 'otter', 'destroyer', 'sub', 'cruiser'];
 
