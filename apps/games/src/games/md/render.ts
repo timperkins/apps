@@ -2,8 +2,14 @@
 // a light map for the dungeon dark, and the minimap / full map.
 import { LEVELS, TRADERS, type LevelDef } from './data';
 import { T, tileAt, type Level, type Prop } from './dungeon';
-import type { Game, Monster } from './game';
-import { parseKey, type MeleeShape, type Ranged } from './data';
+import type { Game, Monster, Peer } from './game';
+import { armorOf, meleeOf, parseKey, rangedOf, type MeleeShape, type Ranged } from './data';
+
+interface HeroView {
+  x: number; y: number; face: number; walk: number; moving: boolean; rolling: boolean;
+  swingT: number; swingDur: number; drawT: number; bowOut: boolean; hurt: boolean;
+  armor: string; melee: string; ranged: string;
+}
 import { heroParts, monsterParts, traderParts, type Part } from './models';
 
 export const TW = 64;
@@ -225,60 +231,66 @@ function propBox(x: CanvasRenderingContext2D, cx: number, cy: number, f: Part) {
   drawPart(x, cx, cy, f, 0, false);
 }
 
-/** Draws one box (in world units relative to an origin already projected to sx, sy). */
-function drawPart(x: CanvasRenderingContext2D, sx: number, sy: number, p: Part, dir: number, flash: boolean, scale = 1) {
+/** Draws one box (in world units relative to an origin already projected to sx, sy), turned to angle `ang`. */
+function drawPart(x: CanvasRenderingContext2D, sx: number, sy: number, p: Part, ang: number, flash: boolean, scale = 1) {
   const [f, r, z, sf, sr, sz, col] = p;
-  // forward / right vectors for the 4 facings
-  const F = DIRS[dir], Rv = [-F[1], F[0]];
-  const cx = (F[0] * f + Rv[0] * r) * scale, cy = (F[1] * f + Rv[1] * r) * scale;
-  const w = (Math.abs(F[0]) * sf + Math.abs(Rv[0]) * sr) * scale;
-  const d = (Math.abs(F[1]) * sf + Math.abs(Rv[1]) * sr) * scale;
-  const h = sz * scale, z0 = z * scale;
-  const x0 = cx - w / 2, y0 = cy - d / 2, x1 = x0 + w, y1 = y0 + d, zt = z0 + h;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  // forward and right vectors in the ground plane
+  const Fx = c, Fy = s, Rx = -s, Ry = c;
+  const cx = (Fx * f + Rx * r) * scale, cy = (Fy * f + Ry * r) * scale;
+  const hf = (sf / 2) * scale, hr = (sr / 2) * scale;
+  const z0 = z * scale, zt = z0 + sz * scale;
   const P = (wx: number, wy: number, wz: number): [number, number] => [sx + (wx - wy) * HW, sy + (wx + wy) * HH - wz * TZ];
+  // the 4 ground corners, going around: front-right, front-left, back-left, back-right
+  const g: [number, number][] = [
+    [cx + Fx * hf + Rx * hr, cy + Fy * hf + Ry * hr],
+    [cx + Fx * hf - Rx * hr, cy + Fy * hf - Ry * hr],
+    [cx - Fx * hf - Rx * hr, cy - Fy * hf - Ry * hr],
+    [cx - Fx * hf + Rx * hr, cy - Fy * hf + Ry * hr],
+  ];
+  const normals: [number, number][] = [[Fx, Fy], [-Rx, -Ry], [-Fx, -Fy], [Rx, Ry]];
   const base = flash ? '#ffffff' : col;
-  const quad = (a: [number, number], b: [number, number], c: [number, number], e: [number, number], color: string) => {
+  const poly = (pts: [number, number][], color: string) => {
     x.fillStyle = color;
     x.beginPath();
-    x.moveTo(a[0], a[1]);
-    x.lineTo(b[0], b[1]);
-    x.lineTo(c[0], c[1]);
-    x.lineTo(e[0], e[1]);
+    x.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) x.lineTo(pts[i][0], pts[i][1]);
     x.closePath();
     x.fill();
   };
-  quad(P(x0, y1, zt), P(x1, y1, zt), P(x1, y1, z0), P(x0, y1, z0), shade(base, 0.78));
-  quad(P(x1, y0, zt), P(x1, y1, zt), P(x1, y1, z0), P(x1, y0, z0), shade(base, 0.6));
-  quad(P(x0, y0, zt), P(x1, y0, zt), P(x1, y1, zt), P(x0, y1, zt), shade(base, 1));
+  // side faces that look toward the camera (+x and +y are toward the viewer)
+  for (let i = 0; i < 4; i++) {
+    const [nx, ny] = normals[i];
+    if (nx + ny <= 1e-4) continue;
+    const a = g[i], b = g[(i + 1) % 4];
+    poly([P(a[0], a[1], zt), P(b[0], b[1], zt), P(b[0], b[1], z0), P(a[0], a[1], z0)], shade(base, 0.69 + 0.09 * (ny - nx)));
+  }
+  poly(g.map((q) => P(q[0], q[1], zt)), shade(base, 1));
 }
 /** guardians are bigger versions of a monster, washed in their dungeon's color */
 export function tintParts(parts: Part[], tint: string): Part[] {
   return parts.map((p) => (p[7] ? p : ([p[0], p[1], p[2], p[3], p[4], p[5], mix(p[6], tint, 0.35)] as Part)));
 }
-const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
-const dir4 = (a: number) => (((Math.round(a / (Math.PI / 2)) % 4) + 4) % 4);
 
-/** Draws a list of parts sorted back to front. */
+/** Draws a list of parts sorted back to front, turned to any angle. */
 export function drawModel(x: CanvasRenderingContext2D, sx: number, sy: number, parts: Part[], face: number, flash = false, scale = 1) {
-  const dir = dir4(face);
-  const F = DIRS[dir], Rv = [-F[1], F[0]];
+  const c = Math.cos(face), s = Math.sin(face);
   const sorted = parts
-    .map((p) => ({ p, k: (F[0] * p[0] + Rv[0] * p[1] + F[1] * p[0] + Rv[1] * p[1]) * 1 + (p[2] + p[5] * 0.5) * 0.001 }))
-    .sort((a, b) => a.k - b.k);
-  // boxes higher up should still draw after the ones they sit on
-  sorted.sort((a, b) => {
-    const da = a.k - b.k;
-    if (Math.abs(da) > 0.12) return da;
-    return a.p[2] - b.p[2];
-  });
+    .map((p) => ({ p, k: (c * p[0] - s * p[1]) + (s * p[0] + c * p[1]) }))
+    .sort((a, b) => {
+      const da = a.k - b.k;
+      // boxes higher up should still draw after the ones they sit on
+      if (Math.abs(da) > 0.12) return da;
+      return a.p[2] - b.p[2] || da;
+    });
   for (const { p } of sorted) {
     if (p[7] && !flash) {
       x.save();
       x.shadowColor = p[6];
       x.shadowBlur = 12;
-      drawPart(x, sx, sy, p, dir, flash, scale);
+      drawPart(x, sx, sy, p, face, flash, scale);
       x.restore();
-    } else drawPart(x, sx, sy, p, dir, flash, scale);
+    } else drawPart(x, sx, sy, p, face, flash, scale);
   }
 }
 
@@ -567,6 +579,9 @@ export class Renderer {
 
   draw(g: Game, opts: { minimap: boolean; title?: boolean }) {
     const x = this.x;
+    const now = performance.now();
+    this.frameDt = this.lastDraw ? Math.min(0.1, (now - this.lastDraw) / 1000) : 1 / 60;
+    this.lastDraw = now;
     const def = g.def;
     if (this.tilesFor !== def.id) {
       this.tiles = makeTileset(def);
@@ -684,6 +699,8 @@ export class Renderer {
     for (const d of g.drops) list.push({ k: d.x + d.y, f: () => this.drop(d.kind, d.x, d.y, g.time + d.x) });
     for (const m of g.monsters) if (seen(Math.floor(m.x), Math.floor(m.y))) list.push({ k: m.x + m.y, f: () => this.monster(m, g) });
     if (!g.dead || g.deadT < 0.6) list.push({ k: heroK, f: () => this.hero(g) });
+    const other = g.remote ? g.mate : g.peers[0];
+    if (other) list.push({ k: other.x + other.y, f: () => this.mate(other, g) });
     for (const s of g.shots) list.push({ k: s.x + s.y, f: () => this.shot(s.x, s.y, s.z, s.vx, s.vy, s.kind, g, s.color) });
     for (const b of g.bombs) list.push({ k: b.x + b.y, f: () => this.bomb(b.x, b.y, b.t, b.fuse) });
     list.sort((a, b) => a.k - b.k);
@@ -893,65 +910,186 @@ export class Renderer {
     x.restore();
   }
 
-  private hero(g: Game) {
-    const x = this.x;
-    const a = g.armor;
-    this.shadow(g.x, g.y, 0.3);
-    const [sx, sy] = this.iso(g.x, g.y, g.rollT > 0 ? -0.1 : 0);
-    const parts = heroParts({ armor: a.color, trim: a.trim, walk: g.walk, moving: g.moving, helm: a.helm, shiny: parseKey(g.save.armor).rarity !== 'normal' });
-    if (g.rollT > 0) {
-      // tuck into a ball-ish block
-      x.save();
-      x.globalAlpha = 0.85;
-      drawModel(x, sx, sy + 8, parts.map((p) => [p[0] * 0.7, p[1] * 0.7, p[2] * 0.55, p[3], p[4], p[5] * 0.7, p[6]] as Part), g.walk, false);
-      x.restore();
-      return;
+  /** the angle a model is shown at eases toward where it faces, so turning looks smooth */
+  private turned = new WeakMap<object, number>();
+  private lastDraw = 0;
+  private frameDt = 1 / 60;
+  private ease(o: object, target: number, rate = 16): number {
+    const cur = this.turned.get(o);
+    if (cur === undefined) {
+      this.turned.set(o, target);
+      return target;
     }
-    const flicker = g.hurtT > 0 && Math.floor(g.time * 20) % 2 === 0;
-    const dir = dir4(g.face);
-    // which side the weapon hand is on, in screen space
-    const fx = Math.cos(g.face), fy = Math.sin(g.face);
-    const scrA = Math.atan2((fx + fy) * HH, (fx - fy) * HW);
-    const handBehind = dir === 2 || dir === 3;
-    const weapon = () => this.heroWeapon(g, sx, sy, scrA);
-    if (handBehind) weapon();
-    drawModel(x, sx, sy, parts, g.face, flicker);
-    if (!handBehind) weapon();
+    let d = target - cur;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    const next = Math.abs(d) < 0.01 ? target : cur + d * Math.min(1, this.frameDt * rate);
+    this.turned.set(o, next);
+    return next;
   }
 
-  private heroWeapon(g: Game, sx: number, sy: number, scrA: number) {
+  private hero(g: Game) {
+    const view: HeroView = {
+      x: g.x, y: g.y, face: g.face, walk: g.walk, moving: g.moving, rolling: g.rollT > 0,
+      swingT: g.swingT, swingDur: g.swingDur, drawT: g.drawT, bowOut: g.drawT > 0 || (g.rangedCd > 0 && g.rangedCd > g.ranged.rate - 0.25),
+      hurt: g.hurtT > 0 && Math.floor(g.time * 20) % 2 === 0,
+      armor: g.save.armor, melee: g.save.melee, ranged: g.save.ranged,
+    };
+    this.drawHero(view, g);
+  }
+
+  /** the other player on your team */
+  private mate(p: Peer, g: Game) {
+    const view: HeroView = {
+      x: p.x, y: p.y, face: p.face, walk: p.walk, moving: p.moving, rolling: p.rolling,
+      swingT: p.swingT, swingDur: p.swingDur, drawT: p.drawT, bowOut: p.drawT > 0, hurt: false,
+      armor: p.armor, melee: p.melee, ranged: p.ranged,
+    };
     const x = this.x;
-    const w = g.melee;
-    const hy = sy - TZ * 0.45;
-    if (g.drawT > 0 || (g.rangedCd > 0 && g.rangedCd > g.ranged.rate - 0.25)) {
-      // bow out, pointing where you shoot
+    if (p.dead) x.globalAlpha = 0.35;
+    this.drawHero(view, p);
+    x.globalAlpha = 1;
+    // name tag and a small health bar
+    const [sx, sy] = this.iso(p.x, p.y, 1.35);
+    x.font = 'bold 12px system-ui, sans-serif';
+    x.textAlign = 'center';
+    const w = Math.max(44, x.measureText(p.name).width + 12);
+    x.fillStyle = 'rgba(10,14,24,.72)';
+    x.fillRect(sx - w / 2, sy - 22, w, 22);
+    x.fillStyle = '#9fe0ff';
+    x.fillText(p.name, sx, sy - 9);
+    x.fillStyle = '#3a1414';
+    x.fillRect(sx - w / 2 + 4, sy - 5, w - 8, 3);
+    x.fillStyle = p.dead ? '#888' : '#e04848';
+    x.fillRect(sx - w / 2 + 4, sy - 5, (w - 8) * Math.max(0, p.hp / p.maxHp), 3);
+    void g;
+  }
+
+  private drawHero(v: HeroView, key: object) {
+    const x = this.x;
+    const a = armorOf(v.armor);
+    this.shadow(v.x, v.y, 0.3);
+    const [sx, sy] = this.iso(v.x, v.y, v.rolling ? -0.1 : 0);
+    const parts = heroParts({ armor: a.color, trim: a.trim, walk: v.walk, moving: v.moving, helm: a.helm, shiny: parseKey(v.armor).rarity !== 'normal' });
+    if (v.rolling) {
+      // tuck into a ball-ish block
       x.save();
-      x.translate(sx + Math.cos(scrA) * 14, hy + Math.sin(scrA) * 8);
-      x.rotate(scrA);
-      drawBow(x, g.ranged, 1, g.drawT > 0);
+      x.globalAlpha *= 0.85;
+      drawModel(x, sx, sy + 8, parts.map((p) => [p[0] * 0.7, p[1] * 0.7, p[2] * 0.55, p[3], p[4], p[5] * 0.7, p[6]] as Part), v.walk, false);
       x.restore();
       return;
     }
-    const k = g.swingT > 0 ? 1 - g.swingT / g.swingDur : 0;
-    if (w.shape === 'fist') {
-      if (g.swingT > 0) {
-        const p = Math.sin(k * Math.PI) * 14;
-        x.fillStyle = '#e8b890';
-        x.fillRect(sx + Math.cos(scrA) * (8 + p) - 4, hy + Math.sin(scrA) * (5 + p * 0.5) - 4, 8, 8);
+    // attacks turn you right away; walking around eases you there
+    const busy = v.swingT > 0 || v.bowOut;
+    const face = busy ? (this.turned.set(key, v.face), v.face) : this.ease(key, v.face);
+    const hand = this.heldPose(v, face, parts);
+    // drop the hand box we draw ourselves (the right hand moves with the weapon)
+    const body = hand.moved ? parts.filter((p) => !(p[1] > 0.2 && p[2] < 0.5 && p[2] > 0.3)) : parts;
+    const handDepth = hand.depth, bodyDepth = v.x + v.y;
+    if (handDepth < bodyDepth - 0.02) hand.draw();
+    drawModel(x, sx, sy, body, face, v.hurt);
+    if (handDepth >= bodyDepth - 0.02) hand.draw();
+  }
+
+  /**
+   * Works out where the right hand is (in the world, from the hero's own facing),
+   * then the weapon's tip, and returns a function that draws the arm, hand and weapon.
+   */
+  private heldPose(v: HeroView, face: number, parts: Part[]) {
+    void parts;
+    const x = this.x;
+    const c = Math.cos(face), s = Math.sin(face);
+    const F = [c, s], Rv = [-s, c];
+    const w = meleeOf(v.melee);
+    const k = v.swingT > 0 && v.swingDur > 0 ? 1 - v.swingT / v.swingDur : -1;
+    const sw = v.moving ? Math.sin(v.walk) * 0.09 : 0;
+    // world point -> screen
+    const W = (wx: number, wy: number, wz: number) => this.iso(v.x + wx, v.y + wy, wz);
+
+    if (v.bowOut) {
+      // the bow is held out in front in the left hand, pointing where you shoot
+      const hx = F[0] * 0.3 - Rv[0] * 0.12, hy = F[1] * 0.3 - Rv[1] * 0.12;
+      const [px, py] = W(hx, hy, 0.5);
+      const [qx, qy] = W(hx + F[0], hy + F[1], 0.5);
+      const scr = Math.atan2(qy - py, qx - px);
+      return {
+        moved: false,
+        depth: v.x + v.y + hx + hy,
+        draw: () => {
+          x.save();
+          x.translate(px, py);
+          x.rotate(scr);
+          drawBow(x, rangedOf(v.ranged), 1, v.drawT > 0);
+          x.restore();
+        },
+      };
+    }
+
+    // hand position and the weapon's direction in the world (ground angle + how far it tips up)
+    let hand: [number, number, number] = [F[0] * (-sw) + Rv[0] * 0.24, F[1] * (-sw) + Rv[1] * 0.24, 0.4];
+    let bladeA = face + 0.15, tilt = 1.15; // resting: held up and a little forward
+    const half = Math.min(w.arc, 220) * (Math.PI / 360);
+    if (k >= 0) {
+      const e = 1 - (1 - k) * (1 - k);
+      if (w.shape === 'spear' || w.shape === 'fist') {
+        // thrust straight ahead
+        const out = Math.sin(k * Math.PI) * (w.shape === 'fist' ? 0.28 : 0.4);
+        hand = [F[0] * (0.12 + out) + Rv[0] * 0.14, F[1] * (0.12 + out) + Rv[1] * 0.14, 0.45];
+        bladeA = face;
+        tilt = 0.05;
+      } else if (w.shape === 'hammer') {
+        // overhead smash: up behind, then down in front
+        hand = [F[0] * 0.22 + Rv[0] * 0.12, F[1] * 0.22 + Rv[1] * 0.12, 0.5];
+        bladeA = face;
+        tilt = 2.2 - 2.4 * e;
+      } else {
+        // a sweep from your right side across to your left
+        const sa = face + half - half * 2 * e;
+        hand = [Math.cos(sa) * 0.3, Math.sin(sa) * 0.3, 0.45];
+        bladeA = sa;
+        tilt = 0.12;
       }
-      return;
     }
-    const len = 18 + Math.min(2.3, w.reach) * 10;
-    let ang = scrA - 1.1;
-    if (g.swingT > 0) {
-      const half = Math.min(w.arc, 220) * (Math.PI / 360);
-      ang = w.shape === 'spear' ? scrA : scrA - half + half * 2 * k;
-      if (w.shape === 'hammer') ang = scrA - 2.2 + 2.2 * k;
-    }
-    const reachOut = g.swingT > 0 && w.shape === 'spear' ? 10 * Math.sin(k * Math.PI) : 0;
-    const hx = sx + Math.cos(scrA + 1.2) * 10 + Math.cos(scrA) * reachOut, hyy = hy + Math.sin(scrA + 1.2) * 5;
-    drawHeldWeapon(x, hx, hyy, ang, len, w.color, w.blade, w.shape, !!w.glow);
-    if (w.shape === 'daggers') drawHeldWeapon(x, sx - Math.cos(scrA + 1.2) * 10, hy - Math.sin(scrA + 1.2) * 5, ang + 2.2, len * 0.9, w.color, w.blade, w.shape, !!w.glow);
+    const reach = w.shape === 'fist' ? 0 : 0.35 + Math.min(2.3, w.reach) * 0.28;
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    const tip: [number, number, number] = [hand[0] + Math.cos(bladeA) * ct * reach, hand[1] + Math.sin(bladeA) * ct * reach, hand[2] + st * reach * 0.9];
+    const [hsx, hsy] = W(hand[0], hand[1], hand[2]);
+    const [tsx, tsy] = W(tip[0], tip[1], tip[2]);
+    const [shx, shy] = W(Rv[0] * 0.2, Rv[1] * 0.2, 0.66);
+    const ang = Math.atan2(tsy - hsy, tsx - hsx), len = Math.hypot(tsx - hsx, tsy - hsy);
+    const a = armorOf(v.armor);
+    return {
+      moved: true,
+      depth: v.x + v.y + (hand[0] + hand[1] + tip[0] + tip[1]) / 2,
+      draw: () => {
+        // sleeve from the shoulder to the hand
+        x.save();
+        x.lineCap = 'round';
+        x.strokeStyle = 'rgba(0,0,0,.35)';
+        x.lineWidth = 9;
+        x.beginPath();
+        x.moveTo(shx, shy);
+        x.lineTo(hsx, hsy);
+        x.stroke();
+        x.strokeStyle = shade(a.color, 0.85);
+        x.lineWidth = 7;
+        x.stroke();
+        x.restore();
+        if (w.shape !== 'fist' && len > 2) drawHeldWeapon(x, hsx, hsy, ang, len, w.color, w.blade, w.shape, !!w.glow);
+        // the fist itself, on top of the grip
+        x.fillStyle = '#e8b890';
+        x.strokeStyle = 'rgba(0,0,0,.4)';
+        x.lineWidth = 1;
+        x.fillRect(hsx - 3.5, hsy - 3.5, 7, 7);
+        x.strokeRect(hsx - 3.5, hsy - 3.5, 7, 7);
+        if (w.shape === 'daggers') {
+          // the second dagger rides in the left hand
+          const lh: [number, number, number] = k >= 0 ? [F[0] * 0.2 - Rv[0] * 0.2, F[1] * 0.2 - Rv[1] * 0.2, 0.42] : [-Rv[0] * 0.24, -Rv[1] * 0.24, 0.4];
+          const [lx, ly] = W(lh[0], lh[1], lh[2]);
+          const [ex, ey] = W(lh[0] + F[0] * 0.3, lh[1] + F[1] * 0.3, lh[2] + 0.25);
+          drawHeldWeapon(x, lx, ly, Math.atan2(ey - ly, ex - lx), Math.hypot(ex - lx, ey - ly), w.color, w.blade, w.shape, !!w.glow);
+        }
+      },
+    };
   }
 
   private monster(m: Monster, g: Game) {
@@ -966,9 +1104,9 @@ export class Renderer {
       x.save();
       x.shadowColor = '#ff2020';
       x.shadowBlur = 16;
-      drawModel(x, sx, sy, parts, m.face, m.flash > 0, m.scale);
+      drawModel(x, sx, sy, parts, this.ease(m, m.face, 10), m.flash > 0, m.scale);
       x.restore();
-    } else drawModel(x, sx, sy, parts, m.face, m.flash > 0, m.scale);
+    } else drawModel(x, sx, sy, parts, this.ease(m, m.face, 10), m.flash > 0, m.scale);
     if (m.stunT > 0) {
       const [a, b] = this.iso(m.x, m.y, 1.2 * m.scale);
       x.fillStyle = '#ffe066';

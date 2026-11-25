@@ -7,7 +7,9 @@ import {
   armorOf, isArmor, isMelee, isRanged, itemName, meleeOf, parseKey, rangedOf,
   type ArtifactId, type GearId, type ItemKey, type SupplyId, type Trader,
 } from './data';
-import { Game, gearName, gearPrice, newSave, type AimMode, type Input, type SaveData } from './game';
+import { Game, gearName, gearPrice, newSave, POTION_EVERY, type AimMode, type Input, type SaveData } from './game';
+import { GuestSession, HostSession } from './mp';
+import { listHosts, type HostInfo } from './net';
 import { Renderer, portrait, heroParts, traderParts } from './render';
 import { artifactIcon, gearIcon, monsterIcon, supplyIcon } from './art';
 import { isMuted, setMuted, sfx } from './audio';
@@ -15,6 +17,44 @@ import { isMuted, setMuted, sfx } from './audio';
 const SAVE_KEY = 'md-save-v1';
 const MUTE_KEY = 'md-muted';
 const SETTINGS_KEY = 'md-settings';
+const NAME_KEY = 'md-name';
+const SLOT_KEY = (n: number) => `md-slot-${n}`;
+const SLOTS = 3;
+
+interface SlotData {
+  saved: number;
+  data: SaveData;
+}
+function readSlot(n: number): SlotData | null {
+  try {
+    const raw = localStorage.getItem(SLOT_KEY(n));
+    const s = raw ? (JSON.parse(raw) as SlotData) : null;
+    return s && s.data && s.data.v === 1 ? s : null;
+  } catch {
+    return null;
+  }
+}
+function writeSlot(n: number, data: SaveData) {
+  try {
+    localStorage.setItem(SLOT_KEY(n), JSON.stringify({ saved: Date.now(), data }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+function fixSave(s: SaveData): SaveData {
+  const d = newSave();
+  return { ...d, ...s, special: { ...d.special, ...(s.special ?? {}) }, slots: s.slots ?? d.slots, artifacts: s.artifacts ?? [], potions: Math.min(1, s.potions ?? 1) };
+}
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+function ago(t: number) {
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(t).toLocaleDateString();
+}
 
 interface Settings {
   aim: AimMode;
@@ -33,8 +73,7 @@ function readSave(): SaveData | null {
     const raw = localStorage.getItem(SAVE_KEY);
     const s = raw ? (JSON.parse(raw) as SaveData) : null;
     if (!s || s.v !== 1) return null;
-    const d = newSave();
-    return { ...d, ...s, special: { ...d.special, ...(s.special ?? {}) }, slots: s.slots ?? d.slots, artifacts: s.artifacts ?? [] };
+    return fixSave(s);
   } catch {
     return null;
   }
@@ -47,19 +86,19 @@ function writeSave(s: SaveData) {
   }
 }
 
-type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win';
+type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win' | 'slots' | 'join' | 'team';
 
 const LOGO = `<div class="md-logo"><span>M</span><i></i><span>D</span><i></i></div><div class="md-sub">MONSTER DUNGEONS</div>`;
 
 const HELP = `
   <div class="md-keys">
-    <div><b>WASD</b> / arrows: walk · <b>mouse</b>: aim</div>
+    <div><b>WASD</b> / arrows: walk (you turn the way you walk) · <b>mouse</b>: aim your bow</div>
     <div><b>Space</b>: attack with your sword, axe, sickle, scythe… (fists if nothing is equipped)</div>
-    <div><b>Click</b> or hold <b>Shift</b>: fire your bow · <b>X</b>: switch arrow type</div>
+    <div><b>Click</b> or hold <b>Shift</b>: fire your bow · <b>Tab</b>: switch arrow type</div>
     <div><b>Click a monster</b>: lock on to it · <b>.</b> (period): stop targeting</div>
-    <div><b>Right click</b> or <b>C</b>: dodge roll (you can’t be hit mid-roll)</div>
-    <div><b>1</b> <b>2</b> <b>3</b>: artifacts · <b>Q</b>: Healing Draught · <b>R</b>: Fizz Bomb · <b>E</b>: talk, open, use</div>
-    <div><b>Ctrl</b>, <b>I</b> or <b>Tab</b>: inventory · <b>M</b>: map · <b>Esc</b>: menu (settings are in there)</div>
+    <div><b>Z</b> <b>X</b> <b>C</b>: your 3 artifacts · <b>Right click</b> or <b>V</b>: dodge roll</div>
+    <div><b>Option</b> (Alt): drink your Healing Draught. A new one brews every 20 seconds and you carry 1.</div>
+    <div><b>B</b>: Fizz Bomb · <b>E</b>: talk, open, use · <b>Ctrl</b> or <b>I</b>: inventory · <b>M</b>: map · <b>Esc</b>: menu (save, load, team play, settings)</div>
     <div class="md-dim">Auto-fire bows shoot by themselves when an enemy is close. In Settings, pick where bows aim: at the mouse, in front of you, or at the nearest enemy.</div>
     <div class="md-dim">On a phone: stick on the left, buttons on the right. Attacks aim at the nearest monster.</div>
   </div>`;
@@ -132,6 +171,40 @@ const game: GameModule = {
     };
     let overlay: Overlay = 'title';
     let playing = false;
+    // team play
+    let host: HostSession | null = null;
+    let guest: GuestSession | null = null;
+    let myName = (() => {
+      try {
+        return localStorage.getItem(NAME_KEY) || 'Hero';
+      } catch {
+        return 'Hero';
+      }
+    })();
+    const setName = (n: string) => {
+      myName = n.trim().slice(0, 20) || 'Hero';
+      try {
+        localStorage.setItem(NAME_KEY, myName);
+      } catch {
+        /* ignore */
+      }
+    };
+    // the save slot you loaded from or last saved to (0 = none yet)
+    let curSlot = (() => {
+      try {
+        return Number(localStorage.getItem('md-cur-slot')) || 0;
+      } catch {
+        return 0;
+      }
+    })();
+    const setCurSlot = (n: number) => {
+      curSlot = n;
+      try {
+        localStorage.setItem('md-cur-slot', String(n));
+      } catch {
+        /* ignore */
+      }
+    };
 
     // ---------- messages ----------
     let toastTimer = 0;
@@ -156,8 +229,16 @@ const game: GameModule = {
       gm.onBanner = banner;
       gm.onSave = save;
       gm.onTrader = (t) => openShop(t);
-      gm.onMissionTable = () => openMission(Math.min(gm.save.unlocked, LEVELS.length - 1));
+      gm.onMissionTable = () => (guest ? toast('Your host picks the dungeon. Stay close and you go in together!') : openMission(Math.min(gm.save.unlocked, LEVELS.length - 1)));
       gm.onDeath = () => show('dead');
+      gm.onEnter = (mode, idx, seed) => host?.entered(mode, idx, seed);
+      gm.onFinish = () => host?.finished();
+      gm.onPeerHurt = (_id, dmg, fx, fy, effect) => host?.hurtPeer(dmg, fx, fy, effect);
+      gm.onPeerGain = (_id, obj) => host?.gain(obj);
+      gm.onBothDown = () => {
+        host?.bothDown();
+        show('dead');
+      };
       gm.onLevelDone = (def, reward) => {
         lastDone = { name: def.name, reward };
         show('done');
@@ -172,18 +253,21 @@ const game: GameModule = {
     const pressed = new Set<string>();
     let mouse: { x: number; y: number } | null = null;
     let mouseL = false;
+    let mouseMovedAt = 0;
     const stick = { x: 0, y: 0, id: -1 };
     const held = new Set<string>();
 
     const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      // letters by their physical key, so holding Option/Alt (which changes e.key on a Mac) can't leave a key stuck
+      const k = e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.code.startsWith('Digit') ? e.code.slice(5) : e.key.toLowerCase();
       if (e.type === 'keyup') {
         keys.delete(k);
         return;
       }
       if (!keys.has(k)) pressed.add(k);
       keys.add(k);
-      if (k === 'tab' || k === ' ' || k === 'control') e.preventDefault();
+      if (k === 'tab' || k === ' ' || k === 'control' || k === 'alt') e.preventDefault();
       if (overlay === 'title') return;
       if (k === 'control' && (overlay === 'none' || overlay === 'gear')) {
         show(overlay === 'gear' ? 'none' : 'gear');
@@ -191,11 +275,12 @@ const game: GameModule = {
       }
       if (k === 'escape') {
         if (overlay === 'none') show('menu');
-        else if (overlay === 'menu' || overlay === 'settings' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help') show('none');
-      } else if ((k === 'i' || k === 'tab') && (overlay === 'none' || overlay === 'gear')) show(overlay === 'gear' ? 'none' : 'gear');
+        else if (overlay === 'menu' || overlay === 'settings' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help' || overlay === 'team') show('none');
+        else if (overlay === 'slots' || overlay === 'join') show(playing ? 'menu' : 'title');
+      } else if (k === 'i' && (overlay === 'none' || overlay === 'gear')) show(overlay === 'gear' ? 'none' : 'gear');
       else if (k === 'm' && (overlay === 'none' || overlay === 'map')) {
         if (g.mode === 'camp') {
-          if (overlay === 'none') openMission(Math.min(g.save.unlocked, LEVELS.length - 1));
+          if (overlay === 'none') g.onMissionTable();
         } else show(overlay === 'map' ? 'none' : 'map');
       }
     };
@@ -209,6 +294,7 @@ const game: GameModule = {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointermove', (e) => {
       if (e.pointerType !== 'mouse') return;
+      if (!mouse || Math.hypot(mouse.x - e.offsetX, mouse.y - e.offsetY) > 2) mouseMovedAt = performance.now();
       mouse = { x: e.offsetX, y: e.offsetY };
     });
     cv.addEventListener('pointerdown', (e) => {
@@ -289,14 +375,15 @@ const game: GameModule = {
         aim: mouse && !touchMode ? R.toWorld(mouse.x, mouse.y) : null,
         melee: keys.has(' ') || held.has('melee'),
         ranged: mouseL || p('mouse0') || keys.has('shift') || keys.has('f') || held.has('ranged'),
-        roll: p('mouse2') || p('c') || p('t:roll'),
-        potion: p('q') || p('t:potion'),
-        bomb: p('r') || p('t:bomb'),
+        roll: p('mouse2') || p('v') || p('t:roll'),
+        potion: p('alt') || p('q') || p('t:potion'),
+        bomb: p('b') || p('t:bomb'),
         use: p('e') || p('enter') || p('t:use'),
-        artifact: p('1') ? 0 : p('2') ? 1 : p('3') ? 2 : p('t:artifact') ? Math.max(0, g.artCd.findIndex((c, i) => c <= 0 && !!g.save.slots[i])) : -1,
-        cycleArrow: p('x'),
+        artifact: p('z') ? 0 : p('x') ? 1 : p('c') ? 2 : p('t:artifact') ? Math.max(0, g.artCd.findIndex((c, i) => c <= 0 && !!g.save.slots[i])) : -1,
+        cycleArrow: p('tab'),
         aimMode: touchMode && settings.aim === 'mouse' ? 'nearest' : settings.aim,
         autoFire: settings.autoFire,
+        aimFresh: performance.now() - mouseMovedAt < 1200,
       };
       if (p('.')) {
         g.targetId = 0;
@@ -307,17 +394,15 @@ const game: GameModule = {
     }
 
     // ---------- HUD ----------
-    function slot(img: string, label: string, key: string, count?: string, cool = 0, rarity = 'normal') {
-      return `<div class="md-slot r-${rarity}"><img src="${img}" alt=""><em>${key}</em>${count !== undefined ? `<span>${count}</span>` : ''}<div class="md-cool" style="height:${Math.round(cool * 100)}%"></div><small>${label}</small></div>`;
-    }
-    let barKey = '';
+    let barKey = '', statKey = '';
     function updateHud() {
       const s = g.save;
       const hpK = g.hp / g.maxHp;
       hpEl.querySelector('i')!.setAttribute('style', `width:${pct(hpK)}`);
       hpEl.classList.toggle('low', hpK < 0.3);
       hpEl.querySelector('span')!.textContent = `${Math.ceil(g.hp)} / ${g.maxHp}`;
-      statsEl.innerHTML = `<span>🪙 ${s.coins}</span>`;
+      const st = topStats();
+      if (statKey !== st) statsEl.innerHTML = statKey = st;
       whereEl.textContent = g.mode === 'camp' ? 'Hearthstead Camp' : `${g.def.name} · ${g.monsters.length} monsters left`;
       const gd = g.guardian;
       if (gd && g.bossAwake && !gd.dead) {
@@ -330,23 +415,29 @@ const game: GameModule = {
         promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> ${g.near.label}`;
       } else promptEl.hidden = true;
       touchEl.querySelector<HTMLElement>('.md-tuse')!.style.visibility = g.near ? 'visible' : 'hidden';
-      const rc = Math.max(0, g.rangedCd / g.ranged.rate), mc = Math.max(0, g.meleeCd / g.melee.rate), roll = Math.max(0, g.rollCd / g.rollMax);
-      const ak = g.loadedArrow;
       const arts = s.slots.map((id, i) => (id ? (g.artCd[i] / ARTIFACTS[id].cooldown).toFixed(2) : '-')).join('/');
-      const key = [s.melee, s.ranged, g.arrowCount(), ak, s.potions, s.bombs, rc.toFixed(1), mc.toFixed(1), roll.toFixed(1), arts, s.slots.join()].join();
+      const key = [arts, s.slots.join(), touchMode].join();
       if (key !== barKey) {
         barKey = key;
-        const rare = (k: string) => (k ? parseKey(k).rarity : 'normal');
-        barEl.innerHTML =
-          slot(gearIcon(s.melee), g.melee.name, touchMode ? '⚔️' : 'Spc', undefined, mc, rare(s.melee)) +
-          slot(gearIcon(s.ranged), g.ranged.name, touchMode ? '🏹' : 'Shift', `${ak === 'normal' ? '' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]}${g.arrowCount()}`, rc, rare(s.ranged)) +
-          `<div class="md-slot md-roll"><b>💨</b><em>${touchMode ? '' : 'C'}</em><div class="md-cool" style="height:${Math.round(roll * 100)}%"></div><small>Roll</small></div>` +
-          slot(supplyIcon('potion'), 'Healing Draught', 'Q', String(s.potions)) +
-          slot(supplyIcon('bomb'), 'Fizz Bomb', 'R', String(s.bombs)) +
-          s.slots
-            .map((id, i) => (id ? slot(artifactIcon(id), ARTIFACTS[id].name, String(i + 1), undefined, g.artCd[i] / ARTIFACTS[id].cooldown) : `<div class="md-slot md-empty"><em>${i + 1}</em></div>`))
-            .join('');
+        const KEYS = ['Z', 'X', 'C'];
+        barEl.innerHTML = s.slots
+          .map((id, i) => {
+            const k = touchMode ? '' : KEYS[i];
+            if (!id) return `<div class="md-slot md-empty"><em>${k}</em><small>Empty</small></div>`;
+            const cd = g.artCd[i] / ARTIFACTS[id].cooldown;
+            return `<div class="md-slot ${cd <= 0 ? 'ready' : ''}"><img src="${artifactIcon(id)}" alt=""><em>${k}</em><div class="md-cool" style="height:${Math.round(Math.max(0, cd) * 100)}%"></div>${cd > 0 ? `<span>${Math.ceil(g.artCd[i])}s</span>` : ''}<small>${ARTIFACTS[id].name}</small></div>`;
+          })
+          .join('');
       }
+    }
+    function topStats() {
+      const s = g.save;
+      const ak = g.loadedArrow;
+      const pot = s.potions > 0
+        ? `<span class="md-pot ready" title="Drink with Option (Alt)">🧪 ${touchMode ? 'Ready' : '<kbd>⌥</kbd> Ready'}</span>`
+        : `<span class="md-pot">🧪 ${Math.ceil(POTION_EVERY - g.potionT)}s</span>`;
+      const team = host?.guest ? `<span class="md-team">👥 ${esc(host.guest.name)}</span>` : host ? '<span class="md-team">👥 Open</span>' : guest ? `<span class="md-team">👥 ${esc(g.mate?.name ?? 'Host')}</span>` : '';
+      return `<span>🪙 ${s.coins}</span>${pot}<span>${ak === 'normal' ? '🏹' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]} ${g.arrowCount()}</span>${team}`;
     }
 
     // ---------- overlays ----------
@@ -367,6 +458,10 @@ const game: GameModule = {
       else if (o === 'settings') settingsPanel();
       else if (o === 'gear') gearPanel();
       else if (o === 'map') mapPanel();
+      else if (o === 'slots') slotsPanel();
+      else if (o === 'join') joinPanel();
+      else if (o === 'team') teamPanel();
+      else if (o === 'dead' && guest) panel(`<h2 class="md-red">Your team fell!</h2><p>You and ${esc(g.mate?.name ?? 'your host')} were both knocked out. Your host picks what happens next.</p><p class="md-dim">Waiting for the host…</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button></div>`, { leave: () => leaveGuest('You left the team game.') });
       else if (o === 'dead') panel(`<h2 class="md-red">You fell!</h2><p>The monsters of ${g.def.name} got the better of you this time. You keep every coin and piece of gear you found.</p><p class="md-dim">Monsters beaten this run: ${g.kills} · coins found: ${g.runCoins}</p><div class="md-row"><button class="md-btn md-go" data-x="camp">Back to camp</button><button class="md-btn" data-x="retry">Try again</button></div>`, {
         camp: () => {
           g.enterCamp();
@@ -400,6 +495,8 @@ const game: GameModule = {
         <p class="md-tag">A blocky dungeon crawler. Gear up in camp, delve five dungeons, beat their guardians.</p>
         <div class="md-col">
           <button class="md-btn md-go" data-x="play">${has ? 'Continue' : 'Play'}</button>
+          <button class="md-btn" data-x="load">📂 Load game</button>
+          <button class="md-btn" data-x="join">👥 Join a friend</button>
           ${has ? '<button class="md-btn" data-x="new">New game</button>' : ''}
           <button class="md-btn" data-x="help">How to play</button>
           <button class="md-btn md-dim" data-x="exit">Back to games</button>
@@ -408,10 +505,13 @@ const game: GameModule = {
       </div>`;
       const acts: Record<string, () => void> = {
         play: () => start(),
+        load: () => openSlots('load'),
+        join: () => show('join'),
         new: () => {
           if (!confirmNew()) return;
           g = new Game();
           wire(g);
+          setCurSlot(0);
           save();
           start();
         },
@@ -437,16 +537,31 @@ const game: GameModule = {
 
     function menu() {
       const inDungeon = g.mode === 'dungeon';
-      panel(`<h2>Paused</h2>
+      const team = guest ? `👥 Team: in ${esc(g.mate?.name ?? 'a friend')}’s game` : host?.guest ? `👥 Team: playing with ${esc(host.guest.name)}` : host ? '👥 Team: open to join' : '👥 Open to join (2 players)';
+      panel(`<h2>${guest || host?.guest ? 'Menu' : 'Paused'}</h2>
+        ${guest || host?.guest ? '<p class="md-dim">Team games keep running while the menu is open.</p>' : ''}
         <div class="md-col">
           <button class="md-btn md-go" data-x="resume">Resume</button>
-          ${inDungeon ? '<button class="md-btn" data-x="camp">Leave the dungeon (back to camp)</button>' : ''}
+          <button class="md-btn" data-x="save">💾 Save</button>
+          ${guest ? '' : '<button class="md-btn" data-x="load">📂 Load</button>'}
+          <button class="md-btn" data-x="savequit">💾 Save &amp; quit</button>
+          <button class="md-btn" data-x="team">${team}</button>
+          ${inDungeon && !guest ? '<button class="md-btn" data-x="camp">Leave the dungeon (back to camp)</button>' : ''}
           <button class="md-btn" data-x="settings">⚙️ Settings</button>
           <button class="md-btn" data-x="help">How to play</button>
-          <button class="md-btn" data-x="title">Title screen</button>
           <button class="md-btn md-dim" data-x="exit">Back to games</button>
         </div>`, {
         resume: () => show('none'),
+        save: () => openSlots('save'),
+        load: () => openSlots('load'),
+        savequit: () => {
+          if (curSlot) {
+            writeSlot(curSlot, g.save);
+            toast(`Saved to slot ${curSlot}.`);
+            quitToTitle();
+          } else openSlots('savequit');
+        },
+        team: () => show('team'),
         camp: () => {
           g.enterCamp();
           save();
@@ -454,17 +569,215 @@ const game: GameModule = {
         },
         help: () => show('help'),
         settings: () => show('settings'),
-        title: () => {
-          save();
-          playing = false;
-          if (g.mode === 'dungeon') g.enterCamp();
-          show('title');
-        },
         exit: () => {
           save();
+          void endTeam();
           onExit();
         },
       });
+    }
+    function quitToTitle() {
+      save();
+      void endTeam();
+      playing = false;
+      if (g.mode === 'dungeon') g.enterCamp();
+      show('title');
+    }
+
+    // --- save slots ---
+    let slotMode: 'save' | 'load' | 'savequit' = 'save';
+    let armed = 0, armedAt = 0;
+    function openSlots(m: typeof slotMode) {
+      slotMode = m;
+      armed = 0;
+      show('slots');
+    }
+    function slotsPanel() {
+      const saving = slotMode !== 'load';
+      const rows: string[] = [];
+      for (let n = 1; n <= SLOTS; n++) {
+        const sd = readSlot(n);
+        const d = sd?.data;
+        const info = d
+          ? `<b>Slot ${n}${n === curSlot ? ' · playing now' : ''}</b><small>🪙 ${d.coins} · ${d.cleared.length} of ${LEVELS.length} dungeons · ${esc(meleeOf(d.melee).name)} · ${esc(armorOf(d.armor).name)} · ${d.owned.length} items</small><small>Saved ${ago(sd!.saved)}</small>`
+          : `<b>Slot ${n}</b><small>Empty</small>`;
+        const btn = saving
+          ? `<button class="md-btn ${d ? '' : 'md-go'}" data-sv="${n}">${armed === n ? 'Tap again to overwrite' : d ? 'Save over' : 'Save here'}</button>`
+          : `<button class="md-btn md-go" data-ld="${n}" ${d ? '' : 'disabled'}>Load</button>`;
+        rows.push(`<div class="md-saveslot ${n === curSlot ? 'cur' : ''}">${portraitSlot(d)}<div>${info}</div>${btn}</div>`);
+      }
+      const title = slotMode === 'load' ? 'Load a game' : slotMode === 'savequit' ? 'Save & quit' : 'Save your game';
+      panel(`<h2>${title}</h2>
+        <p class="md-dim">${saving ? 'Saves keep your coins, every sword, bow, armor and artifact you own, your arrows, bombs and the dungeons you’ve cleared.' : 'Loading takes you to camp with that save’s gear.'}${guest && !saving ? '' : ''}</p>
+        <div class="md-slots">${rows.join('')}</div>
+        <div class="md-row"><button class="md-btn" data-x="back">Back</button></div>`, { back: () => show(playing ? 'menu' : 'title') });
+      ui.querySelectorAll<HTMLElement>('[data-sv]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const n = Number(b.dataset.sv);
+          if (readSlot(n) && n !== curSlot && !(armed === n && Date.now() - armedAt < 4000)) {
+            armed = n;
+            armedAt = Date.now();
+            slotsPanel();
+            return;
+          }
+          if (!writeSlot(n, g.save)) return toast('Could not save: your browser storage is full or blocked.');
+          setCurSlot(n);
+          save();
+          sfx('buy');
+          toast(`Saved to slot ${n}.`);
+          if (slotMode === 'savequit') quitToTitle();
+          else show(playing ? 'menu' : 'title');
+        }),
+      );
+      ui.querySelectorAll<HTMLElement>('[data-ld]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const n = Number(b.dataset.ld);
+          const sd = readSlot(n);
+          if (!sd) return;
+          void endTeam();
+          g = new Game(fixSave(sd.data));
+          wire(g);
+          setCurSlot(n);
+          save();
+          toast(`Loaded slot ${n}.`);
+          start();
+        }),
+      );
+    }
+    function portraitSlot(d?: SaveData) {
+      return `<img src="${gearIcon(d ? d.melee : '')}" alt="" style="width:44px;height:44px">`;
+    }
+
+    // --- team play (2 players, like Factori-owen) ---
+    let hostList: HostInfo[] | null = null;
+    let joinStatus = '';
+    function nameField() {
+      return `<label class="md-dim">Your name</label><input class="md-name" maxlength="20" value="${esc(myName)}">`;
+    }
+    function hookName() {
+      ui.querySelector<HTMLInputElement>('.md-name')?.addEventListener('input', (e) => setName((e.target as HTMLInputElement).value));
+    }
+    function teamPanel() {
+      let body: string;
+      const acts: Record<string, () => void> = { back: () => show('menu') };
+      if (guest) {
+        body = `<p>You’re on ${esc(g.mate?.name ?? 'your host')}’s team. They pick the dungeons; you keep your own gear and every coin you pick up.</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button><button class="md-btn md-go" data-x="back">Back</button></div>`;
+        acts.leave = () => leaveGuest('You left the team game.');
+      } else if (host) {
+        body = `<p>${host.guest ? `<b>${esc(host.guest.name)}</b> is on your team.` : 'Your game is open. On another device, your friend opens M.D. and picks <b>Join a friend</b> on the title screen.'}</p>
+          <p class="md-dim">You pick the dungeons. Monsters go after whoever is closest. If one of you falls, you get back up next to your teammate after 8 seconds.</p>
+          <div class="md-row"><button class="md-btn" data-x="close">Close the game to friends</button><button class="md-btn md-go" data-x="back">Back</button></div>`;
+        acts.close = () => {
+          void endTeam();
+          toast('Your game is closed to friends.');
+          show('team');
+        };
+      } else {
+        body = `<p>Play as a team of 2. Open your game, then your friend picks <b>Join a friend</b> on their title screen.</p>${nameField()}
+          <div class="md-row"><button class="md-btn md-go" data-x="open">👥 Open to join</button><button class="md-btn" data-x="back">Back</button></div>`;
+        acts.open = () => void openTeam();
+      }
+      panel(`<h2>Team play</h2>${body}`, acts, 'md-join');
+      hookName();
+    }
+    async function openTeam() {
+      if (host || guest) return;
+      const h = new HostSession(() => g, () => myName);
+      h.onJoin = (n) => {
+        banner('Team up!', `${n} joined your game.`);
+        sfx('win');
+      };
+      h.onLeave = (n) => toast(`${n} left your game.`);
+      host = h;
+      toast('Opening your game…');
+      try {
+        await h.open();
+        toast('Your game is open. Your friend can join from their title screen.');
+      } catch (e) {
+        host = null;
+        toast(`Couldn’t open your game: ${(e as Error).message || e}`);
+      }
+      if (overlay === 'team') show('team');
+    }
+    async function endTeam() {
+      if (host) {
+        const h = host;
+        host = null;
+        await h.close().catch(() => {});
+      }
+      if (guest) {
+        guest.close();
+        guest = null;
+        g.remote = false;
+        g.mate = null;
+      }
+    }
+    function leaveGuest(why: string) {
+      if (!guest) return;
+      guest.close();
+      guest = null;
+      g.remote = false;
+      g.mate = null;
+      g.dead = false;
+      g.hp = g.maxHp;
+      g.enterCamp();
+      save();
+      toast(why);
+      if (playing) show('none');
+    }
+    function joinPanel() {
+      const list = hostList === null
+        ? '<p class="md-dim">Looking for games…</p>'
+        : hostList.length
+          ? hostList.map((h) => `<div class="md-host"><div><b>${esc(h.name)}’s game</b><small>${esc(h.world)} · ${h.players} of 2 playing</small></div><button class="md-btn md-go" data-join="${h.id}" ${h.players >= 2 ? 'disabled' : ''}>${h.players >= 2 ? 'Full' : 'Join'}</button></div>`).join('')
+          : '<p class="md-dim">No open games right now. Your friend opens their game from the menu (Esc → Open to join).</p>';
+      panel(`<h2>Join a friend</h2>${nameField()}
+        <div class="md-hosts">${list}</div>
+        ${joinStatus ? `<p>${esc(joinStatus)}</p>` : ''}
+        <div class="md-row"><button class="md-btn" data-x="refresh">↻ Refresh</button><button class="md-btn" data-x="back">Back</button></div>`, {
+        refresh: () => refreshHosts(),
+        back: () => show(playing ? 'menu' : 'title'),
+      }, 'md-join');
+      hookName();
+      ui.querySelectorAll<HTMLElement>('[data-join]').forEach((b) => b.addEventListener('click', () => void joinGame(b.dataset.join!)));
+      if (hostList === null) refreshHosts();
+    }
+    function refreshHosts() {
+      hostList = null;
+      listHosts()
+        .then((l) => (hostList = l))
+        .catch((e) => {
+          hostList = [];
+          joinStatus = `Couldn’t look for games: ${(e as Error).message || e}`;
+        })
+        .finally(() => overlay === 'join' && joinPanel());
+    }
+    async function joinGame(id: string) {
+      if (guest) return;
+      await endTeam();
+      joinStatus = 'Connecting…';
+      joinPanel();
+      if (g.mode === 'dungeon') g.enterCamp();
+      const s2 = new GuestSession(() => g, () => myName);
+      s2.onLost = (why) => {
+        if (guest === s2) leaveGuest(why);
+        else {
+          joinStatus = why;
+          if (overlay === 'join') joinPanel();
+        }
+      };
+      s2.onFail = () => show('dead');
+      try {
+        await s2.join(id);
+        guest = s2;
+        joinStatus = '';
+        playing = true;
+        show('none');
+        banner('Team up!', 'You joined your friend’s game.');
+      } catch (e) {
+        joinStatus = `Couldn’t join: ${(e as Error).message || e}`;
+        if (overlay === 'join') joinPanel();
+      }
     }
 
     // --- shop ---
@@ -499,7 +812,7 @@ const game: GameModule = {
       if (t.id === 'peddler') {
         for (const id of PEDDLER_STOCK) {
           const s = SUPPLIES[id];
-          const have = id === 'potion' ? g.save.potions : id === 'arrows' ? g.save.arrows : id === 'bomb' ? g.save.bombs : id === 'mystery' ? null : g.save.special[id.replace('-arrows', '') as 'fire'];
+          const have = id === 'arrows' ? g.save.arrows : id === 'bomb' ? g.save.bombs : id === 'mystery' ? null : g.save.special[id.replace('-arrows', '') as 'fire'];
           items.push(`<div class="md-item"><img src="${supplyIcon(id)}" alt=""><div class="md-it"><b>${s.name}</b><small>${s.desc}</small>${have !== null ? `<small class="md-dim">You have ${have}</small>` : ''}</div>
             <button class="md-btn md-buy" data-buy="${id}" ${g.save.coins < s.price ? 'disabled' : ''}>🪙 ${s.price}</button></div>`);
         }
@@ -537,7 +850,7 @@ const game: GameModule = {
       ui.querySelectorAll<HTMLElement>('[data-art]').forEach((b) =>
         b.addEventListener('click', () => {
           const err = g.buyArtifact(b.dataset.art as ArtifactId);
-          toast(err ?? `Bought the ${ARTIFACTS[b.dataset.art as ArtifactId].name}. Use it with 1, 2 or 3.`);
+          toast(err ?? `Bought the ${ARTIFACTS[b.dataset.art as ArtifactId].name}. Put it on Z, X or C from your inventory (Ctrl).`);
           shopPanel();
         }),
       );
@@ -559,8 +872,7 @@ const game: GameModule = {
         if (parseKey(key).rarity === 'normal') banner('Mystery Crate!', `Inside: ${itemName(key)}. Equip it from your inventory (Ctrl).`);
       } else {
         g.save.coins -= s.price;
-        if (id === 'potion') g.save.potions++;
-        else if (id === 'arrows') g.save.arrows += 20;
+        if (id === 'arrows') g.save.arrows += 20;
         else if (id === 'fire-arrows') g.save.special.fire += 10;
         else if (id === 'frost-arrows') g.save.special.frost += 10;
         else if (id === 'boom-arrows') g.save.special.boom += 8;
@@ -590,22 +902,22 @@ const game: GameModule = {
         ? s.artifacts
             .map((id) => {
               const slot = s.slots.indexOf(id);
-              return `<div class="md-item ${slot >= 0 ? 'eq' : ''}"><img src="${artifactIcon(id)}" alt=""><div class="md-it"><b>${ARTIFACTS[id].name}</b><small>${ARTIFACTS[id].desc}</small></div><button class="md-btn" data-slot="${id}">${slot >= 0 ? `Key ${slot + 1} · Remove` : 'Equip'}</button></div>`;
+              return `<div class="md-item ${slot >= 0 ? 'eq' : ''}"><img src="${artifactIcon(id)}" alt=""><div class="md-it"><b>${ARTIFACTS[id].name}</b><small>${ARTIFACTS[id].desc}</small></div><button class="md-btn" data-slot="${id}">${slot >= 0 ? `Key ${'ZXC'[slot]} · Remove` : 'Equip'}</button></div>`;
             })
             .join('')
         : '<p class="md-dim">No artifacts yet. Mira the Mystic in camp sells them.</p>';
       ui.innerHTML = `<div class="md-panel md-gear">
         <div class="md-gearhead"><div class="md-me"></div><div>
           <h2>Inventory</h2>
-          <p>❤️ ${Math.ceil(g.hp)} / ${g.maxHp} · 🪙 ${s.coins} · 🧪 ${s.potions} draughts · 💣 ${s.bombs} bombs</p>
+          <p>❤️ ${Math.ceil(g.hp)} / ${g.maxHp} · 🪙 ${s.coins} · 🧪 ${s.potions ? 'draught ready (Option)' : `next draught in ${Math.ceil(POTION_EVERY - g.potionT)}s`} · 💣 ${s.bombs} bombs (B)</p>
           <p class="md-dim">Dungeons cleared: ${s.cleared.length} of ${LEVELS.length}</p>
           <button class="md-btn" data-x="settings">⚙️ Settings</button>
         </div></div>
         ${group('Melee weapons (Space)', isMelee, fists)}
         ${group('Bows (click or Shift)', isRanged)}
-        <h3>Arrows (X switches)</h3><div class="md-arrows">${arrows}</div>
+        <h3>Arrows (Tab switches)</h3><div class="md-arrows">${arrows}</div>
         ${group('Armor', isArmor)}
-        <h3>Artifacts (keys 1, 2, 3)</h3><div class="md-items md-small">${arts}</div>
+        <h3>Artifacts (keys Z, X, C)</h3><div class="md-items md-small">${arts}</div>
         ${RARE_NOTE}
         <div class="md-row"><button class="md-btn" data-x="close">Close</button></div></div>`;
       const a = g.armor;
@@ -771,7 +1083,7 @@ const game: GameModule = {
         } else if (a === 'menu') show(overlay === 'menu' ? 'none' : 'menu');
         else if (a === 'gear') show(overlay === 'gear' ? 'none' : 'gear');
         else if (a === 'map') {
-          if (g.mode === 'camp') openMission(Math.min(g.save.unlocked, LEVELS.length - 1));
+          if (g.mode === 'camp') g.onMissionTable();
           else show(overlay === 'map' ? 'none' : 'map');
         }
         b.blur();
@@ -795,6 +1107,7 @@ const game: GameModule = {
         R.draw(g, { minimap: false, title: true });
         return;
       }
+      const team = !!(host?.guest || guest);
       if (playing && overlay === 'none') {
         g.update(dt, readInput());
         saveT += dt;
@@ -802,10 +1115,18 @@ const game: GameModule = {
           saveT = 0;
           save();
         }
+      } else if (playing && team) {
+        // a team game can't pause: keep it running behind menus
+        pressed.clear();
+        g.update(dt, blankInput);
       } else {
         pressed.clear();
         g.update(0, blankInput);
       }
+      host?.tick(dt);
+      guest?.tick(dt);
+      // the host picked what happens after you both fell
+      if (guest && overlay === 'dead' && !g.dead) show('none');
       R.draw(g, { minimap: overlay === 'none' });
       if (playing) updateHud();
     }
@@ -819,11 +1140,13 @@ const game: GameModule = {
         show: (o: Overlay) => show(o),
         shop: (i: number) => openShop(TRADERS[i]),
         mission: (i: number) => openMission(i),
+        slots: (m: 'save' | 'load' | 'savequit') => openSlots(m),
       };
 
     return () => {
       cancelAnimationFrame(raf);
       save();
+      void endTeam();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
       window.removeEventListener('blur', blur);

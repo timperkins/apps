@@ -201,7 +201,7 @@ export const ARTIFACTS: Record<ArtifactId, Artifact> = {
 
 export type SupplyId = 'potion' | 'arrows' | 'fire-arrows' | 'frost-arrows' | 'boom-arrows' | 'bomb' | 'mystery';
 export const SUPPLIES: Record<SupplyId, { name: string; desc: string; price: number }> = {
-  potion: { name: 'Healing Draught', desc: 'Heals 60% of your health (Q).', price: 25 },
+  potion: { name: 'Healing Draught', desc: 'Heals 60% of your health. A fresh one brews every 20 seconds (Option / Alt).', price: 25 },
   arrows: { name: 'Bundle of 20 Arrows', desc: 'For any bow.', price: 12 },
   'fire-arrows': { name: '10 Fire Arrows', desc: 'Set enemies on fire. X switches arrows.', price: 30 },
   'frost-arrows': { name: '10 Frost Arrows', desc: 'Slow enemies down. X switches arrows.', price: 30 },
@@ -313,5 +313,5 @@ export const TRADERS: Trader[] = [
 
 export const SMITH_STOCK: GearId[] = ['twin-daggers', 'sickle', 'long-spear', 'battle-axe', 'scythe', 'frost-glaive', 'thunder-hammer', 'obsidian-cleaver', 'ember-blade', 'dragonfang', 'crossbow', 'fan-bow', 'rapid-repeater', 'thornspike-bow', 'storm-bow', 'starlight-bow', 'dragonbone-longbow'];
 export const ARMOR_STOCK: ArmorId[] = ['scout-cloak', 'jerkin', 'chainmail', 'shadowweave', 'mossguard', 'knight-plate', 'obsidian-plate', 'dragonscale'];
-export const PEDDLER_STOCK: SupplyId[] = ['potion', 'arrows', 'fire-arrows', 'frost-arrows', 'boom-arrows', 'bomb', 'mystery'];
+export const PEDDLER_STOCK: SupplyId[] = ['arrows', 'fire-arrows', 'frost-arrows', 'boom-arrows', 'bomb', 'mystery'];
 export const MYSTIC_STOCK: ArtifactId[] = ['healing-totem', 'gust-horn', 'thunder-charm', 'ghost-boots', 'ironhide-charm', 'firework-crown'];

@@ -1,7 +1,7 @@
 // M.D. simulation: the hero, monsters, projectiles, loot and level flow. No drawing here.
 import {
   ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName,
-  type ArmorId, type ArrowKind, type ArtifactId, type GearId, type ItemKey, type LevelDef, type MonsterDef, type MonsterKind, type Rarity, type Trader,
+  type ArmorId, type ArrowKind, type ArtifactId, type Melee, type GearId, type ItemKey, type LevelDef, type MonsterDef, type MonsterKind, type Rarity, type Trader,
 } from './data';
 import { T, generateCamp, generateDungeon, isWallTile, rng, tileAt, type Level, type Prop } from './dungeon';
 
@@ -29,7 +29,7 @@ export interface SaveData {
 
 export const newSave = (): SaveData => ({
   v: 1, coins: 30, owned: ['rusty-sword', 'shortbow', 'tunic'], melee: 'rusty-sword', ranged: 'shortbow', armor: 'tunic',
-  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 2, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0,
+  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0,
 });
 
 export interface Monster {
@@ -149,6 +149,42 @@ export interface Input {
   cycleArrow?: boolean;
   aimMode?: AimMode;
   autoFire?: boolean;
+  /** the mouse moved in the last moment, so standing still you turn to it */
+  aimFresh?: boolean;
+}
+/** the other player, as the host's game sees them */
+export interface Peer {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  face: number;
+  moving: boolean;
+  walk: number;
+  dead: boolean;
+  rolling: boolean;
+  swingT: number;
+  swingDur: number;
+  drawT: number;
+  hp: number;
+  maxHp: number;
+  armor: string;
+  melee: string;
+  ranged: string;
+}
+/** something the guest did that the host's game has to carry out */
+export type Act =
+  | { a: 'swing'; face: number; key: string }
+  | { a: 'shoot'; angle: number; key: string; ak: ArrowKind }
+  | { a: 'art'; id: ArtifactId; x: number; y: number }
+  | { a: 'bomb'; tx: number; ty: number }
+  | { a: 'chest'; i: number }
+  | { a: 'portal' };
+interface Tgt {
+  /** '' = the host's own hero, '-' = nobody */
+  id: string;
+  x: number;
+  y: number;
 }
 export interface Totem {
   x: number;
@@ -169,6 +205,9 @@ export const CAMP_DEF: LevelDef = {
 };
 
 const HERO_R = 0.3;
+const LOCAL_SOUNDS = new Set(['hurt', 'die', 'coin', 'pickup', 'drink', 'rare', 'buy', 'click', 'artifact', 'roll', 'bow', 'swing', 'punch', 'throw']);
+export const POTION_EVERY = 20;
+export const RESPAWN_AFTER = 8;
 const MAX_HP = 100;
 
 export class Game {
@@ -190,6 +229,8 @@ export class Game {
   moving = false;
   swingT = 0;
   swingDur = 0.3;
+  /** the seed the current dungeon was built from (a guest builds the same one) */
+  seed = 0;
   meleeCd = 0;
   rangedCd = 0;
   drawT = 0;
@@ -230,6 +271,33 @@ export class Game {
   speedT = 0;
   ironT = 0;
   autoT = 0;
+  /** potion refill timer (one draught every 20 s, holding at most 1) */
+  potionT = 0;
+  // ---- co-op ----
+  /** true on the guest: the host's game runs monsters, loot and level flow */
+  remote = false;
+  /** the other player (on the host) */
+  peers: Peer[] = [];
+  /** the host as the guest sees it */
+  mate: Peer | null = null;
+  /** fx events to forward to the guest (host only, when someone has joined) */
+  fxOut: unknown[] | null = null;
+  onAct: (a: Act) => void = () => {};
+  onPeerHurt: (id: string, dmg: number, fx: number, fy: number, effect?: 'slow' | 'burn') => void = () => {};
+  onPeerGain: (id: string, g: { coins?: number; arrows?: number; gear?: boolean; special?: [string, number]; heal?: number }) => void = () => {};
+  onBothDown: () => void = () => {};
+  /** host: the level changed (camp or a dungeon, with its seed) */
+  onEnter: (mode: 'camp' | 'dungeon', idx: number, seed: number) => void = () => {};
+  /** host: a level was finished, just before going home */
+  onFinish: () => void = () => {};
+  /** plays a sound, and on the host also plays it for the guest */
+  sound(name: string) {
+    this.onSound(name);
+    if (this.fxOut && !LOCAL_SOUNDS.has(name)) this.fxOut.push(['s', name]);
+  }
+  get coop() {
+    return this.remote || this.peers.length > 0;
+  }
 
   onSound: (s: string) => void = () => {};
   onMsg: (s: string) => void = () => {};
@@ -268,7 +336,7 @@ export class Game {
     if (!this.save.owned.includes(key)) this.save.owned.push(key);
     if (rarity !== 'normal') {
       this.onBanner(rarity === 'gold' ? '✨ GOLD ITEM! ✨' : '💎 DIAMOND ITEM! 💎', `${itemName(key)}: much stronger than the normal one!`);
-      this.onSound('rare');
+      this.sound('rare');
     }
     this.onSave();
     return key;
@@ -282,9 +350,11 @@ export class Game {
     this.y = this.L.start.y;
     this.resetRun();
     this.hp = this.maxHp;
+    this.onEnter('camp', 0, 0);
   }
 
   enterLevel(idx: number, seed = Math.floor(Math.random() * 1e9)) {
+    this.seed = seed;
     this.mode = 'dungeon';
     this.levelIdx = idx;
     this.def = LEVELS[idx];
@@ -294,10 +364,11 @@ export class Game {
     this.resetRun();
     this.hp = this.maxHp;
     this.save.runs++;
-    this.populate(seed);
+    if (!this.remote) this.populate(seed);
+    this.onEnter('dungeon', idx, seed);
     this.reveal();
     this.onBanner(this.def.name, this.def.blurb);
-    this.onSound('portal');
+    this.sound('portal');
   }
 
   private resetRun() {
@@ -388,6 +459,9 @@ export class Game {
     }
     return this.propGrid.has(ty * this.L.w + tx);
   }
+  propsDirty() {
+    this.propsChanged();
+  }
   private propsChanged() {
     this.propGrid = null;
   }
@@ -463,6 +537,7 @@ export class Game {
 
   // ---------- effects ----------
   burst(x: number, y: number, z: number, color: string, n: number, speed = 3, size = 0.08) {
+    this.fxOut?.push(['b', +x.toFixed(2), +y.toFixed(2), +z.toFixed(2), color, Math.round(n), speed, size]);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random());
       const life = 0.35 + Math.random() * 0.4;
@@ -470,9 +545,11 @@ export class Game {
     }
   }
   float(x: number, y: number, text: string, color: string) {
+    this.fxOut?.push(['f', +x.toFixed(2), +y.toFixed(2), text, color]);
     this.floats.push({ x, y, z: 1.6, text, color, life: 0.9 });
   }
   ring(x: number, y: number, max: number, color: string, life = 0.4) {
+    this.fxOut?.push(['r', +x.toFixed(2), +y.toFixed(2), max, color, life]);
     this.rings.push({ x, y, r: 0.2, max, life, total: life, color });
   }
 
@@ -489,12 +566,12 @@ export class Game {
     if (effect === 'slow') this.slowT = 2;
     this.float(this.x, this.y, `-${real}`, '#ff6a6a');
     this.burst(this.x, this.y, 0.8, '#d83a3a', 6);
-    this.onSound('hurt');
+    this.sound('hurt');
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
       this.deadT = 0;
-      this.onSound('die');
+      this.sound('die');
     }
   }
 
@@ -517,7 +594,7 @@ export class Game {
     }
     this.float(m.x, m.y, crit ? `${real}!` : `${real}`, crit ? '#ffe066' : '#ffffff');
     this.burst(m.x, m.y, 0.7 * m.scale, this.bloodColor(m.kind), 5);
-    this.onSound('hit');
+    this.sound('hit');
     if (m.hp <= 0) this.killMonster(m);
   }
 
@@ -529,13 +606,12 @@ export class Game {
     m.dead = true;
     this.kills++;
     this.burst(m.x, m.y, 0.6 * m.scale, this.bloodColor(m.kind), 18 * m.scale, 4, 0.12);
-    this.onSound(m.guardian ? 'bossdie' : 'kill');
+    this.sound(m.guardian ? 'bossdie' : 'kill');
     const [a, b] = m.def.coins;
     let coins = a + Math.floor(Math.random() * (b - a + 1));
     if (m.guardian) coins = Math.round(coins * 1.5) + 30;
     const piles = Math.min(8, Math.max(1, Math.ceil(coins / 4)));
     for (let i = 0; i < piles; i++) this.drop(m.x, m.y, 'coin', Math.ceil(coins / piles));
-    if (Math.random() < (m.guardian ? 1 : 0.07)) this.drop(m.x, m.y, 'potion', 1);
     if (Math.random() < 0.15) this.drop(m.x, m.y, 'arrows', 6 + Math.floor(Math.random() * 6));
     if (m.guardian) {
       this.shake = 1;
@@ -544,8 +620,30 @@ export class Game {
       if (m.kind === 'hollow-crown') {
         this.onBanner('The Hollow Crown falls!', 'Step into the portal to finish the dungeons.');
       } else this.onBanner(`${m.name} is beaten!`, 'A portal opened in the middle of the room.');
-      this.onSound('portal');
+      this.sound('portal');
     }
+  }
+
+  warn(x: number, y: number, r: number, t: number) {
+    this.fxOut?.push(['w', +x.toFixed(2), +y.toFixed(2), r, t]);
+    this.warns.push({ x, y, r, t, total: t });
+  }
+  bolt(x: number, y: number) {
+    const pts: [number, number, number][] = [];
+    for (let k = 0; k <= 7; k++) pts.push([k ? (Math.random() - 0.5) * 0.5 : 0, k ? (Math.random() - 0.5) * 0.5 : 0, k * 0.7]);
+    this.bolts.push({ x, y, pts, life: 0.35 });
+    this.fxOut?.push(['l', +x.toFixed(2), +y.toFixed(2)]);
+  }
+  /** replays an fx event from the host (guest only) */
+  playFx(e: unknown[]) {
+    const [k, x, y] = e as [string, number, number];
+    if (k === 'b') this.burst(x, y, e[3] as number, e[4] as string, e[5] as number, e[6] as number, e[7] as number);
+    else if (k === 'f') this.float(x, y, e[3] as string, e[4] as string);
+    else if (k === 'r') this.ring(x, y, e[3] as number, e[4] as string, e[5] as number);
+    else if (k === 'w') this.warn(x, y, e[3] as number, e[4] as number);
+    else if (k === 'l') this.bolt(x, y);
+    else if (k === 's') this.sound(e[1] as string);
+    else if (k === 'k') this.shake = Math.max(this.shake, e[1] as number);
   }
 
   drop(x: number, y: number, kind: Drop['kind'], n: number) {
@@ -556,43 +654,47 @@ export class Game {
 
   private swing() {
     const w = this.melee;
-    if (w.shape === 'fist') this.onSound('punch');
     this.meleeCd = w.rate;
     this.swingT = this.swingDur = Math.min(0.32, w.rate * 0.85);
-    if (w.shape !== 'fist') this.onSound(w.effect === 'stun' ? 'slam' : 'swing');
+    this.sound(w.shape === 'fist' ? 'punch' : w.effect === 'stun' ? 'slam' : 'swing');
+    if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee });
+    else this.meleeHit(this.x, this.y, this.face, w);
+  }
+
+  /** the damage part of a swing, from any player (the host runs it for the guest too) */
+  meleeHit(x0: number, y0: number, face: number, w: Melee) {
     const half = (w.arc * Math.PI) / 360;
     for (const m of this.monsters) {
       if (m.dead) continue;
-      const dx = m.x - this.x, dy = m.y - this.y;
+      const dx = m.x - x0, dy = m.y - y0;
       const d = Math.hypot(dx, dy);
       if (d > w.reach + m.def.radius * m.scale) continue;
-      let da = Math.atan2(dy, dx) - this.face;
+      let da = Math.atan2(dy, dx) - face;
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       if (w.arc < 360 && Math.abs(da) > half + 0.25 && d > 0.6) continue;
-      this.hurtMonster(m, w.dmg, this.x, this.y, w.knock, w.effect);
+      this.hurtMonster(m, w.dmg, x0, y0, w.knock, w.effect);
     }
     if (w.effect === 'stun') {
-      this.ring(this.x, this.y, w.reach, '#ffe066', 0.35);
+      this.ring(x0, y0, w.reach, '#ffe066', 0.35);
       this.shake = Math.min(1, this.shake + 0.3);
     }
     // smash crates and barrels
     for (const p of this.L.props) {
       if ((p.kind !== 'crate' && p.kind !== 'barrel') || p.hp <= 0 || p.hp > 50) continue;
-      const dx = p.x + 0.5 - this.x, dy = p.y + 0.5 - this.y;
+      const dx = p.x + 0.5 - x0, dy = p.y + 0.5 - y0;
       if (Math.hypot(dx, dy) > w.reach + 0.5) continue;
-      let da = Math.atan2(dy, dx) - this.face;
+      let da = Math.atan2(dy, dx) - face;
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       if (w.arc < 360 && Math.abs(da) > half + 0.4) continue;
       p.hp = 0;
       this.propsChanged();
       this.burst(p.x + 0.5, p.y + 0.5, 0.5, p.kind === 'crate' ? '#a0713f' : '#7a4a28', 14, 3, 0.1);
-      this.onSound('crate');
+      this.sound('crate');
       const roll = Math.random();
-      if (roll < 0.6) this.drop(p.x + 0.5, p.y + 0.5, 'coin', 2 + Math.floor(Math.random() * 4));
-      else if (roll < 0.8) this.drop(p.x + 0.5, p.y + 0.5, 'arrows', 5);
-      else if (roll < 0.88) this.drop(p.x + 0.5, p.y + 0.5, 'potion', 1);
+      if (roll < 0.65) this.drop(p.x + 0.5, p.y + 0.5, 'coin', 2 + Math.floor(Math.random() * 4));
+      else if (roll < 0.88) this.drop(p.x + 0.5, p.y + 0.5, 'arrows', 5);
     }
   }
 
@@ -628,15 +730,22 @@ export class Game {
     this.face = angle;
     this.rangedCd = w.rate;
     this.drawT = 0.18;
-    this.onSound('bow');
-    const { id, rarity } = parseKey(this.save.ranged);
+    this.sound('bow');
+    if (this.remote) this.onAct({ a: 'shoot', angle, key: this.save.ranged, ak });
+    else this.fireArrows(this.x, this.y, angle, this.save.ranged, ak);
+  }
+
+  /** the arrows themselves, from any player */
+  fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, ak: ArrowKind) {
+    const w = rangedOf(rangedKey);
+    const { id, rarity } = parseKey(rangedKey);
     const kind = w.shape === 'crossbow' ? 'bolt' : id === 'starlight-bow' || id === 'storm-bow' || rarity !== 'normal' ? 'star' : 'arrow';
     const effect = ak === 'fire' || w.burn ? 'burn' : ak === 'frost' ? 'slow' : ak === 'boom' ? 'boom' : undefined;
     const color = ak !== 'normal' ? ({ fire: '#ff8a3a', frost: '#aee8ff', boom: '#ffe066' } as const)[ak] : w.burn ? '#ff8a3a' : rarity === 'gold' ? '#ffd040' : rarity === 'diamond' ? '#8af4ff' : id === 'storm-bow' ? '#9ab0ff' : undefined;
     for (let i = 0; i < w.shots; i++) {
       const a = angle + (i - (w.shots - 1) / 2) * w.spread;
       this.shots.push({
-        x: this.x + Math.cos(a) * 0.4, y: this.y + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
+        x: x0 + Math.cos(a) * 0.4, y: y0 + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
         dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, effect, color,
       });
     }
@@ -698,7 +807,7 @@ export class Game {
     if (t && Math.hypot(t.x - this.x, t.y - this.y) < w.reach + 1.2) return this.angleTo(t);
     const n = this.nearestEnemy(w.reach + 0.9);
     if (n) return this.angleTo(n);
-    if ((inp.aimMode ?? 'mouse') === 'mouse' && inp.aim) return this.angleTo(inp.aim);
+    if (!this.moving && (inp.aimMode ?? 'mouse') === 'mouse' && inp.aim && inp.aimFresh) return this.angleTo(inp.aim);
     return this.face;
   }
 
@@ -712,40 +821,44 @@ export class Game {
     if (this.artCd[i] > 0) return;
     const A = ARTIFACTS[id];
     this.artCd[i] = A.cooldown;
-    this.onSound('artifact');
-    const tier = this.mode === 'dungeon' ? this.levelIdx : 0;
-    if (id === 'healing-totem') {
-      this.totems.push({ x: this.x, y: this.y, t: 7 });
-      this.burst(this.x, this.y, 0.5, '#6fe08a', 16, 2);
-    } else if (id === 'gust-horn') {
-      this.ring(this.x, this.y, 4, '#cfe8ff', 0.45);
-      for (const m of this.monsters) {
-        if (m.dead) continue;
-        const d = Math.hypot(m.x - this.x, m.y - this.y);
-        if (d > 4) continue;
-        this.hurtMonster(m, 6, this.x, this.y, 14, m.guardian ? undefined : 'stun');
-      }
-    } else if (id === 'thunder-charm') {
-      const near = this.monsters.filter((m) => !m.dead && Math.hypot(m.x - this.x, m.y - this.y) < 9).sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y)).slice(0, 5);
-      if (!near.length) this.onMsg('No enemies close enough for the lightning.');
-      for (const m of near) {
-        const pts: [number, number, number][] = [];
-        for (let k = 0; k <= 7; k++) pts.push([k ? (Math.random() - 0.5) * 0.5 : 0, k ? (Math.random() - 0.5) * 0.5 : 0, k * 0.7]);
-        this.bolts.push({ x: m.x, y: m.y, pts, life: 0.35 });
-        this.hurtMonster(m, 30 + tier * 10, m.x, m.y - 0.1, 1, m.guardian ? undefined : 'stun');
-      }
-      this.shake = Math.min(1, this.shake + 0.4);
-      this.onSound('thunder');
-    } else if (id === 'ghost-boots') {
+    this.sound('artifact');
+    if (id === 'ghost-boots') {
       this.speedT = 5;
       this.burst(this.x, this.y, 0.2, '#b8a8ff', 14, 2);
     } else if (id === 'ironhide-charm') {
       this.ironT = 6;
       this.ring(this.x, this.y, 1.2, '#c8d0d8', 0.4);
+    } else if (this.remote) this.onAct({ a: 'art', id, x: this.x, y: this.y });
+    else this.artifactAt(id, this.x, this.y);
+  }
+
+  /** artifacts that touch monsters, from any player */
+  artifactAt(id: ArtifactId, x0: number, y0: number) {
+    const tier = this.mode === 'dungeon' ? this.levelIdx : 0;
+    if (id === 'healing-totem') {
+      this.totems.push({ x: x0, y: y0, t: 7 });
+      this.burst(x0, y0, 0.5, '#6fe08a', 16, 2);
+    } else if (id === 'gust-horn') {
+      this.ring(x0, y0, 4, '#cfe8ff', 0.45);
+      for (const m of this.monsters) {
+        if (m.dead) continue;
+        const d = Math.hypot(m.x - x0, m.y - y0);
+        if (d > 4) continue;
+        this.hurtMonster(m, 6, x0, y0, 14, m.guardian ? undefined : 'stun');
+      }
+    } else if (id === 'thunder-charm') {
+      const near = this.monsters.filter((m) => !m.dead && Math.hypot(m.x - x0, m.y - y0) < 9).sort((a, b) => Math.hypot(a.x - x0, a.y - y0) - Math.hypot(b.x - x0, b.y - y0)).slice(0, 5);
+      if (!near.length) this.onMsg('No enemies close enough for the lightning.');
+      for (const m of near) {
+        this.bolt(m.x, m.y);
+        this.hurtMonster(m, 30 + tier * 10, m.x, m.y - 0.1, 1, m.guardian ? undefined : 'stun');
+      }
+      this.shake = Math.min(1, this.shake + 0.4);
+      this.sound('thunder');
     } else if (id === 'firework-crown') {
       for (let k = 0; k < 12; k++) {
         const a = (k / 12) * Math.PI * 2;
-        this.shots.push({ x: this.x, y: this.y, z: 1, vx: Math.cos(a) * 9, vy: Math.sin(a) * 9, dmg: 20 + tier * 6, from: 'hero', kind: 'firework', pierce: 0, hit: new Set(), life: 0.9, effect: 'boom', color: ['#ff6ad6', '#ffe066', '#6ad6ff'][k % 3] });
+        this.shots.push({ x: x0, y: y0, z: 1, vx: Math.cos(a) * 9, vy: Math.sin(a) * 9, dmg: 20 + tier * 6, from: 'hero', kind: 'firework', pierce: 0, hit: new Set(), life: 0.9, effect: 'boom', color: ['#ff6ad6', '#ffe066', '#6ad6ff'][k % 3] });
       }
     }
   }
@@ -772,8 +885,9 @@ export class Game {
       tx = this.x + (aim.x - this.x) * k;
       ty = this.y + (aim.y - this.y) * k;
     }
-    this.bombs.push({ x: this.x, y: this.y, tx, ty, t: 0, fuse: 1.0 });
-    this.onSound('throw');
+    this.sound('throw');
+    if (this.remote) this.onAct({ a: 'bomb', tx, ty });
+    else this.bombs.push({ x: this.x, y: this.y, tx, ty, t: 0, fuse: 1.0 });
   }
 
   private explode(x: number, y: number) {
@@ -781,7 +895,7 @@ export class Game {
     this.burst(x, y, 0.4, '#ffb347', 26, 6, 0.12);
     this.burst(x, y, 0.4, '#555', 12, 3, 0.16);
     this.shake = 1;
-    this.onSound('boom');
+    this.sound('boom');
     for (const m of this.monsters) if (!m.dead && Math.hypot(m.x - x, m.y - y) < 2.4 + m.def.radius) this.hurtMonster(m, 45, x, y, 6, 'burn');
     for (const p of this.L.props)
       if ((p.kind === 'crate' || p.kind === 'barrel') && p.hp > 0 && p.hp < 50 && Math.hypot(p.x + 0.5 - x, p.y + 0.5 - y) < 2.4) {
@@ -794,7 +908,7 @@ export class Game {
   drinkPotion() {
     if (this.potionCd > 0 || this.dead) return;
     if (this.save.potions <= 0) {
-      this.onMsg('No Healing Draughts. Old Pip sells them.');
+      this.onMsg(`Your next Healing Draught is ready in ${Math.ceil(POTION_EVERY - this.potionT)}s.`);
       this.potionCd = 0.5;
       return;
     }
@@ -806,23 +920,47 @@ export class Game {
     this.save.potions--;
     const heal = Math.round(this.maxHp * 0.6);
     this.hp = Math.min(this.maxHp, this.hp + heal);
-    this.potionCd = 4;
+    this.potionCd = 0.6;
+    this.potionT = 0;
     this.float(this.x, this.y, `+${heal}`, '#6fe08a');
     this.burst(this.x, this.y, 1, '#ff5a8a', 14, 2);
-    this.onSound('drink');
+    this.sound('drink');
   }
 
   // ---------- update ----------
   update(dt: number, inp: Input) {
     this.time += dt;
+    // the teammate's swing and bow pose tick down between network updates
+    for (const p of this.mate ? [this.mate, ...this.peers] : this.peers) {
+      p.swingT = Math.max(0, p.swingT - dt);
+      p.drawT = Math.max(0, p.drawT - dt);
+    }
     this.shake = Math.max(0, this.shake - dt * 2.5);
     if (this.dead) {
       this.deadT += dt;
+      if (!this.coop) {
+        this.updateEffects(dt);
+        if (this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onDeath();
+        return;
+      }
+      // on a team: get back up next to your teammate, unless they are down too
+      const mate = this.remote ? this.mate : this.peers[0];
+      if (mate && !mate.dead && this.deadT >= RESPAWN_AFTER) {
+        this.dead = false;
+        this.hp = Math.round(this.maxHp * 0.5);
+        this.x = mate.x;
+        this.y = mate.y;
+        this.hurtT = 1.5;
+        this.burst(this.x, this.y, 0.6, '#ffe066', 16, 2);
+        this.onMsg('Back on your feet!');
+      } else if (!this.remote && (!mate || mate.dead) && this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onBothDown();
+    } else this.updateHero(dt, inp);
+    if (this.remote) {
+      // the guest only moves its own hero; the host's snapshots bring everything else
+      this.reveal();
       this.updateEffects(dt);
-      if (this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onDeath();
       return;
     }
-    this.updateHero(dt, inp);
     if (this.mode === 'dungeon') {
       this.flowT -= dt;
       if (this.flowT <= 0) {
@@ -846,6 +984,18 @@ export class Game {
     this.hurtT -= dt;
     this.slowT -= dt;
     this.potionCd -= dt;
+    if (this.save.potions >= 1) {
+      this.save.potions = 1;
+      this.potionT = 0;
+    } else {
+      this.potionT += dt;
+      if (this.potionT >= POTION_EVERY) {
+        this.potionT = 0;
+        this.save.potions = 1;
+        this.float(this.x, this.y, '🧪 ready', '#ff8ab0');
+        this.onSound('pickup');
+      }
+    }
     this.bombCd -= dt;
     this.speedT -= dt;
     this.ironT -= dt;
@@ -857,6 +1007,8 @@ export class Game {
         if (Math.random() < dt * 6) this.parts.push({ x: this.x + (Math.random() - 0.5) * 0.5, y: this.y + (Math.random() - 0.5) * 0.5, z: 0.5, vx: 0, vy: 0, vz: 2, life: 0.6, max: 0.6, color: '#6fe08a', size: 0.07 });
       }
     }
+    for (const t of this.totems)
+      for (const p of this.peers) if (!p.dead && Math.hypot(t.x - p.x, t.y - p.y) < 2.6) this.onPeerGain(p.id, { heal: 9 * dt });
     this.totems = this.totems.filter((t) => t.t > 0);
     for (const b of this.bolts) b.life -= dt;
     this.bolts = this.bolts.filter((b) => b.life > 0);
@@ -878,8 +1030,9 @@ export class Game {
     // the body faces the mouse (in mouse aim mode) or where you walk; attacks turn it
     const busy = this.swingT > 0 || this.drawT > 0;
     if (!busy) {
-      if ((inp.aimMode ?? 'mouse') === 'mouse' && inp.aim) this.face = Math.atan2(inp.aim.y - this.y, inp.aim.x - this.x);
-      else if (this.moving) this.face = Math.atan2(gy, gx);
+      // walking always turns you; standing still, you turn to look at the mouse once it moves
+      if (this.moving) this.face = Math.atan2(gy, gx);
+      else if ((inp.aimMode ?? 'mouse') === 'mouse' && inp.aim && inp.aimFresh) this.face = Math.atan2(inp.aim.y - this.y, inp.aim.x - this.x);
     }
 
     if (inp.roll && this.rollCd <= 0 && this.rollT <= 0) {
@@ -888,7 +1041,7 @@ export class Game {
       this.rollDy = Math.sin(a);
       this.rollT = 0.3;
       this.rollCd = this.rollMax;
-      this.onSound('roll');
+      this.sound('roll');
       this.burst(this.x, this.y, 0.1, '#bfb3a0', 6, 1.5);
     }
 
@@ -944,24 +1097,27 @@ export class Game {
       return null;
     }
     const P = this.L.portal;
-    if (P.open && Math.hypot(P.x + 0.5 - this.x, P.y + 0.5 - this.y) < 1.2) return { label: 'Step into the portal', act: () => this.finishLevel() };
-    for (const p of this.L.props) {
+    if (P.open && Math.hypot(P.x + 0.5 - this.x, P.y + 0.5 - this.y) < 1.2)
+      return { label: this.coop ? 'Step into the portal (takes your team home)' : 'Step into the portal', act: () => (this.remote ? this.onAct({ a: 'portal' }) : this.finishLevel()) };
+    for (const [i, p] of this.L.props.entries()) {
       if (p.kind !== 'chest' || p.open) continue;
-      if (Math.hypot(p.x + 0.5 - this.x, p.y + 0.5 - this.y) < 1.4) return { label: 'Open the chest', act: () => this.openChest(p) };
+      if (Math.hypot(p.x + 0.5 - this.x, p.y + 0.5 - this.y) < 1.4) return { label: 'Open the chest', act: () => (this.remote ? this.onAct({ a: 'chest', i }) : this.openChest(p)) };
     }
     return null;
   }
 
-  private openChest(p: Prop) {
+  openChest(p: Prop, opener = '') {
     p.open = true;
-    this.onSound('chest');
+    this.sound('chest');
     this.burst(p.x + 0.5, p.y + 0.5, 0.6, '#ffe066', 18, 2.5);
     const cx = p.x + 0.5, cy = p.y + 1.1;
     for (let i = 0; i < 4; i++) this.drop(cx, cy, 'coin', 5 + this.levelIdx * 3);
     this.drop(cx, cy, 'arrows', 10);
-    if (Math.random() < 0.6) this.drop(cx, cy, 'potion', 1);
     // sometimes a piece of gear you don't have yet
-    if (Math.random() < 0.45) {
+    if (opener) {
+      // the guest rolls their own gear from their own save
+      this.onPeerGain(opener, { gear: Math.random() < 0.45, special: Math.random() < 0.35 ? [['fire', 'frost', 'boom'][Math.floor(Math.random() * 3)], 6] : undefined });
+    } else if (Math.random() < 0.45) {
       const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= this.levelIdx + 1);
       if (pool.length) {
         const g = pool[Math.floor(Math.random() * pool.length)];
@@ -969,14 +1125,22 @@ export class Game {
         if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}: equip it from your inventory (Ctrl).`);
       }
     }
-    if (Math.random() < 0.35) {
+    if (!opener && Math.random() < 0.35) {
       const k = (['fire', 'frost', 'boom'] as const)[Math.floor(Math.random() * 3)];
       this.save.special[k] += 6;
       this.float(cx, cy, `+6 ${k} arrows`, '#ffe08a');
     }
   }
 
-  private finishLevel() {
+  /** a chest roll for this player (used when the guest opened one) */
+  chestGear(level: number) {
+    const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= level + 1);
+    if (!pool.length) return;
+    const key = this.grant(pool[Math.floor(Math.random() * pool.length)]);
+    if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}: equip it from your inventory (Ctrl).`);
+  }
+
+  finishLevel() {
     const def = this.def;
     const first = !this.save.cleared.includes(def.id);
     const reward = first ? def.reward : Math.round(def.reward / 3);
@@ -985,17 +1149,51 @@ export class Game {
     this.save.unlocked = Math.max(this.save.unlocked, Math.min(LEVELS.length - 1, this.levelIdx + 1));
     const won = def.id === 'throne' && !this.save.won;
     if (def.id === 'throne') this.save.won = true;
-    this.onSound('win');
+    this.sound('win');
+    if (!this.remote) this.onFinish();
     this.enterCamp();
     this.onSave();
     if (won) this.onWin();
     else this.onLevelDone(def, reward);
   }
 
+  /** the players monsters can go after: you, and your teammate */
+  private targets(): Tgt[] {
+    const t: Tgt[] = [];
+    if (!this.dead) t.push({ id: '', x: this.x, y: this.y });
+    for (const p of this.peers) if (!p.dead) t.push({ id: p.id, x: p.x, y: p.y });
+    return t;
+  }
+  private hurtTarget(T: Tgt, dmg: number, fx: number, fy: number, effect?: 'slow' | 'burn') {
+    if (!T.id) this.hurtHero(dmg, fx, fy, effect);
+    else {
+      const p = this.peers.find((q) => q.id === T.id);
+      if (p && !p.dead && !p.rolling) this.onPeerHurt(T.id, Math.round(dmg), fx, fy, effect);
+    }
+  }
+
+  /** the host carries out what the guest did */
+  peerAct(id: string, a: Act) {
+    const p = this.peers.find((q) => q.id === id);
+    if (!p || p.dead) return;
+    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, meleeOf(a.key));
+    else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, a.key, a.ak);
+    else if (a.a === 'art') this.artifactAt(a.id, p.x, p.y);
+    else if (a.a === 'bomb') this.bombs.push({ x: p.x, y: p.y, tx: a.tx, ty: a.ty, t: 0, fuse: 1.0 });
+    else if (a.a === 'chest') {
+      const c = this.L.props[a.i];
+      if (c && c.kind === 'chest' && !c.open && this.mode === 'dungeon') this.openChest(c, id);
+    } else if (a.a === 'portal' && this.L.portal.open && this.mode === 'dungeon') this.finishLevel();
+  }
+
   private updateMonsters(dt: number) {
-    const hx = this.x, hy = this.y;
+    const all = this.targets();
     for (const m of this.monsters) {
       if (m.dead) continue;
+      // go after the closest player
+      let T: Tgt = all[0] ?? { id: '-', x: this.x, y: this.y };
+      for (const c of all) if (Math.hypot(c.x - m.x, c.y - m.y) < Math.hypot(T.x - m.x, T.y - m.y)) T = c;
+      const hx = T.x, hy = T.y;
       m.flash -= dt;
       m.hover += dt;
       m.slowT -= dt;
@@ -1016,6 +1214,7 @@ export class Game {
         m.ky *= Math.pow(0.0005, dt);
         if (Math.abs(m.kx) + Math.abs(m.ky) < 0.05) m.kx = m.ky = 0;
       }
+      if (T.id === '-') continue;
       const dx = hx - m.x, dy = hy - m.y;
       const dist = Math.hypot(dx, dy);
       if (!m.awake) {
@@ -1024,7 +1223,7 @@ export class Game {
           if (m.guardian && !this.bossAwake) {
             this.bossAwake = true;
             this.onBanner(m.name, m.kind === 'hollow-crown' ? 'The ruler of the deep dungeons.' : 'The guardian of this dungeon.');
-            this.onSound('roar');
+            this.sound('roar');
           }
         } else continue;
       }
@@ -1068,7 +1267,7 @@ export class Game {
       }
 
       if (m.def.style === 'boss') {
-        this.updateBoss(m, dt, dist, dx, dy, toward);
+        this.updateBoss(m, dt, dist, dx, dy, toward, T);
         continue;
       }
       // guardians have a special ring attack every few seconds
@@ -1078,7 +1277,7 @@ export class Game {
           m.special = 6;
           m.state = 'special';
           m.t = 1;
-          this.warns.push({ x: m.x, y: m.y, r: 3.2, t: 1, total: 1 });
+          this.warn(m.x, m.y, 3.2, 1);
         }
         if (m.state === 'special') {
           m.t -= dt;
@@ -1088,8 +1287,8 @@ export class Game {
             if (m.def.shot) for (let i = 0; i < 12; i++) this.monsterShoot(m, (i / 12) * Math.PI * 2 + m.hover, m.def.shot, 6, Math.round(m.dmg * 0.6));
             this.ring(m.x, m.y, 3.2, this.bloodColor(m.kind), 0.4);
             this.shake = Math.min(1, this.shake + 0.5);
-            this.onSound('slam');
-            if (dist < 3.2) this.hurtHero(m.dmg, m.x, m.y);
+            this.sound('slam');
+            if (dist < 3.2) this.hurtTarget(T, m.dmg, m.x, m.y);
           }
           continue;
         }
@@ -1107,11 +1306,11 @@ export class Game {
             if (m.kind === 'sporecap') for (const o of [-0.25, 0, 0.25]) this.monsterShoot(m, a + o, 'spore', 4.5);
             else this.monsterShoot(m, a, m.def.shot, m.kind === 'frost-wisp' ? 8 : 7);
             if (m.guardian && m.def.shot) for (const o of [-0.5, 0.5]) this.monsterShoot(m, a + o, m.def.shot, 6);
-            this.onSound('cast');
+            this.sound('cast');
           } else {
-            if (dist < reach + 0.5) this.hurtHero(m.dmg, m.x, m.y);
+            if (dist < reach + 0.5) this.hurtTarget(T, m.dmg, m.x, m.y);
             if (m.def.style === 'flier') m.cd = m.def.cooldown;
-            this.onSound(m.kind === 'rustknight' ? 'slam' : 'bite');
+            this.sound(m.kind === 'rustknight' ? 'slam' : 'bite');
             if (m.guardian) this.ring(m.x + Math.cos(m.face) * 0.8, m.y + Math.sin(m.face) * 0.8, 1.5, '#fff', 0.25);
           }
         }
@@ -1151,7 +1350,7 @@ export class Game {
     }
   }
 
-  private updateBoss(m: Monster, dt: number, dist: number, dx: number, dy: number, toward: (sp: number) => void) {
+  private updateBoss(m: Monster, dt: number, dist: number, dx: number, dy: number, toward: (sp: number) => void, T: Tgt) {
     const enraged = m.hp < m.maxHp * 0.5;
     if (m.state === 'wind' || m.state === 'special') {
       m.t -= dt;
@@ -1164,14 +1363,14 @@ export class Game {
           m.cd = 1;
           this.ring(m.x, m.y, 1.8, '#b07aff', 0.3);
           this.shake = 0.6;
-          this.onSound('slam');
-          if (dist < 2) this.hurtHero(m.dmg, m.x, m.y);
+          this.sound('slam');
+          if (dist < 2) this.hurtTarget(T, m.dmg, m.x, m.y);
         } else {
           const sp = 12 * dt;
           const before = { x: m.x, y: m.y };
           this.moveCircle(m, (cx / l) * sp, (cy / l) * sp, 0.9, false, false);
           if (Math.hypot(m.x - before.x, m.y - before.y) < sp * 0.3) m.t = 0;
-          if (dist < 1.4) this.hurtHero(m.dmg, m.x, m.y);
+          if (dist < 1.4) this.hurtTarget(T, m.dmg, m.x, m.y);
           if (Math.random() < 0.6) this.burst(m.x, m.y, 0.2, '#3a2a50', 2, 1);
         }
         return;
@@ -1181,20 +1380,20 @@ export class Game {
       if (m.move === 'slam') {
         this.ring(m.x, m.y, 3.6, '#b07aff', 0.45);
         this.shake = 1;
-        this.onSound('slam');
-        if (dist < 3.6) this.hurtHero(m.dmg * 1.2, m.x, m.y);
+        this.sound('slam');
+        if (dist < 3.6) this.hurtTarget(T, m.dmg * 1.2, m.x, m.y);
         m.state = 'recover';
         m.cd = enraged ? 0.8 : 1.3;
       } else if (m.move === 'charge') {
         m.state = 'special';
         m.t = 1.1;
-        m.cx = this.x + (dx / (dist || 1)) * 1.5;
-        m.cy = this.y + (dy / (dist || 1)) * 1.5;
-        this.onSound('roar');
+        m.cx = T.x + (dx / (dist || 1)) * 1.5;
+        m.cy = T.y + (dy / (dist || 1)) * 1.5;
+        this.sound('roar');
       } else if (m.move === 'volley') {
         const n = enraged ? 20 : 14;
         for (let i = 0; i < n; i++) this.monsterShoot(m, (i / n) * Math.PI * 2 + this.time, 'ember', 6, 14);
-        this.onSound('cast');
+        this.sound('cast');
         m.state = 'recover';
         m.cd = 1;
       } else if (m.move === 'summon') {
@@ -1208,7 +1407,7 @@ export class Game {
             this.burst(x, y, 0.5, '#b07aff', 12, 2);
           }
         }
-        this.onSound('portal');
+        this.sound('portal');
         m.state = 'recover';
         m.cd = 1.2;
       }
@@ -1228,7 +1427,7 @@ export class Game {
       m.special = enraged ? 2.2 : 3.2;
       m.state = 'wind';
       m.t = m.move === 'slam' ? 0.9 : m.move === 'charge' ? 0.7 : 0.8;
-      if (m.move === 'slam') this.warns.push({ x: m.x, y: m.y, r: 3.6, t: 0.9, total: 0.9 });
+      if (m.move === 'slam') this.warn(m.x, m.y, 3.6, 0.9);
     }
   }
 
@@ -1258,11 +1457,16 @@ export class Game {
               }
             }
           }
-        } else if (Math.hypot(this.x - s.x, this.y - s.y) < HERO_R + 0.18) {
-          if (this.rollT > 0) continue;
-          s.life = 0;
-          this.hurtHero(s.dmg, s.x - s.vx, s.y - s.vy, s.kind === 'ice' ? 'slow' : undefined);
-          if (s.kind === 'spore') this.burst(s.x, s.y, 0.6, '#e06ad6', 8, 1.5, 0.14);
+        } else {
+          for (const T of this.targets()) {
+            if (Math.hypot(T.x - s.x, T.y - s.y) >= HERO_R + 0.18) continue;
+            if (!T.id && this.rollT > 0) continue;
+            if (T.id && this.peers.find((q) => q.id === T.id)?.rolling) continue;
+            s.life = 0;
+            this.hurtTarget(T, s.dmg, s.x - s.vx, s.y - s.vy, s.kind === 'ice' ? 'slow' : undefined);
+            if (s.kind === 'spore') this.burst(s.x, s.y, 0.6, '#e06ad6', 8, 1.5, 0.14);
+            break;
+          }
         }
       }
     }
@@ -1276,7 +1480,7 @@ export class Game {
   private miniBoom(x: number, y: number, dmg: number, color: string, skip = 0) {
     this.ring(x, y, 1.4, color, 0.3);
     this.burst(x, y, 0.6, color, 12, 4, 0.1);
-    this.onSound('pop');
+    this.sound('pop');
     for (const m of this.monsters) if (!m.dead && m.id !== skip && Math.hypot(m.x - x, m.y - y) < 1.4 + m.def.radius) this.hurtMonster(m, dmg, x, y, 3);
   }
 
@@ -1304,6 +1508,13 @@ export class Game {
   private updateDrops(dt: number) {
     for (const d of this.drops) {
       d.t += dt;
+      // your teammate can grab it too
+      const pr = this.peers.find((p) => !p.dead && Math.hypot(p.x - d.x, p.y - d.y) < 0.5);
+      if (pr && d.t > 0.35) {
+        d.t = -1;
+        this.onPeerGain(pr.id, d.kind === 'coin' ? { coins: d.n } : d.kind === 'arrows' ? { arrows: d.n } : {});
+        continue;
+      }
       const dist = Math.hypot(this.x - d.x, this.y - d.y);
       if (dist < 2.2 && d.t > 0.35) {
         const k = Math.min(1, dt * 10);
@@ -1315,15 +1526,15 @@ export class Game {
         if (d.kind === 'coin') {
           this.save.coins += d.n;
           this.runCoins += d.n;
-          this.onSound('coin');
+          this.sound('coin');
         } else if (d.kind === 'potion') {
           this.save.potions++;
           this.float(this.x, this.y, '+1 draught', '#ff8ab0');
-          this.onSound('pickup');
+          this.sound('pickup');
         } else {
           this.save.arrows += d.n;
           this.float(this.x, this.y, `+${d.n} arrows`, '#e8d8b0');
-          this.onSound('pickup');
+          this.sound('pickup');
         }
       }
     }
@@ -1368,7 +1579,7 @@ export class Game {
     this.save.coins -= g;
     const key = this.grant(id);
     this.equip(key);
-    this.onSound('buy');
+    this.sound('buy');
     this.onSave();
     return key;
   }
@@ -1392,7 +1603,7 @@ export class Game {
     this.save.artifacts.push(id);
     const empty = this.save.slots.indexOf('');
     if (empty >= 0) this.save.slots[empty] = id;
-    this.onSound('buy');
+    this.sound('buy');
     this.onSave();
     return null;
   }

@@ -23,7 +23,7 @@
 .md-boss b { display: block; font-size: 16px; letter-spacing: 1px; color: #ffd0d8; text-shadow: 0 2px 0 #000; }
 .md-bossbar { height: 14px; border: 3px solid #120a0c; background: #2a0e18; }
 .md-bossbar i { display: block; height: 100%; background: linear-gradient(180deg, #d070ff, #7a2ab0); transition: width .2s; }
-.md-prompt { position: absolute; left: 50%; bottom: 104px; transform: translateX(-50%); background: rgba(10,8,14,.82); border: 2px solid #ffd27a; padding: 5px 14px; font-weight: 800; white-space: nowrap; }
+.md-prompt { position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%); background: rgba(10,8,14,.82); border: 2px solid #ffd27a; padding: 5px 14px; font-weight: 800; white-space: nowrap; }
 .md-prompt kbd { display: inline-block; min-width: 22px; padding: 0 5px; margin-right: 6px; background: #ffd27a; color: #2a1a0a; font: 800 13px/20px ui-monospace, monospace; text-align: center; }
 .md-bar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; background: rgba(14,10,8,.8); border: 3px solid #120a0c; box-shadow: inset 0 0 0 2px #4a3a2a; }
 .md-slot { position: relative; width: 64px; height: 64px; background: #2a2018; box-shadow: inset 0 0 0 2px #5a4a36; display: grid; place-items: center; overflow: hidden; }
@@ -145,3 +145,24 @@
 .md-opt small { font-size: 12px; opacity: .8; }
 .md-opt.on { box-shadow: inset 0 0 0 3px #ffd27a; background: #3f3020; }
 .md-opt.on b::after { content: ' ✓'; color: #8fe06a; }
+
+/* artifact row (Z X C), potion timer, team play, save slots */
+.md-stats { display: flex; flex-wrap: wrap; gap: 4px; }
+.md-stats kbd { font: 800 11px ui-monospace, monospace; background: #ffd27a; color: #2a1a0a; padding: 0 4px; margin-right: 2px; }
+.md-pot { color: #c8c0d8 !important; }
+.md-pot.ready { color: #ff8aa8 !important; border-color: #b0405a !important; }
+.md-team { color: #9fe0ff !important; border-color: #2a5a7a !important; }
+.md-bar .md-slot em { left: 50%; transform: translateX(-50%); top: auto; bottom: -1px; background: #ffd27a; color: #2a1a0a; padding: 0 6px; text-shadow: none; font-size: 12px; }
+.md-bar .md-slot span { right: auto; left: 50%; top: 50%; bottom: auto; transform: translate(-50%, -60%); font-size: 18px; z-index: 1; }
+.md-bar .md-slot.ready { box-shadow: inset 0 0 0 2px #ffd27a; }
+.md-bar .md-slot.md-empty small { display: block; font-size: 10px; color: #8a7a62; }
+.md-join input, .md-name { background: #1a1410; border: 2px solid #5a4a36; color: #f0e0c0; font: 700 15px system-ui, sans-serif; padding: 6px 10px; width: 100%; box-sizing: border-box; }
+.md-hosts { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 46vh; overflow: auto; }
+.md-host { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.25); padding: 8px 10px; }
+.md-host div { flex: 1; display: flex; flex-direction: column; }
+.md-host small { color: #b8a888; }
+.md-slots { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.md-saveslot { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.25); padding: 10px; }
+.md-saveslot div { flex: 1; display: flex; flex-direction: column; }
+.md-saveslot small { color: #b8a888; }
+.md-saveslot.cur { box-shadow: inset 0 0 0 2px #ffd27a; }
