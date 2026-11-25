@@ -295,6 +295,7 @@ interface Unit {
   scan?: number;
   cool?: number;
   fired?: number;
+  upT?: number; // a submarine: when it was last hit while surfaced
   hitT?: number;
   flashT?: number;
   // when you last ordered an attack on it (or sent units into it): it blinks
@@ -656,8 +657,9 @@ const PARA_N = 8;
 const DROP_S = 3.2; // seconds for a paratrooper to come down
 
 // A submarine stays surfaced this long after it fires (long enough for the
-// ship it hit, and anything nearby that can shoot a ship, to fire back);
-// Destroyers hear one under the water this far off.
+// ship it hit, and anything nearby that can shoot a ship, to fire back),
+// counted again from each hit it takes while it is up; Destroyers hear one
+// under the water this far off.
 const SUB_UP = 8;
 const SONAR = 6 * CELL;
 
@@ -1493,6 +1495,8 @@ export class IsoGame implements GameLike {
   // Can you see this enemy unit (it isn't under the shroud)? Yours always.
   private shown(u: Unit): boolean {
     if (u.f !== this.me && this.under(u) && !this.sonar(u, this.me)) return false;
+    // (a submarine that has come up to fire shows to everyone, shroud or not)
+    if (u.kind === 'sub' && !this.under(u)) return true;
     return u.f === this.me || !this.shroud || this.shroud.seen(...this.spot(u));
   }
 
@@ -5237,7 +5241,8 @@ export class IsoGame implements GameLike {
     if (!w || t.dead) return false;
     // (the Commando blows up buildings and bridges with a charge; a dog's
     // bite and her pistols only hurt foot soldiers)
-    if (isB(t)) return w.c4 ? true : !w.foot && !w.sea && w.ground;
+    // (torpedoes only reach a building on the water: a naval yard)
+    if (isB(t)) return w.c4 ? true : w.sea ? t.kind === 'navy' : !w.foot && w.ground;
     if (w.foot && !isFoot(t.kind)) return false;
     // torpedoes only find ships; a submarine under the water only depth charges find
     if (w.sea && !isNaval(t.kind)) return false;
@@ -5439,9 +5444,35 @@ export class IsoGame implements GameLike {
     return 0;
   }
 
-  // A submarine under the water: it comes up to fire, and stays up a moment after.
-  private under(u: { kind: Kind; fired?: number }): boolean {
-    return u.kind === 'sub' && this.time - (u.fired ?? -99) > SUB_UP;
+  // A submarine under the water: it comes up to fire, and stays up a while
+  // after (longer if it is hit while it is up).
+  private under(u: { kind: Kind; fired?: number; upT?: number }): boolean {
+    return u.kind === 'sub' && this.time - Math.max(u.fired ?? -99, u.upT ?? -99) > SUB_UP;
+  }
+
+  // A submerged submarine's shadow: its hull seen from above, one flat dark
+  // color on the water.
+  private subShadow(u: Unit): void {
+    const c = this.ctx;
+    const ca = Math.cos(u.a);
+    const sa = Math.sin(u.a);
+    const pt = (a: number, b: number): [number, number] => toScreen(u.x + ca * a - sa * b, u.y + sa * a + ca * b, 0);
+    // (the hull's half width along its length, as in sprites.ts's submarine)
+    const half = (a: number) => 2.7 * (a > 9 ? Math.sqrt(Math.max(0, (15 - a) / 6)) : a < -9 ? Math.max(0, (a + 16) / 7) : 1);
+    const side: [number, number][] = [];
+    const other: [number, number][] = [];
+    for (let a = -16; a <= 15; a += 1) {
+      side.push(pt(a, half(a)));
+      other.push(pt(a, -half(a)));
+    }
+    c.fillStyle = 'rgba(8,18,24,0.62)';
+    c.beginPath();
+    for (const [i, [x, y]] of [...side, ...other.reverse()].entries()) {
+      if (i) c.lineTo(x, y);
+      else c.moveTo(x, y);
+    }
+    c.closePath();
+    c.fill();
   }
 
   // Can side f see submarine u under the water? Only with a ship, or one
@@ -6259,6 +6290,8 @@ export class IsoGame implements GameLike {
 
   private damage(t: Target, amt: number, src?: Unit | Building): void {
     if (t.dead) return;
+    // a surfaced submarine that is hit has to stay up longer
+    if (!isB(t) && t.kind === 'sub' && !this.under(t)) t.upT = this.time;
     if (!isB(t) && t.digK !== undefined && t.digK >= 1) amt *= DUG_ARMOR; // behind its sandbags
     if (t.f === this.me || src?.f === this.me) this.fightT = this.time;
     // on a player's screen a hit only shows: the host keeps the score
@@ -7413,13 +7446,14 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'sub': {
-        // under the water only a dark shape shows (to its own side), with a
-        // ripple at the periscope; up, it rides low with the sea washing over it
+        // under the water only a flat dark shadow of it shows (to its own
+        // side, or to a ship that hears it), so you can tell it is hidden,
+        // with a ripple at the periscope; up, it rides low with the sea
+        // washing over it
         const c = this.ctx;
         const down = this.under(u);
-        c.globalAlpha = down ? 0.35 : 1;
-        this.blit(art.sub[di], u.x, u.y, down ? -2.4 : -0.6);
-        c.globalAlpha = 1;
+        if (down) this.subShadow(u);
+        else this.blit(art.sub[di], u.x, u.y, -0.6);
         if (down && u.moving && Math.floor(u.anim * 4) % 2) {
           const [px, py] = toScreen(u.x + Math.cos(u.a) * 2.6, u.y + Math.sin(u.a) * 2.6, 0);
           c.fillStyle = 'rgba(230,245,250,0.7)';

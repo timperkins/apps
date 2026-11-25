@@ -51,7 +51,7 @@ export interface Weapon {
   big?: boolean; // heavy rounds: they shove tanks about, not just soldiers
   foot?: boolean; // only hits foot soldiers (a dog's bite, the Commando's pistols)
   c4?: boolean; // walks up to buildings and blows them up with a charge (the Commando)
-  sea?: boolean; // only hits ships (torpedoes)
+  sea?: boolean; // only hits ships and naval yards (torpedoes)
   deep?: boolean; // reaches a submarine under the water (depth charges)
   min?: number; // can't fire on anything nearer than this (world units)
 }
@@ -112,7 +112,7 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
   destroyer: { name: 'Naval gun', dmg: 50, rof: 2, range: 6.5 * CELL, wh: 'HE', shot: 'shell', speed: 260, barrels: 1, air: false, ground: true, deep: true, big: true },
   skyguard: { name: 'Skyguard missiles', dmg: 35, rof: 1.1, range: 7 * CELL, wh: 'AP', shot: 'rocket', speed: 190, barrels: 2, air: true, ground: false },
   cruiser: { name: 'Skyguard missiles', dmg: 60, rof: 1.2, range: 10 * CELL, wh: 'AP', shot: 'rocket', speed: 230, barrels: 2, air: true, ground: false },
-  sub: { name: 'Torpedoes', dmg: 130, rof: 3, range: 6 * CELL, wh: 'AP', shot: 'torpedo', speed: 70, barrels: 1, air: false, ground: true, sea: true },
+  sub: { name: 'Long torpedo', dmg: 300, rof: 10, range: 9 * CELL, wh: 'AP', shot: 'torpedo', speed: 60, barrels: 1, air: false, ground: true, sea: true, big: true },
   tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
 };
 
@@ -976,14 +976,29 @@ export class Fx {
           }
         }
       } else if (s.kind === 'torpedo') {
-        // a dark fish under the surface, a line of white water behind it
-        for (let i = 1; i < 6; i++) {
-          const b = Math.max(0, s.t / s.dur - i * 0.03);
-          const [wx, wy] = toScreen(s.x0 + (s.x1 - s.x0) * b, s.y0 + (s.y1 - s.y0) * b, 0);
-          c.fillStyle = `rgba(235,245,250,${0.7 - i * 0.11})`;
-          c.fillRect(Math.round(wx * 2) / 2, Math.round(wy * 2) / 2, 0.5, 0.5);
+        // a long dark fish under the surface, and a long trail of bubbles
+        // behind it all the way back, fading out the further back they are
+        // (each bubble stays where it came up, and wobbles as it rises)
+        const len = Math.hypot(s.x1 - s.x0, s.y1 - s.y0) || 1;
+        const ux = (s.x1 - s.x0) / len;
+        const uy = (s.y1 - s.y0) / len;
+        const run = (s.t / s.dur) * len;
+        const TRAIL = 56;
+        const STEP = 1.6;
+        for (let i = Math.floor(run / STEP); i >= 0 && run - i * STEP < TRAIL; i--) {
+          const d = i * STEP;
+          const back = (run - d) / TRAIL;
+          if (back < 0.04) continue;
+          const side = (hash2(i, 3, 17) - 0.5) * (1 + back * 3);
+          const [wx, wy] = toScreen(s.x0 + ux * d - uy * side, s.y0 + uy * d + ux * side, 0);
+          const pop = Math.sin(s.t * 9 + i) * 0.25 * back;
+          c.fillStyle = `rgba(235,245,250,${(0.8 * (1 - back)).toFixed(2)})`;
+          const sz = hash2(i, 5, 23) > 0.7 ? 1 : 0.5;
+          c.fillRect(Math.round(wx * 2) / 2, Math.round((wy - pop) * 2) / 2, sz, sz * 0.5 + 0.25);
         }
+        const [tx, ty] = toScreen(s.x - ux * 3, s.y - uy * 3, 0);
         c.fillStyle = '#1f2a2e';
+        c.fillRect(Math.round(tx * 2) / 2, Math.round(ty * 2) / 2, 1, 0.5);
         c.fillRect(X, Y, 1, 0.5);
       } else if (s.kind === 'drone') {
         // a little flying wing, and its shadow on the ground
