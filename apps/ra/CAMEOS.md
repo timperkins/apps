@@ -30,7 +30,7 @@ What is used now, so a new one can be different:
 | radar | long runway in front, apron with parked jets, barrel-vault hangar with open lit door, control tower with dish, fuel tanks | off-white concrete, asphalt, yellow marks | dry grassland, late afternoon |
 | uplink | huge white dish on a tall pylon over a domed drum, beam into the sky | white, steel grey | frosty tundra, starry night |
 | helipad | round pad with a yellow H, windsock | asphalt | lakeshore |
-| lab | one great geodesic glass dome glowing from inside | clear glass, silver, warm white light | summer meadow, dusk |
+| lab | geodesic glass dome glowing from inside, raised on a round-cornered podium, slender spire with two floating halo rings, glass-faced tower | clear glass, off-white concrete, warm white light | summer meadow, dusk |
 | tower | tall round bunker with firing slits and a twin-gun turret | pale concrete, gunmetal | forest edge |
 | depot | round repair pad, four arched orange pylons meeting in a ring, hoist | orange girders, asphalt | industrial yard, dusk, floodlights |
 | wall | run of crenellated concrete block wall with a corner | grey concrete | autumn hills |
