@@ -66,16 +66,21 @@ export const NAVAL: ReadonlySet<string> = new Set<UnitKind>(['boat', 'destroyer'
 export const isNaval = (k: string): boolean => NAVAL.has(k);
 
 // The carrier has no guns of its own: it carries up to CARRIER_JETS Swift
-// jets, parked on its deck at these spots ([along, across] from its middle,
-// in world units, facing the bow) at height DECK_Z. They take off from it
-// to fight and land back on it to rearm. (They match the deck in sprites.ts.)
+// jets, parked on the starboard side of its deck at these spots ([along,
+// across] from its middle, in world units, facing the bow) at height DECK_Z.
+// They taxi across to the runway down the port side (CARRIER_RUNWAY: across,
+// the stern end and the bow end), roll off the bow to fight, come back in
+// over the stern to land on it, and taxi back to their spots to rearm and be
+// mended. (They match the deck in sprites.ts.)
 export const CARRIER_JETS = 12;
 export const DECK_Z = 14;
+export const CARRIER_RUNWAY: readonly [number, number, number] = [-17, -64, 74];
 export const CARRIER_SLOTS: readonly [number, number][] = [
-  // down the port side, stern to bow
-  [-56, -9], [-38, -9], [-20, -9], [-2, -9], [16, -9], [34, -9], [52, -9],
-  // and the starboard side, either side of the island
-  [-56, 7], [-38, 7], [22, 7], [38, 7], [54, 7],
+  // the outer row, aft of the island and forward of it (filled first: it is
+  // the furthest from the runway)
+  [-60, 17.5], [-42, 17.5], [-24, 17.5], [34, 17.5], [52, 17.5],
+  // and the inner row, along the edge of the runway
+  [48, 1], [30, 1], [12, 1], [-6, 1], [-24, 1], [-42, 1], [-60, 1],
 ];
 // The buildings that fight back on their own.
 export type DefenseKind = 'tower' | 'prism' | 'aa';
@@ -150,7 +155,7 @@ export const UNIT_DEF: Record<UnitKind, { strength: number; armor: Armor }> = {
   otter: { strength: 300, armor: 'heavy' },
   destroyer: { strength: 600, armor: 'heavy' },
   cruiser: { strength: 700, armor: 'heavy' },
-  carrier: { strength: 900, armor: 'heavy' },
+  carrier: { strength: 1800, armor: 'heavy' },
   sub: { strength: 450, armor: 'heavy' },
 };
 
