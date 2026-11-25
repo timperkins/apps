@@ -280,8 +280,8 @@ export function initBuild(getGame: () => GameLike | undefined): BuildUI {
   }
 
   // The power bar: how much the plants make, filling up from the bottom in
-  // segments, with a notch for how much the base uses. It goes red, and
-  // blinks, when the base uses more than it makes.
+  // segments, with a notch for how much the base uses. It goes red when
+  // the base uses more than it makes.
   function renderPower(p: BuildMenu['power']): void {
     const made = p?.made ?? 0;
     const used = p?.used ?? 0;
