@@ -170,6 +170,9 @@ const SWIM_DROP = 5.5;
 const PRISM_LINK = 9 * CELL;
 const PRISM_MAX = 6;
 const PRISM_ADD = 0.5;
+// ...and how long one charges up before it fires (it starts while still
+// reloading, so a tower that keeps firing loses no time to it).
+const PRISM_CHARGE = 1.5;
 // Walls: the grid their segments snap to (one segment a side) and the
 // seconds to make one.
 const WALL_GRID = 8;
@@ -487,6 +490,7 @@ interface Building {
   target?: Target;
   scan?: number;
   cool?: number;
+  charge?: number; // a Lumen tower: 0..1, how far charged up for its next shot
   hitT?: number;
   flashT?: number;
   // when you last ordered an attack on it (or sent units into it): it blinks
@@ -5986,6 +5990,7 @@ export class IsoGame implements GameLike {
     b.cool = Math.max(0, (b.cool ?? 0) - dt);
     let t = b.target;
     if (t && (!this.canHit(w, t) || this.reach(gx, gy, t) > w.range)) t = b.target = undefined;
+    if (kind === 'prism') this.prismGlow(b, gx, gy, p.z, dt);
     if (!t) {
       b.scan = (b.scan ?? 0) - dt;
       if (b.scan > 0) return;
@@ -5997,10 +6002,33 @@ export class IsoGame implements GameLike {
     const want = Math.atan2(ay - gy, ax - gx);
     b.gunGoal = want;
     // (a Lumen tower has nothing to turn: its crystal fires any way)
+    if (kind === 'prism' && !this.prismCharge(b, gx, gy, p.z, dt)) return;
     if ((kind !== 'prism' && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
     b.cool = w.rof * (0.9 + Math.random() * 0.2);
     const from = muzzles(kind, gx, gy, p.z, 0, b.gun);
     this.shoot(b, kind === 'prism' ? this.prismBoost(b, w, from[0]) : w, t, from);
+  }
+
+  // A Lumen tower with something to shoot charges up over PRISM_CHARGE
+  // seconds (with a rising whine) before it can fire; true once it is full
+  // and reloaded, ready to fire now.
+  private prismCharge(b: Building, gx: number, gy: number, gz: number, dt: number): boolean {
+    if ((b.cool ?? 0) > PRISM_CHARGE) return false;
+    const k = b.charge ?? 0;
+    if (k === 0) this.sound(gx, gy, 'beam_charge', 1, {}, gz);
+    b.charge = Math.min(1, k + dt / PRISM_CHARGE);
+    if (b.charge < 1 || (b.cool ?? 0) > 0) return false;
+    b.charge = 0;
+    return true;
+  }
+
+  // The light gathering at a Lumen tower's coil as it charges (and fading
+  // away again if it loses its target first).
+  private prismGlow(b: Building, gx: number, gy: number, gz: number, dt: number): void {
+    if (!b.target && b.charge) b.charge = Math.max(0, b.charge - (2 * dt) / PRISM_CHARGE);
+    if (!b.charge) return;
+    const [sx, sy] = toScreen(gx, gy, gz);
+    this.fx.charge(sx, sy, b.charge, dt);
   }
 
   // A Lumen tower about to fire draws on the others of its side nearby that

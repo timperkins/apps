@@ -339,7 +339,7 @@ export function makeShot(kind: ShotKind, from: [number, number, number], to: [nu
 
 // ---------- Effects, in screen pixels ----------
 
-type PKind = 'smoke' | 'soot' | 'spark' | 'ember' | 'dust' | 'debris';
+type PKind = 'smoke' | 'soot' | 'spark' | 'ember' | 'dust' | 'debris' | 'mote';
 interface P {
   x: number;
   y: number;
@@ -561,6 +561,10 @@ export class Fx {
   private tracers: { x0: number; y0: number; x1: number; y1: number; t: number }[] = [];
   // Lumen beams: a bright bolt between two screen points, fading out
   private beams: { x0: number; y0: number; x1: number; y1: number; t: number; w: number }[] = [];
+  // Lumen towers charging up: a ball of light at the coil, k from 0 to 1 as
+  // it fills (given again every frame it lasts; `fresh` until the next step)
+  private glows: { x: number; y: number; k: number; fresh: boolean }[] = [];
+  private clock = 0; // seconds, for the glows' pulse
   private pieces: Piece[] = [];
   // columns of smoke rising from wrecks: `rate` puffs a second, thinning out
   // over `dur` seconds
@@ -575,6 +579,20 @@ export class Fx {
     this.flashes = [];
     this.tracers = [];
     this.beams = [];
+    this.glows = [];
+  }
+
+  // A Lumen tower charging up, at screen point x, y, k of the way full (call
+  // it every frame of the charge): light gathers into a growing, quickening
+  // ball, and motes of it stream in from round about.
+  charge(x: number, y: number, k: number, dt: number): void {
+    this.glows.push({ x, y, k, fresh: true });
+    if (Math.random() < dt * (8 + k * 30)) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 5 + Math.random() * 5;
+      const max = 0.25 + Math.random() * 0.15;
+      this.p(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.8, 'mote', { vx: (-Math.cos(a) * r) / max, vy: (-Math.sin(a) * r * 0.8) / max, max });
+    }
   }
 
   // A bolt of light from one screen point to another (w: how thick; a
@@ -772,6 +790,7 @@ export class Fx {
 
   // Shots move on; each one that arrives calls its hit().
   step(dt: number): void {
+    this.clock += dt;
     for (const s of this.shots) {
       if (s.track) {
         const p = s.track();
@@ -842,6 +861,8 @@ export class Fx {
     this.tracers = this.tracers.filter((t) => t.t < 0.06);
     for (const b of this.beams) b.t += dt;
     this.beams = this.beams.filter((b) => b.t < BEAM_S);
+    this.glows = this.glows.filter((g) => g.fresh);
+    for (const g of this.glows) g.fresh = false;
     for (const p of this.ps) {
       p.life += dt;
       p.vy += p.g * dt;
@@ -914,6 +935,29 @@ export class Fx {
           c.fillStyle = '#f4fcff';
           c.fillRect(x, y, 0.5, 0.5);
         }
+      }
+    }
+    for (const g of this.glows) {
+      // a pale blue halo round a white core, both growing and pulsing faster
+      // as it fills; a four-point glint once it is nearly ready
+      const pulse = 0.85 + 0.15 * Math.sin(this.clock * (12 + g.k * 36));
+      const r = (0.75 + g.k * g.k * 2.6) * pulse;
+      const X = Math.round(g.x * 2) / 2;
+      const Y = Math.round(g.y * 2) / 2;
+      // (each layer a wide box and a tall one over each other: a rounded blob)
+      const blob = (rr: number, style: string) => {
+        c.fillStyle = style;
+        c.fillRect(Math.round((X - rr) * 2) / 2, Math.round((Y - rr * 0.5) * 2) / 2, rr * 2, rr);
+        c.fillRect(Math.round((X - rr * 0.6) * 2) / 2, Math.round((Y - rr * 0.8) * 2) / 2, rr * 1.2, rr * 1.6);
+      };
+      blob(r * 1.6, `rgba(150,215,255,${0.15 + 0.25 * g.k})`);
+      blob(r * 1.05, `rgba(200,236,255,${0.35 + 0.4 * g.k})`);
+      c.fillStyle = '#f4fcff';
+      c.fillRect(Math.round((X - r / 2) * 2) / 2, Math.round((Y - r * 0.4) * 2) / 2, Math.max(0.5, r), Math.max(0.5, r * 0.8));
+      if (g.k > 0.7) {
+        const s = 1.5 + (g.k - 0.7) * 12 * pulse;
+        c.fillRect(X - s, Y, s * 2 + 0.5, 0.5);
+        c.fillRect(X, Y - s * 0.8, 0.5, s * 1.6 + 0.5);
       }
     }
     for (const t of this.tracers) {
@@ -1043,6 +1087,9 @@ export class Fx {
     for (const p of this.ps) {
       if (p.kind === 'spark') {
         c.fillStyle = p.life < 0.12 ? '#fff6c8' : '#ffb347';
+        c.fillRect(Math.round(p.x * 2) / 2, Math.round(p.y * 2) / 2, 0.5, 0.5);
+      } else if (p.kind === 'mote') {
+        c.fillStyle = p.life / p.max < 0.5 ? 'rgba(150,215,255,0.8)' : '#f4fcff';
         c.fillRect(Math.round(p.x * 2) / 2, Math.round(p.y * 2) / 2, 0.5, 0.5);
       } else if (p.kind === 'ember') {
         const k = p.life / p.max;

@@ -45,7 +45,8 @@ export type Sfx =
   | 'flame_burst'
   | 'dog_attack'
   | 'dog_yelp'
-  | 'beam_fire';
+  | 'beam_fire'
+  | 'beam_charge';
 
 // (There was an always-on wind loop, ambient_land, too. Most of it was a
 // thin hiss around 10 kHz that played under everything as a high whine, so
@@ -57,6 +58,7 @@ const SHOTS: Sfx[] = [
   'dog_attack',
   'dog_yelp',
   'beam_fire',
+  'beam_charge',
   'rifle_shot',
   'cannon_shot',
   'howitzer_shot',
@@ -91,6 +93,7 @@ const GAIN: Partial<Record<Sfx | Loop, number>> = {
   dog_attack: 0.5,
   dog_yelp: 0.45,
   beam_fire: 0.5,
+  beam_charge: 0.3,
   cannon_shot: 0.5,
   howitzer_shot: 0.6,
   rocket_launch: 0.45,
