@@ -1372,7 +1372,8 @@ const BUILDINGS: { kind: BuildingKind; name: string; blurb?: string }[] = [
   { kind: 'depot', name: 'Service depot' },
   { kind: 'navy', name: 'Naval yard' },
   { kind: 'wall', name: 'Wall' },
-  { kind: 'tower', name: 'Gun tower' },
+  { kind: 'pillbox', name: 'Pillbox' },
+  { kind: 'tower', name: 'Turret' },
   { kind: 'aa', name: 'Skyguard battery' },
   { kind: 'prism', name: 'Lumen tower' },
   { kind: 'derrick', name: 'Tech oil derrick', blurb: `Can't be built: a few stand out on every map, belonging to nobody. Send an Engineer in to capture it (the three yellow arrows) and it turns your color, pays you $${DERRICK.bonus} at once and then $${DERRICK.rate} a second while you hold it. Anyone can capture it from you the same way, and it can be destroyed for good.` },
@@ -1610,7 +1611,7 @@ function comingOut(vehicle: boolean, b: V2BuildingArt, box: Box, art: V2FactionA
   };
 }
 
-// A building's fighting cells: a gun tower firing; being hit (shells
+// A building's fighting cells: a defense firing; being hit (shells
 // bursting on it, a flash, its health running down); badly damaged (holed,
 // scorched and on fire); being destroyed (hit until it is damaged, hit until
 // it goes up in a string of explosions, then the ruin); and the ruin, which
@@ -1643,7 +1644,7 @@ function buildingFight(kind: BuildingKind, b: V2BuildingArt, st: BuildingStates,
       if (Math.random() < dt * 2.5) s.fx.smoke(sx, sy - 3, true, 1.5);
     }
   };
-  if (kind === 'tower' || kind === 'prism' || kind === 'aa') {
+  if (kind === 'tower' || kind === 'pillbox' || kind === 'prism' || kind === 'aa') {
     const p = b.fx[0];
     const far = 20;
     const g = gunOf(art, kind);

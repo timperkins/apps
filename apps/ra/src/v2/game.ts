@@ -22,7 +22,7 @@ import { DROP_S, FOLD_S, chuteInAir, drawChute, drawChuteShadow, dropAlt, swingO
 import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_RUNWAY, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_RUNWAY, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, FIXED_GUN, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -97,7 +97,8 @@ const BNAME: Record<BuildingKind, string> = {
   refinery: 'Ore refinery',
   radar: 'Air command',
   factory: 'Vehicle works',
-  tower: 'Gun tower',
+  tower: 'Turret',
+  pillbox: 'Pillbox',
   silo: 'Ore silo',
   helipad: 'Helipad',
   lab: 'Tech lab',
@@ -537,10 +538,10 @@ interface Particle {
   v?: number; // which puff texture
 }
 
-const BASE_B: BuildingKind[] = ['power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
+const BASE_B: BuildingKind[] = ['power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'pillbox', 'helipad', 'power'];
 // Your base in the Combat stage: one of every building (enough power plants
 // to run it all), and a Naval yard out on the nearest water.
-const COMBAT_B: BuildingKind[] = ['yard', 'radar', 'factory', 'refinery', 'barracks', 'lab', 'helipad', 'depot', 'silo', 'uplink', 'power', 'power', 'power', 'power', 'power', 'power', 'tower', 'aa', 'prism', 'wall'];
+const COMBAT_B: BuildingKind[] = ['yard', 'radar', 'factory', 'refinery', 'barracks', 'lab', 'helipad', 'depot', 'silo', 'uplink', 'power', 'power', 'power', 'power', 'power', 'power', 'tower', 'pillbox', 'aa', 'prism', 'wall'];
 // ...and one of every unit (as well as the army it starts with): these on
 // land, Swift jets and the Paratrooper plane on the Air command's stands,
 // and ships by the Naval yard.
@@ -609,7 +610,7 @@ const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5
 // round itself.
 const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
-const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
+const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, pillbox: 6, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
 // Show where buildings keep units out, for testing: ?blocks in the URL.
 const SHOW_BLOCKS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('blocks');
@@ -964,7 +965,7 @@ export class IsoGame implements GameLike {
 
   /** Before generate(): the buildings it will place (it needn't wait for them). */
   preload(): Promise<unknown>[] {
-    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy', 'derrick'];
+    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'pillbox', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy', 'derrick'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
     if (this.stage === 'combat') now.push(...COMBAT_B.map((k): [BuildingKind, number] => [k, this.me]));
@@ -6276,7 +6277,7 @@ export class IsoGame implements GameLike {
     return frames[beat < 0 ? 0 : [1, 0, 2, 0][beat % 4]][d];
   }
 
-  // A gun tower picks the nearest enemy unit in range, turns and fires.
+  // A defense (Turret, Pillbox, Lumen tower, Skyguard battery) picks the nearest enemy unit in range, turns and fires.
   private towerFight(b: Building, dt: number): void {
     const kind = b.kind as DefenseKind;
     const w = WEAPON[kind]!;
@@ -6296,10 +6297,11 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(gx, gy, t);
     const want = Math.atan2(ay - gy, ax - gx);
     b.gunGoal = want;
-    // (a Lumen tower has nothing to turn: its crystal fires any way)
-    if ((kind !== 'prism' && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
+    // (a Lumen tower or a Pillbox has nothing to turn: it fires any way)
+    const fixed = FIXED_GUN.has(kind);
+    if ((!fixed && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
     b.cool = w.rof * (0.9 + Math.random() * 0.2);
-    const from = muzzles(kind, gx, gy, p.z, 0, b.gun);
+    const from = muzzles(kind, gx, gy, p.z, 0, fixed ? want : b.gun);
     this.shoot(b, kind === 'prism' ? this.prismBoost(b, w, from[0]) : w, t, from);
   }
 
@@ -6433,6 +6435,10 @@ export class IsoGame implements GameLike {
         return twin('cannon_shot', 0.8, 1.1);
       case 'tower':
         return twin('cannon_shot', 0.92);
+      case 'pillbox':
+        // a heavy machine gun: four quick rounds
+        for (let i = 0; i < 4; i++) this.sound(x, y, 'rifle_shot', 0.75, { rate: 1.2, delay: i * 0.06 }, z);
+        return;
       case 'scorch':
         return this.sound(x, y, 'flame_burst', 1, { rate: 0.85 }, z);
       case 'lumen':
