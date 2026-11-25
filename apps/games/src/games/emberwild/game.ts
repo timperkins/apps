@@ -80,6 +80,42 @@ export interface SaveData {
   name: string;
 }
 
+/** Everything that belongs to one hero. The Game's own fields hold the hero being run right now. */
+export const HERO_KEYS = [
+  'px', 'py', 'face', 'hp', 'maxHp', 'stamina', 'tired', 'inv', 'hot', 'sel', 'spawn', 'relics', 'swing', 'swingDir',
+  'atkCd', 'bowCd', 'invuln', 'mining', 'swimming', 'gliding', 'moving', 'lastLand', 'dead', 'stepT', 'name',
+] as const;
+type HeroKey = (typeof HERO_KEYS)[number];
+export type Hero = { [K in HeroKey]: Game[K] } & {
+  /** 0 is the host (or you on your own), 1 to 3 are friends. */
+  slot: number;
+  /** Counts the host moving this hero (waking up after a knock-out), so the friend's game follows. */
+  tp: number;
+  /** Where a friend last said they are, to glide toward. */
+  tx?: number;
+  ty?: number;
+  /** The tile a friend is holding to mine. */
+  mineAt?: { x: number; y: number } | null;
+};
+
+/** What the host sends each friend about 12 times a second. */
+export interface Snap {
+  t: number;
+  won: boolean;
+  guards: Record<string, number>;
+  beacons: [boolean, Record<string, number>][];
+  stones: boolean[];
+  chests: boolean[];
+  cr: [CreatureKind, number, number, number, number, number, number][];
+  shots: [number, number, number, number, number][];
+  floats: FloatText[];
+  parts: Particle[];
+  heroes: [number, number, number, number, number, number, number, number, number, number, number, string][];
+  world: number[];
+  machines?: Machine[];
+  you: { hp: number; maxHp: number; inv: Stock; hot: (ItemId | null)[]; spawn: [number, number]; relics: Relic[]; dead: number; invuln: number; mining: Game['mining']; tp: number; px: number; py: number };
+}
+
 const REACH = 4.2;
 const MAX_HP_CAP = 30;
 
@@ -127,6 +163,13 @@ export class Game {
   onWin: () => void = () => {};
   onBeaconLit: (name: string) => void = () => {};
 
+  /** Playing together: you, everyone else, and whose fields the Game holds right now. */
+  me!: Hero;
+  others: Hero[] = [];
+  active!: Hero;
+  /** On the host: world tiles changed since the start, as index, ground, block (friends get the new ones). */
+  worldLog: number[] = [];
+
   constructor(save?: SaveData, seed?: number) {
     const s = save?.seed ?? seed ?? (Math.floor(Math.random() * 1e9) | 0);
     this.world = new World(s);
@@ -168,7 +211,166 @@ export class Game {
     this.lastLand = [this.px, this.py];
     this.spawnGuards();
     w.reveal(this.px, this.py, 14);
+    this.me = this.active = { slot: 0, tp: 0 } as Hero;
+    w.onChange = (i) => this.worldLog.push(i, w.ground[i], w.block[i]);
   }
+
+  // ---------- heroes ----------
+  get heroes() {
+    return [this.me, ...this.others];
+  }
+  /** Puts hero `h` into the Game's fields (and the one there back into its own object). */
+  private swap(h: Hero) {
+    if (h === this.active) return;
+    const a = this.active as Record<string, unknown>, b = h as Record<string, unknown>, me = this as unknown as Record<string, unknown>;
+    for (const k of HERO_KEYS) a[k] = me[k];
+    for (const k of HERO_KEYS) me[k] = b[k];
+    this.active = h;
+  }
+  /** Runs `fn` as hero `h`: the host doing what a friend asked, or a creature biting whoever is closest. */
+  as<R>(h: Hero, fn: () => R): R {
+    const prev = this.active;
+    this.swap(h);
+    try {
+      return fn();
+    } finally {
+      this.swap(prev);
+    }
+  }
+  /** A new hero for slot `slot`, next to the camp. */
+  newHero(slot: number): Hero {
+    const x = this.world.home.x + 0.5 + (slot % 2 ? 1 : -1) * Math.ceil(slot / 2), y = this.world.home.y + 1.5;
+    const p = this.world.findLand(Math.floor(x), Math.floor(y));
+    const px = Math.abs(p.x - x) < 3 ? x : p.x + 0.5, py = Math.abs(p.y - y) < 3 ? y : p.y + 0.5;
+    return {
+      slot, tp: 0, px, py, face: 0, hp: 10, maxHp: 10, stamina: 1, tired: false, inv: { campfire: 1 }, hot: ['campfire', null, null, null, null, null, null, null, null],
+      sel: 0, spawn: [this.world.home.x + 0.5, this.world.home.y + 0.5], relics: new Set(), swing: 0, swingDir: 0, atkCd: 0, bowCd: 0, invuln: 0,
+      mining: null, swimming: false, gliding: false, moving: false, lastLand: [px, py], dead: 0, stepT: 0, name: `Player ${slot + 1}`,
+    };
+  }
+  other(slot: number) {
+    return this.others.find((h) => h.slot === slot);
+  }
+  /** The hero nearest to (x, y), awake ones first. */
+  private nearestHero(x: number, y: number) {
+    let best = this.me, bd = Infinity;
+    for (const h of this.heroes) {
+      const hx = h === this.active ? this.px : h.px, hy = h === this.active ? this.py : h.py;
+      const dead = h === this.active ? this.dead : h.dead;
+      const d = Math.hypot(hx - x, hy - y) + (dead ? 1000 : 0);
+      if (d < bd) {
+        bd = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  // ---------- playing together: sending the world ----------
+  /** For friend `h`: the world as it is now. `worldFrom` is how much of the change log they already have. */
+  /** Effects made since the last call, sent once to every friend. */
+  newEffects() {
+    const seen = this.sentFx;
+    const floats = this.floats.filter((f) => !seen.has(f) && seen.add(f));
+    const parts = this.parts.filter((q) => !seen.has(q) && seen.add(q)).slice(-60);
+    return { floats, parts };
+  }
+  private sentFx = new WeakSet<object>();
+
+  snap(h: Hero, worldFrom: number, machines: boolean, fx: { floats: FloatText[]; parts: Particle[] }): Snap {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const w = this.world;
+    const pub = (q: Hero) => this.as(q, () => [q.slot, r2(this.px), r2(this.py), r2(this.face), r2(this.swing), r2(this.swingDir), this.dead > 0 ? r2(this.dead) : 0, r2(this.invuln), this.moving ? 1 : 0, this.swimming ? 1 : 0, this.gliding ? 1 : 0, this.name] as Snap['heroes'][number]);
+    const you = this.as(h, () => ({ hp: this.hp, maxHp: this.maxHp, inv: { ...this.inv }, hot: [...this.hot], spawn: this.spawn, relics: [...this.relics], dead: this.dead, invuln: this.invuln, mining: this.mining, tp: h.tp, px: this.px, py: this.py }));
+    return {
+      t: r2(this.t), won: this.won, guards: this.guards,
+      beacons: w.beacons.map((b) => [b.lit, b.given]),
+      stones: w.stones.map((q) => q.found),
+      chests: w.chests.map((c) => c.opened),
+      cr: this.creatures.map((c) => [c.kind, r2(c.x), r2(c.y), c.hp, c.max, r2(c.hurt), r2(c.fade ?? 0)]),
+      shots: this.shots.map((q) => [r2(q.x), r2(q.y), r2(q.vx), r2(q.vy), q.enemy ? 1 : 0]),
+      floats: fx.floats,
+      parts: fx.parts,
+      heroes: this.heroes.filter((q) => q !== h).map(pub),
+      world: this.worldLog.slice(worldFrom),
+      machines: machines ? this.fac.serialize() : undefined,
+      you,
+    };
+  }
+
+  /** On a friend's game: take the host's world, but keep walking where you are. */
+  applySnap(s: Snap) {
+    const w = this.world;
+    // keep the clock close, without jumping back and forth
+    if (Math.abs(this.t - s.t) > 1) this.t = s.t;
+    for (let k = 0; k + 2 < s.world.length; k += 3) {
+      w.ground[s.world[k]] = s.world[k + 1];
+      w.block[s.world[k]] = s.world[k + 2];
+    }
+    if (s.machines) this.fac.load(s.machines);
+    if (s.won && !this.won) {
+      this.won = true;
+      this.onWin();
+    }
+    this.guards = s.guards;
+    s.beacons.forEach(([lit, given], i) => {
+      const b = w.beacons[i];
+      if (!b) return;
+      b.given = given;
+      if (lit && !b.lit) {
+        b.lit = true;
+        w.reveal(b.x, b.y, 70);
+        this.onBeaconLit(BEACONS.find((q) => q.id === b.id)!.name);
+      }
+    });
+    s.stones.forEach((f, i) => w.stones[i] && (w.stones[i].found = f));
+    s.chests.forEach((o, i) => w.chests[i] && (w.chests[i].opened = o));
+    const old = this.creatures;
+    this.creatures = s.cr.map(([kind, x, y, hp, max, hurt, fade], i) => {
+      const c = old[i] && old[i].kind === kind && Math.hypot(old[i].x - x, old[i].y - y) < 2 ? old[i] : ({ kind, x, y, vx: 0, vy: 0, cd: 0, hx: x, hy: y } as Creature);
+      // glide toward the host's spot
+      c.hx = x;
+      c.hy = y;
+      return Object.assign(c, { kind, hp, max, hurt, fade: fade || undefined });
+    });
+    this.shots = s.shots.map(([x, y, vx, vy, enemy]) => ({ x, y, vx, vy, enemy: !!enemy, dmg: 0, life: 1 }));
+    this.floats.push(...s.floats);
+    this.parts.push(...s.parts);
+    const others: Hero[] = [];
+    for (const [slot, px, py, face, swing, swingDir, dead, invuln, moving, swimming, gliding, name] of s.heroes) {
+      const h = this.other(slot) ?? this.newHero(slot);
+      if (h.tx === undefined || Math.hypot(h.px - px, h.py - py) > 6) {
+        h.px = px;
+        h.py = py;
+      }
+      Object.assign(h, { tx: px, ty: py, face, swing, swingDir, dead, invuln, moving: !!moving, swimming: !!swimming, gliding: !!gliding, name });
+      others.push(h);
+    }
+    this.others = others;
+    const y = s.you;
+    Object.assign(this, { hp: y.hp, maxHp: y.maxHp, inv: y.inv, hot: y.hot, spawn: y.spawn, dead: y.dead, invuln: y.invuln, mining: y.mining });
+    this.relics = new Set(y.relics);
+    if (y.tp !== this.me.tp) {
+      // the host moved you (you woke up by the fire)
+      this.me.tp = y.tp;
+      this.px = y.px;
+      this.py = y.py;
+      this.lastLand = [this.px, this.py];
+    }
+  }
+
+  /** On the host: where a friend says they are and what they're mining. */
+  setOther(slot: number, m: { x: number; y: number; face: number; moving: boolean; swimming: boolean; gliding: boolean; mine: { x: number; y: number } | null }) {
+    const h = this.other(slot);
+    if (!h || !Number.isFinite(m.x) || !Number.isFinite(m.y) || h.dead) return;
+    if (Math.hypot(h.px - m.x, h.py - m.y) > 6) {
+      h.px = m.x;
+      h.py = m.y;
+    }
+    Object.assign(h, { tx: m.x, ty: m.y, face: +m.face || 0, moving: !!m.moving, swimming: !!m.swimming, gliding: !!m.gliding });
+    h.mineAt = m.mine && Number.isFinite(m.mine.x) ? { x: m.mine.x | 0, y: m.mine.y | 0 } : null;
+  }
+
 
   save(): SaveData {
     const w = this.world;
@@ -612,6 +814,12 @@ export class Game {
     const night = this.isNight;
     for (let i = this.creatures.length - 1; i >= 0; i--) {
       const c = this.creatures[i];
+      // each creature goes after the nearest hero who is awake
+      this.as(this.nearestHero(c.x, c.y), () => this.updateCreature(c, i, dt, night));
+    }
+  }
+  private updateCreature(c: Creature, i: number, dt: number, night: boolean) {
+    {
       const dx = this.px - c.x, dy = this.py - c.y;
       const d = Math.hypot(dx, dy);
       c.hurt = Math.max(0, c.hurt - dt);
@@ -624,17 +832,17 @@ export class Game {
       }
       if (c.kind !== 'rustguard' && d > 48) {
         this.creatures.splice(i, 1);
-        continue;
+        return;
       }
       if (c.kind === 'gloom') {
         if (!night) {
           c.fade = (c.fade ?? 0) + dt;
           if (c.fade > 1.5) this.creatures.splice(i, 1);
-          continue;
+          return;
         }
         if (this.lightNear(c.x, c.y, 3)) {
           this.moveCreature(c, (-dx / d) * 1.5 * dt, (-dy / d) * 1.5 * dt);
-          continue;
+          return;
         }
         if (d < 22 && !this.dead) this.moveCreature(c, (dx / d) * 2.1 * dt, (dy / d) * 2.1 * dt);
         if (d < 0.75 && c.cd <= 0) {
@@ -680,10 +888,12 @@ export class Game {
       s.y += s.vy * dt;
       s.life -= dt;
       let gone = s.life <= 0 || this.world.solidBlock(Math.floor(s.x), Math.floor(s.y));
-      if (!gone && s.enemy && Math.hypot(s.x - this.px, s.y - this.py) < 0.5) {
-        this.hurtPlayer(s.dmg, s.x - s.vx, s.y - s.vy);
-        gone = true;
-      }
+      if (!gone && s.enemy)
+        gone = this.as(this.nearestHero(s.x, s.y), () => {
+          if (Math.hypot(s.x - this.px, s.y - this.py) >= 0.5) return false;
+          this.hurtPlayer(s.dmg, s.x - s.vx, s.y - s.vy);
+          return true;
+        });
       if (!gone && !s.enemy)
         for (const c of this.creatures)
           if (Math.hypot(s.x - c.x, s.y - c.y) < 0.55) {
@@ -788,13 +998,60 @@ export class Game {
   }
 
   // ---------- main update ----------
-  update(dt: number, input: { mx: number; my: number; sprint: boolean }) {
+  /** `sim` is false on a friend's game: only your own hero walks there; the host runs creatures, mining and fights. */
+  update(dt: number, input: { mx: number; my: number; sprint: boolean }, sim = true) {
     this.t += dt;
+    // a friend runs the machines too, so belts move smoothly between the host's updates
     this.fac.tick(dt);
+    this.tickHero(dt, input, sim);
+    const k = Math.min(1, dt * 12);
+    for (const h of this.others) {
+      // glide the others toward where they last were
+      if (h.tx !== undefined && h.ty !== undefined && !h.dead) {
+        h.px += (h.tx - h.px) * k;
+        h.py += (h.ty - h.py) * k;
+      }
+      if (sim)
+        this.as(h, () => {
+          this.tickHero(dt, null, true);
+          const at = h.mineAt;
+          if (at && !this.dead && Math.hypot(at.x + 0.5 - this.px, at.y + 0.5 - this.py) <= REACH + 1) {
+            if (!this.mineTick(at.x, at.y, dt)) this.mining = this.mining && this.mining.need > 50 ? this.mining : null;
+          } else this.mining = null;
+        });
+      else {
+        h.swing = Math.max(0, h.swing - dt);
+        h.invuln = Math.max(0, h.invuln - dt);
+      }
+    }
+    if (sim) {
+      const live = this.heroes.filter((h) => !(h === this.active ? this.dead : h.dead));
+      const who = live[Math.floor(Math.random() * live.length)] ?? this.me;
+      this.as(who, () => this.spawnCreatures(dt));
+      this.updateCreatures(dt);
+      this.updateShots(dt);
+      if (this.creatures.length < 200 && Math.random() < dt * 0.2) this.spawnGuards();
+    } else {
+      for (const c of this.creatures) {
+        c.x += (c.hx - c.x) * k;
+        c.y += (c.hy - c.y) * k;
+        c.hurt = Math.max(0, c.hurt - dt);
+      }
+      for (const q of this.shots) {
+        q.x += q.vx * dt;
+        q.y += q.vy * dt;
+      }
+    }
+    this.updateEffects(dt);
+  }
+
+  /** One hero's timers, waking up and walking. `input` is null for a friend on the host (they walk on their own game). */
+  private tickHero(dt: number, input: { mx: number; my: number; sprint: boolean } | null, sim: boolean) {
     this.atkCd = Math.max(0, this.atkCd - dt);
     this.bowCd = Math.max(0, this.bowCd - dt);
     this.swing = Math.max(0, this.swing - dt);
     this.invuln = Math.max(0, this.invuln - dt);
+    if (this.dead > 0 && !sim) return;
 
     if (this.dead > 0) {
       this.dead -= dt;
@@ -809,16 +1066,14 @@ export class Game {
         }
         this.hp = this.maxHp;
         this.stamina = 1;
-        this.creatures = this.creatures.filter((c) => c.kind === 'rustguard');
+        if (!this.others.length) this.creatures = this.creatures.filter((c) => c.kind === 'rustguard');
+        this.active.tp++;
         this.onMsg('You wake up by the fire, all patched up.');
       }
-    } else this.movePlayer(dt, input);
+    } else if (input) this.movePlayer(dt, input);
+  }
 
-    this.spawnCreatures(dt);
-    this.updateCreatures(dt);
-    this.updateShots(dt);
-    if (this.creatures.length < 200 && Math.random() < dt * 0.2) this.spawnGuards();
-
+  private updateEffects(dt: number) {
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
       p.x += p.vx * dt;

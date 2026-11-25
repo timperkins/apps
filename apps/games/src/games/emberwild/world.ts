@@ -57,6 +57,8 @@ export class World {
   block = new Uint8Array(WORLD * WORLD);
   fog = new Uint8Array(WORLD * WORLD);
   changed = new Set<number>();
+  /** Called with the tile index whenever a tile changes after the world is made (co-op sends these on). */
+  onChange: (i: number) => void = () => {};
   home: Poi = { x: WORLD / 2, y: WORLD / 2 };
   beacons: BeaconPoi[] = [];
   stones: (Poi & { found: boolean })[] = [];
@@ -83,12 +85,14 @@ export class World {
     const i = this.idx(x, y);
     this.block[i] = v;
     this.changed.add(i);
+    this.onChange(i);
   }
   setG(x: number, y: number, v: number) {
     if (!this.inside(x, y)) return;
     const i = this.idx(x, y);
     this.ground[i] = v;
     this.changed.add(i);
+    this.onChange(i);
   }
   solidBlock(x: number, y: number) {
     const b = this.b(x, y);
@@ -243,6 +247,7 @@ export class World {
         const i = yy * this.W + xx;
         if (this.block[i] !== B.RUINWALL) this.block[i] = B.NONE;
         if (isWater(this.ground[i])) this.ground[i] = G.GRASS;
+        this.onChange(i);
       }
   }
 

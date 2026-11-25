@@ -3,7 +3,9 @@
 import './style.css';
 import type { GameModule } from '../types';
 import { BEACONS, ITEMS, RECIPES, SMELT, type ItemId } from './data';
-import { Game, RELICS, type SaveData } from './game';
+import { Game, RELICS, type Hero, type SaveData, type Snap } from './game';
+import { coopBadge, coopMenu, every } from '../coop/ui';
+import { PLAYER_NAMES, type FriendSession, type HostSession, type Session } from '../coop/session';
 import { Renderer } from './render';
 import { icon } from './art';
 import { isMuted, setMuted, sfx, startMusic, stopMusic } from './audio';
@@ -11,6 +13,31 @@ import { add, stockSum, take, type Machine } from './sim';
 
 const SAVE_KEY = 'emberwild-save-v1';
 const MUTE_KEY = 'emberwild-muted';
+const COOP_PREFIX = 'trom-emberwild-';
+/** Footsteps stay on the walker's own game. */
+const LOCAL_SOUNDS = new Set(['step', 'swim']);
+
+/** Things a player does that change the world. On a friend's game they go to the host, who does them for that hero. */
+type Act =
+  | { a: 'attack'; face: number }
+  | { a: 'shoot'; face: number }
+  | { a: 'eat'; id: ItemId }
+  | { a: 'place'; x: number; y: number; id: ItemId; dir: number }
+  | { a: 'craft'; i: number; n: number }
+  | { a: 'hot'; id: ItemId; sel: number }
+  | { a: 'interact'; x: number; y: number }
+  | { a: 'machine'; x: number; y: number; d: Record<string, string> }
+  | { a: 'beacon'; id: string }
+  | { a: 'turn'; x: number; y: number }
+  | { a: 'dir'; x: number; y: number; dir: number };
+type ToHost =
+  | { t: 'me'; x: number; y: number; face: number; moving: boolean; swimming: boolean; gliding: boolean; mine: { x: number; y: number } | null }
+  | { t: 'act'; act: Act };
+type ToFriend =
+  | { t: 'init'; seed: number; diff: number[]; machines: Snap['machines'] }
+  | { t: 's'; s: Snap; snd: string[] }
+  | { t: 'msg'; text: string }
+  | { t: 'loot'; got: string[] };
 
 function readSave(): SaveData | null {
   try {
@@ -138,8 +165,12 @@ const game: GameModule = {
       bannerTimer = window.setTimeout(() => (bannerEl.hidden = true), 4200);
     }
     function wire(gm: Game) {
-      gm.onSound = sfx;
-      gm.onMsg = toast;
+      gm.onSound = (n) => {
+        sfx(n);
+        if (net?.role === 'host' && !LOCAL_SOUNDS.has(n) && netSounds.length < 30) netSounds.push(n);
+      };
+      // what happens to a friend's hero is told to that friend
+      gm.onMsg = (t) => (gm.active === gm.me ? toast(t) : net?.role === 'host' && net.send(gm.active.slot, { t: 'msg', text: t } satisfies ToFriend));
       gm.onWin = () => {
         sfx('win');
         showWin();
@@ -150,6 +181,200 @@ const game: GameModule = {
         if (!left) window.setTimeout(() => banner('<b>All four beacons burn!</b><span>The Sky Engine recipe is open in your bag.</span>'), 4400);
         if (overlay === 'beacon') beaconPanel();
       };
+    }
+
+    // ---------- playing together ----------
+    let net: Session | null = null;
+    const badge = coopBadge(el);
+    const sendRate = every(15), snapRate = every(12);
+    let netSounds: string[] = [];
+    let snapCount = 0;
+    const worldFrom = new Map<number, number>();
+    let mineTarget: { x: number; y: number } | null = null;
+    const isFriend = () => net?.role === 'friend';
+    const toHost = (m: ToHost) => (net?.role === 'friend' ? net.send(m) : undefined);
+    function refreshBadge() {
+      if (!net) return badge.set('', [], 0);
+      if (net.role === 'host') badge.set(net.code, [0, ...net.friends()], 0);
+      else badge.set(net.code, [...new Set([0, net.slot, ...g.others.map((o) => o.slot)])].sort(), net.slot);
+    }
+    function endNet() {
+      net?.close();
+      net = null;
+      g.others = [];
+      refreshBadge();
+    }
+
+    /** Does `act` as whichever hero the game holds now. Returns treasure found, if any. */
+    function runAct(act: Act): string[] | void {
+      switch (act.a) {
+        case 'attack':
+          g.face = +act.face || 0;
+          return g.attack();
+        case 'shoot':
+          g.face = +act.face || 0;
+          return g.shoot();
+        case 'eat':
+          return g.eat(act.id);
+        case 'place':
+          if (!ITEMS[act.id] || !g.has(act.id) || Math.hypot(act.x + 0.5 - g.px, act.y + 0.5 - g.py) > 6) return;
+          g.place(act.x | 0, act.y | 0, act.id, act.dir & 3);
+          return;
+        case 'craft':
+          if (RECIPES[act.i]) g.craft(act.i, Math.max(1, Math.min(5, act.n | 0)));
+          return;
+        case 'hot': {
+          const def = ITEMS[act.id];
+          if (!def || (!def.block && !def.machine && !def.heal)) return;
+          const sel = Math.max(0, Math.min(8, act.sel | 0));
+          const old = g.hot.indexOf(act.id);
+          if (old >= 0) g.hot[old] = g.hot[sel];
+          g.hot[sel] = act.id;
+          return;
+        }
+        case 'interact': {
+          if (Math.hypot(act.x + 0.5 - g.px, act.y + 0.5 - g.py) > 3) return;
+          const poi = g.poiAt(act.x, act.y);
+          if (poi?.kind === 'chest') return g.openChest(poi.i);
+          if (poi?.kind === 'stone') return void g.findStone(poi.i);
+          const m = g.fac.at(act.x, act.y);
+          if (m?.kind === 'campfire') g.spawn = [m.x + 0.5, m.y + 1.5];
+          return;
+        }
+        case 'machine': {
+          const m = g.fac.at(act.x, act.y);
+          if (m && Math.hypot(m.x + 0.5 - g.px, m.y + 0.5 - g.py) < 5) machineAction(m, act.d);
+          return;
+        }
+        case 'beacon':
+          if (g.world.beacons.some((b) => b.id === act.id && Math.hypot(b.x + 0.5 - g.px, b.y + 0.5 - g.py) < 5)) g.giveToBeacon(act.id);
+          return;
+        case 'turn': {
+          const m = g.fac.at(act.x, act.y);
+          if (m && m.kind !== 'chest' && m.kind !== 'campfire' && m.kind !== 'lamp') m.dir = (m.dir + 1) % 4;
+          return;
+        }
+        case 'dir': {
+          const m = g.fac.at(act.x, act.y);
+          if (m?.kind === 'belt') m.dir = act.dir & 3;
+          return;
+        }
+      }
+    }
+    /** You did something: on your own or as the host it happens now; on a friend's game it goes to the host. */
+    function act(a: Act): string[] | void {
+      if (!isFriend()) return runAct(a);
+      toHost({ t: 'act', act: a });
+    }
+
+    function startHosting(s: HostSession) {
+      net = s;
+      netSounds = [];
+      s.onJoin((slot) => {
+        const h = g.newHero(slot);
+        g.others.push(h);
+        toast(`${PLAYER_NAMES[slot]} joined your world!`);
+        sfx('chime');
+        refreshBadge();
+        s.send(slot, { t: 'init', seed: g.world.seed, diff: [...g.world.diff(), ...g.worldLog], machines: g.fac.serialize() } satisfies ToFriend);
+        worldFrom.set(slot, g.worldLog.length);
+      });
+      s.onLeave((slot) => {
+        g.others = g.others.filter((h) => h.slot !== slot);
+        worldFrom.delete(slot);
+        toast(`${PLAYER_NAMES[slot]} left.`);
+        refreshBadge();
+      });
+      s.onMessage((slot, raw) => {
+        const m = raw as ToHost;
+        const h = g.other(slot);
+        if (net !== s || !m || !h) return;
+        if (m.t === 'me') g.setOther(slot, m);
+        else if (m.t === 'act' && m.act && !h.dead) {
+          const got = g.as(h, () => runAct(m.act));
+          if (got) s.send(slot, { t: 'loot', got } satisfies ToFriend);
+        }
+      });
+      refreshBadge();
+      toast(`Friends can join with the code ${s.code}: Join a friend on the title screen.`);
+    }
+    function sendSnaps() {
+      if (net?.role !== 'host' || !net.friends().length) return;
+      snapCount++;
+      const fx = g.newEffects();
+      // machines are big, so they go 4 times a second; friends run them in between
+      const machines = snapCount % 3 === 0;
+      for (const slot of net.friends()) {
+        const h = g.other(slot);
+        if (!h) continue;
+        const from = worldFrom.get(slot) ?? g.worldLog.length;
+        net.send(slot, { t: 's', s: g.snap(h, from, machines, fx), snd: netSounds } satisfies ToFriend);
+        worldFrom.set(slot, g.worldLog.length);
+      }
+      netSounds = [];
+    }
+    function startFriend(s: FriendSession) {
+      endNet();
+      net = s;
+      let ready = false;
+      toast('Joining… getting the world from the host.');
+      s.onMessage((raw) => {
+        const m = raw as ToFriend;
+        if (net !== s || !m) return;
+        if (m.t === 'init') {
+          g = new Game(undefined, m.seed);
+          wire(g);
+          g.world.applyDiff(m.diff);
+          g.fac.load(m.machines ?? []);
+          g.creatures = [];
+          g.me.slot = s.slot;
+          const h = g.newHero(s.slot);
+          g.px = h.px;
+          g.py = h.py;
+          g.lastLand = [h.px, h.py];
+          g.inv = {};
+          g.name = h.name;
+          ready = true;
+          beginPlay();
+          toast(`You're ${PLAYER_NAMES[s.slot]}! Your bag is your own; the world and its machines are shared.`);
+        } else if (!ready) return;
+        else if (m.t === 's') {
+          g.applySnap(m.s);
+          for (const n of m.snd) sfx(n);
+          if (openMachine) openMachine = g.fac.at(openMachine.x, openMachine.y) ?? null;
+          refreshBadge();
+          // redraw the bag when what's in it changed (crafting happens on the host)
+          const key = JSON.stringify(g.inv);
+          if (key !== bagKey) {
+            bagKey = key;
+            if (overlay === 'bag') bag();
+          }
+        } else if (m.t === 'msg') toast(m.text);
+        else if (m.t === 'loot') lootPanel(m.got);
+      });
+      s.onClose(() => {
+        if (net !== s) return;
+        net = null;
+        title();
+        toast('The host stopped playing.');
+      });
+    }
+    let bagKey = '';
+    function friendsMenu() {
+      const fromTitle = overlay === 'title';
+      if (!fromTitle) overlay = 'menu';
+      coopMenu(el, {
+        title: 'Emberwild',
+        prefix: COOP_PREFIX,
+        canHost: !fromTitle,
+        canJoin: fromTitle,
+        onHosted: (s) => {
+          startHosting(s);
+          closeOverlay();
+        },
+        onJoined: startFriend,
+        onClose: () => (fromTitle ? undefined : menu()),
+      });
     }
 
     // ---------- input ----------
@@ -187,7 +412,7 @@ const game: GameModule = {
       const t = currentTarget();
       const sel = g.selected;
       if (sel && ITEMS[sel].heal) {
-        g.eat(sel);
+        act({ a: 'eat', id: sel });
         pressMode = 'none';
         return;
       }
@@ -198,14 +423,16 @@ const game: GameModule = {
       const occupied = g.world.b(t.x, t.y) !== 0 || !!g.fac.at(t.x, t.y);
       if (sel && (ITEMS[sel].block || ITEMS[sel].machine) && !occupied) {
         pressMode = 'place';
-        if (g.place(t.x, t.y, sel, dir)) lastPlaced = t;
+        if (placeAt(t.x, t.y, sel)) lastPlaced = t;
       } else pressMode = 'mine';
     }
     function holdUse(dt: number) {
       const t = currentTarget();
       if (!t) return;
       if (pressMode === 'mine') {
-        if (!g.mineTick(t.x, t.y, dt)) g.mining = g.mining && g.mining.need > 50 ? g.mining : null;
+        // a friend's mining happens on the host's game
+        if (isFriend()) mineTarget = t;
+        else if (!g.mineTick(t.x, t.y, dt)) g.mining = g.mining && g.mining.need > 50 ? g.mining : null;
       } else if (pressMode === 'place') {
         const sel = g.selected;
         if (!sel || (lastPlaced && lastPlaced.x === t.x && lastPlaced.y === t.y)) return;
@@ -214,14 +441,49 @@ const game: GameModule = {
           const dx = t.x - lastPlaced.x, dy = t.y - lastPlaced.y;
           dir = dx === 1 ? 0 : dy === 1 ? 1 : dx === -1 ? 2 : 3;
           const prev = g.fac.at(lastPlaced.x, lastPlaced.y);
-          if (prev?.kind === 'belt') prev.dir = dir;
+          if (prev?.kind === 'belt') {
+            prev.dir = dir;
+            if (isFriend()) act({ a: 'dir', x: prev.x, y: prev.y, dir });
+          }
           renderBar();
         }
         if (g.canPlaceAt(t.x, t.y, sel)) return;
-        if (g.place(t.x, t.y, sel, dir)) lastPlaced = t;
+        if (placeAt(t.x, t.y, sel)) lastPlaced = t;
       }
     }
+    /** Places the selected thing. A friend checks here and the host places it. */
+    function placeAt(x: number, y: number, sel: ItemId) {
+      if (!isFriend()) return g.place(x, y, sel, dir);
+      const why = g.canPlaceAt(x, y, sel);
+      if (why) {
+        toast(why);
+        return false;
+      }
+      act({ a: 'place', x, y, id: sel, dir });
+      return true;
+    }
+    function attack() {
+      faceAim();
+      if (!isFriend()) return g.attack();
+      if (g.atkCd > 0 || g.dead) return;
+      // swing here right away; the host does the hitting
+      g.atkCd = 0.38;
+      g.swing = 0.22;
+      g.swingDir = g.face;
+      sfx('swing');
+      act({ a: 'attack', face: g.face });
+    }
+    function shoot() {
+      faceAim();
+      if (!isFriend()) return g.shoot();
+      if (g.bowCd > 0 || g.dead) return;
+      if (!g.has('bow')) return toast('Craft a bow first (wood and copper wire).');
+      if (!g.has('arrow')) return toast('No arrows. Craft some from wood and stone.');
+      g.bowCd = 0.45;
+      act({ a: 'shoot', face: g.face });
+    }
     function endUse() {
+      mineTarget = null;
       pressMode = 'none';
       lastPlaced = null;
       if (g.mining && g.mining.need < 50) g.mining = null;
@@ -235,16 +497,18 @@ const game: GameModule = {
       const near = spot ?? g.nearbyThing();
       if (!near) {
         const sel = g.selected;
-        if (sel && ITEMS[sel].heal) return g.eat(sel);
+        if (sel && ITEMS[sel].heal) return act({ a: 'eat', id: sel });
         return;
       }
       const poi = g.poiAt(near.x, near.y);
       if (poi?.kind === 'chest') {
-        const got = g.openChest(poi.i);
-        lootPanel(got);
+        // on a friend's game the treasure comes back from the host
+        const got = act({ a: 'interact', x: near.x, y: near.y });
+        if (got) lootPanel(got);
         return;
       }
       if (poi?.kind === 'stone') {
+        if (isFriend()) act({ a: 'interact', x: near.x, y: near.y });
         g.findStone(poi.i);
         mapPanel(poi.i);
         return;
@@ -257,7 +521,10 @@ const game: GameModule = {
       const m = g.fac.at(near.x, near.y);
       if (m && m.kind !== 'belt' && m.kind !== 'lamp') {
         if (m.kind === 'sky_engine') return showWin();
-        if (m.kind === 'campfire') g.spawn = [m.x + 0.5, m.y + 1.5];
+        if (m.kind === 'campfire') {
+          g.spawn = [m.x + 0.5, m.y + 1.5];
+          if (isFriend()) act({ a: 'interact', x: m.x, y: m.y });
+        }
         openMachine = m;
         machinePanel();
       }
@@ -273,7 +540,10 @@ const game: GameModule = {
       // turning while aiming at a machine turns that machine
       const t = currentTarget();
       const m = t && g.fac.at(t.x, t.y);
-      if (m && m.kind !== 'chest' && m.kind !== 'campfire' && m.kind !== 'lamp') m.dir = (m.dir + 1) % 4;
+      if (m && m.kind !== 'chest' && m.kind !== 'campfire' && m.kind !== 'lamp') {
+        if (isFriend()) act({ a: 'turn', x: m.x, y: m.y });
+        m.dir = (m.dir + 1) % 4;
+      }
       renderBar();
     }
 
@@ -294,12 +564,8 @@ const game: GameModule = {
       keys.add(k);
       if (k === ' ') {
         e.preventDefault();
-        faceAim();
-        g.attack();
-      } else if (k === 'f') {
-        faceAim();
-        g.shoot();
-      } else if (k === 'e') interact(mouseSeen ? currentTarget() ?? undefined : undefined);
+        attack();
+      } else if (k === 'f') shoot(); else if (k === 'e') interact(mouseSeen ? currentTarget() ?? undefined : undefined);
       else if (k === 'tab' || k === 'i') bag();
       else if (k === 'm') mapPanel();
       else if (k === 'r') turn();
@@ -385,8 +651,8 @@ const game: GameModule = {
       const t = b.dataset.t!;
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        if (t === 'attack') g.attack();
-        else if (t === 'bow') g.shoot();
+        if (t === 'attack') attack();
+        else if (t === 'bow') shoot();
         else if (t === 'act') interact();
         else if (t === 'turn') turn();
         else if (t === 'sprint') {
@@ -474,6 +740,7 @@ const game: GameModule = {
       el.focus();
     }
     function title() {
+      if (net) endNet();
       overlay = 'title';
       playing = false;
       hud.hidden = true;
@@ -488,6 +755,7 @@ const game: GameModule = {
         <div class="ew-menu">
           ${s ? `<button class="ew-btn big" data-a="continue">Continue <small>${s.beacons.filter((b) => b.lit).length}/4 beacons · day ${Math.floor(s.t / 360) + 1}</small></button>` : ''}
           <button class="ew-btn ${s ? '' : 'big'}" data-a="new">${s ? 'New world' : 'Start exploring'}</button>
+          <button class="ew-btn" data-a="friends">👥 Join a friend <small>Up to 4 explorers together</small></button>
           <button class="ew-btn ghost" data-a="exit">Back to games</button>
         </div>
         ${touchMode ? '<p class="ew-note">On a phone: drag the stick to walk, tap the ground to mine or build (hold to keep mining), and use the buttons to fight.</p>' : CONTROLS}
@@ -503,6 +771,14 @@ const game: GameModule = {
       confirmNew = false;
       g = new Game(save ?? undefined);
       wire(g);
+      beginPlay();
+      if (!save) {
+        g.give('campfire', 1);
+        banner('<b>Emberwild</b><span>Chop trees and mine rocks. Your first goal is a stone pickaxe.</span>');
+        if (!writeSave(g.save())) toast("This browser won't keep saves.");
+      }
+    }
+    function beginPlay() {
       R.camX = g.px;
       R.camY = g.py;
       R.mapSeed = -1;
@@ -516,26 +792,26 @@ const game: GameModule = {
       renderBar(true);
       el.focus();
       startMusic(() => g.isNight);
-      if (!save) {
-        g.give('campfire', 1);
-        banner('<b>Emberwild</b><span>Chop trees and mine rocks. Your first goal is a stone pickaxe.</span>');
-        if (!writeSave(g.save())) toast("This browser won't keep saves.");
-      }
     }
     let confirmNew = false;
     function doSave(quiet = false) {
+      if (isFriend()) return quiet ? undefined : toast('Only the host can save. This world lives in their game.');
       const ok = writeSave(g.save());
       if (!quiet) toast(ok ? 'Game saved!' : "Couldn't save in this browser.");
     }
     function menu() {
       overlay = 'menu';
       ui.innerHTML = `<div class="ew-dim"><div class="ew-panel">
-        <h2>Paused</h2>
+        <h2>${net ? 'Menu' : 'Paused'}</h2>
         <p class="ew-sub">Day ${g.day} · ${g.world.beacons.filter((b) => b.lit).length}/4 beacons lit · ${fmtTime(g.t - 108)} played</p>
+        ${net?.role === 'host' ? `<p class="ew-sub">Playing together · code <b>${net.code}</b> · ${net.friends().length + 1} of 4 explorers</p>` : ''}
         <div class="ew-menu">
           <button class="ew-btn big" data-a="resume">Keep playing</button>
+          ${isFriend()
+            ? '<button class="ew-btn ghost" data-a="leave">Leave the game</button>'
+            : `${net ? '<button class="ew-btn" data-a="stopnet">Stop playing together</button>' : '<button class="ew-btn" data-a="friends">👥 Play with friends</button>'}
           <button class="ew-btn" data-a="save">💾 Save</button>
-          <button class="ew-btn" data-a="savequit">Save and quit</button>
+          <button class="ew-btn" data-a="savequit">Save and quit</button>`}
         </div>
         ${CONTROLS}
       </div></div>`;
@@ -659,7 +935,14 @@ const game: GameModule = {
     }
     function machineClick(b: HTMLElement) {
       const m = openMachine!;
-      const d = b.dataset;
+      const d = { ...b.dataset } as Record<string, string>;
+      if (isFriend()) act({ a: 'machine', x: m.x, y: m.y, d });
+      else machineAction(m, d);
+      sfx('click');
+      machinePanel();
+    }
+    /** A button in a machine's panel, done by whichever hero the game holds now. */
+    function machineAction(m: Machine, d: Record<string, string | undefined>) {
       const takeAll = (src: Record<string, number>, id: ItemId) => {
         const n = src[id] ?? 0;
         if (!n) return;
@@ -675,14 +958,14 @@ const game: GameModule = {
           g.use(id, 1);
           n++;
         }
-        if (!n) toast('It is full.');
+        if (!n) g.onMsg('It is full.');
       } else if (d.fuel) {
         const id = d.fuel as ItemId;
         while (g.has(id) && m.fuelStock! < 40) {
           g.use(id, 1);
           m.fuelStock! += ITEMS[id].fuel ?? 1;
         }
-      } else if (d.recipe) {
+      } else if (d.recipe && m.kind === 'assembler' && RECIPES[+d.recipe]) {
         // switching recipe hands back what was loaded
         for (const k in m.inp) g.give(k as ItemId, m.inp[k as ItemId]!);
         m.inp = {};
@@ -706,9 +989,7 @@ const game: GameModule = {
         const n = g.inv[id] ?? 0;
         g.use(id, n);
         add(m.out!, id, n);
-      } else if (d.craft) g.craft(+d.craft);
-      sfx('click');
-      machinePanel();
+      } else if (d.craft && RECIPES[+d.craft]) g.craft(+d.craft);
     }
 
     // ---- beacons ----
@@ -785,6 +1066,13 @@ const game: GameModule = {
       const a = b.dataset.a;
       if (a === 'continue') startGame(readSave());
       else if (a === 'new') startGame(null);
+      else if (a === 'friends') friendsMenu();
+      else if (a === 'leave') title();
+      else if (a === 'stopnet') {
+        endNet();
+        toast('Playing on your own again.');
+        menu();
+      }
       else if (a === 'exit') onExit();
       else if (a === 'resume' || a === 'close') closeOverlay();
       else if (a === 'save') doSave();
@@ -793,10 +1081,10 @@ const game: GameModule = {
         title();
       } else if (b.dataset.tab) bag(b.dataset.tab as typeof bagTab);
       else if (overlay === 'bag' && b.dataset.craft) {
-        g.craft(+b.dataset.craft);
+        act({ a: 'craft', i: +b.dataset.craft, n: 1 });
         bag();
       } else if (overlay === 'bag' && b.dataset.craft5) {
-        g.craft(+b.dataset.craft5, 5);
+        act({ a: 'craft', i: +b.dataset.craft5, n: 5 });
         bag();
       } else if (b.dataset.hot) {
         const id = b.dataset.hot as ItemId;
@@ -805,10 +1093,11 @@ const game: GameModule = {
         const old = g.hot.indexOf(id);
         if (old >= 0) g.hot[old] = g.hot[g.sel];
         g.hot[g.sel] = id;
+        if (isFriend()) act({ a: 'hot', id, sel: g.sel });
         renderBar(true);
         toast(`${name(id)} is in slot ${g.sel + 1}.`);
       } else if (a === 'givebeacon') {
-        g.giveToBeacon(openBeacon);
+        act({ a: 'beacon', id: openBeacon });
         beaconPanel();
       } else if (overlay === 'machine') machineClick(b);
     });
@@ -850,9 +1139,14 @@ const game: GameModule = {
         R.frame(g, { mapTop: 58, hover: null, ghost: null, ghostDir: 0, ghostOk: false, minimap: false });
         return;
       }
-      const paused = overlay === 'menu' || overlay === 'bag' || overlay === 'map' || overlay === 'loot' || overlay === 'win';
+      // with friends, the world keeps going while a panel is open
+      const paused = !net && (overlay === 'menu' || overlay === 'bag' || overlay === 'map' || overlay === 'loot' || overlay === 'win');
       if (!paused) {
-        g.update(dt, overlay === 'none' ? moveInput() : { mx: 0, my: 0, sprint: false });
+        g.update(dt, overlay === 'none' ? moveInput() : { mx: 0, my: 0, sprint: false }, !isFriend());
+        if (overlay !== 'none') mineTarget = null;
+        if (net?.role === 'friend' && sendRate(now))
+          toHost({ t: 'me', x: +g.px.toFixed(2), y: +g.py.toFixed(2), face: +g.face.toFixed(2), moving: g.moving, swimming: g.swimming, gliding: g.gliding, mine: mineTarget });
+        else if (net?.role === 'host' && snapRate(now)) sendSnaps();
         if (overlay === 'none' && (pointerDown || touchUse)) holdUse(dt);
         saveTimer += dt;
         if (saveTimer > 45) {
@@ -897,11 +1191,14 @@ const game: GameModule = {
     wire(g);
     title();
     if (import.meta.env.DEV) (window as unknown as { __ew: () => Game }).__ew = () => g;
+    // for trying co-op by hand in the dev build
+    if (import.meta.env.DEV) (window as unknown as { __ewNet: unknown }).__ewNet = { act, mine: (t: { x: number; y: number } | null) => (mineTarget = t, pressMode = t ? 'mine' : 'none', pointerDown = !!t) };
     R.resize();
     raf = requestAnimationFrame(frame);
 
     return () => {
       if (playing) doSave(true);
+      net?.close();
       cancelAnimationFrame(raf);
       clearTimeout(toastTimer);
       clearTimeout(bannerTimer);
