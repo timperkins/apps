@@ -15,7 +15,9 @@ export type Armor = 'none' | 'wood' | 'light' | 'heavy' | 'concrete';
 // FL: fire, from flamethrowers: it roasts soldiers and wooden buildings and
 // does little to armor or concrete.
 // EN: a Lumen beam's light, which burns through most things fairly evenly.
-export type Warhead = 'SA' | 'AP' | 'HE' | 'FL' | 'EN';
+// AT: the Turret's heavy anti-tank shells: they punch through armor but
+// mostly miss or pass through a soldier.
+export type Warhead = 'SA' | 'AP' | 'HE' | 'FL' | 'EN' | 'AT';
 // bite: an attack dog's jaws (nothing flies); flame: a jet of burning fuel.
 // beam: a Lumen lens's bolt of light, there at once.
 // torpedo: runs along the water to a ship; drone: a carrier's little
@@ -30,6 +32,7 @@ export const VERSUS: Record<Warhead, Record<Armor, number>> = {
   HE: { none: 0.9, wood: 0.75, light: 0.6, heavy: 0.25, concrete: 1 },
   FL: { none: 1.1, wood: 1, light: 0.55, heavy: 0.3, concrete: 0.45 },
   EN: { none: 0.9, wood: 0.8, light: 0.8, heavy: 0.6, concrete: 0.7 },
+  AT: { none: 0.12, wood: 0.6, light: 1, heavy: 1.15, concrete: 0.5 },
 };
 
 // One cell of range, in world units (about a tank's length).
@@ -83,8 +86,11 @@ export const CARRIER_SLOTS: readonly [number, number][] = [
   [48, 1], [30, 1], [12, 1], [-6, 1], [-24, 1], [-42, 1], [-60, 1],
 ];
 // The buildings that fight back on their own.
-export type DefenseKind = 'tower' | 'prism' | 'aa';
-export const DEFENSE: ReadonlySet<string> = new Set<DefenseKind>(['tower', 'prism', 'aa']);
+export type DefenseKind = 'tower' | 'pillbox' | 'prism' | 'aa';
+export const DEFENSE: ReadonlySet<string> = new Set<DefenseKind>(['tower', 'pillbox', 'prism', 'aa']);
+// The defenses with nothing to turn: they fire any way at once (the Lumen
+// tower's crystal, and the Pillbox out of whichever slit faces the target).
+export const FIXED_GUN: ReadonlySet<string> = new Set<DefenseKind>(['pillbox', 'prism']);
 export const isDefense = (k: string): k is DefenseKind => DEFENSE.has(k);
 
 // The foot soldiers.
@@ -118,7 +124,11 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
   skyguard: { name: 'Skyguard missiles', dmg: 35, rof: 1.1, range: 7 * CELL, wh: 'AP', shot: 'rocket', speed: 190, barrels: 2, air: true, ground: false },
   cruiser: { name: 'Skyguard missiles', dmg: 60, rof: 1.2, range: 10 * CELL, wh: 'AP', shot: 'rocket', speed: 230, barrels: 2, air: true, ground: false },
   sub: { name: 'Torpedoes', dmg: 130, rof: 3, range: 6 * CELL, wh: 'AP', shot: 'torpedo', speed: 70, barrels: 1, air: false, ground: true, sea: true },
-  tower: { name: 'Twin cannon', dmg: 25, rof: 1.5, range: 6 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: false, ground: true },
+  // the Turret: twin anti-tank cannon, hard on vehicles, weak on soldiers
+  tower: { name: 'Twin anti-tank cannon', dmg: 34, rof: 1.4, range: 6 * CELL, wh: 'AT', shot: 'shell', speed: 280, barrels: 2, air: false, ground: true },
+  // the Pillbox: a fast machine gun that mows down soldiers and barely
+  // scratches armor
+  pillbox: { name: 'Heavy machine gun', dmg: 16, rof: 0.45, range: 5 * CELL, wh: 'SA', shot: 'bullet', speed: 0, barrels: 1, air: false, ground: true },
 };
 
 // A G.I. dug in behind sandbags: a steadier, longer and harder-hitting
@@ -170,6 +180,7 @@ export const BUILDING_DEF: Record<BuildingKind, { strength: number; armor: Armor
   helipad: { strength: 800, armor: 'wood' },
   lab: { strength: 600, armor: 'wood' },
   tower: { strength: 400, armor: 'heavy' },
+  pillbox: { strength: 450, armor: 'concrete' },
   prism: { strength: 600, armor: 'heavy' },
   aa: { strength: 500, armor: 'heavy' },
   depot: { strength: 800, armor: 'heavy' },
@@ -286,6 +297,9 @@ export function muzzles(kind: UnitKind | DefenseKind, x: number, y: number, z: n
       return [at(px, py, tur, 0, 0, 19.1)]; // the coil's ball (LUMEN_Z in sprites.ts)
     case 'tower':
       return [at(x, y, tur, 11.2, 1.15, 1.45), at(x, y, tur, 11.2, -1.15, 1.45)];
+    case 'pillbox':
+      // out of the slit facing the target (tur), from the gun in it
+      return [at(x, y, tur, 7.4, 0, 0)];
     case 'prism':
       return [[x, y, z]];
     case 'aa':

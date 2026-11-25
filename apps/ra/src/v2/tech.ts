@@ -36,7 +36,8 @@ export const TECH: Tech[] = [
   { id: 'navy', name: 'Naval yard', tab: 'base', cost: 1000, needs: ['power'], building: 'navy', blurb: 'Built out on open water next to your base. Makes ships, and mends ships parked in its slip, for credits.' },
   { id: 'wall', name: 'Wall', tab: 'defense', cost: 100, needs: ['yard'], building: 'wall', blurb: 'Concrete wall, one segment at a time. Keep placing to build a line; tap Wall again (or Esc) to stop.' },
   { id: 'uplink', name: 'Satellite uplink', tab: 'base', cost: 1500, needs: ['radar', 'lab'], building: 'uplink', blurb: 'Reveals the whole map while it stands.' },
-  { id: 'tower', name: 'Gun tower', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Guards your base.' },
+  { id: 'pillbox', name: 'Pillbox', tab: 'defense', cost: 400, needs: ['barracks'], building: 'pillbox', blurb: 'Concrete bunker with a fast machine gun: the key defense against soldiers. Barely scratches vehicles, and grenades and artillery crack it.' },
+  { id: 'tower', name: 'Turret', tab: 'defense', cost: 600, needs: ['barracks'], building: 'tower', blurb: 'Twin anti-tank cannon: tears into vehicles, but does little to soldiers.' },
   { id: 'aa', name: 'Skyguard battery', tab: 'defense', cost: 1000, needs: ['barracks', 'radar'], building: 'aa', blurb: 'Missile launcher that shoots down aircraft. Can\'t hit anything on the ground.' },
   { id: 'prism', name: 'Lumen tower', tab: 'defense', cost: 1500, needs: ['radar', 'lab'], building: 'prism', blurb: 'Long-range light beam. Lumen towers near one that fires beam their light into it and add to the blow.' },
 
@@ -91,6 +92,7 @@ export const POWER: Partial<Record<BuildingKind, number>> = {
   helipad: -10,
   lab: -75,
   tower: -20,
+  pillbox: -15,
   prism: -75,
   aa: -50,
   depot: -25,
