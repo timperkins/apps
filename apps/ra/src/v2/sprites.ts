@@ -1886,7 +1886,77 @@ function drum(u: number, v: number, z: number, cu: number, cv: number, r: number
   return { a: Math.atan2(v - cv, u - cu), d, roof: z > h - 0.2 && d < r - 0.5 };
 }
 
-function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
+// ---------- Walls ----------
+// A wall segment is drawn to suit the segments next to it: which of the four
+// cells beside it hold wall (LINK_E, LINK_S, LINK_W, LINK_N, +u, +v, -u, -v),
+// and LINK_PIER for a brick pier in the middle of a straight run. Ends,
+// corners, junctions and a lone segment always get a pier.
+export const LINK_E = 1;
+export const LINK_S = 2;
+export const LINK_W = 4;
+export const LINK_N = 8;
+export const LINK_PIER = 16;
+const WBRICK = hex('#a5583c');
+const WMORTAR = hex('#c2b6a0');
+const WAL_T = 1.9; // half the wall's thickness
+const WAL_H = 6; // top of the brickwork, under the coping
+const PIER = 2.4; // half a pier's width
+const PIER_H = 7.5;
+const COURSE = 1.5; // a course of bricks and its mortar
+const BRICK_L = 8 / 3; // a brick and its joint, three to a segment so runs line up
+
+// Running-bond brickwork, along the face at `along`, course by course up z.
+function brickAt(along: number, z: number, seed: number): RGB {
+  if (mod(z, COURSE) < 0.5) return WMORTAR;
+  const row = Math.floor(z / COURSE);
+  const a = along + mod(row, 2) * (BRICK_L / 2);
+  if (mod(a, BRICK_L) < 0.45) return WMORTAR;
+  const h = hash2(Math.floor(a / BRICK_L), row, seed);
+  // a few bricks burnt darker, a few faded, and soot low down
+  let c = shade(WBRICK, (h - 0.5) * 0.18 + (h > 0.9 ? -0.16 : h < 0.07 ? 0.1 : 0));
+  if (z < 2) c = shade(c, -0.08 * (2 - z));
+  return c;
+}
+
+function wallShape(wall: number): Shape {
+  let m = wall & 15;
+  const straight = m === (LINK_E | LINK_W) || m === (LINK_S | LINK_N);
+  const pier = !straight || (wall & LINK_PIER) !== 0;
+  // a segment on its own: a short length of wall along u, round a pier
+  if (!m) m = LINK_E | LINK_W;
+  const armU = (u: number) => (u >= 0 ? m & LINK_E : m & LINK_W) !== 0;
+  const armV = (v: number) => (v >= 0 ? m & LINK_S : m & LINK_N) !== 0;
+  return (u, v, z) => {
+    const au = Math.abs(u);
+    const av = Math.abs(v);
+    if (au > 4 || av > 4 || z < 0) return null;
+    if (pier) {
+      const p = Math.max(au, av);
+      // the pier's cap: a slab, then a shallow stone pyramid
+      if (z >= PIER_H && z < PIER_H + 0.6 && p < PIER + 0.4) return z < PIER_H + 0.25 ? CONC : CONC_L;
+      if (z >= PIER_H + 0.6 && p < PIER + 0.2 - (z - PIER_H - 0.6) * 1.6) return g(CONC_L, u, v, z, 0.05);
+      if (z < PIER_H && p < PIER + (z < 0.6 ? 0.3 : 0)) {
+        if (z < 0.6) return CONC_D;
+        // (each face has its own bond, offset so the corners interlock)
+        return av >= au ? brickAt(u + 0.7, z, 51) : brickAt(v + 0.7 + BRICK_L / 2, z, 52);
+      }
+    }
+    const onU = av <= WAL_T + 0.45 && (armU(u) || (au <= WAL_T + 0.45 && !pier && armV(0)));
+    const onV = au <= WAL_T + 0.45 && (armV(v) || (av <= WAL_T + 0.45 && !pier && armU(0)));
+    if (!onU && !onV) return null;
+    const across = onU ? av : au;
+    // the coping: stone along the top, overhanging a little
+    if (z >= WAL_H) {
+      if (z >= WAL_H + 0.8) return null;
+      return z < WAL_H + 0.3 ? CONC : g(CONC_L, u, v, z, 0.05);
+    }
+    if (z < 0.6) return across <= WAL_T + 0.25 ? CONC_D : null; // the footing
+    if (across > WAL_T) return null;
+    return onU ? brickAt(u, z, 53) : brickAt(v, z, 54);
+  };
+}
+
+function buildingShape(kind: BuildingKind, f: Faction, wall = 0): { shape: Shape; glow?: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
   const roofC = mix(f.main, f.light, 0.35);
   const glow = glowOf(f);
   switch (kind) {
@@ -2703,24 +2773,8 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       return { shape, rx: 10, ry: 10, zmax: 28, fx: [{ x: 1, y: 0, z: DZ + 1 }] };
     }
     case 'wall': {
-      // A wall segment: a tall concrete block with a rounded coping and a
-      // round post on each corner. Segments stand side by side on an 8-unit
-      // grid, so a row of them makes one wall.
-      const shape: Shape = (u, v, z) => {
-        const au = Math.abs(u);
-        const av = Math.abs(v);
-        if (au > 4 || av > 4) return null;
-        const pd = Math.hypot(au - 2.9, av - 2.9);
-        if (pd < 1.2 && z < 8.6 - Math.max(0, pd - 0.4) * 0.8) return z > 7.6 ? PLAS_L : g(PLAS, u, v, z, 0.06);
-        if (z < 7) {
-          if (z < 0.8) return CONC_D;
-          if (z > 6.2) return PLAS_L;
-          if (mod(z, 1.6) < 0.25) return shade(PLAS, -0.12);
-          return grime(g(PLAS, u, v, z, 0.07), u + v, z, 7, 41);
-        }
-        return null;
-      };
-      return { shape, rx: 4, ry: 4, zmax: 9, fx: [] };
+      // A brick wall segment, one cell of an 8-unit grid (see wallShape).
+      return { shape: wallShape(wall), rx: 4, ry: 4, zmax: 9, fx: [] };
     }
     case 'helipad': {
       // A round raised landing deck with a hazard rim, a ring of lights and a
@@ -2798,6 +2852,8 @@ export function buildingBlock(kind: BuildingKind): BuildingBlock {
           }
       }
     }
+  // a wall segment keeps units off its whole cell, so a line of them can't be slipped through
+  if (kind === 'wall') solid.fill(1);
   // the helipad is all flat pad: the whole of its round deck is solid
   if (kind === 'helipad')
     for (let j = 0; j < ny; j++)
@@ -2863,8 +2919,8 @@ export function makeBuildingGlow(kind: BuildingKind, f: Faction): StackSprite | 
   return renderStack(b.glow, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, step: 0.5, flat: true, noGroundShadow: true });
 }
 
-export function makeBuilding(kind: BuildingKind, f: Faction): V2BuildingArt {
-  const b = buildingShape(kind, f);
+export function makeBuilding(kind: BuildingKind, f: Faction, wall = 0): V2BuildingArt {
+  const b = buildingShape(kind, f, wall);
   const spr = renderStack(b.shape, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 });
   return { spr, rx: b.rx, ry: b.ry, fx: b.fx };
 }
@@ -3360,8 +3416,8 @@ export interface BuildingStates {
 const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18 };
 
 // A building badly hit, and what is left of it once it is destroyed.
-export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {
-  const b = buildingShape(kind, f);
+export function makeBuildingStates(kind: BuildingKind, f: Faction, wall = 0): BuildingStates {
+  const b = buildingShape(kind, f, wall);
   const { shape, rx, ry, zmax } = b;
   const seed = B_SEED[kind] * 31 + 7;
   const rand = rng(seed * 977);
@@ -3491,8 +3547,8 @@ function partShape(shape: Shape, top: (u: number, v: number) => number, rx: numb
 }
 
 /** The stages of a building going up (BUILD_STAGES), before it is finished. */
-export function makeConstruction(kind: BuildingKind, f: Faction): StackSprite[] {
-  const { shape, rx, ry, zmax } = buildingShape(kind, f);
+export function makeConstruction(kind: BuildingKind, f: Faction, wall = 0): StackSprite[] {
+  const { shape, rx, ry, zmax } = buildingShape(kind, f, wall);
   const o: StackOpts = { r: 0, rx, ry, zmax, step: 0.5 };
   const hm = columnMap(shape, o);
   // the top of each column of the finished building (-1: nothing there)
