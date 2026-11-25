@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       apps: ${{ steps.changed.outputs.apps }}
+      next_ahead: ${{ steps.next.outputs.apps }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +26,19 @@ jobs:
           git fetch --tags --force origin
           apps=$(node scripts/changed-apps.mjs --deployed)
           echo "Apps to deploy: $apps"
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+      # Apps whose files on the "next" preview branch differ from main: their fixed preview link
+      # shows next, so a merge to main must not overwrite it with main's build.
+      - id: next
+        run: |
+          apps='[]'
+          if git fetch --depth=1 origin next 2>/dev/null; then
+            apps=$(for d in apps/*/; do
+              a=$(basename "$d"); [ -f "$d/app.json" ] || continue
+              git diff --quiet FETCH_HEAD HEAD -- "apps/$a/" || echo "$a"
+            done | jq -R . | jq -sc .)
+          fi
+          echo "Apps where next differs from main: $apps"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
   deploy:
@@ -41,8 +55,8 @@ jobs:
       # After the prod deploy, the same job rebuilds each Hosting app with the preview environment
       # and puts it on the app's fixed "latest" preview link, so that link also tracks main.
       # (One job instead of a second deploy-app run: Actions bills every job as at least a minute.)
-      # App Hosting apps are skipped.
-      with_latest: true
+      # App Hosting apps are skipped, and so are apps whose fixed link shows changes on next not yet in main.
+      with_latest: ${{ !contains(fromJSON(needs.detect.outputs.next_ahead), matrix.app) }}
     secrets: inherit
     permissions:
       contents: write

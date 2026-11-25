@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      skip_checks:
+        description: Skip typecheck, lint and tests (the next preview branch; its changes are checked on their PRs).
+        type: boolean
+        required: false
+        default: false
       with_latest:
         description: >-
           Prod only. After the prod deploy, rebuild with the preview environment in the same job and put it
@@ -123,8 +128,11 @@ jobs:
 
       - name: Install and check
         if: steps.app.outputs.type == 'hosting'
+        env:
+          SKIP_CHECKS: ${{ inputs.skip_checks }}
         run: |
           "$RUN" npm ci
+          [ "$SKIP_CHECKS" != true ] || { echo "Checks skipped"; exit 0; }
           "$RUN" npm run typecheck --if-present
           "$RUN" npm run lint --if-present
           if jq -e '.scripts.test' package.json > /dev/null; then "$RUN" npm test; fi
@@ -255,15 +263,15 @@ jobs:
             --project "$FIREBASE_PROJECT" --force
 
       # The same build also goes to a fixed "latest" channel, so each app has one preview link that
-      # never changes and always shows the most recent preview push from any branch or merge to main
-      # (last one wins; prod.yml runs this with latest_only after each merge).
+      # never changes. It tracks the "next" branch (preview.yml deploys next with latest_only), and main
+      # after a merge when next has nothing more for the app (prod.yml with_latest).
       # Channels last at most 30 days; every deploy resets that, and preview-keepalive.yml extends it weekly.
       # An app with previewSite in app.json gets its fixed link from that site instead (next step).
       - name: Deploy fixed latest channel
         id: hosting_latest
         if: >-
           steps.app.outputs.preview_site == '' && (
-            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview')
+            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && inputs.latest_only)
             || (!cancelled() && steps.latest_build.outcome == 'success'))
         continue-on-error: ${{ inputs.target == 'prod' || !inputs.latest_only }}
         run: |
@@ -283,7 +291,7 @@ jobs:
         id: hosting_preview_site
         if: >-
           steps.app.outputs.preview_site != '' && (
-            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview')
+            (success() && steps.app.outputs.type == 'hosting' && inputs.target == 'preview' && inputs.latest_only)
             || (!cancelled() && steps.latest_build.outcome == 'success'))
         continue-on-error: ${{ inputs.target == 'prod' || !inputs.latest_only }}
         env:

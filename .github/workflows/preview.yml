@@ -1,6 +1,9 @@
 name: preview
 
 # Every push to a branch other than main deploys a preview of each app changed on that branch.
+# The "next" branch (main plus every change not yet merged) is the exception: it skips the checks and
+# the per-branch channel and deploys only each app's fixed preview link (e.g. ra-preview.trom.dev),
+# so that link always shows next, as fast as possible. Other branches no longer touch the fixed link.
 # Links go to the run summary, a commit status per app, and a comment on the branch's PR.
 # Each deploy job adds its own app to that comment, so there's no separate links job: Actions bills
 # every job as at least a minute, so small jobs around the deploy cost more than they run.
@@ -65,7 +68,9 @@ jobs:
     with:
       app: ${{ matrix.app }}
       target: preview
-      pr_comment: true
+      latest_only: ${{ github.ref_name == 'next' }}
+      skip_checks: ${{ github.ref_name == 'next' }}
+      pr_comment: ${{ github.ref_name != 'next' }}
     secrets: inherit
     permissions:
       contents: write
