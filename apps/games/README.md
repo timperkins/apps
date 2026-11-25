@@ -48,6 +48,7 @@ A huge village (180 × 180 tiles, about 200 numbered houses, villagers walking t
 - A yellow arrow and the minimap always point to your next task; M or the map button shows the whole village.
 - Keyboard (arrows/WASD, E or Space, M, Esc) and touch (drag on the left to walk, big button to act).
 - Saves in localStorage under `jobville-save-v1`.
+- Play together with up to 4 players, each on their own phone or computer: ⏸ menu → 👥 Play with friends, then Host (you get a code) or type a friend's code to join. You all walk the same village and see each other, with a tag showing each player's number, job and money (and 🏆 once they have the trophy). Everyone keeps their own job, money, shop and save. G waves; next to a friend, G gives them $10. When someone buys the Golden Trophy, everyone hears about it.
 
 ## Survivle
 
