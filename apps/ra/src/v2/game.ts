@@ -7581,9 +7581,8 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'derrick': {
-        // the pumpjack nods away while someone holds it (still when nobody
-        // does, or once it is badly hit)
-        const going = b.f >= 0 && !hurt;
+        // the pumpjack's beam rocks up and down (it stops once badly hit)
+        const going = !hurt;
         const spr = this.pumpFrame(b.f, going ? Math.floor(b.phase * DERRICK.strokes * PUMP_FRAMES) % PUMP_FRAMES : 0);
         if (spr) this.blit(spr, b.x, b.y, 0);
         // the flag of whoever holds it (a pale one when nobody does)

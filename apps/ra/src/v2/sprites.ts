@@ -2151,7 +2151,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       // steel storage tank under a shallow dome, ringed by a handrail and
       // banded in the color of whoever holds it, with a ladder up its front;
       // a pumpjack's skid, A-frame and gearbox over the wellhead (its beam,
-      // horsehead and cranks are drawn on top, nodding: makePumpBeam); a
+      // horsehead and cranks are drawn on top, rocking up and down: makePumpBeam); a
       // tin-roofed pump shed; sandbags round the back and a tall flagpole.
       // fx[0] is the beacon on the tank, fx[1] the top of the flagpole.
       const [tu, tv] = DERRICK_TANK;
@@ -2938,7 +2938,7 @@ export const PUMP_PIVOT: [number, number, number] = [7.5, 6, 11.5];
 // the horsehead to the front: this is where derrick point (u, v) is in the
 // pumpjack's own frame.
 const pumpAt = (u: number, v: number): [number, number] => [11 - v, u - 3];
-export const PUMP_FRAMES = 12;
+export const PUMP_FRAMES = 16;
 
 /**
  * The pumpjack's moving parts at step k of a stroke of PUMP_FRAMES steps, drawn over the derrick at its middle: the walking beam in
@@ -2952,14 +2952,14 @@ export function makePumpBeam(f: Faction, k: number): StackSprite {
   const CZ = 3.6;
   {
     const ph = (k / PUMP_FRAMES) * Math.PI * 2;
-    const th = 0.2 * Math.sin(ph);
+    const th = 0.4 * Math.sin(ph); // the beam rocks this far each way (radians)
     const c = Math.cos(th);
     const s = Math.sin(th);
     // the world point at (lu, lz) along the beam
     const at = (lu: number, lz: number): [number, number] => [pu + lu * c - lz * s, pz + lu * s + lz * c];
     const [hu, hz] = at(-6.2, -0.4); // where the bridle hangs from the horsehead
     const [tu, tz] = at(5, -0.9); // the tail bearing
-    const pin: [number, number] = [CU + 1.7 * Math.cos(ph + Math.PI / 2), CZ + 1.7 * Math.sin(ph)];
+    const pin: [number, number] = [CU + 2 * Math.cos(ph + Math.PI / 2), CZ + 2 * Math.sin(ph)];
     const seg = (u: number, z: number, a: [number, number], b: [number, number]) => {
       const dx = b[0] - a[0];
       const dz = b[1] - a[1];
@@ -2993,7 +2993,7 @@ export function makePumpBeam(f: Faction, k: number): StackSprite {
       if (dv < 2.2 && Math.abs(lu - 5) < 0.3 && Math.abs(lz + 0.9) < 0.3) return GUN_D; // the equalizer bar
       return null;
     };
-    return renderStack(shape, { r: 0, rx: 15, ry: 13, zmax: 14, step: 0.5 });
+    return renderStack(shape, { r: 0, rx: 15, ry: 13, zmax: 17, step: 0.5 });
   }
 }
 
