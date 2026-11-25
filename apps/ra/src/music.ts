@@ -8,11 +8,11 @@
 
 import { onAudioUnlock } from './voice';
 import { onSettings, settings } from './settings';
+import { MUSIC_VOLUME as VOLUME } from './audio-config';
 
 export type Mood = 'battle' | 'shroud' | 'base';
 
 const MOODS: Mood[] = ['base', 'battle', 'shroud'];
-const VOLUME: Record<Mood, number> = { battle: 1, shroud: 1, base: 0.5 };
 const FADE_S = 2.5;
 
 const base = import.meta.env.BASE_URL;

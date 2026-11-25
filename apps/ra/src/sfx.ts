@@ -17,6 +17,7 @@
 
 import { onAudioUnlock } from './voice';
 import { onSettings, settings } from './settings';
+import { GAIN } from './audio-config';
 
 export type Sfx =
   | 'rifle_shot'
@@ -85,46 +86,8 @@ const SHOTS: Sfx[] = [
 ];
 const LOOPS: Loop[] = ['tracks_loop', 'engine_loop', 'rotor_loop', 'boat_loop', 'footsteps', 'ore_dig', 'surf_loop', 'fire_loop'];
 
-// How loud each clip is at full volume. The clips were all evened out to the
-// same peak; this balances them against each other and the voices.
-const GAIN: Partial<Record<Sfx | Loop, number>> = {
-  rifle_shot: 0.35,
-  flame_burst: 0.45,
-  dog_attack: 0.5,
-  dog_yelp: 0.45,
-  beam_fire: 0.5,
-  beam_charge: 0.3,
-  cannon_shot: 0.5,
-  howitzer_shot: 0.6,
-  rocket_launch: 0.45,
-  shell_whistle: 0.25,
-  bullet_hit: 0.25,
-  explosion_small: 0.5,
-  explosion_large: 0.6,
-  building_collapse: 0.7,
-  debris: 0.3,
-  infantry_death: 0.35,
-  build_rise: 0.45,
-  build_place: 0.6,
-  foundry_unfold: 0.5,
-  unit_exit: 0.4,
-  ore_unload: 0.35,
-  ui_click: 0.35,
-  ui_panel: 0.3,
-  credits_tick: 0.15,
-  ui_error: 0.4,
-  order_confirm: 0.35,
-  ui_ready: 0.35,
-  whoosh_space: 0.45,
-  tracks_loop: 0.35,
-  engine_loop: 0.3,
-  rotor_loop: 0.35,
-  boat_loop: 0.3,
-  footsteps: 0.3,
-  ore_dig: 0.3,
-  surf_loop: 0.3,
-  fire_loop: 0.5,
-};
+// How loud each clip is at full volume: GAIN in src/audio-config.ts.
+
 
 // Most copies of one clip playing at once (a big fight would otherwise pile
 // up dozens of the same gunshot), and the least time between two starts.

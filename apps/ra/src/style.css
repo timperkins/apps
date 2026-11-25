@@ -101,7 +101,8 @@ body {
 #keysBtn,
 #keysBack,
 #unitsLink,
-#uiLink {
+#uiLink,
+#audioLink {
   font: inherit;
   font-size: 12px;
   color: var(--ink);
@@ -115,7 +116,8 @@ body {
 }
 
 #unitsLink,
-#uiLink {
+#uiLink,
+#audioLink {
   text-decoration: none;
 }
 
