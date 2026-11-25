@@ -39,7 +39,7 @@ const LEVELS: Record<BotLevel, Level> = {
     army: 6,
     firstAttack: 300,
     every: 120,
-    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'refinery', 'radar', 'power', 'navy', 'aa', 'depot'],
+    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'tower', 'power', 'pillbox', 'refinery', 'radar', 'power', 'navy', 'aa', 'depot'],
     units: ['inf', 'light', 'rocket', 'light', 'gren', 'buggy', 'dog', 'jet', 'plane', 'destroyer', 'flamer', 'light', 'sub', 'inf'],
   },
   hard: {
@@ -47,7 +47,7 @@ const LEVELS: Record<BotLevel, Level> = {
     army: 8,
     firstAttack: 210,
     every: 90,
-    order: ['power', 'barracks', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower', 'navy', 'aa', 'power', 'lab', 'power', 'prism', 'depot', 'uplink', 'power', 'prism', 'aa'],
+    order: ['power', 'barracks', 'pillbox', 'refinery', 'power', 'factory', 'refinery', 'tower', 'power', 'radar', 'power', 'tower', 'pillbox', 'navy', 'aa', 'power', 'lab', 'power', 'prism', 'depot', 'uplink', 'power', 'prism', 'aa'],
     units: ['light', 'rocket', 'gren', 'light', 'arty', 'jet', 'plane', 'destroyer', 'light', 'flamer', 'scorch', 'heavy', 'skyguard', 'sub', 'cruiser', 'lumen', 'comet', 'jet', 'carrier', 'inf', 'cmdo', 'destroyer'],
   },
 };
