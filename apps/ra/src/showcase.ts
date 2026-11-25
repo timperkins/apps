@@ -1,5 +1,6 @@
 // The showcase page (/units/): every unit and building, one row each,
-// from eight angles and doing the things it does in the game, on plain grass.
+// from eight angles and doing the things it does in the game, on plain grass
+// (and the boats and ships on open water).
 import './showcase.css';
 import { ART, RGB, dirIndex, fbm, hash2, hex, mix, shade } from './gfx';
 import { DIRS, FACTIONS, KNEEL_DROP, NEUTRAL_F, PUMP_FRAMES, factionOf, makePumpBeam, BuildingKind, BuildingStates, V2BuildingArt, V2FactionArt, cruiserParts, drawBuggyLights, makeBuilding, makeBuildingGlow, makeBuildingStates, makeConstruction, riseTime, makeDish, makeFactionArt, makeOre } from './v2/sprites';
@@ -48,6 +49,47 @@ function makeGrass(): HTMLCanvasElement {
       else if (r2 > 0.992) col = shade(GRASS[5], rnd * 0.1);
       else if (r2 < 0.02) col = shade(col, -0.2);
       else if (r2 < 0.0206) col = FLOWER[Math.floor(rnd * FLOWER.length)];
+      const i = (y * W + x) * 4;
+      d[i] = col[0];
+      d[i + 1] = col[1];
+      d[i + 2] = col[2];
+      d[i + 3] = 255;
+    }
+  c.putImageData(img, 0, 0);
+  return cv;
+}
+
+// ---------- The sea: open water for the boats and ships, in the game's blues ----------
+
+// (the middle of the game's depth bands, from v2/terrain.ts: not the shallows by
+// the shore, nor the deepest blue)
+const SEA = ['#4a8aa6', '#3b7498', '#2e5f86', '#244c72'].map(hex);
+
+function makeWater(): HTMLCanvasElement {
+  const W = GW * ART;
+  const H = GH * ART;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const c = cv.getContext('2d')!;
+  const img = c.createImageData(W, H);
+  const d = img.data;
+  const seed = 91;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const px = x / ART;
+      const py = y / ART;
+      const rnd = hash2(x, y, seed);
+      // depth: broad, slow patches, dithered where the bands meet
+      const dep = fbm(px / 60, py / 60, seed + 1, 3);
+      const bi = Math.floor(dep * SEA.length + (rnd - 0.5) * 0.5);
+      let col: RGB = SEA[Math.max(0, Math.min(SEA.length - 1, bi))];
+      // ripples, stretched across the screen, in short dashes (as the game's water)
+      const rip = fbm(px / 7, (py / 7) * 1.7, seed + 30, 2);
+      const rip2 = hash2(x >> 2, y, seed + 31) * 0.6 + rnd * 0.4;
+      if (rip > 0.6 && rip2 > 0.5) col = shade(col, rip > 0.7 && rip2 > 0.66 ? 0.2 : 0.07);
+      else if (rip < 0.34) col = shade(col, -0.09);
+      if (rnd > 0.9994) col = [226, 244, 248]; // a glint
       const i = (y * W + x) * 4;
       d[i] = col[0];
       d[i + 1] = col[1];
@@ -244,9 +286,11 @@ interface Live {
   h: number;
   t: number;
   seen: boolean;
+  ground: HTMLCanvasElement; // the grass, or the sea
 }
 
 let grass: HTMLCanvasElement;
+let water: HTMLCanvasElement;
 const live: Live[] = [];
 const PAD = 5;
 
@@ -265,8 +309,8 @@ function paint(l: Live, dt: number): void {
   c.setTransform(ART, 0, 0, ART, 0, 0);
   c.imageSmoothingEnabled = false;
   const [qx, qy] = l.scene.shake(l.t);
-  // (a cell's grass is cut from at least 4 pixels inside the texture, so a shake never runs off it)
-  c.drawImage(grass, (l.gx + qx) * ART, (l.gy + qy) * ART, l.w * ART, l.h * ART, 0, 0, l.w, l.h);
+  // (a cell's ground is cut from at least 4 pixels inside the texture, so a shake never runs off it)
+  c.drawImage(l.ground, (l.gx + qx) * ART, (l.gy + qy) * ART, l.w * ART, l.h * ART, 0, 0, l.w, l.h);
   c.translate(l.ox - qx, l.oy - qy);
   l.scene.step(dt);
   l.scene.fx.step(dt);
@@ -277,8 +321,8 @@ function paint(l: Live, dt: number): void {
 }
 
 // A row: the thing's name and what it is, then its scenes side by side, all
-// the same size so the sprites line up.
-function addRow(parent: HTMLElement, name: string, blurb: string, cells: Cell[], big = false): void {
+// the same size so the sprites line up. Boats and ships are shown at sea.
+function addRow(parent: HTMLElement, name: string, blurb: string, cells: Cell[], big = false, sea = false): void {
   const row = document.createElement('section');
   row.className = big ? 'row big' : 'row';
   const head = document.createElement('div');
@@ -317,6 +361,7 @@ function addRow(parent: HTMLElement, name: string, blurb: string, cells: Cell[],
       h: hgt,
       t: Math.random() * 10,
       seen: false,
+      ground: sea ? water : grass,
     };
     paint(l, 0);
     if (cell.anim) {
@@ -1140,7 +1185,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       }),
     );
     cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => boatDraw(foe)(s, 0, 0, Math.PI / 4, t) });
-    addRow(parent, 'Patrol boat', 'Patrols the water: it only goes on lakes and seas in the game.', cells);
+    addRow(parent, 'Patrol boat', 'Patrols the water: it only goes on lakes and seas in the game.', cells, false, true);
   }
 
   // the Otter, the warships and the submarine
@@ -1186,7 +1231,7 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       },
     });
     cells.push({ label: 'Enemy', box, anim: true, draw: (s, t) => draw(foe)(s, 0, 0, Math.PI / 4, t) });
-    addRow(parent, name, blurbOf(kind), cells);
+    addRow(parent, name, blurbOf(kind), cells, false, true);
   }
 }
 
@@ -1595,6 +1640,7 @@ const later = () => new Promise<void>((r) => setTimeout(r, 0));
 async function main(): Promise<void> {
   await later(); // let "Drawing…" show first
   grass = makeGrass();
+  water = makeWater();
   const arts = FACTIONS.slice(0, 2).map(makeFactionArt);
   const dish = makeDish();
   const yard = makeBuilding('yard', FACTIONS[0]);
