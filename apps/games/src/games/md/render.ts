@@ -3,6 +3,7 @@
 import { LEVELS, TRADERS, type LevelDef } from './data';
 import { T, tileAt, type Level, type Prop } from './dungeon';
 import type { Game, Monster } from './game';
+import { parseKey, type MeleeShape, type Ranged } from './data';
 import { heroParts, monsterParts, traderParts, type Part } from './models';
 
 export const TW = 64;
@@ -322,10 +323,11 @@ function bakeProp(kind: Prop['kind'], v: number, def: LevelDef): HTMLCanvasEleme
       parts.push([0.3, 0.3, 0, 0.1, 0.1, 0.5, '#5a3418'], [-0.3, 0.3, 0, 0.1, 0.1, 0.5, '#5a3418'], [0.3, -0.3, 0, 0.1, 0.1, 0.5, '#5a3418'], [-0.3, -0.3, 0, 0.1, 0.1, 0.5, '#5a3418'], [0, 0, 0.5, 0.9, 0.9, 0.08, '#8a5a32'], [0, 0, 0.58, 0.74, 0.74, 0.01, '#e8d8a8'], [0.1, -0.15, 0.59, 0.12, 0.12, 0.02, '#b5483a']);
       break;
     case 'stall': {
-      const awn = ['#c0392b', '#3f6aa1', '#8a3aa0'][v];
+      const awn = ['#c0392b', '#3f6aa1', '#8a3aa0', '#1f8a8a'][v];
       parts.push([0, 0, 0, 0.9, 0.5, 0.5, '#8a5a32'], [0, 0, 0.5, 0.95, 0.55, 0.05, '#a0713f'], [0.4, 0.4, 0, 0.07, 0.07, 1.2, '#5a3418'], [0.4, -0.4, 0, 0.07, 0.07, 1.2, '#5a3418'], [-0.4, 0.4, 0, 0.07, 0.07, 1.2, '#5a3418'], [-0.4, -0.4, 0, 0.07, 0.07, 1.2, '#5a3418'], [0, 0, 1.2, 1, 1, 0.08, awn], [0, 0, 1.28, 0.7, 0.7, 0.06, '#f0ead8']);
       if (v === 0) parts.push([0.1, 0.15, 0.55, 0.5, 0.06, 0.04, '#b0b8c0'], [-0.1, -0.1, 0.55, 0.06, 0.4, 0.04, '#8a5a2b']);
       if (v === 1) parts.push([0.05, 0.1, 0.55, 0.22, 0.26, 0.24, '#8c939c'], [0.05, -0.22, 0.55, 0.2, 0.2, 0.12, '#9aa4ae']);
+      if (v === 3) parts.push([0.05, 0.2, 0.55, 0.12, 0.12, 0.12, '#ffe066', true], [0.05, -0.05, 0.55, 0.16, 0.16, 0.16, '#8af4e0', true], [0.05, -0.28, 0.55, 0.1, 0.1, 0.18, '#ff6ad6', true]);
       if (v === 2) parts.push([0.05, 0.2, 0.55, 0.1, 0.1, 0.16, '#ff5a8a', true], [0.05, 0, 0.55, 0.1, 0.1, 0.16, '#5ad6ff', true], [0.05, -0.2, 0.55, 0.14, 0.14, 0.14, '#3a3a3a']);
       break;
     }
@@ -360,94 +362,146 @@ function bakeProp(kind: Prop['kind'], v: number, def: LevelDef): HTMLCanvasEleme
 }
 
 // ---------- weapon drawing (screen space, in the hero's hand) ----------
-export function drawHeldWeapon(x: CanvasRenderingContext2D, hx: number, hy: number, ang: number, len: number, handle: string, blade: string, kind: string, glow = false) {
-  // ang is a screen-space angle; draw a chunky pixel blade
+/** Draws a melee weapon from the hand at screen angle `ang`. `shape` picks the silhouette. */
+export function drawHeldWeapon(x: CanvasRenderingContext2D, hx: number, hy: number, ang: number, len: number, handle: string, blade: string, shape: MeleeShape, glow = false) {
+  if (shape === 'fist') return;
+  const heavy = shape === 'axe' || shape === 'hammer' || shape === 'cleaver';
+  const poled = shape === 'spear' || shape === 'glaive' || shape === 'scythe';
   const ex = hx + Math.cos(ang) * len, ey = hy + Math.sin(ang) * len;
-  const gx = hx + Math.cos(ang) * len * 0.28, gy = hy + Math.sin(ang) * len * 0.28;
+  const gx = hx + Math.cos(ang) * len * (poled ? 0.85 : 0.28), gy = hy + Math.sin(ang) * len * (poled ? 0.85 : 0.28);
+  x.save();
   x.lineCap = 'square';
+  // dark outline so it reads on any floor
   x.strokeStyle = 'rgba(0,0,0,.45)';
-  x.lineWidth = kind === 'battle-axe' || kind === 'thunder-hammer' ? 9 : 7;
+  x.lineWidth = heavy ? 9 : 7;
   x.beginPath();
   x.moveTo(hx, hy);
   x.lineTo(ex, ey);
   x.stroke();
   x.strokeStyle = handle;
-  x.lineWidth = 4;
+  x.lineWidth = poled ? 3 : 4;
   x.beginPath();
   x.moveTo(hx, hy);
-  x.lineTo(gx, gy);
+  x.lineTo(poled || heavy ? ex : gx, poled || heavy ? ey : gy);
   x.stroke();
   if (glow) {
-    x.save();
-    x.shadowColor = blade;
+    x.shadowColor = shape === 'cleaver' ? '#b07aff' : blade;
     x.shadowBlur = 14;
   }
+  x.fillStyle = blade;
   x.strokeStyle = blade;
-  if (kind === 'battle-axe' || kind === 'thunder-hammer') {
-    x.lineWidth = 4;
-    x.strokeStyle = handle;
-    x.beginPath();
-    x.moveTo(gx, gy);
-    x.lineTo(ex, ey);
-    x.stroke();
-    x.fillStyle = blade;
-    x.save();
-    x.translate(ex, ey);
-    x.rotate(ang);
-    if (kind === 'battle-axe') {
-      x.beginPath();
-      x.moveTo(-6, -2);
-      x.lineTo(4, -12);
-      x.lineTo(8, 0);
-      x.lineTo(4, 12);
-      x.lineTo(-6, 2);
+  x.translate(ex, ey);
+  x.rotate(ang);
+  x.beginPath();
+  switch (shape) {
+    case 'axe':
+      x.moveTo(-6, -2); x.lineTo(4, -12); x.lineTo(8, 0); x.lineTo(4, 12); x.lineTo(-6, 2);
       x.fill();
-    } else {
+      break;
+    case 'hammer':
       x.fillRect(-8, -9, 16, 18);
       x.fillStyle = 'rgba(0,0,0,.25)';
       x.fillRect(-8, 3, 16, 6);
+      break;
+    case 'cleaver':
+      // a big jagged slab with a glowing edge
+      x.moveTo(-18, -3); x.lineTo(4, -3); x.lineTo(8, -14); x.lineTo(2, -18); x.lineTo(-6, -15); x.lineTo(-12, -18); x.lineTo(-18, -12);
+      x.closePath();
+      x.fill();
+      x.strokeStyle = blade === '#2a2238' ? '#c08aff' : '#ffffff';
+      x.lineWidth = 2;
+      x.beginPath();
+      x.moveTo(8, -14); x.lineTo(2, -18); x.lineTo(-6, -15); x.lineTo(-12, -18); x.lineTo(-18, -12);
+      x.stroke();
+      break;
+    case 'spear':
+      x.moveTo(12, 0); x.lineTo(0, -4); x.lineTo(0, 4);
+      x.fill();
+      break;
+    case 'glaive':
+      x.moveTo(10, 0); x.quadraticCurveTo(4, -12, -6, -10); x.lineTo(-2, 0); x.lineTo(-6, 4);
+      x.fill();
+      break;
+    case 'scythe':
+      // long curved blade off the top of the pole
+      x.moveTo(0, 0); x.quadraticCurveTo(-4, -22, -26, -26); x.quadraticCurveTo(-10, -16, -4, 2);
+      x.closePath();
+      x.fill();
+      break;
+    case 'sickle':
+      x.restore();
+      x.save();
+      if (glow) {
+        x.shadowColor = blade;
+        x.shadowBlur = 14;
+      }
+      x.strokeStyle = blade;
+      x.lineWidth = 4;
+      x.beginPath();
+      x.arc(gx + Math.cos(ang) * 8, gy + Math.sin(ang) * 8, 9, ang - 2.2, ang + 0.9);
+      x.stroke();
+      break;
+    default: {
+      // swords and daggers: blade from the guard to the tip
+      x.rotate(-ang);
+      x.translate(-ex, -ey);
+      x.lineWidth = shape === 'daggers' ? 4 : 5;
+      x.beginPath();
+      x.moveTo(gx, gy);
+      x.lineTo(ex, ey);
+      x.stroke();
+      x.shadowBlur = 0;
+      x.strokeStyle = '#c9a040';
+      x.lineWidth = 3;
+      const px = -Math.sin(ang) * 6, py = Math.cos(ang) * 6;
+      x.beginPath();
+      x.moveTo(gx - px, gy - py);
+      x.lineTo(gx + px, gy + py);
+      x.stroke();
     }
-    x.restore();
-  } else if (kind === 'long-spear' || kind === 'frost-glaive') {
-    x.lineWidth = 3;
-    x.strokeStyle = handle;
-    x.beginPath();
-    x.moveTo(gx, gy);
-    x.lineTo(ex, ey);
-    x.stroke();
-    x.fillStyle = blade;
-    x.save();
-    x.translate(ex, ey);
-    x.rotate(ang);
-    x.beginPath();
-    if (kind === 'long-spear') {
-      x.moveTo(12, 0);
-      x.lineTo(0, -4);
-      x.lineTo(0, 4);
-    } else {
-      x.moveTo(10, 0);
-      x.quadraticCurveTo(4, -12, -6, -10);
-      x.lineTo(-2, 0);
-      x.lineTo(-6, 4);
-    }
-    x.fill();
-    x.restore();
-  } else {
-    x.lineWidth = kind === 'twin-daggers' ? 4 : 5;
-    x.beginPath();
-    x.moveTo(gx, gy);
-    x.lineTo(ex, ey);
-    x.stroke();
-    // cross guard
-    x.strokeStyle = '#c9a040';
-    x.lineWidth = 3;
-    const px = -Math.sin(ang) * 6, py = Math.cos(ang) * 6;
-    x.beginPath();
-    x.moveTo(gx - px, gy - py);
-    x.lineTo(gx + px, gy + py);
-    x.stroke();
   }
-  if (glow) x.restore();
+  x.restore();
+}
+
+/** Draws a bow centered at 0,0 pointing along +x (caller rotates). */
+export function drawBow(x: CanvasRenderingContext2D, w: Ranged, s: number, pulled: boolean) {
+  x.save();
+  x.scale(s, s);
+  if (w.glow) {
+    x.shadowColor = w.color;
+    x.shadowBlur = 12;
+  }
+  x.strokeStyle = 'rgba(0,0,0,.45)';
+  x.lineWidth = 7;
+  const path = () => {
+    x.beginPath();
+    if (w.shape === 'crossbow') {
+      x.moveTo(-12, 0); x.lineTo(12, 0);
+      x.moveTo(5, -13); x.quadraticCurveTo(10, 0, 5, 13);
+    } else if (w.shape === 'longbow') x.arc(-12, 0, 21, -1.15, 1.15);
+    else x.arc(-6, 0, 14, -1.1, 1.1);
+  };
+  path();
+  x.stroke();
+  x.strokeStyle = w.color;
+  x.lineWidth = 4;
+  path();
+  x.stroke();
+  x.shadowBlur = 0;
+  if (w.name.includes('Thornspike')) {
+    x.fillStyle = '#8a2a2a';
+    for (const a of [-0.9, -0.45, 0.45, 0.9]) x.fillRect(-6 + Math.cos(a) * 16 - 1.5, Math.sin(a) * 16 - 1.5, 3, 3);
+  }
+  const tip = w.shape === 'longbow' ? 19 : w.shape === 'crossbow' ? 12 : 12;
+  const back = w.shape === 'longbow' ? 1.5 : 0;
+  x.strokeStyle = w.burn ? '#ff4a3a' : '#e8e0d0';
+  x.lineWidth = 1;
+  x.beginPath();
+  x.moveTo(back + (w.shape === 'crossbow' ? 5 : 0), -tip);
+  x.lineTo(-8 + (pulled ? -4 : 0), 0);
+  x.lineTo(back + (w.shape === 'crossbow' ? 5 : 0), tip);
+  x.stroke();
+  x.restore();
 }
 
 // ---------- the renderer ----------
@@ -557,6 +611,14 @@ export class Renderer {
     if (g.L.portal.open) this.portal(g);
     // swing arc
     if (g.swingT > 0) this.swingArc(g);
+    // locked target marker
+    const tg = g.target();
+    if (tg) {
+      const r = tg.def.radius * tg.scale + 0.25 + Math.sin(g.time * 8) * 0.05;
+      this.floorCircle(tg.x, tg.y, r, 'rgba(255,60,60,.15)', '#ff4a4a', 3);
+    }
+    for (const t of g.totems) this.floorCircle(t.x, t.y, 2.6, `rgba(111,224,138,${0.08 + 0.04 * Math.sin(g.time * 4)})`, 'rgba(111,224,138,.6)', 2);
+    if (g.ironT > 0) this.floorCircle(g.x, g.y, 0.6, 'rgba(200,210,220,.15)', 'rgba(220,230,240,.8)', 3);
 
     // 2. everything with height, sorted back to front
     type D = { k: number; f: () => void };
@@ -604,10 +666,25 @@ export class Renderer {
             drawModel(x, sx, sy, traderParts(t, Math.abs(Math.sin(g.time * 2 + t.x)) * 0.02), Math.hypot(g.y - t.y, g.x - t.x) < 4 ? face : Math.PI / 2);
           },
         });
+    for (const t of g.totems)
+      list.push({
+        k: t.x + t.y,
+        f: () => {
+          const [sx, sy] = this.iso(t.x, t.y);
+          this.shadow(t.x, t.y, 0.2);
+          const bob = Math.sin(g.time * 3) * 0.04;
+          drawModel(x, sx, sy, [
+            [0, 0, 0, 0.22, 0.22, 0.6, '#6b4424'],
+            [0.115, 0, 0.3, 0.02, 0.14, 0.12, '#2a1a0a'],
+            [0, 0, 0.6, 0.3, 0.3, 0.12, '#3f8a3a'],
+            [0, 0, 0.78 + bob, 0.16, 0.16, 0.16, '#6fe08a', true],
+          ], Math.PI / 4);
+        },
+      });
     for (const d of g.drops) list.push({ k: d.x + d.y, f: () => this.drop(d.kind, d.x, d.y, g.time + d.x) });
     for (const m of g.monsters) if (seen(Math.floor(m.x), Math.floor(m.y))) list.push({ k: m.x + m.y, f: () => this.monster(m, g) });
     if (!g.dead || g.deadT < 0.6) list.push({ k: heroK, f: () => this.hero(g) });
-    for (const s of g.shots) list.push({ k: s.x + s.y, f: () => this.shot(s.x, s.y, s.z, s.vx, s.vy, s.kind, g) });
+    for (const s of g.shots) list.push({ k: s.x + s.y, f: () => this.shot(s.x, s.y, s.z, s.vx, s.vy, s.kind, g, s.color) });
     for (const b of g.bombs) list.push({ k: b.x + b.y, f: () => this.bomb(b.x, b.y, b.t, b.fuse) });
     list.sort((a, b) => a.k - b.k);
     for (const d of list) d.f();
@@ -622,6 +699,23 @@ export class Renderer {
     }
     x.globalAlpha = 1;
     for (const r of g.rings) this.floorCircle(r.x, r.y, r.r, 'rgba(0,0,0,0)', r.color, 4 * (r.life / r.total) + 1);
+    // lightning from the sky
+    for (const b of g.bolts) {
+      x.save();
+      x.shadowColor = '#ffe066';
+      x.shadowBlur = 16;
+      x.strokeStyle = '#fffbe0';
+      x.lineWidth = 3;
+      x.globalAlpha = Math.min(1, b.life * 4);
+      x.beginPath();
+      b.pts.forEach(([dx, dy, h], i) => {
+        const [qx, qy] = this.iso(b.x + dx, b.y + dy, h);
+        if (i) x.lineTo(qx, qy);
+        else x.moveTo(qx, qy);
+      });
+      x.stroke();
+      x.restore();
+    }
 
     // 4. light
     if (!camp && !opts.title) this.lighting(g);
@@ -702,7 +796,7 @@ export class Renderer {
     const R = w.reach * HW * Math.SQRT2;
     const half = (Math.min(w.arc, 359) * Math.PI) / 360;
     x.globalAlpha = 0.5 * (1 - k);
-    x.fillStyle = g.save.melee === 'ember-blade' ? '#ff8a3a' : g.save.melee === 'frost-glaive' ? '#aee8ff' : g.save.melee === 'thunder-hammer' ? '#ffe066' : '#ffffff';
+    x.fillStyle = w.effect === 'burn' ? '#ff8a3a' : w.effect === 'slow' ? '#aee8ff' : w.effect === 'stun' ? '#ffe066' : w.glow ? w.blade : '#ffffff';
     x.beginPath();
     x.moveTo(0, 0);
     x.arc(0, 0, R, g.face - half, g.face - half + half * 2 * Math.min(1, k * 1.6));
@@ -804,7 +898,7 @@ export class Renderer {
     const a = g.armor;
     this.shadow(g.x, g.y, 0.3);
     const [sx, sy] = this.iso(g.x, g.y, g.rollT > 0 ? -0.1 : 0);
-    const parts = heroParts({ armor: a.color, trim: a.trim, walk: g.walk, moving: g.moving });
+    const parts = heroParts({ armor: a.color, trim: a.trim, walk: g.walk, moving: g.moving, helm: a.helm, shiny: parseKey(g.save.armor).rarity !== 'normal' });
     if (g.rollT > 0) {
       // tuck into a ball-ish block
       x.save();
@@ -827,47 +921,37 @@ export class Renderer {
 
   private heroWeapon(g: Game, sx: number, sy: number, scrA: number) {
     const x = this.x;
-    const id = g.save.melee;
     const w = g.melee;
     const hy = sy - TZ * 0.45;
     if (g.drawT > 0 || (g.rangedCd > 0 && g.rangedCd > g.ranged.rate - 0.25)) {
-      // bow out, pointing where you aim
-      const bx = sx + Math.cos(scrA) * 14, by = hy + Math.sin(scrA) * 8;
+      // bow out, pointing where you shoot
       x.save();
-      x.translate(bx, by);
+      x.translate(sx + Math.cos(scrA) * 14, hy + Math.sin(scrA) * 8);
       x.rotate(scrA);
-      x.strokeStyle = g.ranged.color;
-      x.lineWidth = 4;
-      x.beginPath();
-      if (g.save.ranged === 'crossbow') {
-        x.moveTo(-10, 0);
-        x.lineTo(10, 0);
-        x.moveTo(6, -11);
-        x.lineTo(6, 11);
-      } else x.arc(-6, 0, 14, -1.1, 1.1);
-      x.stroke();
-      x.strokeStyle = '#e8e0d0';
-      x.lineWidth = 1;
-      x.beginPath();
-      x.moveTo(0, -12);
-      x.lineTo(-8 + (g.drawT > 0 ? -4 : 0), 0);
-      x.lineTo(0, 12);
-      x.stroke();
+      drawBow(x, g.ranged, 1, g.drawT > 0);
       x.restore();
+      return;
+    }
+    const k = g.swingT > 0 ? 1 - g.swingT / g.swingDur : 0;
+    if (w.shape === 'fist') {
+      if (g.swingT > 0) {
+        const p = Math.sin(k * Math.PI) * 14;
+        x.fillStyle = '#e8b890';
+        x.fillRect(sx + Math.cos(scrA) * (8 + p) - 4, hy + Math.sin(scrA) * (5 + p * 0.5) - 4, 8, 8);
+      }
       return;
     }
     const len = 18 + Math.min(2.3, w.reach) * 10;
     let ang = scrA - 1.1;
     if (g.swingT > 0) {
-      const k = 1 - g.swingT / g.swingDur;
       const half = Math.min(w.arc, 220) * (Math.PI / 360);
-      ang = id === 'long-spear' ? scrA : scrA - half + half * 2 * k;
-      if (id === 'thunder-hammer') ang = scrA - 2.2 + 2.2 * k;
+      ang = w.shape === 'spear' ? scrA : scrA - half + half * 2 * k;
+      if (w.shape === 'hammer') ang = scrA - 2.2 + 2.2 * k;
     }
-    const reachOut = g.swingT > 0 && id === 'long-spear' ? 10 * Math.sin((1 - g.swingT / g.swingDur) * Math.PI) : 0;
+    const reachOut = g.swingT > 0 && w.shape === 'spear' ? 10 * Math.sin(k * Math.PI) : 0;
     const hx = sx + Math.cos(scrA + 1.2) * 10 + Math.cos(scrA) * reachOut, hyy = hy + Math.sin(scrA + 1.2) * 5;
-    drawHeldWeapon(x, hx, hyy, ang, len, w.color, w.blade, id, w.effect === 'burn' || w.effect === 'slow');
-    if (id === 'twin-daggers') drawHeldWeapon(x, sx - Math.cos(scrA + 1.2) * 10, hy - Math.sin(scrA + 1.2) * 5, ang + 2.2, len * 0.9, w.color, w.blade, id);
+    drawHeldWeapon(x, hx, hyy, ang, len, w.color, w.blade, w.shape, !!w.glow);
+    if (w.shape === 'daggers') drawHeldWeapon(x, sx - Math.cos(scrA + 1.2) * 10, hy - Math.sin(scrA + 1.2) * 5, ang + 2.2, len * 0.9, w.color, w.blade, w.shape, !!w.glow);
   }
 
   private monster(m: Monster, g: Game) {
@@ -902,18 +986,18 @@ export class Renderer {
     }
   }
 
-  private shot(wx: number, wy: number, wz: number, vx: number, vy: number, kind: string, g: Game) {
+  private shot(wx: number, wy: number, wz: number, vx: number, vy: number, kind: string, g: Game, color?: string) {
     const x = this.x;
     const [sx, sy] = this.iso(wx, wy, wz);
     const l = Math.hypot(vx, vy) || 1;
     const dx = ((vx - vy) / l) * HW, dy = ((vx + vy) / l) * HH;
     x.save();
     if (kind === 'arrow' || kind === 'bolt' || kind === 'star') {
-      if (kind === 'star') {
-        x.shadowColor = '#fff3a0';
+      if (kind === 'star' || color) {
+        x.shadowColor = color ?? '#fff3a0';
         x.shadowBlur = 14;
       }
-      x.strokeStyle = kind === 'star' ? '#fff8d0' : '#d8c8a0';
+      x.strokeStyle = color ?? (kind === 'star' ? '#fff8d0' : '#d8c8a0');
       x.lineWidth = kind === 'bolt' ? 4 : 3;
       x.beginPath();
       x.moveTo(sx - dx * 0.5, sy - dy * 0.5);
@@ -922,7 +1006,7 @@ export class Renderer {
       x.fillStyle = kind === 'star' ? '#ffffff' : '#c0c8d0';
       x.fillRect(sx + dx * 0.25 - 2.5, sy + dy * 0.25 - 2.5, 5, 5);
     } else {
-      const col = g.shotColor(kind as 'ember');
+      const col = color ?? g.shotColor(kind as 'ember');
       x.shadowColor = col;
       x.shadowBlur = 14;
       x.fillStyle = col;

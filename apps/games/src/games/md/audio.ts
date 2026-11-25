@@ -83,6 +83,11 @@ export function sfx(name: string) {
     case 'roar': tone(90, 0.7, 'sawtooth', 0.15, 40); noise(0.6, 0.25, 300); break;
     case 'throw': noise(0.1, 0.15, 1500); break;
     case 'boom': noise(0.6, 0.6, 250); tone(60, 0.5, 'sine', 0.35, -20); break;
+    case 'rare': [784, 988, 1175, 1568, 1976].forEach((f, i) => tone(f, 0.35, 'triangle', 0.1, 0, i * 0.09)); break;
+    case 'punch': noise(0.07, 0.3, 700); break;
+    case 'artifact': tone(520, 0.3, 'sine', 0.1, 520); break;
+    case 'thunder': noise(0.5, 0.5, 1800, 'bandpass'); tone(70, 0.4, 'sawtooth', 0.15, -20); break;
+    case 'pop': noise(0.18, 0.35, 900); tone(200, 0.12, 'square', 0.05, -100); break;
     case 'click': tone(700, 0.04, 'square', 0.04); break;
   }
 }

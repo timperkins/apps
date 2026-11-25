@@ -1,18 +1,23 @@
 // M.D. simulation: the hero, monsters, projectiles, loot and level flow. No drawing here.
 import {
-  ARMOR, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS,
-  type ArmorId, type GearId, type LevelDef, type MeleeId, type MonsterDef, type MonsterKind, type RangedId, type Trader,
+  ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName,
+  type ArmorId, type ArrowKind, type ArtifactId, type GearId, type ItemKey, type LevelDef, type MonsterDef, type MonsterKind, type Rarity, type Trader,
 } from './data';
 import { T, generateCamp, generateDungeon, isWallTile, rng, tileAt, type Level, type Prop } from './dungeon';
 
 export interface SaveData {
   v: 1;
   coins: number;
-  owned: GearId[];
-  melee: MeleeId;
-  ranged: RangedId;
-  armor: ArmorId;
+  owned: ItemKey[];
+  /** '' = fists */
+  melee: ItemKey;
+  ranged: ItemKey;
+  armor: ItemKey;
   arrows: number;
+  special: Record<Exclude<ArrowKind, 'normal'>, number>;
+  arrowKind: ArrowKind;
+  artifacts: ArtifactId[];
+  slots: (ArtifactId | '')[];
   potions: number;
   bombs: number;
   /** highest level index unlocked (0..4) */
@@ -24,7 +29,7 @@ export interface SaveData {
 
 export const newSave = (): SaveData => ({
   v: 1, coins: 30, owned: ['rusty-sword', 'shortbow', 'tunic'], melee: 'rusty-sword', ranged: 'shortbow', armor: 'tunic',
-  arrows: 40, potions: 2, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0,
+  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 2, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0,
 });
 
 export interface Monster {
@@ -68,8 +73,10 @@ export interface Shot {
   vy: number;
   dmg: number;
   from: 'hero' | 'monster';
-  kind: 'arrow' | 'bolt' | 'star' | 'ember' | 'spore' | 'ice';
+  kind: 'arrow' | 'bolt' | 'star' | 'ember' | 'spore' | 'ice' | 'firework';
   pierce: number;
+  effect?: 'burn' | 'slow' | 'boom';
+  color?: string;
   hit: Set<number>;
   life: number;
 }
@@ -126,6 +133,7 @@ export interface Warn {
   total: number;
 }
 
+export type AimMode = 'mouse' | 'front' | 'nearest';
 export interface Input {
   mx: number;
   my: number;
@@ -136,6 +144,23 @@ export interface Input {
   potion: boolean;
   bomb: boolean;
   use: boolean;
+  /** artifact slot pressed this frame (0..2), or -1 */
+  artifact?: number;
+  cycleArrow?: boolean;
+  aimMode?: AimMode;
+  autoFire?: boolean;
+}
+export interface Totem {
+  x: number;
+  y: number;
+  t: number;
+}
+export interface Bolt {
+  x: number;
+  y: number;
+  /** offsets from x, y and the height of each point, ground first */
+  pts: [number, number, number][];
+  life: number;
 }
 
 export const CAMP_DEF: LevelDef = {
@@ -197,6 +222,14 @@ export class Game {
   flow: Int16Array = new Int16Array(0);
   flowT = 0;
   near: { label: string; act: () => void } | null = null;
+  /** locked target (click a monster), 0 = none */
+  targetId = 0;
+  artCd = [0, 0, 0];
+  totems: Totem[] = [];
+  bolts: Bolt[] = [];
+  speedT = 0;
+  ironT = 0;
+  autoT = 0;
 
   onSound: (s: string) => void = () => {};
   onMsg: (s: string) => void = () => {};
@@ -215,13 +248,30 @@ export class Game {
   }
 
   get melee() {
-    return MELEE[this.save.melee];
+    return meleeOf(this.save.melee);
   }
   get ranged() {
-    return RANGED[this.save.ranged];
+    return rangedOf(this.save.ranged);
   }
   get armor() {
-    return ARMOR[this.save.armor];
+    return armorOf(this.save.armor);
+  }
+  get rollMax() {
+    return this.armor.quickroll ? 0.42 : 0.85;
+  }
+  owns(id: GearId) {
+    return this.save.owned.some((k) => parseKey(k).id === id);
+  }
+  /** Gives the player a new item, rolling for gold (0.5%) or diamond (0.05%). */
+  grant(id: GearId, rarity: Rarity = rollRarity()): ItemKey {
+    const key = makeKey(id, rarity);
+    if (!this.save.owned.includes(key)) this.save.owned.push(key);
+    if (rarity !== 'normal') {
+      this.onBanner(rarity === 'gold' ? '✨ GOLD ITEM! ✨' : '💎 DIAMOND ITEM! 💎', `${itemName(key)}: much stronger than the normal one!`);
+      this.onSound('rare');
+    }
+    this.onSave();
+    return key;
   }
 
   enterCamp() {
@@ -252,6 +302,11 @@ export class Game {
 
   private resetRun() {
     this.monsters = [];
+    this.totems = [];
+    this.bolts = [];
+    this.targetId = 0;
+    this.speedT = this.ironT = 0;
+    this.artCd = [0, 0, 0];
     this.shots = [];
     this.bombs = [];
     this.drops = [];
@@ -424,7 +479,7 @@ export class Game {
   // ---------- combat ----------
   hurtHero(dmg: number, fromX: number, fromY: number, effect?: 'slow' | 'burn') {
     if (this.dead || this.rollT > 0 || this.hurtT > 0) return;
-    const real = Math.max(1, Math.round(dmg * (1 - this.armor.block)));
+    const real = Math.max(1, Math.round(dmg * (1 - this.armor.block) * (this.ironT > 0 ? 0.25 : 1)));
     this.hp -= real;
     this.hurtT = 0.45;
     this.shake = Math.min(1, this.shake + 0.35);
@@ -501,9 +556,10 @@ export class Game {
 
   private swing() {
     const w = this.melee;
+    if (w.shape === 'fist') this.onSound('punch');
     this.meleeCd = w.rate;
     this.swingT = this.swingDur = Math.min(0.32, w.rate * 0.85);
-    this.onSound(w.effect === 'stun' ? 'slam' : 'swing');
+    if (w.shape !== 'fist') this.onSound(w.effect === 'stun' ? 'slam' : 'swing');
     const half = (w.arc * Math.PI) / 360;
     for (const m of this.monsters) {
       if (m.dead) continue;
@@ -540,24 +596,157 @@ export class Game {
     }
   }
 
-  private shoot() {
+  /** the arrow type that will fly next */
+  get loadedArrow(): ArrowKind {
+    const k = this.save.arrowKind;
+    return k !== 'normal' && this.save.special[k] > 0 ? k : 'normal';
+  }
+  arrowCount(k: ArrowKind = this.loadedArrow) {
+    return k === 'normal' ? this.save.arrows : this.save.special[k];
+  }
+  cycleArrow() {
+    const order: ArrowKind[] = ['normal', 'fire', 'frost', 'boom'];
+    let i = order.indexOf(this.save.arrowKind);
+    for (let n = 0; n < 4; n++) {
+      i = (i + 1) % 4;
+      if (order[i] === 'normal' || this.save.special[order[i] as 'fire'] > 0) break;
+    }
+    this.save.arrowKind = order[i];
+    this.onMsg(`Loaded: ${order[i] === 'normal' ? 'plain arrows' : order[i] + ' arrows'} (${this.arrowCount(order[i])})`);
+  }
+
+  private shoot(angle: number) {
     const w = this.ranged;
-    if (this.save.arrows <= 0) {
+    const ak = this.loadedArrow;
+    if (this.arrowCount(ak) <= 0) {
       this.rangedCd = 0.4;
       this.onMsg('Out of arrows! Old Pip in camp sells more.');
       return;
     }
-    this.save.arrows--;
+    if (ak === 'normal') this.save.arrows--;
+    else this.save.special[ak]--;
+    this.face = angle;
     this.rangedCd = w.rate;
     this.drawT = 0.18;
     this.onSound('bow');
-    const kind = this.save.ranged === 'crossbow' ? 'bolt' : this.save.ranged === 'starlight-bow' ? 'star' : 'arrow';
+    const { id, rarity } = parseKey(this.save.ranged);
+    const kind = w.shape === 'crossbow' ? 'bolt' : id === 'starlight-bow' || id === 'storm-bow' || rarity !== 'normal' ? 'star' : 'arrow';
+    const effect = ak === 'fire' || w.burn ? 'burn' : ak === 'frost' ? 'slow' : ak === 'boom' ? 'boom' : undefined;
+    const color = ak !== 'normal' ? ({ fire: '#ff8a3a', frost: '#aee8ff', boom: '#ffe066' } as const)[ak] : w.burn ? '#ff8a3a' : rarity === 'gold' ? '#ffd040' : rarity === 'diamond' ? '#8af4ff' : id === 'storm-bow' ? '#9ab0ff' : undefined;
     for (let i = 0; i < w.shots; i++) {
-      const a = this.face + (i - (w.shots - 1) / 2) * w.spread;
+      const a = angle + (i - (w.shots - 1) / 2) * w.spread;
       this.shots.push({
         x: this.x + Math.cos(a) * 0.4, y: this.y + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4,
+        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, effect, color,
       });
+    }
+  }
+
+  // ---------- aiming ----------
+  target(): Monster | null {
+    if (!this.targetId) return null;
+    const m = this.monsters.find((q) => q.id === this.targetId && !q.dead);
+    if (!m) this.targetId = 0;
+    return m ?? null;
+  }
+  /** click on a monster to lock on to it */
+  lockAt(p: { x: number; y: number }): boolean {
+    let best: Monster | null = null, bd = 1.1;
+    for (const m of this.monsters) {
+      if (m.dead) continue;
+      const d = Math.hypot(m.x - p.x, m.y - p.y) - m.def.radius * m.scale * 0.6;
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    if (best) {
+      this.targetId = best.id;
+      return true;
+    }
+    return false;
+  }
+  nearestEnemy(range: number): Monster | null {
+    let best: Monster | null = null, bd = range;
+    for (const m of this.monsters) {
+      if (m.dead) continue;
+      const d = Math.hypot(m.x - this.x, m.y - this.y);
+      if (d < bd && this.lineOfSight(this.x, this.y, m.x, m.y)) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+  private angleTo(m: { x: number; y: number }) {
+    return Math.atan2(m.y - this.y, m.x - this.x);
+  }
+  bowAngle(inp: Input): number {
+    const t = this.target();
+    if (t) return this.angleTo(t);
+    const mode = inp.aimMode ?? 'mouse';
+    if (mode === 'mouse' && inp.aim) return this.angleTo(inp.aim);
+    if (mode === 'nearest' || (mode === 'mouse' && !inp.aim)) {
+      const n = this.nearestEnemy(9);
+      if (n) return this.angleTo(n);
+    }
+    return this.face;
+  }
+  private meleeAngle(inp: Input): number {
+    const w = this.melee;
+    const t = this.target();
+    if (t && Math.hypot(t.x - this.x, t.y - this.y) < w.reach + 1.2) return this.angleTo(t);
+    const n = this.nearestEnemy(w.reach + 0.9);
+    if (n) return this.angleTo(n);
+    if ((inp.aimMode ?? 'mouse') === 'mouse' && inp.aim) return this.angleTo(inp.aim);
+    return this.face;
+  }
+
+  // ---------- artifacts ----------
+  private useArtifact(i: number) {
+    const id = this.save.slots[i];
+    if (!id) {
+      this.onMsg(`Artifact slot ${i + 1} is empty. Mira the Mystic in camp sells artifacts.`);
+      return;
+    }
+    if (this.artCd[i] > 0) return;
+    const A = ARTIFACTS[id];
+    this.artCd[i] = A.cooldown;
+    this.onSound('artifact');
+    const tier = this.mode === 'dungeon' ? this.levelIdx : 0;
+    if (id === 'healing-totem') {
+      this.totems.push({ x: this.x, y: this.y, t: 7 });
+      this.burst(this.x, this.y, 0.5, '#6fe08a', 16, 2);
+    } else if (id === 'gust-horn') {
+      this.ring(this.x, this.y, 4, '#cfe8ff', 0.45);
+      for (const m of this.monsters) {
+        if (m.dead) continue;
+        const d = Math.hypot(m.x - this.x, m.y - this.y);
+        if (d > 4) continue;
+        this.hurtMonster(m, 6, this.x, this.y, 14, m.guardian ? undefined : 'stun');
+      }
+    } else if (id === 'thunder-charm') {
+      const near = this.monsters.filter((m) => !m.dead && Math.hypot(m.x - this.x, m.y - this.y) < 9).sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y)).slice(0, 5);
+      if (!near.length) this.onMsg('No enemies close enough for the lightning.');
+      for (const m of near) {
+        const pts: [number, number, number][] = [];
+        for (let k = 0; k <= 7; k++) pts.push([k ? (Math.random() - 0.5) * 0.5 : 0, k ? (Math.random() - 0.5) * 0.5 : 0, k * 0.7]);
+        this.bolts.push({ x: m.x, y: m.y, pts, life: 0.35 });
+        this.hurtMonster(m, 30 + tier * 10, m.x, m.y - 0.1, 1, m.guardian ? undefined : 'stun');
+      }
+      this.shake = Math.min(1, this.shake + 0.4);
+      this.onSound('thunder');
+    } else if (id === 'ghost-boots') {
+      this.speedT = 5;
+      this.burst(this.x, this.y, 0.2, '#b8a8ff', 14, 2);
+    } else if (id === 'ironhide-charm') {
+      this.ironT = 6;
+      this.ring(this.x, this.y, 1.2, '#c8d0d8', 0.4);
+    } else if (id === 'firework-crown') {
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        this.shots.push({ x: this.x, y: this.y, z: 1, vx: Math.cos(a) * 9, vy: Math.sin(a) * 9, dmg: 20 + tier * 6, from: 'hero', kind: 'firework', pierce: 0, hit: new Set(), life: 0.9, effect: 'boom', color: ['#ff6ad6', '#ffe066', '#6ad6ff'][k % 3] });
+      }
     }
   }
 
@@ -658,6 +847,19 @@ export class Game {
     this.slowT -= dt;
     this.potionCd -= dt;
     this.bombCd -= dt;
+    this.speedT -= dt;
+    this.ironT -= dt;
+    for (let i = 0; i < 3; i++) this.artCd[i] = Math.max(0, this.artCd[i] - dt);
+    for (const t of this.totems) {
+      t.t -= dt;
+      if (Math.hypot(t.x - this.x, t.y - this.y) < 2.6 && this.hp < this.maxHp) {
+        this.hp = Math.min(this.maxHp, this.hp + 9 * dt);
+        if (Math.random() < dt * 6) this.parts.push({ x: this.x + (Math.random() - 0.5) * 0.5, y: this.y + (Math.random() - 0.5) * 0.5, z: 0.5, vx: 0, vy: 0, vz: 2, life: 0.6, max: 0.6, color: '#6fe08a', size: 0.07 });
+      }
+    }
+    this.totems = this.totems.filter((t) => t.t > 0);
+    for (const b of this.bolts) b.life -= dt;
+    this.bolts = this.bolts.filter((b) => b.life > 0);
     this.swingT = Math.max(0, this.swingT - dt);
     this.drawT = Math.max(0, this.drawT - dt);
     if (this.armor.regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.armor.regen * dt);
@@ -673,19 +875,10 @@ export class Game {
     const gx = (mx + my) * Math.SQRT1_2, gy = (my - mx) * Math.SQRT1_2;
     this.moving = ml > 0.1;
 
-    // aim: mouse, else nearest enemy (for touch), else where you walk
-    if (inp.aim) this.face = Math.atan2(inp.aim.y - this.y, inp.aim.x - this.x);
-    else {
-      let best: Monster | null = null, bd = 6.5;
-      for (const m of this.monsters) {
-        if (m.dead) continue;
-        const d = Math.hypot(m.x - this.x, m.y - this.y);
-        if (d < bd && this.lineOfSight(this.x, this.y, m.x, m.y)) {
-          bd = d;
-          best = m;
-        }
-      }
-      if (best && (inp.melee || inp.ranged || inp.bomb || this.swingT > 0)) this.face = Math.atan2(best.y - this.y, best.x - this.x);
+    // the body faces the mouse (in mouse aim mode) or where you walk; attacks turn it
+    const busy = this.swingT > 0 || this.drawT > 0;
+    if (!busy) {
+      if ((inp.aimMode ?? 'mouse') === 'mouse' && inp.aim) this.face = Math.atan2(inp.aim.y - this.y, inp.aim.x - this.x);
       else if (this.moving) this.face = Math.atan2(gy, gx);
     }
 
@@ -694,14 +887,14 @@ export class Game {
       this.rollDx = Math.cos(a);
       this.rollDy = Math.sin(a);
       this.rollT = 0.3;
-      this.rollCd = 0.85;
+      this.rollCd = this.rollMax;
       this.onSound('roll');
       this.burst(this.x, this.y, 0.1, '#bfb3a0', 6, 1.5);
     }
 
     const tile = tileAt(this.L, Math.floor(this.x), Math.floor(this.y));
     const onHaz = tile === T.HAZARD && this.mode === 'dungeon';
-    let speed = 4.6 * this.armor.speed * (this.slowT > 0 ? 0.6 : 1) * (onHaz && this.def.hazard === 'water' ? 0.6 : 1);
+    let speed = 4.6 * (this.speedT > 0 ? 1.6 : 1) * this.armor.speed * (this.slowT > 0 ? 0.6 : 1) * (onHaz && this.def.hazard === 'water' ? 0.6 : 1);
     if (this.swingT > 0 && this.melee.rate > 0.6) speed *= 0.55;
     if (this.rollT > 0) {
       this.rollT -= dt;
@@ -714,13 +907,26 @@ export class Game {
     }
     this.moveCircle(this, this.vx * dt, this.vy * dt, HERO_R);
     if (this.moving || this.rollT > 0) this.walk += dt * 10;
-    if (onHaz && this.def.hazard === 'lava' && this.rollT <= 0) {
+    if (this.speedT > 0 && this.moving && Math.random() < dt * 14) this.burst(this.x, this.y, 0.1, '#b8a8ff', 1, 0.5);
+    if (onHaz && this.def.hazard === 'lava' && this.rollT <= 0 && !this.armor.lavaproof) {
       if (Math.random() < dt * 8) this.burst(this.x, this.y, 0.1, '#ff8a2a', 2, 1.5);
       if (this.hurtT <= 0) this.hurtHero(12, this.x - this.vx, this.y - this.vy);
     }
 
-    if (inp.melee && this.meleeCd <= 0 && this.rollT <= 0) this.swing();
-    if (inp.ranged && this.rangedCd <= 0 && this.rollT <= 0) this.shoot();
+    if (inp.melee && this.meleeCd <= 0 && this.rollT <= 0) {
+      this.face = this.meleeAngle(inp);
+      this.swing();
+    }
+    if (this.rangedCd <= 0 && this.rollT <= 0) {
+      if (inp.ranged) this.shoot(this.bowAngle(inp));
+      else if (this.ranged.auto && (inp.autoFire ?? true) && this.arrowCount() > 0) {
+        // auto-fire bows shoot by themselves while an enemy is close
+        const t = this.target() ?? this.nearestEnemy(8.5);
+        if (t && t.awake) this.shoot(this.bowAngle(inp));
+      }
+    }
+    if (inp.cycleArrow) this.cycleArrow();
+    if (inp.artifact !== undefined && inp.artifact >= 0) this.useArtifact(inp.artifact);
     if (inp.potion) this.drinkPotion();
     if (inp.bomb && this.bombCd <= 0) this.throwBomb(inp.aim);
 
@@ -756,13 +962,17 @@ export class Game {
     if (Math.random() < 0.6) this.drop(cx, cy, 'potion', 1);
     // sometimes a piece of gear you don't have yet
     if (Math.random() < 0.45) {
-      const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.save.owned.includes(g) && gearTier(g) <= this.levelIdx + 1);
+      const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((g) => !this.owns(g) && gearTier(g) <= this.levelIdx + 1);
       if (pool.length) {
         const g = pool[Math.floor(Math.random() * pool.length)];
-        this.save.owned.push(g);
-        this.onBanner('New gear!', `${gearName(g)} — equip it from your gear (I).`);
-        this.onSave();
+        const key = this.grant(g);
+        if (parseKey(key).rarity === 'normal') this.onBanner('New gear!', `${itemName(key)}: equip it from your inventory (Ctrl).`);
       }
+    }
+    if (Math.random() < 0.35) {
+      const k = (['fire', 'frost', 'boom'] as const)[Math.floor(Math.random() * 3)];
+      this.save.special[k] += 6;
+      this.float(cx, cy, `+6 ${k} arrows`, '#ffe08a');
     }
   }
 
@@ -1031,7 +1241,8 @@ export class Game {
         s.y += (s.vy * dt) / steps;
         if (isWallTile(tileAt(this.L, Math.floor(s.x), Math.floor(s.y))) || this.solidAt(Math.floor(s.x), Math.floor(s.y), true)) {
           s.life = 0;
-          this.burst(s.x - s.vx * 0.01, s.y - s.vy * 0.01, s.z, s.from === 'hero' ? '#d8c8a0' : this.shotColor(s.kind), 4, 1.5);
+          this.burst(s.x - s.vx * 0.01, s.y - s.vy * 0.01, s.z, s.from === 'hero' ? (s.color ?? '#d8c8a0') : this.shotColor(s.kind), 4, 1.5);
+          if (s.effect === 'boom') this.miniBoom(s.x - s.vx * 0.02, s.y - s.vy * 0.02, s.dmg * 0.6, s.color ?? '#ffe066');
           break;
         }
         if (s.from === 'hero') {
@@ -1039,7 +1250,8 @@ export class Game {
             if (m.dead || s.hit.has(m.id)) continue;
             if (Math.hypot(m.x - s.x, m.y - s.y) < m.def.radius * m.scale + 0.15) {
               s.hit.add(m.id);
-              this.hurtMonster(m, s.dmg, s.x - s.vx, s.y - s.vy, 2);
+              this.hurtMonster(m, s.dmg, s.x - s.vx, s.y - s.vy, 2, s.effect === 'boom' ? undefined : s.effect);
+              if (s.effect === 'boom') this.miniBoom(s.x, s.y, s.dmg * 0.6, s.color ?? '#ffe066', m.id);
               if (s.pierce-- <= 0) {
                 s.life = 0;
                 break;
@@ -1059,6 +1271,13 @@ export class Game {
 
   shotColor(k: Shot['kind']) {
     return k === 'ember' ? '#ffb347' : k === 'spore' ? '#e06ad6' : k === 'ice' ? '#bfefff' : k === 'star' ? '#fff3a0' : '#d8c8a0';
+  }
+
+  private miniBoom(x: number, y: number, dmg: number, color: string, skip = 0) {
+    this.ring(x, y, 1.4, color, 0.3);
+    this.burst(x, y, 0.6, color, 12, 4, 0.1);
+    this.onSound('pop');
+    for (const m of this.monsters) if (!m.dead && m.id !== skip && Math.hypot(m.x - x, m.y - y) < 1.4 + m.def.radius) this.hurtMonster(m, dmg, x, y, 3);
   }
 
   private updateBombs(dt: number) {
@@ -1142,34 +1361,64 @@ export class Game {
   }
 
   // ---------- shop ----------
-  buyGear(id: GearId): string | null {
+  buyGear(id: GearId): ItemKey | string {
     const g = gearPrice(id);
-    if (this.save.owned.includes(id)) return 'You already own that.';
+    if (this.owns(id)) return 'You already own that.';
     if (this.save.coins < g) return 'Not enough coins.';
     this.save.coins -= g;
-    this.save.owned.push(id);
-    this.equip(id);
+    const key = this.grant(id);
+    this.equip(key);
+    this.onSound('buy');
+    this.onSave();
+    return key;
+  }
+  equip(key: ItemKey) {
+    if (!this.save.owned.includes(key)) return;
+    const { id } = parseKey(key);
+    if (isMelee(id)) this.save.melee = key;
+    else if (isRanged(id)) this.save.ranged = key;
+    else if (isArmor(id)) this.save.armor = key;
+    this.onSave();
+  }
+  unequipMelee() {
+    this.save.melee = '';
+    this.onSave();
+  }
+  buyArtifact(id: ArtifactId): string | null {
+    if (this.save.artifacts.includes(id)) return 'You already own that.';
+    const p = ARTIFACTS[id].price;
+    if (this.save.coins < p) return 'Not enough coins.';
+    this.save.coins -= p;
+    this.save.artifacts.push(id);
+    const empty = this.save.slots.indexOf('');
+    if (empty >= 0) this.save.slots[empty] = id;
     this.onSound('buy');
     this.onSave();
     return null;
   }
-  equip(id: GearId) {
-    if (!this.save.owned.includes(id)) return;
-    if (id in MELEE) this.save.melee = id as MeleeId;
-    else if (id in RANGED) this.save.ranged = id as RangedId;
-    else this.save.armor = id as ArmorId;
+  slotArtifact(id: ArtifactId) {
+    const s = this.save.slots;
+    if (s.includes(id)) s[s.indexOf(id)] = '';
+    else {
+      const empty = s.indexOf('');
+      if (empty >= 0) s[empty] = id;
+      else {
+        s.shift();
+        s.push(id);
+      }
+    }
     this.onSave();
   }
 }
 
 export function gearPrice(id: GearId) {
-  return (MELEE as Record<string, { price: number }>)[id]?.price ?? (RANGED as Record<string, { price: number }>)[id]?.price ?? ARMOR[id as ArmorId].price;
+  return isMelee(id) ? MELEE[id].price : isRanged(id) ? RANGED[id].price : ARMOR[id as ArmorId].price;
 }
 export function gearName(id: GearId) {
-  return (MELEE as Record<string, { name: string }>)[id]?.name ?? (RANGED as Record<string, { name: string }>)[id]?.name ?? ARMOR[id as ArmorId].name;
+  return isMelee(id) ? MELEE[id].name : isRanged(id) ? RANGED[id].name : ARMOR[id as ArmorId].name;
 }
 /** rough level a piece of gear belongs to, so chests don't hand out the best stuff early */
 export function gearTier(id: GearId) {
   const p = gearPrice(id);
-  return p < 120 ? 0 : p < 200 ? 1 : p < 300 ? 2 : p < 500 ? 3 : 4;
+  return p < 120 ? 0 : p < 230 ? 1 : p < 330 ? 2 : p < 500 ? 3 : 4;
 }

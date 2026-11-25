@@ -9,6 +9,9 @@ export interface HeroLook {
   trim: string;
   walk: number;
   moving: boolean;
+  helm?: 'horns' | 'hood' | 'crest' | 'spikes';
+  /** gold or diamond armor: a shiny helmet and shoulder plates in the trim color */
+  shiny?: boolean;
 }
 
 const leg = (side: number, swing: number, color: string, z = 0, h = 0.34, w = 0.13): Part => [swing * side, side * 0.085, z, w, w, h, color];
@@ -33,7 +36,34 @@ export function heroParts(l: HeroLook): Part[] {
     [0.165, 0.075, 0.82, 0.02, 0.06, 0.06, '#20304a'],
     [0.165, -0.075, 0.82, 0.02, 0.06, 0.06, '#20304a'],
     [0.165, 0, 0.75, 0.02, 0.08, 0.025, '#b0684a'],
+    ...helmParts(l),
   ];
+}
+
+function helmParts(l: HeroLook): Part[] {
+  const p: Part[] = [];
+  const metal = l.shiny ? l.trim : l.armor;
+  if (l.shiny || l.helm === 'horns' || l.helm === 'crest' || l.helm === 'spikes') {
+    p.push([-0.02, 0, 0.94, 0.36, 0.36, 0.1, metal, l.shiny]);
+    p.push([-0.12, 0, 0.72, 0.13, 0.36, 0.24, metal]);
+    p.push([0, 0.25, 0.66, 0.16, 0.16, 0.08, metal, l.shiny]);
+    p.push([0, -0.25, 0.66, 0.16, 0.16, 0.08, metal, l.shiny]);
+  }
+  if (l.helm === 'hood') {
+    p.push([-0.03, 0, 0.93, 0.37, 0.37, 0.12, l.armor]);
+    p.push([-0.13, 0, 0.7, 0.12, 0.37, 0.28, l.armor]);
+    p.push([0.0, 0.17, 0.72, 0.3, 0.04, 0.24, l.armor]);
+    p.push([0.0, -0.17, 0.72, 0.3, 0.04, 0.24, l.armor]);
+  } else if (l.helm === 'horns') {
+    p.push([0, 0.2, 1.0, 0.08, 0.1, 0.12, '#e8dcc0'], [0, -0.2, 1.0, 0.08, 0.1, 0.12, '#e8dcc0']);
+    p.push([0.02, 0.26, 1.1, 0.07, 0.08, 0.1, '#e8dcc0'], [0.02, -0.26, 1.1, 0.07, 0.08, 0.1, '#e8dcc0']);
+  } else if (l.helm === 'crest') {
+    p.push([-0.04, 0, 1.04, 0.3, 0.06, 0.12, l.trim], [-0.14, 0, 1.0, 0.1, 0.06, 0.1, l.trim]);
+  } else if (l.helm === 'spikes') {
+    for (const [f, r] of [[0.08, 0.12], [0.08, -0.12], [-0.1, 0.12], [-0.1, -0.12]] as const) p.push([f, r, 1.04, 0.06, 0.06, 0.1, l.trim, true]);
+    p.push([0, 0.27, 0.74, 0.06, 0.06, 0.08, l.trim], [0, -0.27, 0.74, 0.06, 0.06, 0.08, l.trim]);
+  }
+  return p;
 }
 
 export function traderParts(t: Trader, bob: number): Part[] {
@@ -60,6 +90,11 @@ export function traderParts(t: Trader, bob: number): Part[] {
     p.push([0, 0, 1.0 + bob, 0.08, 0.08, 0.08, '#c8d0d8']);
     p.push([0.17, 0.15, 0.4, 0.04, 0.12, 0.14, '#9aa4ae']); // shoulder plates
     p.push([0.17, -0.15, 0.4, 0.04, 0.12, 0.14, '#9aa4ae']);
+  } else if (t.id === 'mystic') {
+    p.push([0, 0, 0.9 + bob, 0.36, 0.36, 0.12, L.hat]); // hood
+    p.push([-0.12, 0, 0.66 + bob, 0.12, 0.36, 0.3, L.hat]);
+    p.push([0.17, 0, 0.98 + bob, 0.03, 0.1, 0.06, '#8af4e0', true]); // gem on the hood
+    p.push([0.2, 0.23, 0.36, 0.14, 0.14, 0.14, '#8af4e0', true]); // glowing orb in hand
   } else {
     p.push([0, 0, 0.9 + bob, 0.38, 0.38, 0.05, L.hat]); // wide brim
     p.push([0, 0, 0.95 + bob, 0.22, 0.22, 0.14, L.hat]);

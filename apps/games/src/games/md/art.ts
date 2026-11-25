@@ -1,6 +1,6 @@
 // Little icons for gear and supplies, drawn once into data URLs.
-import { ARMOR, MELEE, RANGED, type GearId, type SupplyId, type MonsterKind } from './data';
-import { drawHeldWeapon, portrait, monsterParts, heroParts, tintParts } from './render';
+import { ARTIFACTS, RARITY_LOOK, armorOf, isMelee, isRanged, meleeOf, parseKey, rangedOf, type ArtifactId, type GearId, type ItemKey, type SupplyId, type MonsterKind } from './data';
+import { drawBow, drawHeldWeapon, portrait, monsterParts, heroParts, tintParts } from './render';
 
 const cache = new Map<string, string>();
 
@@ -10,56 +10,37 @@ function canvas(size: number) {
   return [c, c.getContext('2d')!] as const;
 }
 
-export function gearIcon(id: GearId): string {
-  const key = 'g:' + id;
-  const hit = cache.get(key);
+/** Icon for an owned item key ("battle-axe", "battle-axe@gold"…) or a plain gear id. */
+export function gearIcon(key: ItemKey | ''): string {
+  const ck = 'g:' + key;
+  const hit = cache.get(ck);
   if (hit) return hit;
   const S = 64;
   const [c, x] = canvas(S);
-  if (id in MELEE) {
-    const w = MELEE[id as keyof typeof MELEE];
-    const len = id === 'long-spear' || id === 'frost-glaive' ? 62 : id === 'twin-daggers' ? 34 : 46;
-    drawHeldWeapon(x, id === 'twin-daggers' ? 18 : 12, S - 12, -Math.PI / 4, len, w.color, w.blade, id, w.effect === 'burn' || w.effect === 'slow');
-    if (id === 'twin-daggers') drawHeldWeapon(x, 32, S - 8, -Math.PI / 4, len, w.color, w.blade, id);
-  } else if (id in RANGED) {
-    const w = RANGED[id as keyof typeof RANGED];
-    x.translate(S / 2, S / 2);
-    x.rotate(-Math.PI / 4);
-    if (id === 'starlight-bow') {
-      x.shadowColor = '#fff3a0';
-      x.shadowBlur = 12;
-    }
-    x.strokeStyle = 'rgba(0,0,0,.5)';
-    x.lineWidth = 8;
-    x.beginPath();
-    if (id === 'crossbow') {
-      x.moveTo(-24, 0);
-      x.lineTo(24, 0);
-      x.moveTo(10, -22);
-      x.quadraticCurveTo(18, 0, 10, 22);
-    } else x.arc(-14, 0, 30, -1.05, 1.05);
-    x.stroke();
-    x.strokeStyle = w.color;
-    x.lineWidth = 5;
-    x.stroke();
-    x.strokeStyle = '#efe6d0';
-    x.lineWidth = 1.5;
-    x.beginPath();
-    if (id === 'crossbow') {
-      x.moveTo(10, -22);
-      x.lineTo(-2, 0);
-      x.lineTo(10, 22);
+  const { id, rarity } = key ? parseKey(key) : { id: '' as GearId, rarity: 'normal' as const };
+  if (!key || isMelee(id)) {
+    const w = meleeOf(key);
+    if (w.shape === 'fist') {
+      x.fillStyle = '#e8b890';
+      x.fillRect(18, 22, 28, 22);
+      x.fillStyle = '#c99a70';
+      for (let i = 0; i < 4; i++) x.fillRect(19 + i * 7, 22, 5, 6);
+      x.fillRect(14, 30, 8, 10);
     } else {
-      x.moveTo(1, -26);
-      x.lineTo(1, 26);
+      const len = w.shape === 'spear' || w.shape === 'glaive' || w.shape === 'scythe' ? 60 : w.shape === 'daggers' || w.shape === 'sickle' ? 34 : 46;
+      drawHeldWeapon(x, w.shape === 'daggers' ? 18 : 12, S - 12, -Math.PI / 4, len, w.color, w.blade, w.shape, !!w.glow);
+      if (w.shape === 'daggers') drawHeldWeapon(x, 32, S - 8, -Math.PI / 4, len, w.color, w.blade, w.shape, !!w.glow);
     }
-    x.stroke();
-    // arrow(s)
-    const arrows = id === 'fan-bow' ? [-0.3, 0, 0.3] : [0];
+  } else if (isRanged(id)) {
+    const w = rangedOf(key);
+    x.translate(S / 2 + 4, S / 2);
+    x.rotate(-Math.PI / 4);
+    drawBow(x, w, w.shape === 'longbow' ? 1.45 : 2, false);
+    const arrows = w.shots === 3 ? [-0.3, 0, 0.3] : w.shots === 2 ? [-0.12, 0.12] : [0];
     for (const a of arrows) {
       x.save();
       x.rotate(a);
-      x.strokeStyle = id === 'starlight-bow' ? '#fff8d0' : '#d8c8a0';
+      x.strokeStyle = w.burn ? '#ff8a3a' : w.glow ? '#fff8d0' : '#d8c8a0';
       x.lineWidth = 2.5;
       x.beginPath();
       x.moveTo(-18, 0);
@@ -69,19 +50,113 @@ export function gearIcon(id: GearId): string {
       x.fillRect(22, -3, 6, 6);
       x.restore();
     }
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    if (w.auto) {
+      x.fillStyle = '#ffe066';
+      x.font = 'bold 13px sans-serif';
+      x.fillText('AUTO', 2, 62);
+    }
   } else {
-    const a = ARMOR[id as keyof typeof ARMOR];
-    const parts = heroParts({ armor: a.color, trim: a.trim, walk: 0, moving: false }).filter((p) => p[6] === a.color || p[6] === a.trim);
-    const p = portrait(parts.map((q) => [q[0], q[1], q[2] - 0.3, q[3], q[4], q[5], q[6]]), Math.PI / 4, S, S, 1, 1.5);
-    x.drawImage(p, 0, -6, S, S);
+    const a = armorOf(key);
+    const shiny = rarity !== 'normal';
+    const parts = heroParts({ armor: a.color, trim: a.trim, walk: 0, moving: false, helm: a.helm, shiny }).filter((p) => p[6] === a.color || p[6] === a.trim || p[6] === '#e8dcc0');
+    const p = portrait(parts.map((q) => [q[0], q[1], q[2] - 0.3, q[3], q[4], q[5], q[6], q[7]]), Math.PI / 4, S, S, 1, 1.35);
+    x.drawImage(p, 0, -4, S, S);
     if (a.regen) {
       x.fillStyle = '#8fe06a';
-      x.fillRect(44, 6, 12, 4);
-      x.fillRect(48, 2, 4, 12);
+      x.fillRect(48, 6, 12, 4);
+      x.fillRect(52, 2, 4, 12);
+    }
+  }
+  if (rarity !== 'normal') {
+    // sparkles for gold and diamond
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    const col = RARITY_LOOK[rarity].metal;
+    x.fillStyle = '#ffffff';
+    x.shadowColor = col;
+    x.shadowBlur = 6;
+    for (const [px, py, r] of [[8, 10, 3], [54, 52, 2.5], [50, 14, 2]]) {
+      x.fillRect(px - r, py - 0.8, r * 2, 1.6);
+      x.fillRect(px - 0.8, py - r, 1.6, r * 2);
     }
   }
   const url = c.toDataURL();
-  cache.set(key, url);
+  cache.set(ck, url);
+  return url;
+}
+
+export function artifactIcon(id: ArtifactId): string {
+  const ck = 'a:' + id;
+  const hit = cache.get(ck);
+  if (hit) return hit;
+  const [c, x] = canvas(64);
+  const A = ARTIFACTS[id];
+  x.shadowColor = A.color;
+  x.shadowBlur = 10;
+  const box = (px: number, py: number, w: number, h: number, col: string) => {
+    x.fillStyle = col;
+    x.fillRect(px, py, w, h);
+  };
+  switch (id) {
+    case 'healing-totem':
+      box(26, 26, 12, 30, '#6b4424');
+      box(22, 18, 20, 10, '#3f8a3a');
+      box(27, 6, 10, 10, A.color);
+      box(29, 36, 6, 4, '#2a1a0a');
+      break;
+    case 'gust-horn':
+      x.beginPath();
+      x.moveTo(10, 40);
+      x.quadraticCurveTo(20, 18, 50, 14);
+      x.lineTo(54, 30);
+      x.quadraticCurveTo(28, 30, 18, 46);
+      x.closePath();
+      x.fillStyle = '#e8dcc0';
+      x.fill();
+      box(48, 12, 8, 20, '#c9a040');
+      x.strokeStyle = A.color;
+      x.lineWidth = 2;
+      for (const r of [8, 14]) {
+        x.beginPath();
+        x.arc(56, 22, r, -0.8, 0.8);
+        x.stroke();
+      }
+      break;
+    case 'thunder-charm':
+      x.beginPath();
+      x.moveTo(36, 4); x.lineTo(16, 34); x.lineTo(30, 34); x.lineTo(24, 60); x.lineTo(48, 26); x.lineTo(34, 26); x.lineTo(42, 4);
+      x.closePath();
+      x.fillStyle = A.color;
+      x.fill();
+      break;
+    case 'ghost-boots':
+      box(14, 14, 14, 30, '#8a78d0');
+      box(14, 40, 26, 12, '#8a78d0');
+      box(34, 18, 14, 26, '#b8a8ff');
+      box(34, 40, 24, 12, '#b8a8ff');
+      box(8, 22, 4, 4, '#fff');
+      box(4, 34, 6, 3, '#fff');
+      break;
+    case 'ironhide-charm':
+      x.beginPath();
+      x.moveTo(32, 6); x.lineTo(54, 14); x.lineTo(50, 40); x.lineTo(32, 58); x.lineTo(14, 40); x.lineTo(10, 14);
+      x.closePath();
+      x.fillStyle = A.color;
+      x.fill();
+      box(28, 16, 8, 30, '#5b6169');
+      box(20, 26, 24, 8, '#5b6169');
+      break;
+    case 'firework-crown':
+      box(12, 34, 40, 18, '#e0b040');
+      for (const px of [12, 26, 40]) box(px, 24, 12, 12, '#f0c850');
+      box(16, 12, 6, 6, '#ff6ad6');
+      box(30, 6, 6, 6, '#ffe066');
+      box(44, 12, 6, 6, '#6ad6ff');
+      box(29, 40, 6, 6, '#ff4a6a');
+      break;
+  }
+  const url = c.toDataURL();
+  cache.set(ck, url);
   return url;
 }
 
@@ -103,7 +178,12 @@ export function supplyIcon(id: SupplyId): string {
     x.shadowBlur = 0;
     x.fillStyle = '#ff9ab8';
     x.fillRect(18, 28, 8, 10);
-  } else if (id === 'arrows') {
+  } else if (id === 'arrows' || id === 'fire-arrows' || id === 'frost-arrows' || id === 'boom-arrows') {
+    const tipCol = id === 'fire-arrows' ? '#ff8a3a' : id === 'frost-arrows' ? '#aee8ff' : id === 'boom-arrows' ? '#ffe066' : '#c0c8d0';
+    if (id !== 'arrows') {
+      x.shadowColor = tipCol;
+      x.shadowBlur = 10;
+    }
     x.translate(32, 32);
     x.rotate(-Math.PI / 4);
     for (const o of [-8, 0, 8]) {
@@ -113,7 +193,7 @@ export function supplyIcon(id: SupplyId): string {
       x.moveTo(-24, o);
       x.lineTo(20, o);
       x.stroke();
-      x.fillStyle = '#c0c8d0';
+      x.fillStyle = tipCol;
       x.fillRect(18, o - 4, 8, 8);
       x.fillStyle = '#e8e0d0';
       x.fillRect(-26, o - 4, 8, 8);

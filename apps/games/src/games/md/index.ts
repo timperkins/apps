@@ -3,22 +3,38 @@
 import './style.css';
 import type { GameModule } from '../types';
 import {
-  ARMOR, ARMOR_STOCK, LEVELS, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
-  type ArmorId, type GearId, type MeleeId, type RangedId, type SupplyId, type Trader,
+  ARMOR, ARMOR_STOCK, ARTIFACTS, ARROWS, LEVELS, MYSTIC_STOCK, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
+  armorOf, isArmor, isMelee, isRanged, itemName, meleeOf, parseKey, rangedOf,
+  type ArtifactId, type GearId, type ItemKey, type SupplyId, type Trader,
 } from './data';
-import { Game, gearName, gearPrice, newSave, type Input, type SaveData } from './game';
+import { Game, gearName, gearPrice, newSave, type AimMode, type Input, type SaveData } from './game';
 import { Renderer, portrait, heroParts, traderParts } from './render';
-import { gearIcon, monsterIcon, supplyIcon } from './art';
+import { artifactIcon, gearIcon, monsterIcon, supplyIcon } from './art';
 import { isMuted, setMuted, sfx } from './audio';
 
 const SAVE_KEY = 'md-save-v1';
 const MUTE_KEY = 'md-muted';
+const SETTINGS_KEY = 'md-settings';
+
+interface Settings {
+  aim: AimMode;
+  autoFire: boolean;
+}
+function readSettings(): Settings {
+  try {
+    return { aim: 'mouse', autoFire: true, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>) };
+  } catch {
+    return { aim: 'mouse', autoFire: true };
+  }
+}
 
 function readSave(): SaveData | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     const s = raw ? (JSON.parse(raw) as SaveData) : null;
-    return s && s.v === 1 ? { ...newSave(), ...s } : null;
+    if (!s || s.v !== 1) return null;
+    const d = newSave();
+    return { ...d, ...s, special: { ...d.special, ...(s.special ?? {}) }, slots: s.slots ?? d.slots, artifacts: s.artifacts ?? [] };
   } catch {
     return null;
   }
@@ -31,17 +47,20 @@ function writeSave(s: SaveData) {
   }
 }
 
-type Overlay = 'none' | 'title' | 'help' | 'menu' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win';
+type Overlay = 'none' | 'title' | 'help' | 'menu' | 'settings' | 'shop' | 'gear' | 'mission' | 'map' | 'dead' | 'done' | 'win';
 
 const LOGO = `<div class="md-logo"><span>M</span><i></i><span>D</span><i></i></div><div class="md-sub">MONSTER DUNGEONS</div>`;
 
 const HELP = `
   <div class="md-keys">
     <div><b>WASD</b> / arrows: walk · <b>mouse</b>: aim</div>
-    <div><b>Left click</b>: melee weapon · <b>Right click</b> or <b>F</b>: bow</div>
-    <div><b>Space</b> or <b>Shift</b>: dodge roll (you can’t be hit mid-roll)</div>
-    <div><b>Q</b>: Healing Draught · <b>R</b>: throw a Fizz Bomb · <b>E</b>: talk, open, use</div>
-    <div><b>I</b> or <b>Tab</b>: your gear · <b>M</b>: map · <b>Esc</b>: menu</div>
+    <div><b>Space</b>: attack with your sword, axe, sickle, scythe… (fists if nothing is equipped)</div>
+    <div><b>Click</b> or hold <b>Shift</b>: fire your bow · <b>X</b>: switch arrow type</div>
+    <div><b>Click a monster</b>: lock on to it · <b>.</b> (period): stop targeting</div>
+    <div><b>Right click</b> or <b>C</b>: dodge roll (you can’t be hit mid-roll)</div>
+    <div><b>1</b> <b>2</b> <b>3</b>: artifacts · <b>Q</b>: Healing Draught · <b>R</b>: Fizz Bomb · <b>E</b>: talk, open, use</div>
+    <div><b>Ctrl</b>, <b>I</b> or <b>Tab</b>: inventory · <b>M</b>: map · <b>Esc</b>: menu (settings are in there)</div>
+    <div class="md-dim">Auto-fire bows shoot by themselves when an enemy is close. In Settings, pick where bows aim: at the mouse, in front of you, or at the nearest enemy.</div>
     <div class="md-dim">On a phone: stick on the left, buttons on the right. Attacks aim at the nearest monster.</div>
   </div>`;
 
@@ -75,6 +94,7 @@ const game: GameModule = {
           <button data-t="use" class="md-tuse">✋</button>
           <button data-t="potion">🧪</button>
           <button data-t="bomb">💣</button>
+          <button data-t="artifact">✨</button>
           <button data-t="roll">💨</button>
           <button data-t="ranged">🏹</button>
           <button data-t="melee" class="md-tbig">⚔️</button>
@@ -102,6 +122,14 @@ const game: GameModule = {
     syncMute();
 
     let g = new Game(readSave() ?? undefined);
+    let settings = readSettings();
+    const saveSettings = () => {
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      } catch {
+        /* ignore */
+      }
+    };
     let overlay: Overlay = 'title';
     let playing = false;
 
@@ -143,7 +171,7 @@ const game: GameModule = {
     const keys = new Set<string>();
     const pressed = new Set<string>();
     let mouse: { x: number; y: number } | null = null;
-    let mouseL = false, mouseR = false;
+    let mouseL = false;
     const stick = { x: 0, y: 0, id: -1 };
     const held = new Set<string>();
 
@@ -155,11 +183,15 @@ const game: GameModule = {
       }
       if (!keys.has(k)) pressed.add(k);
       keys.add(k);
-      if (k === 'tab' || k === ' ') e.preventDefault();
+      if (k === 'tab' || k === ' ' || k === 'control') e.preventDefault();
       if (overlay === 'title') return;
+      if (k === 'control' && (overlay === 'none' || overlay === 'gear')) {
+        show(overlay === 'gear' ? 'none' : 'gear');
+        return;
+      }
       if (k === 'escape') {
         if (overlay === 'none') show('menu');
-        else if (overlay === 'menu' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help') show('none');
+        else if (overlay === 'menu' || overlay === 'settings' || overlay === 'shop' || overlay === 'gear' || overlay === 'map' || overlay === 'mission' || overlay === 'help') show('none');
       } else if ((k === 'i' || k === 'tab') && (overlay === 'none' || overlay === 'gear')) show(overlay === 'gear' ? 'none' : 'gear');
       else if (k === 'm' && (overlay === 'none' || overlay === 'map')) {
         if (g.mode === 'camp') {
@@ -171,7 +203,7 @@ const game: GameModule = {
     window.addEventListener('keyup', onKey);
     const blur = () => {
       keys.clear();
-      mouseL = mouseR = false;
+      mouseL = false;
     };
     window.addEventListener('blur', blur);
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -183,12 +215,16 @@ const game: GameModule = {
       el.focus();
       if (e.pointerType !== 'mouse') return;
       mouse = { x: e.offsetX, y: e.offsetY };
-      if (e.button === 0) mouseL = true;
-      if (e.button === 2) mouseR = true;
+      if (e.button === 0) {
+        mouseL = true;
+        pressed.add('mouse0');
+        // clicking a monster locks on to it
+        if (playing && overlay === 'none' && g.lockAt(R.toWorld(e.offsetX, e.offsetY))) sfx('click');
+      }
+      if (e.button === 2) pressed.add('mouse2');
     });
     window.addEventListener('pointerup', (e) => {
       if (e.button === 0) mouseL = false;
-      if (e.button === 2) mouseR = false;
     });
 
     // touch stick and buttons
@@ -251,20 +287,28 @@ const game: GameModule = {
       const inp: Input = {
         mx, my,
         aim: mouse && !touchMode ? R.toWorld(mouse.x, mouse.y) : null,
-        melee: mouseL || held.has('melee'),
-        ranged: mouseR || keys.has('f') || held.has('ranged'),
-        roll: p(' ') || p('shift') || p('t:roll'),
+        melee: keys.has(' ') || held.has('melee'),
+        ranged: mouseL || p('mouse0') || keys.has('shift') || keys.has('f') || held.has('ranged'),
+        roll: p('mouse2') || p('c') || p('t:roll'),
         potion: p('q') || p('t:potion'),
         bomb: p('r') || p('t:bomb'),
         use: p('e') || p('enter') || p('t:use'),
+        artifact: p('1') ? 0 : p('2') ? 1 : p('3') ? 2 : p('t:artifact') ? Math.max(0, g.artCd.findIndex((c, i) => c <= 0 && !!g.save.slots[i])) : -1,
+        cycleArrow: p('x'),
+        aimMode: touchMode && settings.aim === 'mouse' ? 'nearest' : settings.aim,
+        autoFire: settings.autoFire,
       };
+      if (p('.')) {
+        g.targetId = 0;
+        toast('Stopped targeting.');
+      }
       pressed.clear();
       return inp;
     }
 
     // ---------- HUD ----------
-    function slot(img: string, label: string, key: string, count?: string, cool = 0) {
-      return `<div class="md-slot"><img src="${img}" alt=""><em>${key}</em>${count !== undefined ? `<span>${count}</span>` : ''}<div class="md-cool" style="height:${Math.round(cool * 100)}%"></div><small>${label}</small></div>`;
+    function slot(img: string, label: string, key: string, count?: string, cool = 0, rarity = 'normal') {
+      return `<div class="md-slot r-${rarity}"><img src="${img}" alt=""><em>${key}</em>${count !== undefined ? `<span>${count}</span>` : ''}<div class="md-cool" style="height:${Math.round(cool * 100)}%"></div><small>${label}</small></div>`;
     }
     let barKey = '';
     function updateHud() {
@@ -286,16 +330,22 @@ const game: GameModule = {
         promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> ${g.near.label}`;
       } else promptEl.hidden = true;
       touchEl.querySelector<HTMLElement>('.md-tuse')!.style.visibility = g.near ? 'visible' : 'hidden';
-      const rc = Math.max(0, g.rangedCd / g.ranged.rate), mc = Math.max(0, g.meleeCd / g.melee.rate), roll = Math.max(0, g.rollCd / 0.85);
-      const key = [s.melee, s.ranged, s.arrows, s.potions, s.bombs, rc.toFixed(1), mc.toFixed(1), roll.toFixed(1)].join();
+      const rc = Math.max(0, g.rangedCd / g.ranged.rate), mc = Math.max(0, g.meleeCd / g.melee.rate), roll = Math.max(0, g.rollCd / g.rollMax);
+      const ak = g.loadedArrow;
+      const arts = s.slots.map((id, i) => (id ? (g.artCd[i] / ARTIFACTS[id].cooldown).toFixed(2) : '-')).join('/');
+      const key = [s.melee, s.ranged, g.arrowCount(), ak, s.potions, s.bombs, rc.toFixed(1), mc.toFixed(1), roll.toFixed(1), arts, s.slots.join()].join();
       if (key !== barKey) {
         barKey = key;
+        const rare = (k: string) => (k ? parseKey(k).rarity : 'normal');
         barEl.innerHTML =
-          slot(gearIcon(s.melee), g.melee.name, touchMode ? '⚔️' : 'L', undefined, mc) +
-          slot(gearIcon(s.ranged), g.ranged.name, touchMode ? '🏹' : 'R', String(s.arrows), rc) +
-          `<div class="md-slot md-roll"><b>💨</b><em>${touchMode ? '' : 'Spc'}</em><div class="md-cool" style="height:${Math.round(roll * 100)}%"></div><small>Roll</small></div>` +
+          slot(gearIcon(s.melee), g.melee.name, touchMode ? '⚔️' : 'Spc', undefined, mc, rare(s.melee)) +
+          slot(gearIcon(s.ranged), g.ranged.name, touchMode ? '🏹' : 'Shift', `${ak === 'normal' ? '' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]}${g.arrowCount()}`, rc, rare(s.ranged)) +
+          `<div class="md-slot md-roll"><b>💨</b><em>${touchMode ? '' : 'C'}</em><div class="md-cool" style="height:${Math.round(roll * 100)}%"></div><small>Roll</small></div>` +
           slot(supplyIcon('potion'), 'Healing Draught', 'Q', String(s.potions)) +
-          slot(supplyIcon('bomb'), 'Fizz Bomb', 'R', String(s.bombs));
+          slot(supplyIcon('bomb'), 'Fizz Bomb', 'R', String(s.bombs)) +
+          s.slots
+            .map((id, i) => (id ? slot(artifactIcon(id), ARTIFACTS[id].name, String(i + 1), undefined, g.artCd[i] / ARTIFACTS[id].cooldown) : `<div class="md-slot md-empty"><em>${i + 1}</em></div>`))
+            .join('');
       }
     }
 
@@ -314,6 +364,7 @@ const game: GameModule = {
       if (o === 'title') titleScreen();
       else if (o === 'help') panel(`<h2>How to play</h2>${HELP}<p>Talk to the traders in camp to buy weapons, armor and supplies. Use the mission table to pick a dungeon. Each dungeon has a guardian in its last room; beat it and a portal opens to take you home with a reward. Clear all five to face the Hollow Crown.</p><div class="md-row"><button class="md-btn" data-x="back">Back</button></div>`, { back: () => show(playing ? 'menu' : 'title') });
       else if (o === 'menu') menu();
+      else if (o === 'settings') settingsPanel();
       else if (o === 'gear') gearPanel();
       else if (o === 'map') mapPanel();
       else if (o === 'dead') panel(`<h2 class="md-red">You fell!</h2><p>The monsters of ${g.def.name} got the better of you this time. You keep every coin and piece of gear you found.</p><p class="md-dim">Monsters beaten this run: ${g.kills} · coins found: ${g.runCoins}</p><div class="md-row"><button class="md-btn md-go" data-x="camp">Back to camp</button><button class="md-btn" data-x="retry">Try again</button></div>`, {
@@ -390,6 +441,7 @@ const game: GameModule = {
         <div class="md-col">
           <button class="md-btn md-go" data-x="resume">Resume</button>
           ${inDungeon ? '<button class="md-btn" data-x="camp">Leave the dungeon (back to camp)</button>' : ''}
+          <button class="md-btn" data-x="settings">⚙️ Settings</button>
           <button class="md-btn" data-x="help">How to play</button>
           <button class="md-btn" data-x="title">Title screen</button>
           <button class="md-btn md-dim" data-x="exit">Back to games</button>
@@ -401,6 +453,7 @@ const game: GameModule = {
           show('none');
         },
         help: () => show('help'),
+        settings: () => show('settings'),
         title: () => {
           save();
           playing = false;
@@ -415,24 +468,24 @@ const game: GameModule = {
     }
 
     // --- shop ---
-    function statLine(id: GearId) {
-      if (id in MELEE) {
-        const w = MELEE[id as MeleeId];
-        return `⚔️ ${w.dmg} dmg · ${(1 / w.rate).toFixed(1)}/s · reach ${w.reach}${w.arc >= 360 ? ' · all around' : ''}`;
+    const RARE_NOTE = '<p class="md-dim md-small-note">Every new item has a <b class="md-gold">0.5% chance to be GOLD</b> and a <b class="md-dia">0.05% chance to be DIAMOND</b>: shinier, with much better stats.</p>';
+    function statLine(key: ItemKey | '') {
+      const { id } = key ? parseKey(key) : { id: '' as GearId };
+      if (!key || isMelee(id)) {
+        const w = meleeOf(key);
+        return `⚔️ ${w.dmg} dmg · ${(1 / w.rate).toFixed(1)}/s · reach ${w.reach}${w.arc >= 360 ? ' · all around' : w.arc >= 200 ? ' · wide sweep' : ''}${w.effect ? ` · ${w.effect === 'burn' ? 'burns' : w.effect === 'slow' ? 'slows' : 'stuns'}` : ''}`;
       }
-      if (id in RANGED) {
-        const w = RANGED[id as RangedId];
-        return `🏹 ${w.dmg} dmg${w.shots > 1 ? ` ×${w.shots}` : ''} · ${(1 / w.rate).toFixed(1)}/s${w.pierce ? ` · pierces ${w.pierce > 5 ? 'all' : w.pierce}` : ''}`;
+      if (isRanged(id)) {
+        const w = rangedOf(key);
+        return `🏹 ${w.dmg} dmg${w.shots > 1 ? ` ×${w.shots}` : ''} · ${(1 / w.rate).toFixed(1)}/s${w.pierce ? ` · pierces ${w.pierce > 5 ? 'all' : w.pierce}` : ''}${w.auto ? ' · AUTO-FIRE' : ''}${w.burn ? ' · burns' : ''}`;
       }
-      const a = ARMOR[id as ArmorId];
-      return `🛡️ blocks ${pct(a.block)}${a.regen ? ' · heals' : ''}${a.speed < 1 ? ` · ${pct(1 - a.speed)} slower` : ''}`;
+      const a = armorOf(key);
+      return `🛡️ blocks ${pct(a.block)}${a.regen ? ' · heals' : ''}${a.speed > 1 ? ` · ${pct(a.speed - 1)} faster` : a.speed < 1 ? ` · ${pct(1 - a.speed)} slower` : ''}${a.lavaproof ? ' · lavaproof' : ''}${a.quickroll ? ' · fast rolls' : ''}`;
     }
     function gearDesc(id: GearId) {
-      return (MELEE as Record<string, { desc: string }>)[id]?.desc ?? (RANGED as Record<string, { desc: string }>)[id]?.desc ?? ARMOR[id as ArmorId].desc;
+      return isMelee(id) ? MELEE[id].desc : isRanged(id) ? RANGED[id].desc : ARMOR[id as keyof typeof ARMOR].desc;
     }
-    function equipped(id: GearId) {
-      return g.save.melee === id || g.save.ranged === id || g.save.armor === id;
-    }
+    const isEquipped = (key: ItemKey) => g.save.melee === key || g.save.ranged === key || g.save.armor === key;
     let shopTrader: Trader | null = null;
     function openShop(t: Trader) {
       shopTrader = t;
@@ -446,39 +499,45 @@ const game: GameModule = {
       if (t.id === 'peddler') {
         for (const id of PEDDLER_STOCK) {
           const s = SUPPLIES[id];
-          const have = id === 'potion' ? g.save.potions : id === 'arrows' ? g.save.arrows : id === 'bomb' ? g.save.bombs : null;
+          const have = id === 'potion' ? g.save.potions : id === 'arrows' ? g.save.arrows : id === 'bomb' ? g.save.bombs : id === 'mystery' ? null : g.save.special[id.replace('-arrows', '') as 'fire'];
           items.push(`<div class="md-item"><img src="${supplyIcon(id)}" alt=""><div class="md-it"><b>${s.name}</b><small>${s.desc}</small>${have !== null ? `<small class="md-dim">You have ${have}</small>` : ''}</div>
             <button class="md-btn md-buy" data-buy="${id}" ${g.save.coins < s.price ? 'disabled' : ''}>🪙 ${s.price}</button></div>`);
+        }
+      } else if (t.id === 'mystic') {
+        for (const id of MYSTIC_STOCK) {
+          const A = ARTIFACTS[id];
+          const own = g.save.artifacts.includes(id);
+          items.push(`<div class="md-item ${own ? 'own' : ''}"><img src="${artifactIcon(id)}" alt=""><div class="md-it"><b>${A.name}</b><small>${A.desc}</small><small class="md-dim">Recharges in ${A.cooldown}s</small></div>
+            ${own ? '<span class="md-tagx">Owned</span>' : `<button class="md-btn md-buy" data-art="${id}" ${g.save.coins < A.price ? 'disabled' : ''}>🪙 ${A.price}</button>`}</div>`);
         }
       } else {
         const stock: GearId[] = t.id === 'smith' ? SMITH_STOCK : ARMOR_STOCK;
         for (const id of stock) {
-          const own = g.save.owned.includes(id);
+          const own = g.owns(id);
           const price = gearPrice(id);
-          const btn = own
-            ? equipped(id) ? '<button class="md-btn" disabled>Equipped</button>' : `<button class="md-btn" data-eq="${id}">Equip</button>`
-            : `<button class="md-btn md-buy" data-gear="${id}" ${g.save.coins < price ? 'disabled' : ''}>🪙 ${price}</button>`;
+          const btn = own ? '<span class="md-tagx">Owned</span>' : `<button class="md-btn md-buy" data-gear="${id}" ${g.save.coins < price ? 'disabled' : ''}>🪙 ${price}</button>`;
           items.push(`<div class="md-item ${own ? 'own' : ''}"><img src="${gearIcon(id)}" alt=""><div class="md-it"><b>${gearName(id)}</b><small>${statLine(id)}</small><small class="md-dim">${gearDesc(id)}</small></div>${btn}</div>`);
         }
       }
       ui.innerHTML = `<div class="md-panel md-shop">
         <div class="md-shophead"><div class="md-face"></div><div><h2>${t.name} <small>the ${t.title}</small></h2><p class="md-say">“${t.hello}”</p></div><div class="md-purse">🪙 ${g.save.coins}</div></div>
+        ${t.id === 'smith' || t.id === 'armorer' || t.id === 'peddler' ? RARE_NOTE : ''}
         <div class="md-items">${items.join('')}</div>
         <div class="md-row"><button class="md-btn" data-x="close">Done</button></div></div>`;
       ui.querySelector('.md-face')!.appendChild(portrait(traderParts(t, 0), Math.PI / 2, 110, 130, 1, 2.4));
       ui.querySelector('[data-x="close"]')!.addEventListener('click', () => show('none'));
       ui.querySelectorAll<HTMLElement>('[data-gear]').forEach((b) =>
         b.addEventListener('click', () => {
-          const err = g.buyGear(b.dataset.gear as GearId);
-          if (err) toast(err);
-          else toast(`Bought ${gearName(b.dataset.gear as GearId)} and equipped it.`);
+          const res = g.buyGear(b.dataset.gear as GearId);
+          if (res === 'You already own that.' || res === 'Not enough coins.') toast(res);
+          else toast(`Bought ${itemName(res)} and equipped it.`);
           shopPanel();
         }),
       );
-      ui.querySelectorAll<HTMLElement>('[data-eq]').forEach((b) =>
+      ui.querySelectorAll<HTMLElement>('[data-art]').forEach((b) =>
         b.addEventListener('click', () => {
-          g.equip(b.dataset.eq as GearId);
-          sfx('click');
+          const err = g.buyArtifact(b.dataset.art as ArtifactId);
+          toast(err ?? `Bought the ${ARTIFACTS[b.dataset.art as ArtifactId].name}. Use it with 1, 2 or 3.`);
           shopPanel();
         }),
       );
@@ -493,50 +552,125 @@ const game: GameModule = {
       const s = SUPPLIES[id];
       if (g.save.coins < s.price) return toast('Not enough coins.');
       if (id === 'mystery') {
-        const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((x) => !g.save.owned.includes(x));
+        const pool = [...SMITH_STOCK, ...ARMOR_STOCK].filter((x) => !g.owns(x));
         if (!pool.length) return toast('You already own every piece of gear!');
         g.save.coins -= s.price;
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        g.save.owned.push(pick);
-        banner('Mystery Crate!', `Inside: ${gearName(pick)}. Equip it from your gear (I).`);
+        const key = g.grant(pool[Math.floor(Math.random() * pool.length)]);
+        if (parseKey(key).rarity === 'normal') banner('Mystery Crate!', `Inside: ${itemName(key)}. Equip it from your inventory (Ctrl).`);
       } else {
         g.save.coins -= s.price;
         if (id === 'potion') g.save.potions++;
         else if (id === 'arrows') g.save.arrows += 20;
+        else if (id === 'fire-arrows') g.save.special.fire += 10;
+        else if (id === 'frost-arrows') g.save.special.frost += 10;
+        else if (id === 'boom-arrows') g.save.special.boom += 8;
         else g.save.bombs++;
       }
       sfx('buy');
       save();
     }
 
-    // --- gear ---
+    // --- inventory ---
     function gearPanel() {
       const s = g.save;
-      const group = (title: string, ids: GearId[]) =>
-        `<h3>${title}</h3><div class="md-items md-small">${ids
-          .filter((id) => s.owned.includes(id))
-          .map((id) => `<div class="md-item ${equipped(id) ? 'eq' : ''}"><img src="${gearIcon(id)}" alt=""><div class="md-it"><b>${gearName(id)}</b><small>${statLine(id)}</small></div>${equipped(id) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${id}">Equip</button>`}</div>`)
-          .join('')}</div>`;
+      const rank = { diamond: 0, gold: 1, normal: 2 };
+      const card = (key: ItemKey) => {
+        const r = parseKey(key).rarity;
+        return `<div class="md-item r-${r} ${isEquipped(key) ? 'eq' : ''}"><img src="${gearIcon(key)}" alt=""><div class="md-it"><b>${itemName(key)}${r !== 'normal' ? ` <span class="md-badge r-${r}">${r.toUpperCase()}</span>` : ''}</b><small>${statLine(key)}</small></div>${isEquipped(key) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${key}">Equip</button>`}</div>`;
+      };
+      const group = (title: string, test: (id: GearId) => boolean, extra = '') => {
+        const keys = s.owned.filter((k) => test(parseKey(k).id)).sort((a, b) => rank[parseKey(a).rarity] - rank[parseKey(b).rarity]);
+        return `<h3>${title}</h3><div class="md-items md-small">${extra}${keys.map(card).join('')}</div>`;
+      };
+      const fists = `<div class="md-item ${s.melee === '' ? 'eq' : ''}"><img src="${gearIcon('')}" alt=""><div class="md-it"><b>Fists</b><small>${statLine('')}</small></div>${s.melee === '' ? '<span class="md-tagx">Equipped</span>' : '<button class="md-btn" data-x="fists">Unequip weapon</button>'}</div>`;
+      const arrows = (['normal', 'fire', 'frost', 'boom'] as const)
+        .map((k) => `<button class="md-arrow ${g.save.arrowKind === k ? 'on' : ''}" data-arrow="${k}" style="--c:${ARROWS[k].color}">${ARROWS[k].name}: <b>${g.arrowCount(k)}</b></button>`)
+        .join('');
+      const arts = s.artifacts.length
+        ? s.artifacts
+            .map((id) => {
+              const slot = s.slots.indexOf(id);
+              return `<div class="md-item ${slot >= 0 ? 'eq' : ''}"><img src="${artifactIcon(id)}" alt=""><div class="md-it"><b>${ARTIFACTS[id].name}</b><small>${ARTIFACTS[id].desc}</small></div><button class="md-btn" data-slot="${id}">${slot >= 0 ? `Key ${slot + 1} · Remove` : 'Equip'}</button></div>`;
+            })
+            .join('')
+        : '<p class="md-dim">No artifacts yet. Mira the Mystic in camp sells them.</p>';
       ui.innerHTML = `<div class="md-panel md-gear">
         <div class="md-gearhead"><div class="md-me"></div><div>
-          <h2>Your gear</h2>
-          <p>❤️ ${Math.ceil(g.hp)} / ${g.maxHp} · 🪙 ${s.coins}</p>
-          <p>🏹 ${s.arrows} arrows · 🧪 ${s.potions} draughts · 💣 ${s.bombs} bombs</p>
+          <h2>Inventory</h2>
+          <p>❤️ ${Math.ceil(g.hp)} / ${g.maxHp} · 🪙 ${s.coins} · 🧪 ${s.potions} draughts · 💣 ${s.bombs} bombs</p>
           <p class="md-dim">Dungeons cleared: ${s.cleared.length} of ${LEVELS.length}</p>
+          <button class="md-btn" data-x="settings">⚙️ Settings</button>
         </div></div>
-        ${group('Melee weapons', Object.keys(MELEE) as GearId[])}
-        ${group('Bows', Object.keys(RANGED) as GearId[])}
-        ${group('Armor', Object.keys(ARMOR) as GearId[])}
-        <p class="md-dim">More gear: Bram and Tilda in camp, chests in dungeons, and Old Pip’s Mystery Crates.</p>
+        ${group('Melee weapons (Space)', isMelee, fists)}
+        ${group('Bows (click or Shift)', isRanged)}
+        <h3>Arrows (X switches)</h3><div class="md-arrows">${arrows}</div>
+        ${group('Armor', isArmor)}
+        <h3>Artifacts (keys 1, 2, 3)</h3><div class="md-items md-small">${arts}</div>
+        ${RARE_NOTE}
         <div class="md-row"><button class="md-btn" data-x="close">Close</button></div></div>`;
       const a = g.armor;
-      ui.querySelector('.md-me')!.appendChild(portrait(heroParts({ armor: a.color, trim: a.trim, walk: 0, moving: false }), Math.PI / 2, 110, 130, 1, 2.4));
+      ui.querySelector('.md-me')!.appendChild(portrait(heroParts({ armor: a.color, trim: a.trim, walk: 0, moving: false, helm: a.helm, shiny: parseKey(s.armor).rarity !== 'normal' }), Math.PI / 2, 110, 130, 1, 2.4));
       ui.querySelector('[data-x="close"]')!.addEventListener('click', () => show('none'));
+      ui.querySelector('[data-x="settings"]')!.addEventListener('click', () => show('settings'));
+      ui.querySelector('[data-x="fists"]')?.addEventListener('click', () => {
+        g.unequipMelee();
+        gearPanel();
+      });
       ui.querySelectorAll<HTMLElement>('[data-eq]').forEach((b) =>
         b.addEventListener('click', () => {
-          g.equip(b.dataset.eq as GearId);
+          g.equip(b.dataset.eq!);
           sfx('click');
           gearPanel();
+        }),
+      );
+      ui.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) =>
+        b.addEventListener('click', () => {
+          g.slotArtifact(b.dataset.slot as ArtifactId);
+          sfx('click');
+          gearPanel();
+        }),
+      );
+      ui.querySelectorAll<HTMLElement>('[data-arrow]').forEach((b) =>
+        b.addEventListener('click', () => {
+          g.save.arrowKind = b.dataset.arrow as 'normal';
+          sfx('click');
+          gearPanel();
+        }),
+      );
+    }
+
+    // --- settings ---
+    function settingsPanel() {
+      const opt = (k: AimMode, label: string, sub: string) =>
+        `<button class="md-opt ${settings.aim === k ? 'on' : ''}" data-aim="${k}"><b>${label}</b><small>${sub}</small></button>`;
+      panel(`<h2>Settings</h2>
+        <h3>Where bows aim</h3>
+        <div class="md-opts">
+          ${opt('mouse', '🖱️ At the mouse', 'Arrows fly toward your mouse pointer.')}
+          ${opt('front', '⬆️ In front of you', 'Arrows fly the way you are facing.')}
+          ${opt('nearest', '🎯 Nearest enemy', 'Arrows fly at the closest monster you can see.')}
+        </div>
+        <p class="md-dim">Clicking a monster always locks on to it, whatever you pick here. Press <b>.</b> to stop targeting.</p>
+        <h3>Auto-fire bows</h3>
+        <div class="md-opts">
+          <button class="md-opt ${settings.autoFire ? 'on' : ''}" data-auto="1"><b>On</b><small>Auto-fire bows shoot by themselves when an enemy is close.</small></button>
+          <button class="md-opt ${!settings.autoFire ? 'on' : ''}" data-auto="0"><b>Off</b><small>Auto-fire bows only shoot when you click or hold Shift.</small></button>
+        </div>
+        <div class="md-row"><button class="md-btn md-go" data-x="back">Done</button></div>`, { back: () => show(playing ? 'none' : 'title') }, 'md-settings');
+      ui.querySelectorAll<HTMLElement>('[data-aim]').forEach((b) =>
+        b.addEventListener('click', () => {
+          settings.aim = b.dataset.aim as AimMode;
+          saveSettings();
+          sfx('click');
+          settingsPanel();
+        }),
+      );
+      ui.querySelectorAll<HTMLElement>('[data-auto]').forEach((b) =>
+        b.addEventListener('click', () => {
+          settings.autoFire = b.dataset.auto === '1';
+          saveSettings();
+          sfx('click');
+          settingsPanel();
         }),
       );
     }

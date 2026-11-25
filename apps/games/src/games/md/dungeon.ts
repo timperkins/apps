@@ -254,6 +254,7 @@ export function generateCamp(): Level {
   L.props.push({ x: 10, y: 6, kind: 'anvil', solid: true, hp: 1 });
   L.props.push({ x: 16, y: 6, kind: 'stall', solid: true, hp: 1, v: 1 });
   L.props.push({ x: 13, y: 16, kind: 'stall', solid: true, hp: 1, v: 2 });
+  L.props.push({ x: 21, y: 14, kind: 'stall', solid: true, hp: 1, v: 3 });
   L.props.push({ x: 5, y: 6, kind: 'banner', solid: true, hp: 1, v: 0 });
   L.props.push({ x: 20, y: 6, kind: 'banner', solid: true, hp: 1, v: 1 });
   for (const [dx, dy] of [[4, 6], [18, 6], [15, 16]]) L.props.push({ x: dx, y: dy, kind: 'door', solid: false, hp: 1 });
