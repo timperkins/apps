@@ -18,10 +18,11 @@ import { planBridges } from './bridges';
 import { BRIDGE_Z, BridgeStyle, DECK_W, HUT_R, bridgeFromKey, bridgeKey, bridgeLen, deckTop, makeHut } from './bridge-art';
 import { bridgeArt as workerBridge } from './art-pool';
 import { Shroud } from './shroud';
+import { DROP_S, FOLD_S, chuteInAir, drawChute, drawChuteShadow, dropAlt, swingOffset } from './chute';
 import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -653,7 +654,6 @@ const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new
 // Paratroopers: one planeload every few minutes from the Paratrooper plane.
 const PARA_S = 240;
 const PARA_N = 8;
-const DROP_S = 3.2; // seconds for a paratrooper to come down
 
 // A submarine stays surfaced this long after it fires (long enough for the
 // ship it hit, and anything nearby that can shoot a ship, to fire back);
@@ -5435,7 +5435,7 @@ export class IsoGame implements GameLike {
     if (u.kind === 'heron') return HELI_ALT * (u.fly ?? 1);
     if (u.kind === 'jet') return JET_ALT * (u.fly ?? 1);
     if (u.kind === 'plane') return PLANE_ALT * (u.fly ?? 1);
-    if (u.fly !== undefined && isFoot(u.kind)) return DROP_ALT * u.fly;
+    if (u.fly !== undefined && isFoot(u.kind)) return dropAlt(u.fly);
     return 0;
   }
 
@@ -5828,24 +5828,38 @@ export class IsoGame implements GameLike {
     if (!this.okAt(u, u.x, u.y)) this.kill(u, this.terrain.k(u.x, u.y) === K.Water);
   }
 
-  // A paratrooper on the way down, under his canopy.
+  // A paratrooper on the way down, under his canopy: it bursts open, swings
+  // him to and fro, and (see foldChutes) folds up on the grass once he's down.
   private drawChute(u: Unit): void {
     const z = u.z + this.alt(u);
-    this.blit(this.footSprite(u), u.x, u.y, z);
-    const c = this.ctx;
-    const [sx, sy] = toScreen(u.x, u.y, z + 12);
-    const x = Math.round(sx);
-    const y = Math.round(sy);
-    c.fillStyle = 'rgba(40,40,40,0.55)';
-    pxLine(c, x - 3, y + 1, x - 0.5, y + 7);
-    pxLine(c, x + 3, y + 1, x + 0.5, y + 7);
-    c.fillStyle = '#e9e4d4';
-    c.fillRect(x - 2, y - 2, 5, 1);
-    c.fillRect(x - 3, y - 1, 7, 2);
-    c.fillStyle = '#b9b3a2';
-    c.fillRect(x - 3, y + 1, 2, 1);
-    c.fillRect(x + 2, y + 1, 2, 1);
-    c.fillRect(x, y - 1, 1, 2);
+    const st = chuteInAir((1 - (u.fly ?? 0)) * DROP_S, u.id * 0.37);
+    const [ox, oy] = swingOffset(st);
+    // his swing, in screen pixels, back into the map (sideways on the screen is +x -y)
+    this.blit(this.footSprite(u), u.x + ox / 2, u.y - ox / 2, z - oy);
+    const [sx, sy] = toScreen(u.x, u.y, z);
+    drawChute(this.ctx, sx, sy, st, factionOf(u.f), this.time);
+  }
+
+  // Paratroopers who just came down: their canopies fold over and sink
+  // (only to look at: each screen sees them land for itself).
+  private chuteWatch = new Map<number, { x: number; y: number; z: number; f: number }>();
+  private chuteFolds: { x: number; y: number; z: number; f: number; t0: number }[] = [];
+  private foldChutes(): void {
+    const here = new Set<number>();
+    for (const u of this.units) {
+      if (!isFoot(u.kind)) continue;
+      here.add(u.id);
+      if (u.fly !== undefined) this.chuteWatch.set(u.id, { x: u.x, y: u.y, z: u.z, f: u.f });
+      else {
+        const w = this.chuteWatch.get(u.id);
+        if (w) {
+          this.chuteWatch.delete(u.id);
+          if (this.terrain.k(u.x, u.y) !== K.Water) this.chuteFolds.push({ ...w, z: u.z, t0: this.time });
+        }
+      }
+    }
+    for (const id of this.chuteWatch.keys()) if (!here.has(id)) this.chuteWatch.delete(id);
+    this.chuteFolds = this.chuteFolds.filter((p) => this.time - p.t0 < FOLD_S && this.time >= p.t0);
   }
 
   // Jets and Herons each frame: taking off and landing, and jets going home
@@ -6933,9 +6947,11 @@ export class IsoGame implements GameLike {
     for (const u of this.units) {
       if (!this.aloft(u) || !seen(u.x, u.y)) continue;
       if (!isAir(u.kind)) {
-        // a paratrooper's shadow, a dot that grows as he comes down
+        // a paratrooper's shadow, and his canopy's, darker as he comes down
+        const fly = u.fly ?? 0;
         const [sx, sy] = toScreen(u.x, u.y, u.z);
-        c.fillStyle = `rgba(0,0,0,${0.35 - 0.2 * (u.fly ?? 0)})`;
+        drawChuteShadow(c, sx + 3 * fly, sy + 1.5 * fly, 1 - fly, chuteInAir((1 - fly) * DROP_S, 0).open);
+        c.fillStyle = `rgba(0,0,0,${0.35 - 0.2 * fly})`;
         c.fillRect(Math.round(sx) - 1, Math.round(sy), 2, 1);
         continue;
       }
@@ -6990,6 +7006,13 @@ export class IsoGame implements GameLike {
       items.push({ k: n.x + n.y, draw: () => this.blit(spr, n.x, n.y, 0) });
     }
     for (const g of this.oreGens) if (seen(g.x, g.y, 3)) items.push({ k: g.x + g.y, draw: () => this.drawOreGen(g) });
+    this.foldChutes();
+    for (const p of this.chuteFolds)
+      if (seen(p.x, p.y, p.z)) {
+        const [sx, sy] = toScreen(p.x, p.y, p.z);
+        const fold = (this.time - p.t0) / FOLD_S;
+        items.push({ k: p.x + p.y + p.z * 2 + 0.5, draw: () => drawChute(this.ctx, sx, sy, { open: 1, tilt: 0, fold }, factionOf(p.f), this.time) });
+      }
     for (const u of this.units) if ((!this.aloft(u) || u.exit) && seen(u.x, u.y, u.z)) items.push({ k: u.exit ? u.exit.k : u.x + u.y + u.z * 2, draw: () => (u.exit ? this.drawExiting(u, u.exit) : this.drawUnit(u)) });
     items.sort((a, b) => a.k - b.k);
     for (const it of items) it.draw();

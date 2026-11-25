@@ -8,6 +8,7 @@ import { BOOM, CARRIER_SLOTS, DECK_Z, DAMAGED, DIG_S, DUG_WEAPON, HIT_SPREAD, Fx
 import { StackSprite, drawGoingUp, drawSprite, toScreen, toWorld } from './v2/stack';
 import { DERRICK, TECH } from './v2/tech';
 import { DOOR_S, clipDoorway, doorOf, drawDoor } from './v2/doors';
+import { DROP_S, FOLD_S, chuteInAir, drawChute, drawChuteShadow, dropAlt, swingOffset } from './v2/chute';
 
 const TAU = Math.PI * 2;
 const HELI_ALT = 20; // as in the game (see combat.ts)
@@ -1165,6 +1166,110 @@ function buildUnits(parent: HTMLElement, me: V2FactionArt, foe: V2FactionArt, ya
       );
     cells.push({ label: 'Enemy', box: air, anim: true, draw: (s, t) => flyerDraw(foe, kind)(s, 0, 0, Math.PI / 4, t) });
     addRow(parent, name, blurb, cells);
+  }
+
+  // the paratroopers: the cargo plane passes over and eight jump, one after
+  // another; their canopies burst open and swing them down, fold up on the
+  // grass once they land, and the squad forms up (see drawChute in v2/game.ts)
+  {
+    const N = 8;
+    const LOOP = 10;
+    const PA = -Math.PI / 4; // the plane flies left to right across the screen
+    const SPEED = 45;
+    const GAP = 0.13; // seconds between jumpers
+    const T0 = 1.6; // when the first one jumps
+    const pc = Math.cos(PA);
+    const ps = Math.sin(PA);
+    const along = (d: number, side: number): [number, number] => [pc * d - ps * side, ps * d + pc * side];
+    const jumpers = Array.from({ length: N }, (_, i) => {
+      const side = [3, -4, 5, -2, -5, 2, -3, 4][i];
+      const [x, y] = along((i - (N - 1) / 2) * SPEED * GAP, side);
+      // where he forms up once he's down: two ranks of four
+      const [gx, gy] = along(((i % 4) - 1.5) * 5, i < 4 ? -3 : 3);
+      return { x, y, gx, gy, t: T0 + i * GAP, seed: i * 0.37 };
+    });
+    const drop =
+      (art: V2FactionArt, f: number): Cell['draw'] =>
+      (s, time) => {
+        const t = time % LOOP;
+        const c = s.c;
+        const fac = FACTIONS[f];
+        // the plane, from well off the left to well off the right
+        const pd = (t - T0 - ((N - 1) / 2) * GAP) * SPEED;
+        if (Math.abs(pd) < 200) flyerDraw(art, 'plane')(s, pc * pd, ps * pd, PA, time);
+        type Item = { k: number; draw: () => void };
+        const items: Item[] = [];
+        for (const j of jumpers) {
+          const since = t - j.t;
+          if (since < 0) continue;
+          if (since < DROP_S) {
+            const fly = 1 - since / DROP_S;
+            const z = dropAlt(fly);
+            const st = chuteInAir(since, j.seed);
+            const [gx, gy] = toScreen(j.x, j.y, 0);
+            drawChuteShadow(c, gx + 3 * fly, gy + 1.5 * fly, 1 - fly, st.open);
+            items.push({
+              k: 1000 + j.x + j.y,
+              draw: () => {
+                const [ox, oy] = swingOffset(st);
+                s.blit(art.infantry[0][dirIndex(PA + Math.PI / 2, 16)], j.x + ox / 2, j.y - ox / 2, z - oy);
+                const [sx, sy] = toScreen(j.x, j.y, z);
+                drawChute(c, sx, sy, st, fac, time);
+              },
+            });
+            continue;
+          }
+          const down = since - DROP_S;
+          if (down < FOLD_S) {
+            const [sx, sy] = toScreen(j.x, j.y, 0);
+            items.push({ k: j.x + j.y + 0.5, draw: () => drawChute(c, sx, sy, { open: 1, tilt: 0, fold: down / FOLD_S }, fac, time) });
+          }
+          // stands a moment, then trots to his place in the squad and faces front
+          const walk = Math.max(0, Math.min(1, (down - 0.5) / 1.1));
+          const x = j.x + (j.gx - j.x) * walk;
+          const y = j.y + (j.gy - j.y) * walk;
+          const moving = walk > 0 && walk < 1;
+          const a = moving ? Math.atan2(j.gy - j.y, j.gx - j.x) : walk >= 1 ? A : PA + Math.PI / 2;
+          const fr = moving ? [1, 0, 2, 0][Math.floor(time * 9) % 4] : 0;
+          items.push({ k: x + y, draw: () => s.blit(art.infantry[fr][dirIndex(a, 16)], x, y, 0) });
+        }
+        items.sort((p, q) => p.k - q.k);
+        for (const it of items) it.draw();
+      };
+    const box: Box = { l: 46, r: 56, u: dropAlt(1) + 34, d: 12 };
+    const one: Cell['draw'] = (s, time) => {
+      // one of them, close: the jump, the canopy opening, the swing, the landing
+      const t = time % 6;
+      const c = s.c;
+      if (t < DROP_S) {
+        const fly = 1 - t / DROP_S;
+        const z = dropAlt(fly);
+        const st = chuteInAir(t, 0.4);
+        const [gx, gy] = toScreen(0, 0, 0);
+        drawChuteShadow(c, gx + 3 * fly, gy + 1.5 * fly, 1 - fly, st.open);
+        const [ox, oy] = swingOffset(st);
+        s.blit(me.infantry[0][dirIndex(A, 16)], ox / 2, -ox / 2, z - oy);
+        const [sx, sy] = toScreen(0, 0, z);
+        drawChute(c, sx, sy, st, FACTIONS[0], time);
+        return;
+      }
+      s.blit(me.infantry[0][dirIndex(A, 16)], 0, 0, 0);
+      const down = t - DROP_S;
+      if (down < FOLD_S) {
+        const [sx, sy] = toScreen(0, 0, 0);
+        drawChute(c, sx, sy, { open: 1, tilt: 0, fold: down / FOLD_S }, FACTIONS[0], time);
+      }
+    };
+    addRow(
+      parent,
+      'Paratroopers',
+      'Eight G.I.s from the cargo plane. Their canopies open just after they jump, swing them down to wherever you picked, and fold up on the grass once they land.',
+      [
+        { label: 'Drop', box, anim: true, draw: drop(me, 0) },
+        { label: 'One', box: { l: 16, r: 22, u: dropAlt(1) + 34, d: 8 }, anim: true, draw: one },
+        { label: 'Enemy', box, anim: true, draw: drop(foe, 1) },
+      ],
+    );
   }
 
   // the boat bobs (it only goes on water in the game)
