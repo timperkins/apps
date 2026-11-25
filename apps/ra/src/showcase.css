@@ -67,9 +67,17 @@ body {
   white-space: nowrap;
 }
 
-#top .jump {
+#top .jump,
+#top .pages {
   display: flex;
   gap: 6px;
+}
+
+/* The test pages: test mode, this page and the UI kit, this one lit. */
+#top .pages a[aria-current='page'] {
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #10170d;
 }
 
 @media (max-width: 520px) {

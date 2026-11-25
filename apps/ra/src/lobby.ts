@@ -2,8 +2,8 @@
 // (and get a four-letter room code) or join one with its code. Everyone in
 // the room sees who else is there and gets a color of their own, which they
 // can change; the host picks one of the maps made for that many players and
-// starts the game. "Test mode" (top right) goes to the single-player game
-// and its test stages at /test instead.
+// starts the game. (The way to test mode, /test, is in a top corner of the
+// Play screen before this, in main.ts.)
 //
 // A room has its own address (/CODE), so reloading the page brings you
 // back into it: a player joins again, and the host takes the room back up
@@ -91,7 +91,6 @@ export interface Match {
 }
 
 export interface LobbyHooks {
-  solo(): void;
   start(m: Match): void;
   /** The landing page shows (true) or goes (false): main.ts shows a world behind it. */
   showing(on: boolean): void;
@@ -762,15 +761,7 @@ export class Lobby {
     if (this.busy) box.append(el('div', 'busy', `${this.busy}…`));
     if (this.error) box.append(el('div', 'err', this.error));
 
-    const kids: HTMLElement[] = [box];
-    if (this.mode === 'home') {
-      const test = el('button', 'testMode', 'Test mode');
-      test.type = 'button';
-      test.title = 'Play alone against the computer, with the test stages';
-      test.addEventListener('click', () => this.hooks.solo());
-      kids.push(test);
-    }
-    this.root.replaceChildren(...kids);
+    this.root.replaceChildren(box);
     if (focused) {
       const f = document.getElementById(focused) as HTMLInputElement | null;
       if (f) {

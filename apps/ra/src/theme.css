@@ -81,6 +81,7 @@ body {
 #settingsBtn,
 #setReset,
 #unitsLink,
+#uiLink,
 #toolbar button,
 #selBar button,
 #build .close,
@@ -94,7 +95,7 @@ body {
 #lobby button.small,
 #lobby .map,
 #lobby .botCtl .rm,
-#lobby .testMode,
+#playGate .testMode,
 #banner button,
 #pauseScreen button {
   color: var(--ink);
@@ -113,6 +114,7 @@ body {
   #settingsBtn:hover,
   #setReset:hover,
   #unitsLink:hover,
+  #uiLink:hover,
   #toolbar button:hover,
   #selBar button:hover:not(:disabled),
   #build .close:hover,
@@ -415,7 +417,8 @@ body {
 #lobbyBtn,
 #settingsBtn,
 #setReset,
-#unitsLink {
+#unitsLink,
+#uiLink {
   padding: 4px 22px 4px 6px;
 }
 #setBack {
@@ -658,7 +661,7 @@ body {
 #lobby .err {
   color: var(--danger);
 }
-#lobby .testMode {
+#playGate .testMode {
   opacity: 0.75;
 }
 #playGate {
