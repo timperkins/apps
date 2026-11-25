@@ -192,7 +192,7 @@ export type Act =
   | { a: 'shoot'; angle: number; key: string; ak: ArrowKind; lv?: number; en?: EnchSet }
   | { a: 'art'; id: ArtifactId; x: number; y: number }
   | { a: 'bomb'; tx: number; ty: number }
-  | { a: 'revive' }
+  | { a: 'revive'; who?: string }
   | { a: 'chest'; i: number }
   | { a: 'portal' };
 interface Tgt {
@@ -288,7 +288,8 @@ export class Game {
   /** your downed teammate is close enough to revive */
   reviveNear = false;
   /** host: you revived the guest */
-  onReviveMate: () => void = () => {};
+  /** host: you (or a guest, `by`) revived guest `id` */
+  onReviveMate: (id: string, by: string) => void = () => {};
   /** locked target (click a monster), 0 = none */
   targetId = 0;
   artCd = [0, 0, 0];
@@ -306,12 +307,19 @@ export class Game {
   peers: Peer[] = [];
   /** the host as the guest sees it */
   mate: Peer | null = null;
+  /** the other guests as a guest sees them */
+  others: Peer[] = [];
+  /** everyone else on your team */
+  get mates(): Peer[] {
+    return this.remote ? (this.mate ? [this.mate, ...this.others] : this.others) : this.peers;
+  }
   /** fx events to forward to the guest (host only, when someone has joined) */
   fxOut: unknown[] | null = null;
   onAct: (a: Act) => void = () => {};
   onPeerHurt: (id: string, dmg: number, fx: number, fy: number, effect?: 'slow' | 'burn') => void = () => {};
   onPeerGain: (id: string, g: { coins?: number; arrows?: number; gear?: boolean; special?: [string, number]; heal?: number; xp?: number }) => void = () => {};
   onBothDown: () => void = () => {};
+  private allDownSent = false;
   /** host: the level changed (camp or a dungeon, with its seed) */
   onEnter: (mode: 'camp' | 'dungeon', idx: number, seed: number) => void = () => {};
   /** host: a level was finished, just before going home */
@@ -701,6 +709,7 @@ export class Game {
       this.hp = 0;
       this.dead = true;
       this.deadT = 0;
+      this.allDownSent = false;
       this.sound('die');
     }
   }
@@ -1080,7 +1089,7 @@ export class Game {
   update(dt: number, inp: Input) {
     this.time += dt;
     // the teammate's swing and bow pose tick down between network updates
-    for (const p of this.mate ? [this.mate, ...this.peers] : this.peers) {
+    for (const p of this.mates) {
       p.swingT = Math.max(0, p.swingT - dt);
       p.drawT = Math.max(0, p.drawT - dt);
     }
@@ -1092,13 +1101,17 @@ export class Game {
         if (this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onDeath();
         return;
       }
-      // on a team: get back up next to your teammate, unless they are down too
-      const mate = this.remote ? this.mate : this.peers[0];
-      if (mate && !mate.dead && this.deadT >= RESPAWN_AFTER) {
+      // on a team: get back up next to a teammate who is still standing, unless everyone is down
+      const mate = this.mates.find((m) => !m.dead);
+      if (mate && this.deadT >= RESPAWN_AFTER) {
         this.x = mate.x;
         this.y = mate.y;
         this.revived('');
-      } else if (!this.remote && (!mate || mate.dead) && this.deadT > 1.8 && this.deadT - dt <= 1.8) this.onBothDown();
+      } else if (!this.remote && !mate && this.deadT > 1.8 && !this.allDownSent) {
+        // fires once, however long ago the host fell, when the last teammate goes down too
+        this.allDownSent = true;
+        this.onBothDown();
+      }
     } else this.updateHero(dt, inp);
     if (this.remote) {
       // the guest only moves its own hero; the host's snapshots bring everything else
@@ -1225,6 +1238,7 @@ export class Game {
         this.hp = 0;
         this.dead = true;
         this.deadT = 0;
+        this.allDownSent = false;
         this.burnT = 0;
         this.sound('die');
       }
@@ -1249,8 +1263,8 @@ export class Game {
 
     // things to use nearby
     // a downed teammate next to you: hold E to get them back up
-    const mate = this.remote ? this.mate : this.peers[0];
-    this.reviveNear = !!mate && mate.dead && Math.hypot(mate.x - this.x, mate.y - this.y) < 1.4;
+    const mate = this.mates.find((m) => m.dead && Math.hypot(m.x - this.x, m.y - this.y) < 1.4);
+    this.reviveNear = !!mate;
     if (this.reviveNear && inp.useHeld) {
       this.reviveT += dt;
       if (Math.random() < dt * 20) this.burst(mate!.x, mate!.y, 0.4, '#ffe066', 1, 1.5);
@@ -1260,8 +1274,8 @@ export class Game {
         this.sound('artifact');
         this.onMsg(`You revived ${mate!.name}!`);
         mate!.dead = false;
-        if (this.remote) this.onAct({ a: 'revive' });
-        else this.onReviveMate();
+        if (this.remote) this.onAct({ a: 'revive', who: mate!.id });
+        else this.onReviveMate(mate!.id, '');
       }
     } else this.reviveT = 0;
     this.near = this.reviveNear ? null : this.findNear();
@@ -1352,7 +1366,7 @@ export class Game {
     else this.onLevelDone(def, reward);
   }
 
-  /** the players monsters can go after: you, and your teammate */
+  /** the players monsters can go after: you, and your teammates */
   private targets(): Tgt[] {
     const t: Tgt[] = [];
     if (!this.dead) t.push({ id: '', x: this.x, y: this.y });
@@ -1383,7 +1397,12 @@ export class Game {
   peerAct(id: string, a: Act) {
     const p = this.peers.find((q) => q.id === id);
     if (a.a === 'revive') {
-      this.revived(p?.name ?? 'Your teammate');
+      // a guest revived the host, or another guest
+      const who = a.who && a.who !== 'host' ? this.peers.find((q) => q.id === a.who) : null;
+      if (who) {
+        who.dead = false;
+        this.onReviveMate(who.id, p?.name ?? 'Your teammate');
+      } else this.revived(p?.name ?? 'Your teammate');
       return;
     }
     if (!p || p.dead) return;

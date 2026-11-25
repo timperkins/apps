@@ -1,5 +1,5 @@
-// M.D. team play (2 players), built like Factori-owen's: the host's game is the real one.
-// The guest moves their own hero and sends what they do (swings, arrows, artifacts, bombs,
+// M.D. team play (up to 4 players), built like Factori-owen's: the host's game is the real one.
+// Each guest moves their own hero and sends what they do (swings, arrows, artifacts, bombs,
 // chests, the portal); the host runs monsters, loot and the level, and sends snapshots back.
 import { MONSTERS, type MonsterKind } from './data';
 import { Host, joinHost, type Pipe } from './net';
@@ -11,6 +11,8 @@ const SHOTS: Shot['kind'][] = ['arrow', 'bolt', 'star', 'ember', 'spore', 'ice',
 const DROPS = ['coin', 'potion', 'arrows'] as const;
 const SNAP_EVERY = 1 / 15;
 const POS_EVERY = 1 / 20;
+/** the host and up to 3 guests */
+export const MAX_TEAM = 4;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Msg = any;
@@ -28,9 +30,16 @@ export function peerOf(g: Game, id: string, name: string): Peer {
 
 // ---------- host ----------
 
+interface Guest { id: string; pipe: Pipe; name: string; ready: boolean }
+
 export class HostSession {
   host = new Host();
-  guest: { id: string; pipe: Pipe; name: string } | null = null;
+  guests = new Map<string, Guest>();
+  /** everyone on the team but you, as one entry (for the menus): null while nobody has joined */
+  get guest(): { name: string } | null {
+    const names = [...this.guests.values()].map((x) => x.name);
+    return names.length ? { name: names.join(', ') } : null;
+  }
   private snapT = 0;
   onJoin: (name: string) => void = () => {};
   onLeave: (name: string) => void = () => {};
@@ -46,54 +55,68 @@ export class HostSession {
   }
 
   private addGuest(id: string, pipe: Pipe) {
-    if (this.guest && this.guest.id !== id) {
-      // a team is two players
+    if (!this.guests.has(id) && this.guests.size >= MAX_TEAM - 1) {
+      // a team is up to four players
       pipe.send({ t: 'full' });
       return;
     }
     const g = this.game();
-    this.guest = { id, pipe, name: 'Player 2' };
+    // Player 2, 3 or 4: the lowest number nobody is using
+    const used = new Set([...this.guests.values()].map((x) => x.name));
+    let n = 2;
+    while (used.has(`Player ${n}`)) n++;
+    const name = `Player ${n}`;
+    this.guests.set(id, { id, pipe, name, ready: false });
     pipe.onMessage = (m) => this.onMessage(id, m);
-    g.peers = [{ ...peerOf(g, id, 'Player 2'), dead: false }];
-    g.fxOut = [];
+    g.peers = [...g.peers.filter((p) => p.id !== id), { ...peerOf(g, id, name), dead: false }];
+    g.fxOut ??= [];
     // the level is sent once the guest says hello (their game may not be listening before that)
-    this.host.players = 2;
+    this.host.players = this.guests.size + 1;
     void this.host.touch();
   }
 
   private dropGuest(id: string) {
-    if (!this.guest || this.guest.id !== id) return;
-    const name = this.guest.name;
-    this.guest = null;
+    const gu = this.guests.get(id);
+    if (!gu) return;
+    this.guests.delete(id);
     const g = this.game();
-    g.peers = [];
-    g.fxOut = null;
-    this.host.players = 1;
-    this.onLeave(name);
+    g.peers = g.peers.filter((p) => p.id !== id);
+    if (!this.guests.size) g.fxOut = null;
+    this.host.players = this.guests.size + 1;
+    void this.host.touch();
+    this.onLeave(gu.name);
   }
 
   private onMessage(id: string, m: Msg) {
     const g = this.game();
+    const gu = this.guests.get(id);
+    if (!gu) return;
     if (m.t === 'hello') {
-      this.guest!.name = String(m.name || 'Player 2').slice(0, 20);
-      if (g.peers[0]) g.peers[0].name = this.guest!.name;
-      this.sendLevel();
-      this.onJoin(this.guest!.name);
+      const typed = String(m.name || '').slice(0, 20);
+      // keep "Player N" unless they picked a name of their own
+      if (typed && !/^Player \d$/.test(typed)) gu.name = typed;
+      const p = g.peers.find((q) => q.id === id);
+      if (p) p.name = gu.name;
+      gu.ready = true;
+      this.sendLevel(id);
+      this.onJoin(gu.name);
     } else if (m.t === 'sync') {
       // the guest is on a different map than us: send it again
-      this.sendLevel();
+      this.sendLevel(id);
     } else if (m.t === 'pos') {
-      const p = g.peers[0];
-      if (p) Object.assign(p, m.p, { id, name: this.guest!.name });
+      const p = g.peers.find((q) => q.id === id);
+      if (p) Object.assign(p, m.p, { id, name: gu.name });
     } else if (m.t === 'act') g.peerAct(id, m.a as Act);
   }
 
-  send(m: object) {
-    this.guest?.pipe.send(m);
+  /** to every guest, or to one */
+  send(m: object, to?: string) {
+    if (to) this.guests.get(to)?.pipe.send(m);
+    else for (const gu of this.guests.values()) gu.pipe.send(m);
   }
-  private sendLevel() {
+  private sendLevel(to?: string) {
     const g = this.game();
-    this.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, diff: g.diff, x: g.x, y: g.y });
+    this.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, diff: g.diff, x: g.x, y: g.y }, to);
   }
 
   // hooks the game calls (wired up in index.ts)
@@ -106,14 +129,15 @@ export class HostSession {
   finished() {
     this.send({ t: 'done' });
   }
-  hurtPeer(dmg: number, fx: number, fy: number, effect?: string) {
-    this.send({ t: 'hurt', dmg, fx, fy, effect });
+  hurtPeer(id: string, dmg: number, fx: number, fy: number, effect?: string) {
+    this.send({ t: 'hurt', dmg, fx, fy, effect }, id);
   }
-  gain(g: object) {
-    this.send({ t: 'gain', g });
+  gain(id: string, g: object) {
+    this.send({ t: 'gain', g }, id);
   }
-  revive() {
-    this.send({ t: 'revive' });
+  /** `id` was revived by `by` */
+  revive(id: string, by: string) {
+    this.send({ t: 'revive', by: by || this.myName() }, id);
   }
   bothDown() {
     this.send({ t: 'fail' });
@@ -121,7 +145,7 @@ export class HostSession {
 
   /** call every frame after the game updates */
   tick(dt: number) {
-    if (!this.guest) return;
+    if (!this.guests.size) return;
     this.snapT -= dt;
     if (this.snapT > 0) return;
     this.snapT = SNAP_EVERY;
@@ -132,7 +156,7 @@ export class HostSession {
       if (p.hp <= 0) gone.push(i);
       if (p.open) opened.push(i);
     });
-    this.send({
+    const snap = {
       t: 'snap',
       // which map we're on, so the guest can tell if it's on the same one
       lv: [g.mode === 'camp' ? 0 : 1, g.levelIdx, g.seed],
@@ -149,7 +173,9 @@ export class HostSession {
       portal: L.portal.open ? 1 : 0,
       boss: g.bossAwake ? 1 : 0,
       fx: g.fxOut?.splice(0) ?? [],
-    });
+    };
+    // each guest also gets the other guests
+    for (const gu of this.guests.values()) gu.pipe.send({ ...snap, o: g.peers.filter((p) => p.id !== gu.id) });
   }
 
   async close() {
@@ -157,7 +183,7 @@ export class HostSession {
     const g = this.game();
     g.peers = [];
     g.fxOut = null;
-    this.guest = null;
+    this.guests.clear();
     await this.host.close();
   }
 }
@@ -191,7 +217,7 @@ export class GuestSession {
     const g = this.game();
     switch (m.t) {
       case 'full':
-        this.onLost('That game already has two players.');
+        this.onLost(`That game already has ${MAX_TEAM} players.`);
         break;
       case 'level':
         if (typeof m.diff === 'number') g.diff = m.diff;
@@ -235,7 +261,7 @@ export class GuestSession {
         break;
       }
       case 'revive':
-        g.revived(g.mate?.name ?? 'Your teammate');
+        g.revived(typeof m.by === 'string' && m.by ? m.by : g.mate?.name ?? 'Your teammate');
         break;
       case 'fail':
         this.onFail();
@@ -262,10 +288,12 @@ export class GuestSession {
           this.pipe?.send({ t: 'sync' });
         }
         g.mate = m.me;
+        g.others = Array.isArray(m.o) ? m.o : [];
         return;
       }
     }
     g.mate = m.me;
+    g.others = Array.isArray(m.o) ? m.o : [];
     const old = new Map(g.monsters.map((x) => [x.id, x]));
     const seen = new Set<number>();
     g.monsters = m.m.map((a: (number | string)[]) => {
@@ -340,6 +368,7 @@ export class GuestSession {
     const g = this.game();
     g.remote = false;
     g.mate = null;
+    g.others = [];
     g.onAct = () => {};
   }
 }

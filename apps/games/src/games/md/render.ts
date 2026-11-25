@@ -755,10 +755,9 @@ export class Renderer {
       });
     for (const d of g.drops) list.push({ k: d.x + d.y, f: () => this.drop(d.kind, d.x, d.y, g.time + d.x) });
     for (const m of g.monsters) if (seen(Math.floor(m.x), Math.floor(m.y))) list.push({ k: m.x + m.y, f: () => this.monster(m, g) });
-    const downOnTeam = g.dead && !!(g.remote ? g.mate : g.peers[0]);
+    const downOnTeam = g.dead && g.mates.length > 0;
     if (!g.dead || g.deadT < 0.6 || downOnTeam) list.push({ k: heroK, f: () => this.hero(g) });
-    const other = g.remote ? g.mate : g.peers[0];
-    if (other) list.push({ k: other.x + other.y, f: () => this.mate(other, g) });
+    for (const other of g.mates) list.push({ k: other.x + other.y, f: () => this.mate(other, g) });
     for (const s of g.shots) list.push({ k: s.x + s.y, f: () => this.shot(s.x, s.y, s.z, s.vx, s.vy, s.kind, g, s.color) });
     for (const b of g.bombs) list.push({ k: b.x + b.y, f: () => this.bomb(b.x, b.y, b.t, b.fuse) });
     list.sort((a, b) => a.k - b.k);
