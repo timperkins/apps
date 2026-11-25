@@ -134,7 +134,7 @@ export class Renderer {
     // rocks
     for (const rock of g.rocks.values()) {
       if (rock.x < x0 || rock.x > x1 || rock.y < y0 || rock.y > y1) continue;
-      this.rock(ctx, rock.x, rock.y, rock.ore, rock.amt / rock.max, g.miningRock === rock.y * W + rock.x ? Math.sin(t * 40) * 0.03 : 0);
+      this.rock(ctx, rock.x, rock.y, rock.ore, 1, g.miningRock === rock.y * W + rock.x ? Math.sin(t * 40) * 0.03 : 0);
     }
     // buildings
     const items: [number, number, OreId][] = [];
