@@ -237,9 +237,9 @@ const game: GameModule = {
       gm.onDeath = () => show('dead');
       gm.onEnter = (mode, idx, seed) => host?.entered(mode, idx, seed);
       gm.onFinish = () => host?.finished();
-      gm.onReviveMate = () => host?.revive();
-      gm.onPeerHurt = (_id, dmg, fx, fy, effect) => host?.hurtPeer(dmg, fx, fy, effect);
-      gm.onPeerGain = (_id, obj) => host?.gain(obj);
+      gm.onReviveMate = (id, by) => host?.revive(id, by);
+      gm.onPeerHurt = (id, dmg, fx, fy, effect) => host?.hurtPeer(id, dmg, fx, fy, effect);
+      gm.onPeerGain = (id, obj) => host?.gain(id, obj);
       gm.onBothDown = () => {
         host?.bothDown();
         show('dead');
@@ -427,11 +427,11 @@ const game: GameModule = {
       } else bossEl.hidden = true;
       if (g.reviveNear) {
         promptEl.hidden = false;
-        const who = esc((g.remote ? g.mate : g.peers[0])?.name ?? 'your teammate');
+        const who = esc(g.mates.find((m) => m.dead && Math.hypot(m.x - g.x, m.y - g.y) < 1.4)?.name ?? 'your teammate');
         promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> Hold to revive ${who} <span class="md-revive"><i style="width:${pct(g.reviveT / 1.5)}"></i></span>`;
       } else if (g.dead && (host?.guest || guest)) {
         promptEl.hidden = false;
-        promptEl.innerHTML = `💫 You’re down! Your teammate can revive you (hold E next to you) · up by yourself in ${Math.max(0, Math.ceil(30 - g.deadT))}s`;
+        promptEl.innerHTML = `💫 You’re down! A teammate can revive you (hold E next to you) · up by yourself in ${Math.max(0, Math.ceil(30 - g.deadT))}s`;
       } else if (g.near) {
         promptEl.hidden = false;
         promptEl.innerHTML = `<kbd>${touchMode ? '✋' : 'E'}</kbd> ${g.near.label}`;
@@ -487,7 +487,7 @@ const game: GameModule = {
       else if (o === 'ench') enchPanel();
       else if (o === 'story') storyPanel();
       else if (o === 'chapters') chaptersPanel();
-      else if (o === 'dead' && guest) panel(`<h2 class="md-red">Your team fell!</h2><p>You and ${esc(g.mate?.name ?? 'your host')} were both knocked out. Your host picks what happens next.</p><p class="md-dim">Waiting for the host…</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button></div>`, { leave: () => leaveGuest('You left the team game.') });
+      else if (o === 'dead' && guest) panel(`<h2 class="md-red">Your team fell!</h2><p>Your whole team was knocked out. Your host picks what happens next.</p><p class="md-dim">Waiting for the host…</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button></div>`, { leave: () => leaveGuest('You left the team game.') });
       else if (o === 'dead') panel(`<h2 class="md-red">You fell!</h2><p>The monsters of ${g.def.name} got the better of you this time. You keep every coin and piece of gear you found.</p><p class="md-dim">Monsters beaten this run: ${g.kills} · coins found: ${g.runCoins}</p><div class="md-row"><button class="md-btn md-go" data-x="camp">Back to camp</button><button class="md-btn" data-x="retry">Try again</button></div>`, {
         camp: () => {
           g.enterCamp();
@@ -625,7 +625,7 @@ const game: GameModule = {
 
     function menu() {
       const inDungeon = g.mode === 'dungeon';
-      const team = guest ? `👥 Team: in ${esc(g.mate?.name ?? 'a friend')}’s game` : host?.guest ? `👥 Team: playing with ${esc(host.guest.name)}` : host ? '👥 Team: open to join' : '👥 Open to join (2 players)';
+      const team = guest ? `👥 Team: in ${esc(g.mate?.name ?? 'a friend')}’s game` : host?.guest ? `👥 Team: playing with ${esc(host.guest.name)}` : host ? '👥 Team: open to join' : '👥 Open to join (up to 4 players)';
       panel(`<h2>${guest || host?.guest ? 'Menu' : 'Paused'}</h2>
         ${guest || host?.guest ? '<p class="md-dim">Team games keep running while the menu is open.</p>' : ''}
         <div class="md-col">
@@ -738,7 +738,7 @@ const game: GameModule = {
       return `<img src="${gearIcon(d ? d.melee : '')}" alt="" style="width:44px;height:44px">`;
     }
 
-    // --- team play (2 players, like Factori-owen) ---
+    // --- team play (up to 4 players, like Factori-owen) ---
     let hostList: HostInfo[] | null = null;
     let joinStatus = '';
     function nameField() {
@@ -754,8 +754,8 @@ const game: GameModule = {
         body = `<p>You’re on ${esc(g.mate?.name ?? 'your host')}’s team. They pick the dungeons; you keep your own gear and every coin you pick up.</p><div class="md-row"><button class="md-btn" data-x="leave">Leave their game</button><button class="md-btn md-go" data-x="back">Back</button></div>`;
         acts.leave = () => leaveGuest('You left the team game.');
       } else if (host) {
-        body = `<p>${host.guest ? `<b>${esc(host.guest.name)}</b> is on your team.` : 'Your game is open. On another device, your friend opens M.D. and picks <b>Join a friend</b> on the title screen.'}</p>
-          <p class="md-dim">You pick the dungeons. Monsters go after whoever is closest. If one of you falls, your teammate can revive you: stand next to them and hold E.</p>
+        body = `<p>${host.guest ? `On your team: <b>${esc(host.guest.name)}</b>. Up to 4 players can play together.` : 'Your game is open (up to 4 players). On another device, a friend opens M.D. and picks <b>Join a friend</b> on the title screen.'}</p>
+          <p class="md-dim">You pick the dungeons. Monsters go after whoever is closest. If one of you falls, a teammate can revive you: stand next to them and hold E.</p>
           <div class="md-row"><button class="md-btn" data-x="close">Close the game to friends</button><button class="md-btn md-go" data-x="back">Back</button></div>`;
         acts.close = () => {
           void endTeam();
@@ -782,7 +782,7 @@ const game: GameModule = {
       toast('Opening your game…');
       try {
         await h.open();
-        toast('Your game is open. Your friend can join from their title screen.');
+        toast('Your game is open. Up to 3 friends can join from their title screen.');
       } catch (e) {
         host = null;
         toast(`Couldn’t open your game: ${(e as Error).message || e}`);
@@ -1302,7 +1302,7 @@ const game: GameModule = {
       }
       host?.tick(dt);
       guest?.tick(dt);
-      // the host picked what happens after you both fell
+      // the host picked what happens after the whole team fell
       if (guest && overlay === 'dead' && !g.dead) show('none');
       R.draw(g, { minimap: overlay === 'none' });
       if (playing) updateHud();
