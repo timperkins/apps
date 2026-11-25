@@ -1898,7 +1898,77 @@ function drum(u: number, v: number, z: number, cu: number, cv: number, r: number
   return { a: Math.atan2(v - cv, u - cu), d, roof: z > h - 0.2 && d < r - 0.5 };
 }
 
-function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
+// ---------- Walls ----------
+// A wall segment is drawn to suit the segments next to it: which of the four
+// cells beside it hold wall (LINK_E, LINK_S, LINK_W, LINK_N, +u, +v, -u, -v),
+// and LINK_PIER for a brick pier in the middle of a straight run. Ends,
+// corners, junctions and a lone segment always get a pier.
+export const LINK_E = 1;
+export const LINK_S = 2;
+export const LINK_W = 4;
+export const LINK_N = 8;
+export const LINK_PIER = 16;
+const WBRICK = hex('#a5583c');
+const WMORTAR = hex('#c2b6a0');
+const WAL_T = 1.9; // half the wall's thickness
+const WAL_H = 6; // top of the brickwork, under the coping
+const PIER = 2.4; // half a pier's width
+const PIER_H = 7.5;
+const COURSE = 1.5; // a course of bricks and its mortar
+const BRICK_L = 8 / 3; // a brick and its joint, three to a segment so runs line up
+
+// Running-bond brickwork, along the face at `along`, course by course up z.
+function brickAt(along: number, z: number, seed: number): RGB {
+  if (mod(z, COURSE) < 0.5) return WMORTAR;
+  const row = Math.floor(z / COURSE);
+  const a = along + mod(row, 2) * (BRICK_L / 2);
+  if (mod(a, BRICK_L) < 0.45) return WMORTAR;
+  const h = hash2(Math.floor(a / BRICK_L), row, seed);
+  // a few bricks burnt darker, a few faded, and soot low down
+  let c = shade(WBRICK, (h - 0.5) * 0.18 + (h > 0.9 ? -0.16 : h < 0.07 ? 0.1 : 0));
+  if (z < 2) c = shade(c, -0.08 * (2 - z));
+  return c;
+}
+
+function wallShape(wall: number): Shape {
+  let m = wall & 15;
+  const straight = m === (LINK_E | LINK_W) || m === (LINK_S | LINK_N);
+  const pier = !straight || (wall & LINK_PIER) !== 0;
+  // a segment on its own: a short length of wall along u, round a pier
+  if (!m) m = LINK_E | LINK_W;
+  const armU = (u: number) => (u >= 0 ? m & LINK_E : m & LINK_W) !== 0;
+  const armV = (v: number) => (v >= 0 ? m & LINK_S : m & LINK_N) !== 0;
+  return (u, v, z) => {
+    const au = Math.abs(u);
+    const av = Math.abs(v);
+    if (au > 4 || av > 4 || z < 0) return null;
+    if (pier) {
+      const p = Math.max(au, av);
+      // the pier's cap: a slab, then a shallow stone pyramid
+      if (z >= PIER_H && z < PIER_H + 0.6 && p < PIER + 0.4) return z < PIER_H + 0.25 ? CONC : CONC_L;
+      if (z >= PIER_H + 0.6 && p < PIER + 0.2 - (z - PIER_H - 0.6) * 1.6) return g(CONC_L, u, v, z, 0.05);
+      if (z < PIER_H && p < PIER + (z < 0.6 ? 0.3 : 0)) {
+        if (z < 0.6) return CONC_D;
+        // (each face has its own bond, offset so the corners interlock)
+        return av >= au ? brickAt(u + 0.7, z, 51) : brickAt(v + 0.7 + BRICK_L / 2, z, 52);
+      }
+    }
+    const onU = av <= WAL_T + 0.45 && (armU(u) || (au <= WAL_T + 0.45 && !pier && armV(0)));
+    const onV = au <= WAL_T + 0.45 && (armV(v) || (av <= WAL_T + 0.45 && !pier && armU(0)));
+    if (!onU && !onV) return null;
+    const across = onU ? av : au;
+    // the coping: stone along the top, overhanging a little
+    if (z >= WAL_H) {
+      if (z >= WAL_H + 0.8) return null;
+      return z < WAL_H + 0.3 ? CONC : g(CONC_L, u, v, z, 0.05);
+    }
+    if (z < 0.6) return across <= WAL_T + 0.25 ? CONC_D : null; // the footing
+    if (across > WAL_T) return null;
+    return onU ? brickAt(u, z, 53) : brickAt(v, z, 54);
+  };
+}
+
+function buildingShape(kind: BuildingKind, f: Faction, wall = 0): { shape: Shape; glow?: Shape; rx: number; ry: number; zmax: number; fx: V2BuildingArt['fx'] } {
   const roofC = mix(f.main, f.light, 0.35);
   const glow = glowOf(f);
   switch (kind) {
@@ -1977,15 +2047,22 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       return { shape, rx: 24, ry: 22, zmax: 38, fx: [{ x: mu, y: mv, z: 37.6 }, { x: HU, y: mv, z: 19 }] };
     }
     case 'lab': {
-      // The Tech lab: a great geodesic dome of glass panes in steel frames,
-      // the panes lit from inside in the side's color, with a vaulted
-      // entrance. Its `glow` is the light in the panes alone, which the game
-      // pulses over it.
-      const AU = 17;
-      const AV = 14;
-      const AZ = 19;
-      const Z0 = 1.4; // the dome stands on a low ring
+      // The Tech lab: the great geodesic dome of glass panes in steel frames,
+      // lit from inside in the side's color, raised on a round-cornered
+      // podium with a glowing collar where the dome meets it. Beside it
+      // stand a tall research spire (floating rings of light, a sensor deck,
+      // an antenna and a beacon) joined to the dome by a glass skybridge, and a shorter
+      // server tower whose glass faces glow in bands. Its `glow` is the light
+      // in the panes, windows and bands alone, which the game pulses over it.
+      const R = 11; // the dome's radius
+      const AZ = 11; // and height
+      const PH = 8; // the podium's height
+      const Z0 = PH + 1.4; // the dome stands on a collar on the podium
       const BANDS = 5;
+      const [TAu, TAv] = [-15, 3]; // the research spire
+      const TAH = 28;
+      const [TBu, TBv] = [14.5, -8]; // the server tower
+      const TBH = 19;
       const pane = (k: number) => {
         // the panes: dark at the foot, glowing higher up, a few brighter ones
         if (k > 0.86) return glow;
@@ -1997,50 +2074,157 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       let lit = 0;
       const shape: Shape = (u, v, z) => {
         lit = 0;
-        const nu = u / AU;
-        const nv = v / AV;
+        // ---- the dome ----
+        const nu = u / R;
+        const nv = v / R;
         const nz = (z - Z0) / AZ;
         const q = nu * nu + nv * nv + nz * nz;
         if (z >= Z0 && q <= 1) {
           const el = Math.asin(Math.min(1, Math.max(0, nz / Math.sqrt(q || 1)))); // 0 at the foot, pi/2 at the top
           const band = Math.min(BANDS - 1, Math.floor((el / (Math.PI / 2)) * BANDS));
           const t = (el / (Math.PI / 2)) * BANDS - band; // 0..1 up the band
-          const n = [16, 15, 12, 8, 4][band];
+          const n = [14, 12, 10, 7, 4][band];
           const s = ((Math.atan2(nv, nu) + Math.PI) / (Math.PI * 2)) * n + (band % 2) * 0.5;
           const w = mod(s, 1);
-          const R = Math.sqrt(AU * AV) * Math.cos(el); // the band's radius, roughly
-          const seg = (Math.PI * 2 * R) / n || 1;
+          const seg = (Math.PI * 2 * R * Math.cos(el)) / n || 1;
           const bh = (AZ * Math.PI) / 2 / BANDS;
-          // frames: the rings between the bands and the zigzag struts in each
-          const ring = Math.min(t, 1 - t) * bh < 0.3;
-          const strut = Math.min(Math.abs(w - 0.5 * t), Math.abs(1 - w - 0.5 * t)) * seg < 0.3;
+          const ring = Math.min(t, 1 - t) * bh < 0.28;
+          const strut = Math.min(Math.abs(w - 0.5 * t), Math.abs(1 - w - 0.5 * t)) * seg < 0.28;
           if (ring || strut || (band === BANDS - 1 && t > 0.7)) return z > Z0 + AZ * 0.7 ? PLAS_L : STEEL;
-          // which pane: up-pointing or down-pointing triangle in the cell
           const tri = w < 0.5 * t ? 0 : 1 - w < 0.5 * t ? 2 : 1;
           const id = hash2(Math.floor(s) * 3 + tri, band, 41);
           const k = Math.min(1, id * 0.55 + (el / (Math.PI / 2)) * 0.55);
           lit = 0.35 + k * 0.65;
           return pane(k);
         }
-        // the vaulted entrance on the front (+v), a dark doorway with light spilling out
-        if (v > 9 && v < 16 && Math.abs(u) < 3.6) {
-          const r = Math.hypot(u, z - 1.2);
-          if (r < 3.6 && z >= 0) {
-            if (v > 15.4) {
-              if (r > 2.8) return STEEL;
-              if (z < 1.8) return GUN_D;
-              lit = r < 1.6 ? 1 : 0.4;
-              return r < 1.6 ? glow : mix(f.dark, f.main, 0.4);
+        // the finial on the crown: a short mast with a glowing tip
+        const cd = Math.hypot(u, v);
+        if (cd < 0.5 && z >= Z0 + AZ - 0.2 && z < Z0 + AZ + 3) return GUN_D;
+        if ((u * u + v * v + (z - (Z0 + AZ + 3.4)) ** 2) < 0.8) {
+          lit = 1;
+          return glow;
+        }
+        // the collar the dome stands on: a dark ring with a strip of light round it
+        if (z >= PH && z < Z0 && cd < R + 1.2) {
+          if (cd < R - 0.6) return GUN_D;
+          if (z > PH + 0.5 && z < PH + 1) {
+            lit = 0.9;
+            return glow;
+          }
+          return mod(Math.atan2(v, u) * 16 / Math.PI, 1) < 0.12 ? GUN_D : GUN;
+        }
+
+        // ---- the research spire, on the left ----
+        const ad = Math.hypot(u - TAu, v - TAv);
+        const aa = Math.atan2(v - TAv, u - TAu);
+        // the antenna and its beacon
+        if (ad < 0.35 && z >= TAH + 1 && z < TAH + 7) return mod(Math.floor(z / 1.2), 2) ? STEEL : GUN_D;
+        if (ad < 1 && Math.abs(z - (TAH + 3.6)) < 0.3) return GUN;
+        if ((u - TAu) ** 2 + (v - TAv) ** 2 + (z - (TAH + 7.4)) ** 2 < 0.6) return RED;
+        // the sensor deck on top: a flat disc with a lit rim
+        if (z >= TAH - 1.2 && z < TAH + 1 && ad < 3.4) {
+          if (z > TAH + 0.4) return ad < 3 ? (mod(aa * 6 / Math.PI, 1) < 0.1 ? PLAS_D : PLAS_L) : PLAS_L;
+          if (ad > 2.8 && z < TAH - 0.4) {
+            lit = 0.9;
+            return glow;
+          }
+          return GUN;
+        }
+        // two rings of light floating round the upper shaft, on thin spokes
+        for (const rz of [18.5, 23.5]) {
+          const tr = Math.hypot(ad - 4.4, z - rz);
+          if (tr < 0.6) {
+            lit = 1;
+            return tr < 0.3 ? glow : f.light;
+          }
+          if (Math.abs(z - rz) < 0.2 && ad < 4.2 && mod(aa * 3 / Math.PI + 0.25, 2 / 3) < 0.1) return GUN_D;
+        }
+        const tw = z < 3 ? 3.8 : 3.1 - (z / TAH) * 0.9; // the shaft tapers as it rises
+        if (z < TAH && ad < tw) {
+          if (z < 3) return z > 2.4 ? PLAS_L : rskin(aa * 3.8, z, 3, { seed: 51 });
+          // slits of light running up the shaft, and rings between its sections
+          if (Math.abs(mod(z, 5) - 0.2) < 0.3) return f.main;
+          const sl = mod(aa * 4 / Math.PI + 0.5, 1);
+          if (sl < 0.2 && z > 4) {
+            lit = 0.75;
+            return mod(z, 5) > 2.6 ? glow : f.light;
+          }
+          return g(mod(aa * 8 / Math.PI, 1) < 0.08 ? PLAS_D : PLAS, u, v, z, 0.05);
+        }
+        // the glass skybridge from the spire to the dome's collar
+        {
+          const bx = -TAu;
+          const by = -TAv;
+          const L = Math.hypot(bx, by);
+          const along = ((u - TAu) * bx + (v - TAv) * by) / L;
+          const side = ((u - TAu) * by - (v - TAv) * bx) / L;
+          if (along > 2.6 && along < L - 9.4 && Math.abs(side) < 1.6 && z > 13 && z < 16.2) {
+            const r = Math.hypot(side, z - 14.6);
+            if (r < 1.6) {
+              if (mod(along, 2.2) < 0.5 || r > 1.25 || z < 13.6) return STEEL;
+              lit = 0.6;
+              return z > 15 ? f.light : mix(f.main, f.light, 0.3);
             }
-            if (mod(v, 2) < 0.5) return STEEL;
-            if (r > 3) return STEEL;
-            lit = 0.4;
-            return z > 3.4 ? pane(0.5) : pane(0.2);
           }
         }
-        // the ring the dome stands on
-        const e = (u / (AU + 0.8)) ** 2 + (v / (AV + 0.8)) ** 2;
-        if (e <= 1 && z < Z0) return z > Z0 - 0.5 ? GUN : mod(Math.atan2(v, u) * 24 / Math.PI, 1) < 0.15 ? GUN_D : METAL_D;
+
+        // ---- the server tower, back right ----
+        const e2 = -rrect(u, v, TBu, TBv, 4, 4, 1.6);
+        if (e2 >= 0) {
+          // short antennas on the roof
+          if (z >= TBH && z < TBH + 4.6) {
+            for (const [mu, mv, h] of [[TBu - 1.6, TBv - 1.4, 4.4], [TBu + 1.4, TBv - 1.8, 3], [TBu + 1.6, TBv + 1.4, 2]] as [number, number, number][])
+              if (Math.abs(u - mu) < 0.35 && Math.abs(v - mv) < 0.35 && z < TBH + h) return z > TBH + h - 0.5 ? LAMP : GUN_D;
+            if (inBox(u, v, z, TBu - 1.4, TBu + 0.4, TBv + 0.6, TBv + 2.4, TBH, TBH + 1.4)) return z > TBH + 1 ? METAL : METAL_D;
+          }
+          if (z < TBH) {
+            if (e2 > 0.6 && z > TBH - 0.6) return e2 < 1.2 ? PLAS_L : shade(TAR, -0.1);
+            if (z > TBH - 1) return PLAS_L;
+            if (z < 1.2) return grime(CONC_D, u + v, z, TBH, 52);
+            const along = u - TBu + v - TBv;
+            // glass faces in bands of light, with pale frames at the corners and floors
+            const corner = Math.abs(u - TBu) > 2.6 && Math.abs(v - TBv) > 2.6;
+            if (corner || mod(z, 3.6) < 0.5) return corner ? PLAS : PLAS_L;
+            if (mod(along, 2) < 0.3) return GUN_D;
+            const fl = Math.floor(z / 3.6);
+            const on = hash2(Math.floor(along / 2), fl, 53) < 0.55;
+            lit = on ? 0.85 : 0.35;
+            return on ? (mod(z, 3.6) > 2.6 ? glow : f.light) : mix(f.dark, f.main, 0.5);
+          }
+        }
+        // a low duct from the server tower into the podium
+        if (inBox(u, v, z, 9, TBu - 3.5, TBv - 1.2, TBv + 1.2, 3, 5.6)) return mod(u, 1.8) < 0.4 ? GUN : z > 5 ? METAL : METAL_D;
+
+        // ---- the podium ----
+        const e = -rrect(u, v, 0, 1.5, 12.5, 11.5, 6);
+        const top = shoulder(e, PH, 1.6);
+        if (e >= 0 && z <= top) {
+          if (e > 0.6 && z > top - 0.6) {
+            // the deck: pale coping, then plates with lines of light running to the collar
+            if (e < 1.8) return PLAS_L;
+            const a = Math.atan2(v, u) * 8 / Math.PI;
+            if (Math.abs(mod(a, 1) - 0.5) < 0.6 / Math.max(1, cd) * 2.6) {
+              lit = 0.6;
+              return f.light;
+            }
+            return g(mod(u + v, 3) < 0.3 ? shade(METAL_D, -0.1) : METAL_D, u, v, z, 0.06);
+          }
+          // the entrance on the front (+v): a tall glass doorway under a canopy
+          if (v > 11 && Math.abs(u) < 4.2 && z < 6.4) {
+            if (Math.abs(u) > 3.6 || z > 5.8) return STEEL;
+            if (z < 0.6) return GUN_D;
+            if (mod(u, 2.4) < 0.3) return GUN_D;
+            lit = z > 3 ? 1 : 0.7;
+            return z > 3 ? glow : f.light;
+          }
+          return rskin(u * 1.1 + v, z, PH, { seed: 50, win: [3, 5.6], band: [6.2, 7, f.main], pitch: 3.6, lit: glow });
+        }
+        // the canopy over the door, on two posts
+        if (Math.abs(u) < 5 && v > 12.8 && v < 15.6 && z > 6.4 && z < 7.2) return z > 6.9 ? PLAS_L : f.main;
+        if (Math.abs(Math.abs(u) - 4.4) < 0.35 && Math.abs(v - 15) < 0.35 && z < 6.4) return STEEL;
+        // the forecourt: a pad with hazard edging and lamps
+        if (Math.abs(u) < 6 && v > 12.4 && v < 16 && z < 0.4) return v > 15.4 ? hazard(u, 0) : CONC_L;
+        for (const lu of [-7.5, 7.5]) if (Math.abs(u - lu) < 0.3 && Math.abs(v - 14.5) < 0.3 && z < 3.4) return z > 2.8 ? LAMP : GUN_D;
         return null;
       };
       const light = mix(f.light, WHITE, 0.15);
@@ -2049,7 +2233,7 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
         if (!c) return null;
         return lit ? shade(light, (lit - 1) * 0.9) : BLACK;
       };
-      return { shape, glow: glowShape, rx: 20, ry: 16, zmax: 22, fx: [{ x: 0, y: 0, z: Z0 + AZ * 0.55 }] };
+      return { shape, glow: glowShape, rx: 20, ry: 16, zmax: 40, fx: [{ x: 0, y: 0, z: Z0 + AZ * 0.55 }, { x: TAu, y: TAv, z: TAH + 8.4 }] };
     }
     case 'power': {
       // The power plant: a tall cooling tower, a domed reactor ringed with
@@ -2766,24 +2950,8 @@ function buildingShape(kind: BuildingKind, f: Faction): { shape: Shape; glow?: S
       return { shape, rx: 10, ry: 10, zmax: 28, fx: [{ x: 1, y: 0, z: DZ + 1 }] };
     }
     case 'wall': {
-      // A wall segment: a tall concrete block with a rounded coping and a
-      // round post on each corner. Segments stand side by side on an 8-unit
-      // grid, so a row of them makes one wall.
-      const shape: Shape = (u, v, z) => {
-        const au = Math.abs(u);
-        const av = Math.abs(v);
-        if (au > 4 || av > 4) return null;
-        const pd = Math.hypot(au - 2.9, av - 2.9);
-        if (pd < 1.2 && z < 8.6 - Math.max(0, pd - 0.4) * 0.8) return z > 7.6 ? PLAS_L : g(PLAS, u, v, z, 0.06);
-        if (z < 7) {
-          if (z < 0.8) return CONC_D;
-          if (z > 6.2) return PLAS_L;
-          if (mod(z, 1.6) < 0.25) return shade(PLAS, -0.12);
-          return grime(g(PLAS, u, v, z, 0.07), u + v, z, 7, 41);
-        }
-        return null;
-      };
-      return { shape, rx: 4, ry: 4, zmax: 9, fx: [] };
+      // A brick wall segment, one cell of an 8-unit grid (see wallShape).
+      return { shape: wallShape(wall), rx: 4, ry: 4, zmax: 9, fx: [] };
     }
     case 'helipad': {
       // A round raised landing deck with a hazard rim, a ring of lights and a
@@ -2861,6 +3029,8 @@ export function buildingBlock(kind: BuildingKind): BuildingBlock {
           }
       }
     }
+  // a wall segment keeps units off its whole cell, so a line of them can't be slipped through
+  if (kind === 'wall') solid.fill(1);
   // the helipad is all flat pad: the whole of its round deck is solid
   if (kind === 'helipad')
     for (let j = 0; j < ny; j++)
@@ -2926,8 +3096,8 @@ export function makeBuildingGlow(kind: BuildingKind, f: Faction): StackSprite | 
   return renderStack(b.glow, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, step: 0.5, flat: true, noGroundShadow: true });
 }
 
-export function makeBuilding(kind: BuildingKind, f: Faction): V2BuildingArt {
-  const b = buildingShape(kind, f);
+export function makeBuilding(kind: BuildingKind, f: Faction, wall = 0): V2BuildingArt {
+  const b = buildingShape(kind, f, wall);
   const spr = renderStack(b.shape, { r: 0, rx: b.rx, ry: b.ry, zmax: b.zmax, bakeShadow: true, step: 0.5, shadowAlpha: 0.32 });
   return { spr, rx: b.rx, ry: b.ry, fx: b.fx };
 }
@@ -3423,8 +3593,8 @@ export interface BuildingStates {
 const B_SEED: Record<BuildingKind, number> = { yard: 1, lab: 2, power: 4, barracks: 5, refinery: 6, radar: 7, factory: 8, tower: 9, silo: 10, helipad: 11, prism: 12, aa: 13, depot: 14, wall: 15, uplink: 16, navy: 17, derrick: 18, pillbox: 19 };
 
 // A building badly hit, and what is left of it once it is destroyed.
-export function makeBuildingStates(kind: BuildingKind, f: Faction): BuildingStates {
-  const b = buildingShape(kind, f);
+export function makeBuildingStates(kind: BuildingKind, f: Faction, wall = 0): BuildingStates {
+  const b = buildingShape(kind, f, wall);
   const { shape, rx, ry, zmax } = b;
   const seed = B_SEED[kind] * 31 + 7;
   const rand = rng(seed * 977);
@@ -3554,8 +3724,8 @@ function partShape(shape: Shape, top: (u: number, v: number) => number, rx: numb
 }
 
 /** The stages of a building going up (BUILD_STAGES), before it is finished. */
-export function makeConstruction(kind: BuildingKind, f: Faction): StackSprite[] {
-  const { shape, rx, ry, zmax } = buildingShape(kind, f);
+export function makeConstruction(kind: BuildingKind, f: Faction, wall = 0): StackSprite[] {
+  const { shape, rx, ry, zmax } = buildingShape(kind, f, wall);
   const o: StackOpts = { r: 0, rx, ry, zmax, step: 0.5 };
   const hm = columnMap(shape, o);
   // the top of each column of the finished building (-1: nothing there)

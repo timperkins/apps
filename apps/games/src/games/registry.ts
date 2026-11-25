@@ -165,4 +165,22 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./emberwild/index'),
   },
+  {
+    id: 'md',
+    title: 'M.D.',
+    tagline: 'Monster Dungeons: a blocky dungeon crawler with traders, many weapons, dungeon maps and five guardians to beat.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#0e0b14"/>
+      <path d="M60 30L110 55L60 80L10 55Z" fill="#4a534d"/><path d="M60 30L85 42.5L60 55L35 42.5Z" fill="#56605a"/>
+      <path d="M10 55L60 30V18L10 43Z" fill="#6d7a68"/><path d="M60 30L110 55V43L60 18Z" fill="#3d4a3a"/>
+      <path d="M10 43L60 18L110 43" stroke="#8a9a84" stroke-width="1" fill="none"/>
+      <rect x="28" y="30" width="3" height="6" fill="#5a3418"/><rect x="27" y="25" width="5" height="6" fill="#ffb347"/><circle cx="29.5" cy="28" r="9" fill="#ffb347" opacity=".18"/>
+      <g transform="translate(46 52)"><rect x="-4" y="-2" width="3" height="6" fill="#3a3a52"/><rect x="1" y="-2" width="3" height="6" fill="#3a3a52"/><rect x="-5" y="-10" width="10" height="9" fill="#3f7a5a"/><rect x="-4.5" y="-18" width="9" height="8" fill="#e8b890"/><rect x="-5" y="-19" width="10" height="3" fill="#6b3a1e"/><path d="M5 -8L16 -18" stroke="#b0a090" stroke-width="2.5"/></g>
+      <g transform="translate(78 50)"><rect x="-6" y="-12" width="12" height="11" fill="#77806e"/><rect x="-6.5" y="-13" width="13" height="3" fill="#5f9a3a"/><rect x="-4" y="-8" width="2.5" height="2" fill="#ffe24a"/><rect x="1.5" y="-8" width="2.5" height="2" fill="#ffe24a"/></g>
+      <g transform="translate(92 36)"><rect x="-4" y="-4" width="8" height="7" fill="#3a2a4a"/><rect x="-11" y="-3" width="7" height="2" fill="#5a3a6e"/><rect x="4" y="-3" width="7" height="2" fill="#5a3a6e"/><rect x="-2.5" y="-2" width="1.6" height="1.6" fill="#ff3a5a"/><rect x="1" y="-2" width="1.6" height="1.6" fill="#ff3a5a"/></g>
+      <circle cx="100" cy="68" r="2.5" fill="#ffd84a"/><circle cx="20" cy="64" r="2" fill="#ffd84a"/>
+      <text x="60" y="13" font-size="12" font-weight="900" text-anchor="middle" fill="#ffd04a" stroke="#2a1206" stroke-width="1" paint-order="stroke" font-family="sans-serif" letter-spacing="1">M.D.</text>
+    </svg>`,
+    load: () => import('./md/index'),
+  },
 ];

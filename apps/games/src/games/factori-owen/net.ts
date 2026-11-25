@@ -56,7 +56,8 @@ export async function listHosts(): Promise<HostInfo[]> {
   await ensureUser();
   const since = Timestamp.fromMillis(Date.now() - STALE_MS);
   const snap = await getDocs(query(collection(db, 'hosts'), where('updatedAt', '>', since), orderBy('updatedAt', 'desc'), limit(25)));
-  return snap.docs.map((d) => {
+  // M.D. hosts share this collection; leave them out
+  return snap.docs.filter((d) => d.data().game === undefined).map((d) => {
     const x = d.data();
     return { id: d.id, name: x.name ?? 'Someone', world: x.world ?? 'A factory', players: x.players ?? 1, updated: x.updatedAt?.toMillis?.() ?? 0 };
   });

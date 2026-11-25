@@ -57,7 +57,11 @@ export interface Weapon {
   sea?: boolean; // only hits ships (torpedoes)
   deep?: boolean; // reaches a submarine under the water (depth charges)
   min?: number; // can't fire on anything nearer than this (world units)
+  vs?: Partial<Record<Armor, number>>; // its own share through these armors, in place of its warhead's
 }
+
+// How much of w's damage gets through armor a.
+export const versus = (w: Weapon, a: Armor): number => w.vs?.[a] ?? VERSUS[w.wh][a];
 
 export type UnitKind = 'mcv' | 'light' | 'heavy' | 'buggy' | 'apc' | 'hauler' | 'arty' | 'boat' | 'heli' | 'inf' | 'rocket' | 'gren' | 'eng' | 'dog' | 'cmdo' | 'flamer' | 'scorch' | 'lumen' | 'comet' | 'skyguard' | 'heron' | 'jet' | 'plane' | 'otter' | 'destroyer' | 'cruiser' | 'carrier' | 'sub';
 // The aircraft: they fly over everything and only some weapons reach them.
@@ -110,8 +114,10 @@ export const WEAPON: Partial<Record<UnitKind | DefenseKind, Weapon>> = {
   heavy: { name: 'Twin 105mm', dmg: 30, rof: 2.2, range: 4.75 * CELL, wh: 'AP', shot: 'shell', speed: 260, barrels: 2, air: true, ground: true, big: true },
   arty: { name: '155mm howitzer', dmg: 150, rof: 4.5, range: 6.5 * CELL, wh: 'HE', shot: 'arc', speed: 95, barrels: 1, air: false, ground: true, splash: 14, scatter: 8, big: true },
   // one huge rocket from far off, then a long wait to load the next; it
-  // can't fire on anything close, so it needs guarding
-  comet: { name: 'Comet rocket', dmg: 340, rof: 11, range: 10.5 * CELL, wh: 'HE', shot: 'missile', speed: 72, barrels: 1, air: false, ground: true, splash: 22, scatter: 4, big: true, min: 3 * CELL },
+  // can't fire on anything close, so it needs guarding. Its warhead is big
+  // enough to go through heavy armor too: a direct hit takes about three
+  // quarters of a Bastion tank's strength.
+  comet: { name: 'Comet rocket', dmg: 360, rof: 11, range: 10.5 * CELL, wh: 'HE', shot: 'missile', speed: 72, barrels: 1, air: false, ground: true, splash: 22, scatter: 4, big: true, min: 3 * CELL, vs: { heavy: 1 } },
   heli: { name: 'Rocket pods', dmg: 40, rof: 1.6, range: 4 * CELL, wh: 'AP', shot: 'rocket', speed: 150, barrels: 2, air: true, ground: true },
   boat: { name: 'Deck gun', dmg: 25, rof: 1.4, range: 5 * CELL, wh: 'HE', shot: 'shell', speed: 240, barrels: 1, air: false, ground: true },
   scorch: { name: 'Twin flame projectors', dmg: 42, rof: 1.3, range: 3 * CELL, wh: 'FL', shot: 'flame', speed: 85, barrels: 2, air: false, ground: true, splash: 7, scatter: 2 },
@@ -331,6 +337,31 @@ export interface Shot {
   track?: () => [number, number, number] | null;
   hit: (s: Shot) => void;
   puffT: number;
+  color?: string; // the band round a Comet rocket: its side's color
+}
+
+// A Comet rocket's length and radius (world units), as on its launcher's rail.
+export const MISSILE_LEN = 16;
+const MISSILE_R = 1.55;
+
+// Where a shot is at k (0..1) of its flight.
+function shotAt(s: Shot, k: number): [number, number, number] {
+  return [s.x0 + (s.x1 - s.x0) * k, s.y0 + (s.y1 - s.y0) * k, s.z0 + (s.z1 - s.z0) * k + s.peak * 4 * k * (1 - k)];
+}
+
+// The way a shot is heading at k of its flight, a unit vector in the world.
+function shotDir(s: Shot, k: number): [number, number, number] {
+  const a = shotAt(s, Math.max(0, k - 0.005));
+  const b = shotAt(s, Math.min(1, k + 0.005));
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const n = Math.hypot(d[0], d[1], d[2]) || 1;
+  return [d[0] / n, d[1] / n, d[2] / n];
+}
+
+// A Comet rocket's tail, behind its nose (the shot's point) along its heading.
+function missileTail(s: Shot, back = MISSILE_LEN): [number, number, number] {
+  const d = shotDir(s, Math.min(1, s.t / s.dur));
+  return [s.x - d[0] * back, s.y - d[1] * back, s.z - d[2] * back];
 }
 
 export function makeShot(kind: ShotKind, from: [number, number, number], to: [number, number, number], speed: number, hit: (s: Shot) => void, track?: Shot['track']): Shot {
@@ -358,7 +389,7 @@ export function makeShot(kind: ShotKind, from: [number, number, number], to: [nu
 
 // ---------- Effects, in screen pixels ----------
 
-type PKind = 'smoke' | 'soot' | 'spark' | 'ember' | 'dust' | 'debris';
+type PKind = 'smoke' | 'soot' | 'spark' | 'ember' | 'dust' | 'debris' | 'mote';
 interface P {
   x: number;
   y: number;
@@ -580,6 +611,10 @@ export class Fx {
   private tracers: { x0: number; y0: number; x1: number; y1: number; t: number }[] = [];
   // Lumen beams: a bright bolt between two screen points, fading out
   private beams: { x0: number; y0: number; x1: number; y1: number; t: number; w: number }[] = [];
+  // Lumen towers charging up: a ball of light at the coil, k from 0 to 1 as
+  // it fills (given again every frame it lasts; `fresh` until the next step)
+  private glows: { x: number; y: number; k: number; fresh: boolean }[] = [];
+  private clock = 0; // seconds, for the glows' pulse
   private pieces: Piece[] = [];
   // columns of smoke rising from wrecks: `rate` puffs a second, thinning out
   // over `dur` seconds
@@ -594,6 +629,20 @@ export class Fx {
     this.flashes = [];
     this.tracers = [];
     this.beams = [];
+    this.glows = [];
+  }
+
+  // A Lumen tower charging up, at screen point x, y, k of the way full (call
+  // it every frame of the charge): light gathers into a growing, quickening
+  // ball, and motes of it stream in from round about.
+  charge(x: number, y: number, k: number, dt: number): void {
+    this.glows.push({ x, y, k, fresh: true });
+    if (Math.random() < dt * (8 + k * 30)) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 5 + Math.random() * 5;
+      const max = 0.25 + Math.random() * 0.15;
+      this.p(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.8, 'mote', { vx: (-Math.cos(a) * r) / max, vy: (-Math.sin(a) * r * 0.8) / max, max });
+    }
   }
 
   // A bolt of light from one screen point to another (w: how thick; a
@@ -791,6 +840,7 @@ export class Fx {
 
   // Shots move on; each one that arrives calls its hit().
   step(dt: number): void {
+    this.clock += dt;
     for (const s of this.shots) {
       if (s.track) {
         const p = s.track();
@@ -807,10 +857,13 @@ export class Fx {
         this.p(sx, sy, 'smoke', { vx: (Math.random() - 0.5) * 3, vy: -2 - Math.random() * 2, max: 0.5 + Math.random() * 0.3, size: 1 });
       }
       if (s.kind === 'missile' && (s.puffT -= dt) <= 0) {
-        // a thick white trail, hanging in the air a while
-        s.puffT = 0.02;
-        const [sx, sy] = toScreen(s.x, s.y, s.z);
-        this.p(sx + (Math.random() - 0.5), sy + (Math.random() - 0.5), 'smoke', { vx: (Math.random() - 0.5) * 2, vy: -1 - Math.random() * 1.5, max: 1.4 + Math.random() * 0.8, size: 1.6 });
+        // a thick white trail from behind its flame, hanging in the air a
+        // while, and sparks of burning fuel falling out of it
+        s.puffT = 0.015;
+        const [sx, sy] = toScreen(...missileTail(s, MISSILE_LEN + 6));
+        this.p(sx + (Math.random() - 0.5) * 1.5, sy + (Math.random() - 0.5) * 1.5, 'smoke', { vx: (Math.random() - 0.5) * 2.5, vy: -1 - Math.random() * 1.5, max: 1.8 + Math.random() * 1, size: 2.2 });
+        if (Math.random() < 0.3) this.p(sx, sy, 'soot', { vx: (Math.random() - 0.5) * 2, vy: -0.5 - Math.random(), max: 0.9 + Math.random() * 0.5, size: 1.6 });
+        if (Math.random() < 0.5) this.p(sx + (Math.random() - 0.5) * 2, sy, 'ember', { vx: (Math.random() - 0.5) * 6, vy: Math.random() * 4, max: 0.3 + Math.random() * 0.3, g: 14 });
       }
       if (s.kind === 'flame' && Math.random() < dt * 70) {
         // burning fuel drips and sparks off the jet
@@ -861,6 +914,8 @@ export class Fx {
     this.tracers = this.tracers.filter((t) => t.t < 0.06);
     for (const b of this.beams) b.t += dt;
     this.beams = this.beams.filter((b) => b.t < BEAM_S);
+    this.glows = this.glows.filter((g) => g.fresh);
+    for (const g of this.glows) g.fresh = false;
     for (const p of this.ps) {
       p.life += dt;
       p.vy += p.g * dt;
@@ -933,6 +988,29 @@ export class Fx {
           c.fillStyle = '#f4fcff';
           c.fillRect(x, y, 0.5, 0.5);
         }
+      }
+    }
+    for (const g of this.glows) {
+      // a pale blue halo round a white core, both growing and pulsing faster
+      // as it fills; a four-point glint once it is nearly ready
+      const pulse = 0.85 + 0.15 * Math.sin(this.clock * (12 + g.k * 36));
+      const r = (0.75 + g.k * g.k * 2.6) * pulse;
+      const X = Math.round(g.x * 2) / 2;
+      const Y = Math.round(g.y * 2) / 2;
+      // (each layer a wide box and a tall one over each other: a rounded blob)
+      const blob = (rr: number, style: string) => {
+        c.fillStyle = style;
+        c.fillRect(Math.round((X - rr) * 2) / 2, Math.round((Y - rr * 0.5) * 2) / 2, rr * 2, rr);
+        c.fillRect(Math.round((X - rr * 0.6) * 2) / 2, Math.round((Y - rr * 0.8) * 2) / 2, rr * 1.2, rr * 1.6);
+      };
+      blob(r * 1.6, `rgba(150,215,255,${0.15 + 0.25 * g.k})`);
+      blob(r * 1.05, `rgba(200,236,255,${0.35 + 0.4 * g.k})`);
+      c.fillStyle = '#f4fcff';
+      c.fillRect(Math.round((X - r / 2) * 2) / 2, Math.round((Y - r * 0.4) * 2) / 2, Math.max(0.5, r), Math.max(0.5, r * 0.8));
+      if (g.k > 0.7) {
+        const s = 1.5 + (g.k - 0.7) * 12 * pulse;
+        c.fillRect(X - s, Y, s * 2 + 0.5, 0.5);
+        c.fillRect(X, Y - s * 0.8, 0.5, s * 1.6 + 0.5);
       }
     }
     for (const t of this.tracers) {
@@ -1018,28 +1096,7 @@ export class Fx {
           c.fillRect(X - 1, Y, 0.5, 0.5);
         }
       } else if (s.kind === 'missile') {
-        // the rocket itself, pointing the way it is going, its flame behind
-        // it and its shadow far below
-        const k = s.t / s.dur;
-        const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * k);
-        c.fillStyle = 'rgba(0,0,0,0.25)';
-        c.fillRect(Math.round(gx * 2) / 2 - 0.5, Math.round(gy * 2) / 2, 1.5, 0.5);
-        const kb = Math.max(0, k - 0.02);
-        const [bx, by] = toScreen(s.x0 + (s.x1 - s.x0) * kb, s.y0 + (s.y1 - s.y0) * kb, s.z0 + (s.z1 - s.z0) * kb + s.peak * 4 * kb * (1 - kb));
-        const dx = x - bx;
-        const dy = y - by;
-        const n = Math.hypot(dx, dy) || 1;
-        const ux = dx / n;
-        const uy = dy / n;
-        for (let i = 0; i <= 6; i++) {
-          const b = i / 2 - 1.5; // from the tail (-1.5) to the nose (1.5)
-          c.fillStyle = i === 6 ? '#3a3a36' : i < 2 ? '#8a8880' : '#e6e2d4';
-          c.fillRect(Math.round((x + ux * b) * 2) / 2, Math.round((y + uy * b) * 2) / 2, i === 6 ? 0.5 : 1, i === 6 ? 0.5 : 1);
-        }
-        c.fillStyle = Math.floor(s.t * 30) % 2 ? '#fff4c2' : '#ffb347';
-        c.fillRect(Math.round((x - ux * 2.5) * 2) / 2, Math.round((y - uy * 2.5) * 2) / 2, 1, 1);
-        c.fillStyle = '#ff8a3a';
-        c.fillRect(Math.round((x - ux * 3.5) * 2) / 2, Math.round((y - uy * 3.5) * 2) / 2, 0.5, 0.5);
+        drawMissile(c, s);
       } else if (s.kind === 'arc') {
         // the shell high up, and its shadow sliding along the ground
         const [gx, gy] = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * (s.t / s.dur));
@@ -1063,6 +1120,9 @@ export class Fx {
       if (p.kind === 'spark') {
         c.fillStyle = p.life < 0.12 ? '#fff6c8' : '#ffb347';
         c.fillRect(Math.round(p.x * 2) / 2, Math.round(p.y * 2) / 2, 0.5, 0.5);
+      } else if (p.kind === 'mote') {
+        c.fillStyle = p.life / p.max < 0.5 ? 'rgba(150,215,255,0.8)' : '#f4fcff';
+        c.fillRect(Math.round(p.x * 2) / 2, Math.round(p.y * 2) / 2, 0.5, 0.5);
       } else if (p.kind === 'ember') {
         const k = p.life / p.max;
         c.fillStyle = k < 0.5 ? '#ffcf5a' : '#e0602c';
@@ -1073,6 +1133,74 @@ export class Fx {
         c.fillStyle = '#6a5a48';
         c.fillRect(Math.round(p.x * 2) / 2, Math.round(p.y * 2) / 2, 0.5, 0.5);
       }
+    }
+  }
+}
+
+// A Comet rocket in flight: the whole rocket off the launcher's rail (off-white,
+// a band of its side's color, hazard stripes, dark nose and fins), nose first
+// along its path, a roaring flame out of its tail and its shadow far below.
+function drawMissile(c: CanvasRenderingContext2D, s: Shot): void {
+  const L = MISSILE_LEN;
+  const nose = toScreen(s.x, s.y, s.z);
+  const tw = missileTail(s);
+  const tail = toScreen(...tw);
+  const k = Math.min(1, s.t / s.dur);
+  const px = (x: number, y: number, w = 1, h = 1) => c.fillRect(Math.round(x * 2) / 2, Math.round(y * 2) / 2, w, h);
+  // its shadow on the ground
+  const g0 = toScreen(s.x, s.y, s.z0 + (s.z1 - s.z0) * k);
+  const g1 = toScreen(tw[0], tw[1], s.z0 + (s.z1 - s.z0) * k);
+  c.fillStyle = 'rgba(0,0,0,0.22)';
+  for (let i = 0; i <= 8; i++) px(g0[0] + (g1[0] - g0[0]) * (i / 8), g0[1] + (g1[1] - g0[1]) * (i / 8), 1.5, 0.5);
+  // along the body (ax, ay) and across it (qx, qy, the side towards the sky)
+  let ax = nose[0] - tail[0];
+  let ay = nose[1] - tail[1];
+  const len = Math.hypot(ax, ay) || 1;
+  ax /= len;
+  ay /= len;
+  let qx = -ay;
+  let qy = ax;
+  if (qy > 0 || (qy === 0 && qx > 0)) {
+    qx = -qx;
+    qy = -qy;
+  }
+  // the flame: white at the nozzle, out through yellow and orange, flickering
+  const fl = Math.floor(s.t * 30);
+  const FL = 7 + 3 * hash2(fl, 1, 5);
+  for (let i = 0; i <= FL * 2; i++) {
+    const b = i / (FL * 2);
+    const w = (1.6 - b * 1.2) * (0.85 + 0.3 * hash2(i, fl, 9));
+    const x = tail[0] - ax * (0.4 + b * FL);
+    const y = tail[1] - ay * (0.4 + b * FL);
+    c.fillStyle = b > 0.65 ? '#e0602c' : '#ffb347';
+    for (let j = -w; j <= w; j += 0.5) px(x + qx * j, y + qy * j, 0.5, 0.5);
+    if (b < 0.45) {
+      c.fillStyle = b < 0.2 ? '#fffbe6' : '#ffe27a';
+      for (let j = -w * 0.45; j <= w * 0.45; j += 0.5) px(x + qx * j, y + qy * j, 0.5, 0.5);
+    }
+  }
+  // the fins, a cross at the tail: two stand out either side, edge on
+  c.fillStyle = '#3f2b26';
+  for (let u = 0; u <= 2.4; u += 0.5)
+    for (const side of [1, -1])
+      for (let j = MISSILE_R; j <= 3 - u * 0.25; j += 0.5) px(tail[0] + ax * u * (len / L) + qx * j * side, tail[1] + ay * u * (len / L) + qy * j * side, 0.5, 0.5);
+  // the body, tail to nose, a ring at a time, shaded light on its sky side
+  const band = s.color ?? '#b8401e';
+  const steps = Math.max(8, Math.ceil(len * 2));
+  for (let i = 0; i <= steps; i++) {
+    const at = (i / steps) * L; // world units from the tail
+    const x = tail[0] + ax * (i / steps) * len;
+    const y = tail[1] + ay * (i / steps) * len;
+    const r = at > L - 3.6 ? MISSILE_R * Math.sqrt(Math.max(0, 1 - ((at - (L - 3.6)) / 3.6) ** 2)) : at < 0.6 ? 0.95 : MISSILE_R;
+    for (let j = -r; j <= r + 0.01; j += 0.5) {
+      const top = j / (r || 1);
+      let col: string;
+      if (at < 0.6 || at > L - 0.9) col = '#3a3a36'; // the nozzle, the nose tip
+      else if (at > 9.4 && at < 10.4) col = band;
+      else if (at > 1.6 && at < 3.4) col = (Math.floor(at * 1.6 + j * 1.4) & 1) ? '#2a2622' : '#e8c23a';
+      else col = top > 0.45 ? '#ffffff' : top < -0.4 ? '#c9c6bb' : '#efece2';
+      c.fillStyle = col;
+      px(x + qx * j, y + qy * j);
     }
   }
 }
