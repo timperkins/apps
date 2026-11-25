@@ -6,7 +6,7 @@ import './audio.css';
 import type { Loop, Sfx } from '../sfx';
 import type { UnitLine, UnitVoice } from '../voice';
 import { ANNOUNCE, ANNOUNCE_GAP, GAIN, MUSIC_VOLUME as VOLUME, UNIT_CLIPS } from '../audio-config';
-import { ANNOUNCEMENTS, LINES, LINE_TITLE, LINE_WHEN, MUSIC, type MoodId, SFX, SFX_GROUPS, UNIT_NAME, type Use, VOICES } from './data';
+import { ANNOUNCEMENTS, LINES, LINE_TITLE, LINE_WHEN, MUSIC, type MoodId, SFX, SFX_GROUPS, SFX_OPTIONS, UNIT_NAME, type Use, VOICE_OPTIONS, VOICES } from './data';
 import { ROOT, picture } from './pics';
 import { load, play, stopAll, type PlayOpts, type Playing } from './player';
 
@@ -23,6 +23,53 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 const secs = (s: number) => (s < 10 ? `${s.toFixed(2)} s` : s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
 const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+// ---------- picks: which option is chosen for each sound and voice ----------
+// 0 is what the game plays now. Kept in this browser so a reload keeps them.
+
+const PICKS_KEY = 'ra.audio.picks';
+const picks: Record<string, number> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(PICKS_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+})();
+const pickListeners: (() => void)[] = [];
+function setPick(key: string, i: number): void {
+  if (i) picks[key] = i;
+  else delete picks[key];
+  try {
+    localStorage.setItem(PICKS_KEY, JSON.stringify(picks));
+  } catch {
+    /* private mode */
+  }
+  for (const f of pickListeners) f();
+}
+
+const sfxPath = (n: string) => (picks[`sfx:${n}`] ? `sfx/options/${n}_${picks[`sfx:${n}`]}.mp3` : `sfx/${n}.mp3`);
+
+/** A row of buttons, one per choice; the picked one is lit. */
+function choiceGroup(key: string, labels: string[], titles: string[] = []): HTMLElement {
+  const g = el('div', 'choices');
+  g.setAttribute('role', 'radiogroup');
+  const btns = labels.map((l, i) => {
+    const b = el('button', 'choice', l);
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    if (titles[i]) b.title = titles[i];
+    b.addEventListener('click', () => {
+      stopAll();
+      setPick(key, i);
+    });
+    g.append(b);
+    return b;
+  });
+  const paint = () => btns.forEach((b, i) => b.setAttribute('aria-checked', String((picks[key] ?? 0) === i)));
+  pickListeners.push(paint);
+  paint();
+  return g;
+}
 
 // A file's name and, once it has loaded, how long it is.
 function fileMeta(path: string): HTMLElement {
@@ -105,8 +152,11 @@ function sfxCard(n: Sfx | Loop): HTMLElement {
   const when = el('p', 'when');
   when.append(el('b', '', 'Plays when: '), info.when);
   body.append(when);
+  const key = `sfx:${n}`;
+  const opts = ['Current', ...Array.from({ length: SFX_OPTIONS }, (_, i) => `New ${i + 1}`)];
+  body.append(choiceGroup(key, opts, ['What the game plays now', ...opts.slice(1).map((_, i) => `New ElevenLabs take ${i + 1}`)]));
   const plays = el('div', 'plays');
-  const path = `sfx/${n}.mp3`;
+  const path = () => sfxPath(n);
   plays.append(playBtn(path, loop ? 'Loop' : 'Play', { loop, gain: 1 }, 'main'));
   // the ways the game plays it: each at its own speed (so its own pitch)
   for (const u of info.uses ?? []) {
@@ -117,7 +167,17 @@ function sfxCard(n: Sfx | Loop): HTMLElement {
   }
   body.append(plays);
   const meta = el('div', 'meta');
-  meta.append(fileMeta(path), el('span', '', `in-game volume ${pct(GAIN[n] ?? 0.5)}`));
+  const file = el('span');
+  let shown = '';
+  const showFile = () => {
+    if (shown === path()) return;
+    shown = path();
+    file.replaceChildren(fileMeta(shown));
+    card.classList.toggle('changed', !!picks[key]);
+  };
+  pickListeners.push(showFile);
+  showFile();
+  meta.append(file, el('span', '', `in-game volume ${pct(GAIN[n] ?? 0.5)}`));
   if (!loop && n !== 'whoosh_space' && info.group !== 'ui') meta.append(el('span', '', 'pitched ±5% at random each time'));
   body.append(meta);
   card.append(body);
@@ -174,10 +234,43 @@ function pickTake(key: string, n: number): number {
   return i;
 }
 
+// New voices to try for this unit, each saying its first select line.
+function voiceOptions(v: UnitVoice, vo: NonNullable<(typeof VOICE_OPTIONS)[UnitVoice]>): HTMLElement {
+  const key = `voice:${v}`;
+  const says = LINES[v].select?.[0] ?? '';
+  const box = el('div', 'vopts');
+  const lh = el('div', 'lhead');
+  lh.append(el('h5', '', 'Try a new voice'), el('span', 'opts', `${vo.options.length} new voices${vo.why ? `. ${vo.why}` : ''}`));
+  box.append(lh);
+  const names = ['Current', ...vo.options.map((o) => o.voice.split(' – ')[0])];
+  box.append(choiceGroup(key, names, [VOICES[v].voice, ...vo.options.map((o) => o.voice)]));
+  const path = () => {
+    const i = picks[key] ?? 0;
+    return i ? `voice-options/${v}/${v}_select_${vo.options[i - 1].slug}.mp3` : `voice/${v}/${v}_select_1.mp3`;
+  };
+  const row = el('div', 'plays');
+  row.append(playBtn(path, `“${says}”`, {}, 'main'));
+  box.append(row);
+  const who = el('p', 'voice');
+  const paint = () => {
+    const i = picks[key] ?? 0;
+    const o = i ? vo.options[i - 1] : { voice: VOICES[v].voice, voiceId: VOICES[v].voiceId, style: VOICES[v].style };
+    who.replaceChildren(el('b', '', i ? 'New voice: ' : 'Current voice: '), `${o.voice} `, el('span', 'id', `ElevenLabs · ${o.voiceId}`), el('br'), el('span', 'style', o.style));
+    box.classList.toggle('changed', !!i);
+  };
+  pickListeners.push(paint);
+  paint();
+  box.append(who);
+  box.append(el('p', 'note', 'Only this first line has been made in the new voices. The other lines below are still the current voice.'));
+  return box;
+}
+
 function voiceCard(v: UnitVoice): HTMLElement {
   const card = el('section', 'vcard');
   card.id = `voice-${v}`;
   card.append(voiceHead(v));
+  const vo = VOICE_OPTIONS[v];
+  if (vo) card.append(voiceOptions(v, vo));
   const lines = el('div', 'lines');
   for (const line of LINE_ORDER) {
     const takes = LINES[v][line];
@@ -285,5 +378,65 @@ buildSfx(document.querySelector('#sfxRows')!);
 buildVoices(document.querySelector('#voiceRows')!);
 buildMusic(document.querySelector('#musicRows')!);
 document.querySelector('#stop')!.addEventListener('click', () => stopAll());
+
+// ---------- copy the picks, to paste back into the chat ----------
+
+function changesText(): { text: string; count: number } {
+  const sfx: string[] = [];
+  for (const n of Object.keys(SFX)) {
+    const i = picks[`sfx:${n}`];
+    if (i) sfx.push(`- ${n} (${SFX[n as Sfx | Loop].title}): new ${i} (public/sfx/options/${n}_${i}.mp3)`);
+  }
+  const voices: string[] = [];
+  for (const [v, vo] of Object.entries(VOICE_OPTIONS) as [UnitVoice, NonNullable<(typeof VOICE_OPTIONS)[UnitVoice]>][]) {
+    const i = picks[`voice:${v}`];
+    if (!i) continue;
+    const o = vo.options[i - 1];
+    voices.push(`- ${VOICES[v].title} (${v}): ${o.voice}, voice id ${o.voiceId} (was ${VOICES[v].voice}). Sample: public/voice-options/${v}/${v}_select_${o.slug}.mp3`);
+  }
+  const count = sfx.length + voices.length;
+  if (!count) return { text: 'RA audio picks: no changes, keep everything as it is.', count };
+  const out = ['RA audio picks from the Audio page:'];
+  if (sfx.length) out.push('', `Sound effects to replace (${sfx.length}):`, ...sfx);
+  if (voices.length) out.push('', `Voices to switch to, then make all of their lines in the new voice (${voices.length}):`, ...voices);
+  return { text: out.join('\n'), count };
+}
+
+async function copyText(t: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(t);
+    return true;
+  } catch {
+    const ta = el('textarea');
+    ta.value = t;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
+const copyBtn = document.querySelector<HTMLButtonElement>('#copy')!;
+const clearBtn = document.querySelector<HTMLButtonElement>('#clear')!;
+const paintCopy = () => {
+  const { count } = changesText();
+  copyBtn.textContent = count ? `⧉ Copy ${count} change${count === 1 ? '' : 's'}` : '⧉ Copy changes';
+  clearBtn.hidden = !count;
+};
+pickListeners.push(paintCopy);
+paintCopy();
+copyBtn.addEventListener('click', async () => {
+  const { text } = changesText();
+  const ok = await copyText(text);
+  copyBtn.textContent = ok ? '✓ Copied' : 'Copy failed';
+  setTimeout(paintCopy, 1500);
+});
+clearBtn.addEventListener('click', () => {
+  for (const k of Object.keys(picks)) delete picks[k];
+  setPick('', 0);
+});
 document.querySelector<HTMLParagraphElement>('#status')!.hidden = true;
 if (location.hash) document.querySelector(location.hash)?.scrollIntoView();

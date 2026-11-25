@@ -2,7 +2,7 @@
 import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ANNOUNCE, GAIN, MUSIC_VOLUME, UNIT_CLIPS } from '../audio-config';
-import { ANNOUNCEMENTS, LINES, MUSIC, SFX, VOICES } from './data';
+import { ANNOUNCEMENTS, LINES, MUSIC, SFX, SFX_OPTIONS, VOICE_OPTIONS, VOICES } from './data';
 
 const pub = new URL('../../public/', import.meta.url).pathname;
 const mp3s = (dir: string) =>
@@ -39,5 +39,16 @@ describe('audio page', () => {
   it('describes every music loop', () => {
     expect(Object.keys(MUSIC).sort()).toEqual(mp3s('music'));
     expect(Object.keys(MUSIC_VOLUME).sort()).toEqual(mp3s('music'));
+  });
+
+  it('has every new option the page offers, and only those', () => {
+    const want: string[] = [];
+    for (const n of Object.keys(SFX)) for (let i = 1; i <= SFX_OPTIONS; i++) want.push(`${n}_${i}`);
+    expect(mp3s('sfx/options')).toEqual(want.sort());
+    for (const [v, vo] of Object.entries(VOICE_OPTIONS)) {
+      expect(vo.options, v).toHaveLength(3);
+      expect(mp3s(`voice-options/${v}`), v).toEqual(vo.options.map((o) => `${v}_select_${o.slug}`).sort());
+    }
+    expect(readdirSync(pub + 'voice-options').sort()).toEqual(Object.keys(VOICE_OPTIONS).sort());
   });
 });

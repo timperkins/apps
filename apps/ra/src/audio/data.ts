@@ -678,3 +678,69 @@ export const MUSIC: Record<MoodId, MusicInfo> = {
     when: 'Any of your combat units is on the move well away from your base (24 cells from your nearest building, or from the MCU before it deploys), and for 8 seconds after.',
   },
 };
+
+// ---------- New options to choose from ----------
+
+// Three new ElevenLabs takes of every sound effect, made from the same
+// prompts (Text to Sound v3), trimmed and matched in loudness to the clip the
+// game plays now: public/sfx/options/<name>_<1..3>.mp3.
+export const SFX_OPTIONS = 3;
+
+export interface VoiceOption {
+  slug: string; // file name part: public/voice-options/<voice>/<voice>_select_<slug>.mp3
+  voice: string; // the ElevenLabs voice
+  voiceId: string;
+  style: string;
+}
+
+// Three new male voices for some units, each saying that unit's first select
+// line (Eleven v4). The game keeps its current voice until one is picked.
+export const VOICE_OPTIONS: Partial<Record<UnitVoice, { why?: string; options: VoiceOption[] }>> = {
+  commando: {
+    options: [
+      { slug: 'adam', voice: 'Adam – Brooding, Dark, Tough American', voiceId: 'IRHApOXLvnW57QJPQH2P', style: 'A tough hero weathered by years of experience, mid-low and gritty.' },
+      { slug: 'revenant', voice: 'Revenant – RTS Stealth Ghost Soldier', voiceId: 'AocjYzHzWRalprWmBG9m', style: 'Gritty American soldier, sinister and calculating, made for RTS units.' },
+      { slug: 'clive', voice: 'Clive – Determined Hero', voiceId: 'dnHIANkC4u76O6OE22jT', style: 'Deep and resonant with a slight rasp; strong and controlled.' },
+    ],
+  },
+  tank: {
+    why: 'Asked for: less echo-y than the gas-mask radio voice.',
+    options: [
+      { slug: 'rolando', voice: 'Rolando', voiceId: '6PBHdlpKVQ70t6tnDUYF', style: 'Strong, authoritative and deep, with a military past; clean studio sound.' },
+      { slug: 'rob', voice: 'Rob – Military Podcast Host', voiceId: 'hWhGhek2FTOGZaByvSGa', style: 'Many years in the military; serious but lively, dry and close.' },
+      { slug: 'pyle', voice: 'Pyle', voiceId: 'weNdhGmYaizQlfiLlyJq', style: 'Low baritone, plainspoken military veteran, deadpan and dry.' },
+    ],
+  },
+  scout: {
+    why: 'Male voices; the current one is female.',
+    options: [
+      { slug: 'max', voice: 'Max – Deep and Crisp', voiceId: 'ItKJeqCQp9zXEfMJgRLS', style: 'Young American man, confident, clear and a little breathy.' },
+      { slug: 'john', voice: 'John Mansfield', voiceId: 'jD9ZLAx3sVOQk9LCF0zD', style: 'Mid-twenties East Coast American, low and no-nonsense.' },
+      { slug: 'louie', voice: 'Louie the Legend', voiceId: 'ataV0GNgfIus2NWdTJP0', style: 'Youthful, expressive and animated, warm and confident.' },
+    ],
+  },
+  copter: {
+    why: 'Male voices; the current one is female.',
+    options: [
+      { slug: 'steven', voice: 'Steven Casteel – Hero, Villain, or Narrator', voiceId: 'QEj0heL4nQHjaGrihlr0', style: 'Neutral Pacific Northwest accent, confident hero.' },
+      { slug: 'oliver', voice: 'Oliver – Friendly Professional', voiceId: 'snyKKuaGYk1VUEh42zbW', style: 'Warm, laid-back Australian.' },
+      { slug: 'chris', voice: 'Chris – Northern UK', voiceId: 'AmY1pcgcEc15wyuIj50p', style: 'British, North Eastern accent (Durham).' },
+    ],
+  },
+  pilot: {
+    why: 'Male voices; the current one is female.',
+    options: [
+      { slug: 'penfist', voice: 'Penfist – Military Broadcaster', voiceId: 'PODaWQBE9fnXYis1ztG8', style: 'Military-trained radio broadcaster, confident.' },
+      { slug: 'mark', voice: 'Mark – Friendly, Confident', voiceId: 'v3p1kjzUvro6S76qmYmH', style: 'Midwestern American, friendly and sure of himself.' },
+      { slug: 'adam', voice: 'Adam – American Male', voiceId: 'ookcfIYgQDpBT5ueX6gr', style: 'Neutral newscaster American, relaxed.' },
+    ],
+  },
+  navy: {
+    why: 'Asked for: not like a pirate.',
+    options: [
+      { slug: 'severin', voice: 'Severin – Powerful & Commanding', voiceId: 'ib8aaABAPZQpTo6hx8Jr', style: 'Refined British, composed and authoritative.' },
+      { slug: 'jeff', voice: 'Jeff Wells', voiceId: 'sK8BRDMixLgM8i4inA71', style: 'Deep, commanding, bold American.' },
+      { slug: 'spartan', voice: 'Spartan', voiceId: 'S75jVZ0i3J6Xa5BbK8CE', style: 'Calm, grounded American baritone, measured.' },
+    ],
+  },
+};
