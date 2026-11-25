@@ -8,7 +8,7 @@ import { armorOf, meleeOf, parseKey, rangedOf, type MeleeShape, type Ranged } fr
 interface HeroView {
   x: number; y: number; face: number; walk: number; moving: boolean; rolling: boolean;
   swingT: number; swingDur: number; drawT: number; bowOut: boolean; hurt: boolean;
-  armor: string; melee: string; ranged: string;
+  armor: string; melee: string; ranged: string; meleeLv?: number;
 }
 import { heroParts, monsterParts, traderParts, type Part } from './models';
 
@@ -932,7 +932,7 @@ export class Renderer {
       x: g.x, y: g.y, face: g.face, walk: g.walk, moving: g.moving, rolling: g.rollT > 0,
       swingT: g.swingT, swingDur: g.swingDur, drawT: g.drawT, bowOut: g.drawT > 0 || (g.rangedCd > 0 && g.rangedCd > g.ranged.rate - 0.25),
       hurt: g.hurtT > 0 && Math.floor(g.time * 20) % 2 === 0,
-      armor: g.save.armor, melee: g.save.melee, ranged: g.save.ranged,
+      armor: g.save.armor, melee: g.save.melee, ranged: g.save.ranged, meleeLv: g.lvOf(g.save.melee),
     };
     this.drawHero(view, g);
   }
@@ -999,7 +999,7 @@ export class Renderer {
     const x = this.x;
     const c = Math.cos(face), s = Math.sin(face);
     const F = [c, s], Rv = [-s, c];
-    const w = meleeOf(v.melee);
+    const w = meleeOf(v.melee, v.meleeLv ?? 1);
     const k = v.swingT > 0 && v.swingDur > 0 ? 1 - v.swingT / v.swingDur : -1;
     const sw = v.moving ? Math.sin(v.walk) * 0.09 : 0;
     // world point -> screen

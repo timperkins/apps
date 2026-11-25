@@ -56,7 +56,7 @@ export class HostSession {
     pipe.onMessage = (m) => this.onMessage(id, m);
     g.peers = [{ ...peerOf(g, id, 'Player 2'), dead: false }];
     g.fxOut = [];
-    pipe.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, x: g.x, y: g.y });
+    pipe.send({ t: 'level', mode: g.mode, idx: g.levelIdx, seed: g.seed, diff: g.diff, x: g.x, y: g.y });
     this.host.players = 2;
     void this.host.touch();
   }
@@ -93,7 +93,7 @@ export class HostSession {
     this.host.world = mode === 'camp' ? 'Camp' : this.game().def.name;
     void this.host.touch();
     const g = this.game();
-    this.send({ t: 'level', mode, idx, seed, x: g.x, y: g.y });
+    this.send({ t: 'level', mode, idx, seed, diff: g.diff, x: g.x, y: g.y });
   }
   finished() {
     this.send({ t: 'done' });
@@ -181,6 +181,7 @@ export class GuestSession {
         this.onLost('That game already has two players.');
         break;
       case 'level':
+        if (typeof m.diff === 'number') g.diff = m.diff;
         if (m.mode === 'camp') {
           if (g.mode !== 'camp') g.enterCamp();
         } else g.enterLevel(m.idx, m.seed);
@@ -211,6 +212,7 @@ export class GuestSession {
           g.onSound('pickup');
         }
         if (x.heal && !g.dead) g.hp = Math.min(g.maxHp, g.hp + x.heal);
+        if (x.xp) g.gainSetXp(x.xp);
         if (x.gear) g.chestGear(g.levelIdx);
         if (x.special) {
           g.save.special[x.special[0] as 'fire'] += x.special[1];

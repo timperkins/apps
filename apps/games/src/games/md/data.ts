@@ -3,8 +3,8 @@
 
 export type MeleeId =
   | 'rusty-sword' | 'twin-daggers' | 'battle-axe' | 'long-spear' | 'thunder-hammer' | 'frost-glaive' | 'ember-blade'
-  | 'sickle' | 'scythe' | 'obsidian-cleaver' | 'dragonfang';
-export type RangedId = 'shortbow' | 'crossbow' | 'fan-bow' | 'starlight-bow' | 'rapid-repeater' | 'storm-bow' | 'thornspike-bow' | 'dragonbone-longbow';
+  | 'sickle' | 'scythe' | 'obsidian-cleaver' | 'dragonfang' | 'rimeblade';
+export type RangedId = 'shortbow' | 'crossbow' | 'fan-bow' | 'starlight-bow' | 'rapid-repeater' | 'storm-bow' | 'thornspike-bow' | 'dragonbone-longbow' | 'glacier-bow';
 export type ArmorId = 'tunic' | 'jerkin' | 'chainmail' | 'mossguard' | 'obsidian-plate' | 'scout-cloak' | 'knight-plate' | 'shadowweave' | 'dragonscale';
 export type GearId = MeleeId | RangedId | ArmorId;
 export type Rarity = 'normal' | 'gold' | 'diamond';
@@ -12,6 +12,12 @@ export type Rarity = 'normal' | 'gold' | 'diamond';
 export type ItemKey = string;
 
 /** How a weapon is drawn in the hero's hand. */
+/** Fire burns and hits ice monsters harder; ice slows and hits fire monsters harder. */
+export type Element = 'fire' | 'ice';
+export const ELEMENT_BONUS = 1.6;
+/** how long ice keeps an enemy slowed (seconds) */
+export const ICE_SLOW = 3;
+
 export type MeleeShape = 'sword' | 'daggers' | 'axe' | 'spear' | 'hammer' | 'glaive' | 'sickle' | 'scythe' | 'cleaver' | 'fist';
 
 export interface Melee {
@@ -33,6 +39,7 @@ export interface Melee {
   shape: MeleeShape;
   /** drawn with a glow */
   glow?: boolean;
+  element?: Element;
 }
 export interface Ranged {
   kind: 'ranged';
@@ -52,6 +59,9 @@ export interface Ranged {
   burn?: boolean;
   shape: 'bow' | 'crossbow' | 'longbow';
   glow?: boolean;
+  element?: Element;
+  /** every arrow slows enemies */
+  chill?: boolean;
 }
 export interface Armor {
   kind: 'armor';
@@ -79,11 +89,12 @@ export const MELEE: Record<MeleeId, Melee> = {
   'long-spear': { kind: 'melee', shape: 'spear', name: 'Long Spear', desc: 'Pokes enemies from twice as far away.', dmg: 13, rate: 0.5, reach: 2.3, arc: 36, knock: 4, price: 110, color: '#8a6a3a', blade: '#cfd6dc' },
   'battle-axe': { kind: 'melee', shape: 'axe', name: 'Battle Axe', desc: 'Slow, heavy sweeps that hit everything in front.', dmg: 20, rate: 0.72, reach: 1.45, arc: 170, knock: 6, price: 140, color: '#5a3820', blade: '#9aa4ae' },
   scythe: { kind: 'melee', shape: 'scythe', name: 'Scythe', desc: 'A huge sweeping blade that reaps a wide circle.', dmg: 17, rate: 0.68, reach: 2.0, arc: 230, knock: 4, price: 220, color: '#3a2a20', blade: '#d8dce0' },
-  'frost-glaive': { kind: 'melee', shape: 'glaive', name: 'Frost Glaive', desc: 'A wide icy arc that slows what it cuts.', dmg: 15, rate: 0.55, reach: 1.85, arc: 150, knock: 4, effect: 'slow', price: 260, color: '#2f5f8a', blade: '#aee8ff', glow: true },
+  'frost-glaive': { kind: 'melee', shape: 'glaive', name: 'Frost Glaive', desc: 'A wide icy arc that slows what it cuts.', dmg: 15, rate: 0.55, reach: 1.85, arc: 150, knock: 4, effect: 'slow', price: 260, color: '#2f5f8a', blade: '#aee8ff', glow: true, element: 'ice' },
+  rimeblade: { kind: 'melee', shape: 'sword', name: 'Rimeblade', desc: 'A sword of blue ice. Slows what it cuts and shatters fire monsters.', dmg: 16, rate: 0.4, reach: 1.45, arc: 120, knock: 3, effect: 'slow', price: 470, color: '#1a3a5a', blade: '#9ae6ff', glow: true, element: 'ice' },
   'thunder-hammer': { kind: 'melee', shape: 'hammer', name: 'Thunder Hammer', desc: 'Slams the floor: a shock ring that hits all around and stuns.', dmg: 28, rate: 1.0, reach: 1.9, arc: 360, knock: 7, effect: 'stun', price: 320, color: '#3b3f5a', blade: '#ffe066' },
   'obsidian-cleaver': { kind: 'melee', shape: 'cleaver', name: 'Obsidian Cleaver', desc: 'A jagged black slab with a glowing purple edge. Brutal.', dmg: 26, rate: 0.62, reach: 1.55, arc: 150, knock: 7, price: 380, color: '#1a1420', blade: '#2a2238', glow: true },
-  'ember-blade': { kind: 'melee', shape: 'sword', name: 'Ember Blade', desc: 'A glowing blade that sets enemies on fire.', dmg: 16, rate: 0.4, reach: 1.45, arc: 120, knock: 3, effect: 'burn', price: 480, color: '#5a1d10', blade: '#ff8a3a', glow: true },
-  dragonfang: { kind: 'melee', shape: 'sword', name: 'Dragonfang', desc: 'A blood-red blade carved from a dragon’s tooth. Burns and hits hard.', dmg: 22, rate: 0.44, reach: 1.6, arc: 130, knock: 5, effect: 'burn', price: 640, color: '#2a0e0e', blade: '#e0303a', glow: true },
+  'ember-blade': { kind: 'melee', shape: 'sword', name: 'Ember Blade', desc: 'A glowing blade that sets enemies on fire.', dmg: 16, rate: 0.4, reach: 1.45, arc: 120, knock: 3, effect: 'burn', price: 480, color: '#5a1d10', blade: '#ff8a3a', glow: true, element: 'fire' },
+  dragonfang: { kind: 'melee', shape: 'sword', name: 'Dragonfang', desc: 'A blood-red blade carved from a dragon’s tooth. Burns and hits hard.', dmg: 22, rate: 0.44, reach: 1.6, arc: 130, knock: 5, effect: 'burn', price: 640, color: '#2a0e0e', blade: '#e0303a', glow: true, element: 'fire' },
 };
 
 /** what you swing with nothing equipped */
@@ -97,7 +108,8 @@ export const RANGED: Record<RangedId, Ranged> = {
   'thornspike-bow': { kind: 'ranged', shape: 'bow', name: 'Thornspike Bow', desc: 'A spiked black bow that fires two arrows at once.', dmg: 11, rate: 0.55, speed: 14, shots: 2, spread: 0.1, pierce: 0, price: 300, color: '#20261a', glow: false },
   'storm-bow': { kind: 'ranged', shape: 'bow', name: 'Storm Bow', desc: 'AUTO-FIRE: crackling arrows that pierce one enemy.', dmg: 10, rate: 0.45, speed: 16, shots: 1, spread: 0, pierce: 1, price: 420, color: '#3a4a8a', auto: true, glow: true },
   'starlight-bow': { kind: 'ranged', shape: 'bow', name: 'Starlight Bow', desc: 'Fast glowing arrows that pass through everything.', dmg: 14, rate: 0.32, speed: 17, shots: 1, spread: 0, pierce: 9, price: 520, color: '#e8e0ff', glow: true },
-  'dragonbone-longbow': { kind: 'ranged', shape: 'longbow', name: 'Dragonbone Longbow', desc: 'A huge bow of bone and red string. Burning arrows that pierce three.', dmg: 30, rate: 0.85, speed: 19, shots: 1, spread: 0, pierce: 3, price: 680, color: '#e8dcc0', burn: true },
+  'dragonbone-longbow': { kind: 'ranged', shape: 'longbow', name: 'Dragonbone Longbow', desc: 'A huge bow of bone and red string. Burning arrows that pierce three.', dmg: 30, rate: 0.85, speed: 19, shots: 1, spread: 0, pierce: 3, price: 680, color: '#e8dcc0', burn: true, element: 'fire' },
+  'glacier-bow': { kind: 'ranged', shape: 'bow', name: 'Glacier Bow', desc: 'A bow of packed ice. Freezing arrows slow enemies and pierce one.', dmg: 13, rate: 0.5, speed: 15, shots: 1, spread: 0, pierce: 1, price: 460, color: '#8ad8f0', chill: true, glow: true, element: 'ice' },
 };
 
 export const ARMOR: Record<ArmorId, Armor> = {
@@ -128,6 +140,16 @@ export const RARITY_LOOK = {
   gold: { metal: '#ffd040', dark: '#a07010', name: 'Golden' },
   diamond: { metal: '#8af4ff', dark: '#2a8aa0', name: 'Diamond' },
 };
+// ---------- "the set" levels (1 to 100) ----------
+export const MAX_LEVEL = 100;
+/** xp to go from level lv to lv + 1 */
+export const xpNeed = (lv: number) => 3 + Math.floor(lv * 0.6);
+/** how much better an item gets with its level: stronger, faster, and a little more reach */
+export function levelBoost(lv = 1) {
+  const t = Math.max(0, Math.min(MAX_LEVEL, lv) - 1) / (MAX_LEVEL - 1);
+  return { dmg: 1 + 2 * t, rate: 1 - 0.35 * t, reach: 1 + 0.2 * t, bowRange: 1 + 0.06 * t, block: 0.15 * t, regen: 1.2 * t, speed: 1 + 0.06 * t };
+}
+
 const mul = { normal: 1, gold: 1.35, diamond: 1.8 };
 const fast = { normal: 1, gold: 0.9, diamond: 0.8 };
 
@@ -136,7 +158,13 @@ export const isRanged = (id: GearId): id is RangedId => id in RANGED;
 export const isArmor = (id: GearId): id is ArmorId => id in ARMOR;
 
 /** The real stats and look of an owned item, with its rarity applied. */
-export function meleeOf(key: ItemKey | ''): Melee {
+export function meleeOf(key: ItemKey | '', lv = 1): Melee {
+  const w = baseMelee(key);
+  if (lv <= 1 || !key) return w;
+  const B = levelBoost(lv);
+  return { ...w, dmg: Math.round(w.dmg * B.dmg), rate: w.rate * B.rate, reach: +(w.reach * B.reach).toFixed(2) };
+}
+function baseMelee(key: ItemKey | ''): Melee {
   if (!key) return FIST;
   const { id, rarity } = parseKey(key);
   const b = MELEE[id as MeleeId] ?? FIST;
@@ -144,14 +172,26 @@ export function meleeOf(key: ItemKey | ''): Melee {
   const L = RARITY_LOOK[rarity];
   return { ...b, name: `${L.name} ${b.name}`, dmg: Math.round(b.dmg * mul[rarity]), rate: b.rate * fast[rarity], reach: +(b.reach * (rarity === 'diamond' ? 1.12 : 1.06)).toFixed(2), blade: L.metal, color: b.shape === 'cleaver' ? L.dark : b.color, glow: true };
 }
-export function rangedOf(key: ItemKey): Ranged {
+export function rangedOf(key: ItemKey, lv = 1): Ranged {
+  const w = baseRanged(key);
+  if (lv <= 1) return w;
+  const B = levelBoost(lv);
+  return { ...w, dmg: Math.round(w.dmg * B.dmg), rate: w.rate * B.rate, speed: +(w.speed * B.bowRange).toFixed(2) };
+}
+function baseRanged(key: ItemKey): Ranged {
   const { id, rarity } = parseKey(key);
   const b = RANGED[id as RangedId] ?? RANGED.shortbow;
   if (rarity === 'normal') return b;
   const L = RARITY_LOOK[rarity];
   return { ...b, name: `${L.name} ${b.name}`, dmg: Math.round(b.dmg * mul[rarity]), rate: b.rate * fast[rarity], pierce: b.pierce + (rarity === 'diamond' ? 2 : 1), color: L.metal, glow: true };
 }
-export function armorOf(key: ItemKey): Armor {
+export function armorOf(key: ItemKey, lv = 1): Armor {
+  const a = baseArmor(key);
+  if (lv <= 1) return a;
+  const B = levelBoost(lv);
+  return { ...a, block: +Math.min(0.85, a.block + B.block).toFixed(3), regen: +(a.regen + B.regen).toFixed(2), speed: +(a.speed * B.speed).toFixed(3) };
+}
+function baseArmor(key: ItemKey): Armor {
   const { id, rarity } = parseKey(key);
   const b = ARMOR[id as ArmorId] ?? ARMOR.tunic;
   if (rarity === 'normal') return b;
@@ -171,6 +211,26 @@ function mixHex(a: string, b: string, t: number) {
 export function gear(id: GearId): Melee | Ranged | Armor {
   return isMelee(id) ? MELEE[id] : isRanged(id) ? RANGED[id] : ARMOR[id as ArmorId];
 }
+
+// ---------- difficulty ----------
+export interface Difficulty {
+  name: string;
+  desc: string;
+  hp: number;
+  dmg: number;
+  /** extra monsters per room */
+  more: number;
+  coins: number;
+  xp: number;
+  reward: number;
+  color: string;
+}
+export const DIFFS: Difficulty[] = [
+  { name: 'Easy', desc: 'Weaker monsters. Good for learning a dungeon.', hp: 0.7, dmg: 0.6, more: 0, coins: 0.8, xp: 0.75, reward: 0.75, color: '#7ad07a' },
+  { name: 'Normal', desc: 'The dungeon as it was built.', hp: 1, dmg: 1, more: 0, coins: 1, xp: 1, reward: 1, color: '#e8d8b8' },
+  { name: 'Hard', desc: 'Tougher, angrier monsters and more of them. Double gear xp.', hp: 1.8, dmg: 1.5, more: 1, coins: 1.6, xp: 2, reward: 1.8, color: '#ffa040' },
+  { name: 'Nightmare', desc: 'Only for high-level gear. Triple gear xp and big rewards.', hp: 3, dmg: 2.2, more: 2, coins: 2.5, xp: 3, reward: 3, color: '#ff4a6a' },
+];
 
 // ---------- arrows ----------
 export type ArrowKind = 'normal' | 'fire' | 'frost' | 'boom';
@@ -227,16 +287,18 @@ export interface MonsterDef {
   coins: [number, number];
   shot?: 'ember' | 'spore' | 'ice';
   blurb: string;
+  /** made of fire or ice: weak to the other one */
+  element?: Element;
 }
 
 export const MONSTERS: Record<MonsterKind, MonsterDef> = {
   mossling: { name: 'Mossling', hp: 26, speed: 2.4, dmg: 8, style: 'melee', range: 0.9, windup: 0.35, cooldown: 0.9, radius: 0.32, coins: [1, 3], blurb: 'A hopping block of mossy stone with glowing eyes.' },
-  'lantern-monk': { name: 'Lantern Monk', hp: 22, speed: 2.0, dmg: 9, style: 'ranged', range: 5.5, windup: 0.6, cooldown: 1.6, radius: 0.3, coins: [2, 4], shot: 'ember', blurb: 'A hooded robe with a lantern for a head. Throws embers.' },
+  'lantern-monk': { name: 'Lantern Monk', hp: 22, speed: 2.0, dmg: 9, style: 'ranged', range: 5.5, windup: 0.6, cooldown: 1.6, radius: 0.3, coins: [2, 4], shot: 'ember', blurb: 'A hooded robe with a lantern for a head. Throws embers.', element: 'fire' },
   sporecap: { name: 'Sporecap', hp: 38, speed: 1.4, dmg: 7, style: 'ranged', range: 4.5, windup: 0.8, cooldown: 2.2, radius: 0.38, coins: [2, 5], shot: 'spore', blurb: 'A waddling mushroom that lobs clouds of spores.' },
   rustknight: { name: 'Rustknight', hp: 90, speed: 1.6, dmg: 20, style: 'melee', range: 1.25, windup: 0.75, cooldown: 1.5, radius: 0.45, coins: [5, 9], blurb: 'A big empty suit of horned armor. Slow, but it hits hard.' },
   gloomwing: { name: 'Gloomwing', hp: 14, speed: 4.2, dmg: 6, style: 'flier', range: 0.8, windup: 0.2, cooldown: 1.1, radius: 0.28, coins: [1, 2], blurb: 'A cube with leathery wings that swoops in fast.' },
-  'frost-wisp': { name: 'Frost Wisp', hp: 34, speed: 2.2, dmg: 10, style: 'ranged', range: 6, windup: 0.55, cooldown: 1.7, radius: 0.32, coins: [3, 6], shot: 'ice', blurb: 'A floating ice crystal. Its bolts slow you down.' },
-  'cinder-hound': { name: 'Cinder Hound', hp: 40, speed: 3.6, dmg: 12, style: 'melee', range: 1.0, windup: 0.3, cooldown: 1.0, radius: 0.36, coins: [3, 6], blurb: 'A blocky dog of cooling lava that charges you down.' },
+  'frost-wisp': { name: 'Frost Wisp', hp: 34, speed: 2.2, dmg: 10, style: 'ranged', range: 6, windup: 0.55, cooldown: 1.7, radius: 0.32, coins: [3, 6], shot: 'ice', blurb: 'A floating ice crystal. Its bolts slow you down.', element: 'ice' },
+  'cinder-hound': { name: 'Cinder Hound', hp: 40, speed: 3.6, dmg: 12, style: 'melee', range: 1.0, windup: 0.3, cooldown: 1.0, radius: 0.36, coins: [3, 6], blurb: 'A blocky dog of cooling lava that charges you down.', element: 'fire' },
   'hollow-crown': { name: 'The Hollow Crown', hp: 1400, speed: 1.5, dmg: 24, style: 'boss', range: 1.8, windup: 0.9, cooldown: 1.4, radius: 0.9, coins: [150, 200], blurb: 'An obsidian golem king who rules the deepest dungeon.' },
 };
 
@@ -311,7 +373,7 @@ export const TRADERS: Trader[] = [
   { id: 'mystic', name: 'Mira', title: 'Mystic', hello: 'Charms and relics, each with a little magic inside.', x: 21.5, y: 13.5, look: { robe: '#1f6a6a', trim: '#8af4e0', hat: '#123c3c', skin: '#d8a880' } },
 ];
 
-export const SMITH_STOCK: GearId[] = ['twin-daggers', 'sickle', 'long-spear', 'battle-axe', 'scythe', 'frost-glaive', 'thunder-hammer', 'obsidian-cleaver', 'ember-blade', 'dragonfang', 'crossbow', 'fan-bow', 'rapid-repeater', 'thornspike-bow', 'storm-bow', 'starlight-bow', 'dragonbone-longbow'];
+export const SMITH_STOCK: GearId[] = ['twin-daggers', 'sickle', 'long-spear', 'battle-axe', 'scythe', 'frost-glaive', 'thunder-hammer', 'obsidian-cleaver', 'rimeblade', 'ember-blade', 'dragonfang', 'crossbow', 'fan-bow', 'rapid-repeater', 'thornspike-bow', 'storm-bow', 'glacier-bow', 'starlight-bow', 'dragonbone-longbow'];
 export const ARMOR_STOCK: ArmorId[] = ['scout-cloak', 'jerkin', 'chainmail', 'shadowweave', 'mossguard', 'knight-plate', 'obsidian-plate', 'dragonscale'];
 export const PEDDLER_STOCK: SupplyId[] = ['arrows', 'fire-arrows', 'frost-arrows', 'boom-arrows', 'bomb', 'mystery'];
 export const MYSTIC_STOCK: ArtifactId[] = ['healing-totem', 'gust-horn', 'thunder-charm', 'ghost-boots', 'ironhide-charm', 'firework-crown'];

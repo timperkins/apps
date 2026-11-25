@@ -166,3 +166,9 @@
 .md-saveslot div { flex: 1; display: flex; flex-direction: column; }
 .md-saveslot small { color: #b8a888; }
 .md-saveslot.cur { box-shadow: inset 0 0 0 2px #ffd27a; }
+.md-lv { position: relative; display: inline-block; margin-left: 6px; padding: 0 6px 3px; background: #1a3a28; color: #9affc0; font: 800 11px/16px ui-monospace, monospace; vertical-align: middle; overflow: hidden; }
+.md-lv i { position: absolute; left: 0; bottom: 0; height: 3px; background: #7affb0; }
+.md-diffs { display: flex; flex-wrap: wrap; gap: 6px; }
+.md-diff { border: 2px solid var(--c); background: rgba(0,0,0,.35); color: var(--c); font: 800 13px system-ui, sans-serif; padding: 5px 10px; cursor: pointer; }
+.md-diff.on { background: var(--c); color: #1a1008; }
+.md-diff:disabled { opacity: .45; cursor: not-allowed; }

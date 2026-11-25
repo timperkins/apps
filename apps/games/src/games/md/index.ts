@@ -3,7 +3,7 @@
 import './style.css';
 import type { GameModule } from '../types';
 import {
-  ARMOR, ARMOR_STOCK, ARTIFACTS, ARROWS, LEVELS, MYSTIC_STOCK, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
+  ARMOR, ARMOR_STOCK, ARTIFACTS, ARROWS, DIFFS, LEVELS, MAX_LEVEL, xpNeed, MYSTIC_STOCK, TRADERS, MELEE, MONSTERS, PEDDLER_STOCK, RANGED, SMITH_STOCK, SUPPLIES,
   armorOf, isArmor, isMelee, isRanged, itemName, meleeOf, parseKey, rangedOf,
   type ArtifactId, type GearId, type ItemKey, type SupplyId, type Trader,
 } from './data';
@@ -99,6 +99,8 @@ const HELP = `
     <div><b>Z</b> <b>X</b> <b>C</b>: your 3 artifacts · <b>Right click</b> or <b>V</b>: dodge roll</div>
     <div><b>Option</b> (Alt): drink your Healing Draught. A new one brews every 20 seconds and you carry 1.</div>
     <div><b>B</b>: Fizz Bomb · <b>E</b>: talk, open, use · <b>Ctrl</b> or <b>I</b>: inventory · <b>M</b>: map · <b>Esc</b>: menu (save, load, team play, settings)</div>
+    <div class="md-dim">🔥 Fire weapons and arrows burn and do +60% to ice monsters. ❄️ Ice ones slow enemies for 3 seconds and do +60% to fire monsters.</div>
+    <div class="md-dim">⭐ The set (weapon, bow, armor) levels up to 100 from beating mobs and opening chests. Pick Easy, Normal, Hard or Nightmare on the mission map; beat a dungeon to unlock the next difficulty there.</div>
     <div class="md-dim">Auto-fire bows shoot by themselves when an enemy is close. In Settings, pick where bows aim: at the mouse, in front of you, or at the nearest enemy.</div>
     <div class="md-dim">On a phone: stick on the left, buttons on the right. Attacks aim at the nearest monster.</div>
   </div>`;
@@ -403,7 +405,7 @@ const game: GameModule = {
       hpEl.querySelector('span')!.textContent = `${Math.ceil(g.hp)} / ${g.maxHp}`;
       const st = topStats();
       if (statKey !== st) statsEl.innerHTML = statKey = st;
-      whereEl.textContent = g.mode === 'camp' ? 'Hearthstead Camp' : `${g.def.name} · ${g.monsters.length} monsters left`;
+      whereEl.textContent = g.mode === 'camp' ? 'Hearthstead Camp' : `${g.def.name} · ${g.D.name} · ${g.monsters.length} monsters left`;
       const gd = g.guardian;
       if (gd && g.bossAwake && !gd.dead) {
         bossEl.hidden = false;
@@ -434,7 +436,7 @@ const game: GameModule = {
       const s = g.save;
       const ak = g.loadedArrow;
       const pot = s.potions > 0
-        ? `<span class="md-pot ready" title="Drink with Option (Alt)">🧪 ${touchMode ? 'Ready' : '<kbd>⌥</kbd> Ready'}</span>`
+        ? `<span class="md-pot ready" title="Drink with Option (Alt)">🧪 ${touchMode ? 'Ready' : '<kbd>Option</kbd> Ready'}</span>`
         : `<span class="md-pot">🧪 ${Math.ceil(POTION_EVERY - g.potionT)}s</span>`;
       const team = host?.guest ? `<span class="md-team">👥 ${esc(host.guest.name)}</span>` : host ? '<span class="md-team">👥 Open</span>' : guest ? `<span class="md-team">👥 ${esc(g.mate?.name ?? 'Host')}</span>` : '';
       return `<span>🪙 ${s.coins}</span>${pot}<span>${ak === 'normal' ? '🏹' : { fire: '🔥', frost: '❄️', boom: '💥' }[ak]} ${g.arrowCount()}</span>${team}`;
@@ -782,17 +784,18 @@ const game: GameModule = {
 
     // --- shop ---
     const RARE_NOTE = '<p class="md-dim md-small-note">Every new item has a <b class="md-gold">0.5% chance to be GOLD</b> and a <b class="md-dia">0.05% chance to be DIAMOND</b>: shinier, with much better stats.</p>';
-    function statLine(key: ItemKey | '') {
+    const elemTag = (e?: 'fire' | 'ice') => (e === 'fire' ? ' · 🔥 fire: burns, +60% vs ice monsters' : e === 'ice' ? ' · ❄️ ice: slows, +60% vs fire monsters' : '');
+    function statLine(key: ItemKey | '', lv = key ? g.lvOf(key) : 1) {
       const { id } = key ? parseKey(key) : { id: '' as GearId };
       if (!key || isMelee(id)) {
-        const w = meleeOf(key);
-        return `⚔️ ${w.dmg} dmg · ${(1 / w.rate).toFixed(1)}/s · reach ${w.reach}${w.arc >= 360 ? ' · all around' : w.arc >= 200 ? ' · wide sweep' : ''}${w.effect ? ` · ${w.effect === 'burn' ? 'burns' : w.effect === 'slow' ? 'slows' : 'stuns'}` : ''}`;
+        const w = meleeOf(key, lv);
+        return `⚔️ ${w.dmg} dmg · ${(1 / w.rate).toFixed(1)}/s · reach ${w.reach}${w.arc >= 360 ? ' · all around' : w.arc >= 200 ? ' · wide sweep' : ''}${w.element ? elemTag(w.element) : w.effect ? ` · ${w.effect === 'burn' ? 'burns' : w.effect === 'slow' ? 'slows' : 'stuns'}` : ''}`;
       }
       if (isRanged(id)) {
-        const w = rangedOf(key);
-        return `🏹 ${w.dmg} dmg${w.shots > 1 ? ` ×${w.shots}` : ''} · ${(1 / w.rate).toFixed(1)}/s${w.pierce ? ` · pierces ${w.pierce > 5 ? 'all' : w.pierce}` : ''}${w.auto ? ' · AUTO-FIRE' : ''}${w.burn ? ' · burns' : ''}`;
+        const w = rangedOf(key, lv);
+        return `🏹 ${w.dmg} dmg${w.shots > 1 ? ` ×${w.shots}` : ''} · ${(1 / w.rate).toFixed(1)}/s${w.pierce ? ` · pierces ${w.pierce > 5 ? 'all' : w.pierce}` : ''}${w.auto ? ' · AUTO-FIRE' : ''}${w.element ? elemTag(w.element) : ''}`;
       }
-      const a = armorOf(key);
+      const a = armorOf(key, lv);
       return `🛡️ blocks ${pct(a.block)}${a.regen ? ' · heals' : ''}${a.speed > 1 ? ` · ${pct(a.speed - 1)} faster` : a.speed < 1 ? ` · ${pct(1 - a.speed)} slower` : ''}${a.lavaproof ? ' · lavaproof' : ''}${a.quickroll ? ' · fast rolls' : ''}`;
     }
     function gearDesc(id: GearId) {
@@ -828,8 +831,8 @@ const game: GameModule = {
         for (const id of stock) {
           const own = g.owns(id);
           const price = gearPrice(id);
-          const btn = own ? '<span class="md-tagx">Owned</span>' : `<button class="md-btn md-buy" data-gear="${id}" ${g.save.coins < price ? 'disabled' : ''}>🪙 ${price}</button>`;
-          items.push(`<div class="md-item ${own ? 'own' : ''}"><img src="${gearIcon(id)}" alt=""><div class="md-it"><b>${gearName(id)}</b><small>${statLine(id)}</small><small class="md-dim">${gearDesc(id)}</small></div>${btn}</div>`);
+          const btn = own ? `<span class="md-tagx">Owned · Lv ${g.lvOf(s0(id))}</span>` : `<button class="md-btn md-buy" data-gear="${id}" ${g.save.coins < price ? 'disabled' : ''}>🪙 ${price}</button>`;
+          items.push(`<div class="md-item ${own ? 'own' : ''}"><img src="${gearIcon(id)}" alt=""><div class="md-it"><b>${gearName(id)}</b><small>${statLine(id, 1)}</small><small class="md-dim">${gearDesc(id)}</small></div>${btn}</div>`);
         }
       }
       ui.innerHTML = `<div class="md-panel md-shop">
@@ -861,6 +864,10 @@ const game: GameModule = {
         }),
       );
     }
+    /** the owned key for a gear id (whichever rarity you have, best first) */
+    function s0(id: GearId): ItemKey {
+      return g.save.owned.find((k) => k === `${id}@diamond`) ?? g.save.owned.find((k) => k === `${id}@gold`) ?? id;
+    }
     function buySupply(id: SupplyId) {
       const s = SUPPLIES[id];
       if (g.save.coins < s.price) return toast('Not enough coins.');
@@ -883,12 +890,18 @@ const game: GameModule = {
     }
 
     // --- inventory ---
+    function lvBadge(key: ItemKey) {
+      const lv = g.lvOf(key);
+      const need = xpNeed(lv);
+      const k = lv >= MAX_LEVEL ? 1 : g.xpOf(key) / need;
+      return `<span class="md-lv" title="${lv >= MAX_LEVEL ? 'Max level' : `${g.xpOf(key)} / ${need} xp to Lv ${lv + 1}`}">Lv ${lv}<i style="width:${pct(k)}"></i></span>`;
+    }
     function gearPanel() {
       const s = g.save;
       const rank = { diamond: 0, gold: 1, normal: 2 };
       const card = (key: ItemKey) => {
         const r = parseKey(key).rarity;
-        return `<div class="md-item r-${r} ${isEquipped(key) ? 'eq' : ''}"><img src="${gearIcon(key)}" alt=""><div class="md-it"><b>${itemName(key)}${r !== 'normal' ? ` <span class="md-badge r-${r}">${r.toUpperCase()}</span>` : ''}</b><small>${statLine(key)}</small></div>${isEquipped(key) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${key}">Equip</button>`}</div>`;
+        return `<div class="md-item r-${r} ${isEquipped(key) ? 'eq' : ''}"><img src="${gearIcon(key)}" alt=""><div class="md-it"><b>${itemName(key)}${r !== 'normal' ? ` <span class="md-badge r-${r}">${r.toUpperCase()}</span>` : ''} ${lvBadge(key)}</b><small>${statLine(key)}</small></div>${isEquipped(key) ? '<span class="md-tagx">Equipped</span>' : `<button class="md-btn" data-eq="${key}">Equip</button>`}</div>`;
       };
       const group = (title: string, test: (id: GearId) => boolean, extra = '') => {
         const keys = s.owned.filter((k) => test(parseKey(k).id)).sort((a, b) => rank[parseKey(a).rarity] - rank[parseKey(b).rarity]);
@@ -913,6 +926,7 @@ const game: GameModule = {
           <p class="md-dim">Dungeons cleared: ${s.cleared.length} of ${LEVELS.length}</p>
           <button class="md-btn" data-x="settings">⚙️ Settings</button>
         </div></div>
+        <p class="md-dim">⭐ <b>The set</b> (your weapon, bow and armor) levels up to Lv ${MAX_LEVEL} from beating mobs and opening chests. Higher levels hit harder and faster with a bit more reach. Harder difficulties give more xp.</p>
         ${group('Melee weapons (Space)', isMelee, fists)}
         ${group('Bows (click or Shift)', isRanged)}
         <h3>Arrows (Tab switches)</h3><div class="md-arrows">${arrows}</div>
@@ -1006,9 +1020,12 @@ const game: GameModule = {
     }
 
     // --- mission map (the camp's table) ---
+    let diffSel = 1;
+    const diffOpen = (lvId: string, d: number) => d <= 1 || (g.save.best?.[lvId] ?? -1) >= d - 1;
     function openMission(sel: number) {
       show('mission');
       const s = g.save;
+      if (!diffOpen(LEVELS[sel].id, diffSel)) diffSel = 1;
       const pts = LEVELS.map((L) => L.map);
       const camp = { x: 8, y: 92 };
       const path = [camp, ...pts].map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y * 0.7}`).join(' ');
@@ -1044,10 +1061,17 @@ const game: GameModule = {
           <h2>${L.name}</h2>
           <p>${L.blurb}</p>
           <h3>Monsters</h3>
-          <div class="md-mobs">${kinds.map((k) => `<div><img src="${monsterIcon(k, 64)}" alt=""><small>${MONSTERS[k].name}</small></div>`).join('')}</div>
+          <div class="md-mobs">${kinds.map((k) => `<div><img src="${monsterIcon(k, 64)}" alt=""><small>${MONSTERS[k].name}${MONSTERS[k].element === 'fire' ? '<br>🔥 weak to ice' : MONSTERS[k].element === 'ice' ? '<br>❄️ weak to fire' : ''}</small></div>`).join('')}</div>
           <h3>Guardian</h3>
           <div class="md-mobs"><div class="md-gd"><img src="${monsterIcon(L.guardian.kind, 72, L.guardian.kind === 'hollow-crown' ? '' : L.accent)}" alt=""><small>${L.guardian.name}</small></div><p class="md-dim">${L.guardian.kind === 'hollow-crown' ? MONSTERS[L.guardian.kind].blurb : `A giant ${MONSTERS[L.guardian.kind].name}, much tougher, with a ring attack that hits all around it.`}</p></div>
-          <p>Reward: 🪙 ${s.cleared.includes(L.id) ? Math.round(L.reward / 3) + ' (replay)' : L.reward}${L.hazard ? ` · Watch for ${L.hazard === 'lava' ? 'lava' : L.hazard === 'ice' ? 'slippery ice' : 'deep water'}` : ''}</p>
+          <h3>Difficulty</h3>
+          <div class="md-diffs">${DIFFS.map((D, i) => {
+            const open = diffOpen(L.id, i);
+            const beat = (s.best?.[L.id] ?? -1) >= i;
+            return `<button class="md-diff ${i === diffSel ? 'on' : ''}" data-diff="${i}" ${open ? '' : 'disabled'} style="--c:${D.color}" title="${open ? D.desc : `Beat ${L.name} on ${DIFFS[i - 1].name} first`}">${open ? '' : '🔒 '}${D.name}${beat ? ' ⭐' : ''}</button>`;
+          }).join('')}</div>
+          <p class="md-dim md-small-note">${DIFFS[diffSel].desc} Monsters ×${DIFFS[diffSel].hp} health, ×${DIFFS[diffSel].dmg} damage · gear xp ×${DIFFS[diffSel].xp}</p>
+          <p>Reward: 🪙 ${Math.round((s.cleared.includes(L.id) ? L.reward / 3 : L.reward) * DIFFS[diffSel].reward)}${s.cleared.includes(L.id) ? ' (replay)' : ''}${L.hazard ? ` · Watch for ${L.hazard === 'lava' ? 'lava' : L.hazard === 'ice' ? 'slippery ice' : 'deep water'}` : ''}</p>
           <div class="md-row">
             ${locked ? `<button class="md-btn" disabled>🔒 Clear ${LEVELS[sel - 1].name} first</button>` : '<button class="md-btn md-go" data-x="go">Enter dungeon</button>'}
             <button class="md-btn" data-x="close">Close</button>
@@ -1060,7 +1084,15 @@ const game: GameModule = {
         }),
       );
       ui.querySelector('[data-x="close"]')!.addEventListener('click', () => show('none'));
+      ui.querySelectorAll<HTMLElement>('[data-diff]').forEach((b) =>
+        b.addEventListener('click', () => {
+          diffSel = Number(b.dataset.diff);
+          sfx('click');
+          openMission(sel);
+        }),
+      );
       ui.querySelector('[data-x="go"]')?.addEventListener('click', () => {
+        g.diff = diffSel;
         g.enterLevel(sel);
         save();
         show('none');

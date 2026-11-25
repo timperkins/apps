@@ -1,6 +1,6 @@
 // M.D. simulation: the hero, monsters, projectiles, loot and level flow. No drawing here.
 import {
-  ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName,
+  ARMOR, ARTIFACTS, LEVELS, MELEE, MONSTERS, RANGED, SMITH_STOCK, ARMOR_STOCK, TRADERS, armorOf, isArmor, isMelee, isRanged, makeKey, meleeOf, parseKey, rangedOf, rollRarity, itemName, DIFFS, ELEMENT_BONUS, ICE_SLOW, MAX_LEVEL, xpNeed, type Element,
   type ArmorId, type ArrowKind, type ArtifactId, type Melee, type GearId, type ItemKey, type LevelDef, type MonsterDef, type MonsterKind, type Rarity, type Trader,
 } from './data';
 import { T, generateCamp, generateDungeon, isWallTile, rng, tileAt, type Level, type Prop } from './dungeon';
@@ -25,11 +25,15 @@ export interface SaveData {
   cleared: string[];
   won: boolean;
   runs: number;
+  /** "the set": each owned item's level (1..100) and xp toward the next */
+  levels: Record<ItemKey, { lv: number; xp: number }>;
+  /** the hardest difficulty beaten on each dungeon (index into DIFFS) */
+  best: Record<string, number>;
 }
 
 export const newSave = (): SaveData => ({
   v: 1, coins: 30, owned: ['rusty-sword', 'shortbow', 'tunic'], melee: 'rusty-sword', ranged: 'shortbow', armor: 'tunic',
-  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0,
+  arrows: 40, special: { fire: 0, frost: 0, boom: 0 }, arrowKind: 'normal', artifacts: [], slots: ['', '', ''], potions: 1, bombs: 1, unlocked: 0, cleared: [], won: false, runs: 0, levels: {}, best: {},
 });
 
 export interface Monster {
@@ -76,6 +80,7 @@ export interface Shot {
   kind: 'arrow' | 'bolt' | 'star' | 'ember' | 'spore' | 'ice' | 'firework';
   pierce: number;
   effect?: 'burn' | 'slow' | 'boom';
+  element?: Element;
   color?: string;
   hit: Set<number>;
   life: number;
@@ -174,8 +179,8 @@ export interface Peer {
 }
 /** something the guest did that the host's game has to carry out */
 export type Act =
-  | { a: 'swing'; face: number; key: string }
-  | { a: 'shoot'; angle: number; key: string; ak: ArrowKind }
+  | { a: 'swing'; face: number; key: string; lv?: number }
+  | { a: 'shoot'; angle: number; key: string; ak: ArrowKind; lv?: number }
   | { a: 'art'; id: ArtifactId; x: number; y: number }
   | { a: 'bomb'; tx: number; ty: number }
   | { a: 'chest'; i: number }
@@ -284,7 +289,7 @@ export class Game {
   fxOut: unknown[] | null = null;
   onAct: (a: Act) => void = () => {};
   onPeerHurt: (id: string, dmg: number, fx: number, fy: number, effect?: 'slow' | 'burn') => void = () => {};
-  onPeerGain: (id: string, g: { coins?: number; arrows?: number; gear?: boolean; special?: [string, number]; heal?: number }) => void = () => {};
+  onPeerGain: (id: string, g: { coins?: number; arrows?: number; gear?: boolean; special?: [string, number]; heal?: number; xp?: number }) => void = () => {};
   onBothDown: () => void = () => {};
   /** host: the level changed (camp or a dungeon, with its seed) */
   onEnter: (mode: 'camp' | 'dungeon', idx: number, seed: number) => void = () => {};
@@ -316,13 +321,48 @@ export class Game {
   }
 
   get melee() {
-    return meleeOf(this.save.melee);
+    return meleeOf(this.save.melee, this.lvOf(this.save.melee));
   }
   get ranged() {
-    return rangedOf(this.save.ranged);
+    return rangedOf(this.save.ranged, this.lvOf(this.save.ranged));
   }
   get armor() {
-    return armorOf(this.save.armor);
+    return armorOf(this.save.armor, this.lvOf(this.save.armor));
+  }
+  /** the difficulty of the dungeon you're in (or about to pick) */
+  diff = 1;
+  get D() {
+    return DIFFS[this.diff] ?? DIFFS[1];
+  }
+  lvOf(key: ItemKey | ''): number {
+    return key ? (this.save.levels?.[key]?.lv ?? 1) : 1;
+  }
+  xpOf(key: ItemKey): number {
+    return this.save.levels?.[key]?.xp ?? 0;
+  }
+  /** the set (equipped weapon, bow and armor) gets xp only from beating mobs and opening chests */
+  gainSetXp(n: number) {
+    if (n <= 0) return;
+    if (!this.save.levels) this.save.levels = {};
+    const ups: string[] = [];
+    for (const key of [this.save.melee, this.save.ranged, this.save.armor]) {
+      if (!key) continue;
+      const e = (this.save.levels[key] ??= { lv: 1, xp: 0 });
+      if (e.lv >= MAX_LEVEL) continue;
+      e.xp += n;
+      while (e.lv < MAX_LEVEL && e.xp >= xpNeed(e.lv)) {
+        e.xp -= xpNeed(e.lv);
+        e.lv++;
+        ups.push(`${itemName(key)} Lv ${e.lv}`);
+      }
+      if (e.lv >= MAX_LEVEL) e.xp = 0;
+    }
+    if (ups.length) {
+      this.float(this.x, this.y - 0.3, 'LEVEL UP!', '#7affb0');
+      this.ring(this.x, this.y, 1.4, '#7affb0', 0.4);
+      this.onSound('rare');
+      this.onMsg(`⬆ ${ups.join(' · ')}`);
+    }
   }
   get rollMax() {
     return this.armor.quickroll ? 0.42 : 0.85;
@@ -407,8 +447,8 @@ export class Game {
         const m = this.spawn(gd.kind, rm.cx + 0.5, rm.cy - 2.5, true);
         m.name = gd.name;
         m.scale = gd.scale;
-        m.hp = m.maxHp = gd.hp;
-        m.dmg = Math.round(MONSTERS[gd.kind].dmg * (gd.kind === 'hollow-crown' ? 1 : 1.7));
+        m.hp = m.maxHp = Math.round(gd.hp * this.D.hp);
+        m.dmg = Math.round(MONSTERS[gd.kind].dmg * (gd.kind === 'hollow-crown' ? 1 : 1.7) * this.D.dmg);
         this.guardian = m;
         // a couple of guards
         for (let k = 0; k < 2 + tier; k++) {
@@ -417,7 +457,7 @@ export class Game {
         }
         return;
       }
-      const n = 2 + Math.floor(r() * (3 + Math.ceil(tier * 0.75))) + (rm.w * rm.h > 70 ? 1 : 0);
+      const n = 2 + Math.floor(r() * (3 + Math.ceil(tier * 0.75))) + (rm.w * rm.h > 70 ? 1 : 0) + this.D.more;
       for (let k = 0; k < n; k++) {
         const kind = this.def.monsters[Math.floor(r() * this.def.monsters.length)];
         for (let tries = 0; tries < 10; tries++) {
@@ -434,9 +474,10 @@ export class Game {
   spawn(kind: MonsterKind, x: number, y: number, guardian = false): Monster {
     const def = MONSTERS[kind];
     const tier = this.levelIdx;
-    const hp = Math.round(def.hp * (1 + 0.3 * tier));
+    const D = this.D;
+    const hp = Math.round(def.hp * (1 + 0.3 * tier) * D.hp);
     const m: Monster = {
-      id: this.nextId++, kind, def, name: def.name, x, y, hp, maxHp: hp, dmg: Math.round(def.dmg * (1 + 0.22 * tier)),
+      id: this.nextId++, kind, def, name: def.name, x, y, hp, maxHp: hp, dmg: Math.round(def.dmg * (1 + 0.22 * tier) * D.dmg),
       scale: 1, guardian, state: 'idle', t: 0, cd: 0.5 + Math.random(), special: 5, face: Math.random() * 6.28, awake: false,
       slowT: 0, burnT: 0, stunT: 0, flash: 0, kx: 0, ky: 0, walk: Math.random() * 10, hover: Math.random() * 6, dead: false,
     };
@@ -575,10 +616,15 @@ export class Game {
     }
   }
 
-  hurtMonster(m: Monster, dmg: number, fromX: number, fromY: number, knock: number, effect?: 'slow' | 'burn' | 'stun') {
+  hurtMonster(m: Monster, dmg: number, fromX: number, fromY: number, knock: number, effect?: 'slow' | 'burn' | 'stun', element?: Element) {
     if (m.dead) return;
     const crit = Math.random() < 0.1;
-    const real = Math.round(dmg * (crit ? 2 : 1) * (0.9 + Math.random() * 0.2));
+    // fire beats ice, ice beats fire
+    const me = m.def.element;
+    const strong = !!element && !!me && element !== me;
+    const real = Math.round(dmg * (crit ? 2 : 1) * (strong ? ELEMENT_BONUS : 1) * (0.9 + Math.random() * 0.2));
+    if (element === 'fire') effect = effect === 'stun' ? effect : 'burn';
+    if (element === 'ice' && effect !== 'stun') effect = 'slow';
     m.hp -= real;
     m.flash = 0.12;
     m.awake = true;
@@ -586,13 +632,14 @@ export class Game {
     const k = knock / (m.guardian || m.kind === 'hollow-crown' ? 4 : m.kind === 'rustknight' ? 2 : 1);
     m.kx += ((m.x - fromX) / d) * k;
     m.ky += ((m.y - fromY) / d) * k;
-    if (effect === 'slow') m.slowT = 2.5;
+    if (effect === 'slow') m.slowT = ICE_SLOW;
     if (effect === 'burn') m.burnT = 3;
+    if (strong) this.burst(m.x, m.y, 0.8 * m.scale, element === 'fire' ? '#ff8a3a' : '#aee8ff', 10, 3);
     if (effect === 'stun' && !m.guardian) {
       m.stunT = 0.9;
       m.state = 'recover';
     }
-    this.float(m.x, m.y, crit ? `${real}!` : `${real}`, crit ? '#ffe066' : '#ffffff');
+    this.float(m.x, m.y, strong ? `${real}!!` : crit ? `${real}!` : `${real}`, strong ? (element === 'fire' ? '#ff9a4a' : '#9ae6ff') : crit ? '#ffe066' : '#ffffff');
     this.burst(m.x, m.y, 0.7 * m.scale, this.bloodColor(m.kind), 5);
     this.sound('hit');
     if (m.hp <= 0) this.killMonster(m);
@@ -610,6 +657,11 @@ export class Game {
     const [a, b] = m.def.coins;
     let coins = a + Math.floor(Math.random() * (b - a + 1));
     if (m.guardian) coins = Math.round(coins * 1.5) + 30;
+    coins = Math.max(1, Math.round(coins * this.D.coins));
+    // the set levels up from beating mobs (your teammate's set too)
+    const xp = Math.max(1, Math.round((m.guardian ? 20 : 1) * this.D.xp));
+    this.gainSetXp(xp);
+    for (const p of this.peers) this.onPeerGain(p.id, { xp });
     const piles = Math.min(8, Math.max(1, Math.ceil(coins / 4)));
     for (let i = 0; i < piles; i++) this.drop(m.x, m.y, 'coin', Math.ceil(coins / piles));
     if (Math.random() < 0.15) this.drop(m.x, m.y, 'arrows', 6 + Math.floor(Math.random() * 6));
@@ -657,7 +709,7 @@ export class Game {
     this.meleeCd = w.rate;
     this.swingT = this.swingDur = Math.min(0.32, w.rate * 0.85);
     this.sound(w.shape === 'fist' ? 'punch' : w.effect === 'stun' ? 'slam' : 'swing');
-    if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee });
+    if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee, lv: this.lvOf(this.save.melee) });
     else this.meleeHit(this.x, this.y, this.face, w);
   }
 
@@ -673,7 +725,7 @@ export class Game {
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       if (w.arc < 360 && Math.abs(da) > half + 0.25 && d > 0.6) continue;
-      this.hurtMonster(m, w.dmg, x0, y0, w.knock, w.effect);
+      this.hurtMonster(m, w.dmg, x0, y0, w.knock, w.effect, w.element);
     }
     if (w.effect === 'stun') {
       this.ring(x0, y0, w.reach, '#ffe066', 0.35);
@@ -731,22 +783,23 @@ export class Game {
     this.rangedCd = w.rate;
     this.drawT = 0.18;
     this.sound('bow');
-    if (this.remote) this.onAct({ a: 'shoot', angle, key: this.save.ranged, ak });
-    else this.fireArrows(this.x, this.y, angle, this.save.ranged, ak);
+    if (this.remote) this.onAct({ a: 'shoot', angle, key: this.save.ranged, ak, lv: this.lvOf(this.save.ranged) });
+    else this.fireArrows(this.x, this.y, angle, this.save.ranged, ak, this.lvOf(this.save.ranged));
   }
 
   /** the arrows themselves, from any player */
-  fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, ak: ArrowKind) {
-    const w = rangedOf(rangedKey);
+  fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, ak: ArrowKind, lv = 1) {
+    const w = rangedOf(rangedKey, lv);
     const { id, rarity } = parseKey(rangedKey);
     const kind = w.shape === 'crossbow' ? 'bolt' : id === 'starlight-bow' || id === 'storm-bow' || rarity !== 'normal' ? 'star' : 'arrow';
-    const effect = ak === 'fire' || w.burn ? 'burn' : ak === 'frost' ? 'slow' : ak === 'boom' ? 'boom' : undefined;
-    const color = ak !== 'normal' ? ({ fire: '#ff8a3a', frost: '#aee8ff', boom: '#ffe066' } as const)[ak] : w.burn ? '#ff8a3a' : rarity === 'gold' ? '#ffd040' : rarity === 'diamond' ? '#8af4ff' : id === 'storm-bow' ? '#9ab0ff' : undefined;
+    const effect = ak === 'fire' || w.burn ? 'burn' : ak === 'frost' || w.chill ? 'slow' : ak === 'boom' ? 'boom' : undefined;
+    const element: Element | undefined = ak === 'fire' ? 'fire' : ak === 'frost' ? 'ice' : w.element;
+    const color = ak !== 'normal' ? ({ fire: '#ff8a3a', frost: '#aee8ff', boom: '#ffe066' } as const)[ak] : w.burn ? '#ff8a3a' : w.chill ? '#aee8ff' : rarity === 'gold' ? '#ffd040' : rarity === 'diamond' ? '#8af4ff' : id === 'storm-bow' ? '#9ab0ff' : undefined;
     for (let i = 0; i < w.shots; i++) {
       const a = angle + (i - (w.shots - 1) / 2) * w.spread;
       this.shots.push({
         x: x0 + Math.cos(a) * 0.4, y: y0 + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, effect, color,
+        dmg: w.dmg, from: 'hero', kind, pierce: w.pierce, hit: new Set(), life: 1.4, effect, element, color,
       });
     }
   }
@@ -1111,7 +1164,10 @@ export class Game {
     this.sound('chest');
     this.burst(p.x + 0.5, p.y + 0.5, 0.6, '#ffe066', 18, 2.5);
     const cx = p.x + 0.5, cy = p.y + 1.1;
-    for (let i = 0; i < 4; i++) this.drop(cx, cy, 'coin', 5 + this.levelIdx * 3);
+    for (let i = 0; i < 4; i++) this.drop(cx, cy, 'coin', Math.round((5 + this.levelIdx * 3) * this.D.coins));
+    const cxp = Math.max(1, Math.round(5 * this.D.xp));
+    if (opener) this.onPeerGain(opener, { xp: cxp });
+    else this.gainSetXp(cxp);
     this.drop(cx, cy, 'arrows', 10);
     // sometimes a piece of gear you don't have yet
     if (opener) {
@@ -1143,9 +1199,11 @@ export class Game {
   finishLevel() {
     const def = this.def;
     const first = !this.save.cleared.includes(def.id);
-    const reward = first ? def.reward : Math.round(def.reward / 3);
+    const reward = Math.round((first ? def.reward : def.reward / 3) * this.D.reward);
     this.save.coins += reward;
     if (first) this.save.cleared.push(def.id);
+    if (!this.save.best) this.save.best = {};
+    this.save.best[def.id] = Math.max(this.save.best[def.id] ?? -1, this.diff);
     this.save.unlocked = Math.max(this.save.unlocked, Math.min(LEVELS.length - 1, this.levelIdx + 1));
     const won = def.id === 'throne' && !this.save.won;
     if (def.id === 'throne') this.save.won = true;
@@ -1176,8 +1234,8 @@ export class Game {
   peerAct(id: string, a: Act) {
     const p = this.peers.find((q) => q.id === id);
     if (!p || p.dead) return;
-    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, meleeOf(a.key));
-    else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, a.key, a.ak);
+    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, meleeOf(a.key, Math.min(MAX_LEVEL, a.lv ?? 1)));
+    else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, a.key, a.ak, Math.min(MAX_LEVEL, a.lv ?? 1));
     else if (a.a === 'art') this.artifactAt(a.id, p.x, p.y);
     else if (a.a === 'bomb') this.bombs.push({ x: p.x, y: p.y, tx: a.tx, ty: a.ty, t: 0, fuse: 1.0 });
     else if (a.a === 'chest') {
@@ -1449,7 +1507,7 @@ export class Game {
             if (m.dead || s.hit.has(m.id)) continue;
             if (Math.hypot(m.x - s.x, m.y - s.y) < m.def.radius * m.scale + 0.15) {
               s.hit.add(m.id);
-              this.hurtMonster(m, s.dmg, s.x - s.vx, s.y - s.vy, 2, s.effect === 'boom' ? undefined : s.effect);
+              this.hurtMonster(m, s.dmg, s.x - s.vx, s.y - s.vy, 2, s.effect === 'boom' ? undefined : s.effect, s.element);
               if (s.effect === 'boom') this.miniBoom(s.x, s.y, s.dmg * 0.6, s.color ?? '#ffe066', m.id);
               if (s.pierce-- <= 0) {
                 s.life = 0;
