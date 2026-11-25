@@ -67,9 +67,11 @@ export function coopMenu(parent: HTMLElement, o: CoopMenuOpts): () => void {
 }
 
 /** A little badge in the top corner while playing together. */
-export function coopBadge(parent: HTMLElement) {
+export function coopBadge(parent: HTMLElement, style: Partial<CSSStyleDeclaration> = {}) {
   const el = document.createElement('div');
   el.className = 'coop-badge';
+  // games move it out of the way of their own top bar
+  Object.assign(el.style, style);
   parent.appendChild(el);
   return {
     /** `slots` are everyone in the game (0 is the host). `me` is your slot. */

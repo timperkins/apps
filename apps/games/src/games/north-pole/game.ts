@@ -78,6 +78,8 @@ export interface Villager {
   color: string;
   jack: boolean; // bought villagers chop trees for you
   state: 'idle' | 'walk' | 'rescue' | 'carry' | 'toTree' | 'chop' | 'home';
+  /** Slot of the player being rescued or carried. */
+  who?: number;
   tx: number;
   ty: number;
   timer: number;
@@ -103,6 +105,11 @@ export interface Meat {
 }
 
 export interface Player {
+  /** 0 is the host (or you on your own), 1 to 3 are friends. */
+  slot: number;
+  /** On the other players' games: where this player last was, to glide toward. */
+  tx?: number;
+  ty?: number;
   x: number;
   y: number;
   dir: Dir;
@@ -141,6 +148,19 @@ export interface Fx {
   text?: string;
 }
 
+export interface Snap {
+  inv: Inv; chopped: number; hasBase: boolean; bearTimer: number; wave: number; kills: number; time: number; banner: string; bannerT: number;
+  objs: [Kind, number, number, Dir, number, number, Item | null, number, Item | null, number, number, number][];
+  stumps: number[];
+  shakes: number[];
+  bears: number[][];
+  villagers: [number, number, string, number, string, number, number, number][];
+  shots: number[][];
+  meats: number[][];
+  players: number[][];
+  fx: [number, number, number, number, number, number, string, number, string][];
+}
+
 function rng(seed: number) {
   let s = seed >>> 0;
   return () => {
@@ -164,7 +184,14 @@ export class Game {
   shots: Shot[] = [];
   meats: Meat[] = [];
   fx: Fx[] = [];
+  /** The player whose turn it is: you, except while the host runs a friend's action. */
   p: Player;
+  /** You. */
+  me: Player;
+  /** Friends (and, on a friend's game, the host). */
+  others: Player[] = [];
+  /** Messages meant for friends, by slot, picked up by the host's game and sent on. */
+  outbox = new Map<number, { toast?: string; banner?: string }[]>();
   inv: Inv = { wood: 0, sticks: 0, arrows: 15, meat: 0, gold: 0, tower: 0, belt: 0, grabber: 0 };
   chopped = 0;
   hasBase = false;
@@ -181,7 +208,7 @@ export class Game {
 
   constructor(seed = 7) {
     const r = rng(seed);
-    this.p = { x: (HOME.x + 0.5) * T, y: (HOME.y + 3.5) * T, dir: 3, aim: -Math.PI / 2, hp: PLAYER_MAX_HP, down: false, hurt: 0, swing: 0, step: 0, shootCool: 0, actCool: 0 };
+    this.p = this.me = Game.newPlayer(0);
     this.addObj('sticks', STICKS_TILE.x, STICKS_TILE.y, 0);
     this.addObj('machine', MACHINE_TILE.x, MACHINE_TILE.y, 0);
     // forest: thick at the edges, a clearing around the village
@@ -194,6 +221,26 @@ export class Game {
       }
     this.addVillager(false);
     this.addVillager(false);
+  }
+
+  static newPlayer(slot: number): Player {
+    return { slot, x: (HOME.x + 0.5 + (slot % 2 ? slot : -slot) * 0.8) * T, y: (HOME.y + 3.5) * T, dir: 3, aim: -Math.PI / 2, hp: PLAYER_MAX_HP, down: false, hurt: 0, swing: 0, step: 0, shootCool: 0, actCool: 0 };
+  }
+
+  /** Everyone in the village. */
+  get players() {
+    return [this.me, ...this.others];
+  }
+
+  /** Runs `fn` as player `q` (the host doing what a friend asked). */
+  as<R>(q: Player, fn: () => R): R {
+    const old = this.p;
+    this.p = q;
+    try {
+      return fn();
+    } finally {
+      this.p = old;
+    }
   }
 
   addTree(x: number, y: number, size: number) {
@@ -294,7 +341,14 @@ export class Game {
   }
 
   toast(s: string) {
-    this.toasts.push(s);
+    if (this.p === this.me) this.toasts.push(s);
+    else this.send(this.p.slot, { toast: s });
+  }
+
+  private send(slot: number, m: { toast?: string; banner?: string }) {
+    const box = this.outbox.get(slot) ?? [];
+    box.push(m);
+    this.outbox.set(slot, box);
   }
 
   float(x: number, y: number, text: string, color = '#fff') {
@@ -522,15 +576,39 @@ export class Game {
 
   // ---------- simulation ----------
 
-  update(dt: number, move: { x: number; y: number }) {
-    this.time += dt;
-    const p = this.p;
+  /** `sim` is false on a friend's game: only your own player moves there, the host runs the village. */
+  update(dt: number, move: { x: number; y: number }, sim = true) {
+    if (sim) this.time += dt;
+    if (this.bannerT > 0) this.bannerT -= dt;
+    this.movePlayer(this.me, dt, move);
+    // the other players glide toward where they last were
+    const k = Math.min(1, dt * 12);
+    for (const o of this.others) {
+      this.cool(o, dt);
+      if (o.tx === undefined || o.ty === undefined) continue;
+      const kk = Math.hypot(o.tx - o.x, o.ty - o.y) > 6 * T ? 1 : k;
+      o.x += (o.tx - o.x) * kk;
+      o.y += (o.ty - o.y) * kk;
+    }
+    if (!sim) {
+      for (const t of this.trees) if (t.shake > 0) t.shake -= dt;
+      this.updateFx(dt);
+      return;
+    }
+    for (const o of this.others) this.as(o, () => this.healAndPickUp(o, dt));
+    this.healAndPickUp(this.me, dt);
+    this.updateWorld(dt);
+  }
+
+  private cool(p: Player, dt: number) {
     p.shootCool = Math.max(0, p.shootCool - dt);
     p.actCool = Math.max(0, p.actCool - dt);
     p.swing = Math.max(0, p.swing - dt * 4);
     p.hurt = Math.max(0, p.hurt - dt);
-    if (this.bannerT > 0) this.bannerT -= dt;
+  }
 
+  private movePlayer(p: Player, dt: number, move: { x: number; y: number }) {
+    this.cool(p, dt);
     // player (walks through fences and everything else)
     if (!p.down) {
       const len = Math.hypot(move.x, move.y);
@@ -542,14 +620,16 @@ export class Game {
         p.step += dt * 10 * k;
         p.dir = Math.abs(move.x) > Math.abs(move.y) ? (move.x > 0 ? 0 : 2) : move.y > 0 ? 1 : 3;
       }
-      // regain health slowly inside the base area
-      if (this.hasBase && this.nearRect(BASE_TILE, 40)) p.hp = Math.min(PLAYER_MAX_HP, p.hp + dt * 15);
     }
+  }
 
+  private healAndPickUp(p: Player, dt: number) {
+    // regain health slowly inside the base area
+    if (!p.down && this.hasBase && this.nearRect(BASE_TILE, 40)) p.hp = Math.min(PLAYER_MAX_HP, p.hp + dt * 15);
     // pick up meat
     for (let i = this.meats.length - 1; i >= 0; i--) {
       const m = this.meats[i];
-      m.t += dt;
+      if (p === this.me) m.t += dt;
       if (!p.down && Math.hypot(m.x - p.x, m.y - p.y) < 34) {
         this.inv.meat += m.n;
         this.float(m.x, m.y - 20, `+${m.n} meat`, '#ff9a9a');
@@ -557,7 +637,10 @@ export class Game {
         this.meats.splice(i, 1);
       }
     }
+  }
 
+  private updateWorld(dt: number) {
+    const p = this.me;
     // trees grow back
     for (const t of this.trees) {
       if (t.shake > 0) t.shake -= dt;
@@ -590,7 +673,10 @@ export class Game {
     this.updateBelts(dt);
     this.updateGrabbers(dt);
     this.updateVillagers(dt);
+    this.updateFx(dt);
+  }
 
+  private updateFx(dt: number) {
     for (let i = this.fx.length - 1; i >= 0; i--) {
       const f = this.fx[i];
       f.life -= dt;
@@ -624,11 +710,20 @@ export class Game {
   }
 
   updateBears(dt: number) {
-    const p = this.p;
     const home = { x: (HOME.x + 0.5) * T, y: (HOME.y + 0.5) * T };
+    const up = this.players.filter((q) => !q.down);
     for (const b of this.bears) {
       b.cool = Math.max(0, b.cool - dt);
       b.hurt = Math.max(0, b.hurt - dt);
+      // each bear goes after the nearest player who is still up
+      let p = this.me, pd = Infinity;
+      for (const q of up) {
+        const d = Math.hypot(q.x - b.x, q.y - b.y);
+        if (d < pd) {
+          pd = d;
+          p = q;
+        }
+      }
       const hunting = !p.down;
       const tgt = hunting ? p : home;
       let ang = Math.atan2(tgt.y - b.y, tgt.x - b.x);
@@ -663,7 +758,7 @@ export class Game {
         if (!this.blocksBear(mx, my) && !this.blocksBear(Math.floor(p.x / T), Math.floor(p.y / T))) {
           b.cool = 0.9;
           b.ang = Math.atan2(p.y - b.y, p.x - b.x);
-          this.hurtPlayer(14);
+          this.as(p, () => this.hurtPlayer(14));
         }
       }
     }
@@ -701,7 +796,8 @@ export class Game {
     if (p.hp <= 0) {
       p.hp = 0;
       p.down = true;
-      this.showBanner('You got hurt!');
+      if (p === this.me) this.showBanner('You got hurt!');
+      else this.send(p.slot, { banner: 'You got hurt!' });
       this.toast('Hang on! A villager is coming to carry you back to base.');
       this.sendRescue();
     }
@@ -725,6 +821,7 @@ export class Game {
     if (best.tree >= 0) this.trees[best.tree].target = false;
     best.tree = -1;
     best.state = 'rescue';
+    best.who = p.slot;
   }
 
   healAtBase() {
@@ -915,25 +1012,31 @@ export class Game {
         v.face = Math.atan2(dy, dx);
         return false;
       };
+      // the player this villager is rescuing
+      const q = this.players.find((o) => o.slot === (v.who ?? 0));
       switch (v.state) {
         case 'rescue':
-          if (!p.down) {
+          if (!q || !q.down) {
             v.state = 'idle';
             break;
           }
-          if (go(p.x, p.y, 190)) {
+          if (go(q.x, q.y, 190)) {
             v.state = 'carry';
-            this.toast('Got you! Going back to base.');
+            this.as(q, () => this.toast('Got you! Going back to base.'));
           }
           break;
         case 'carry':
+          if (!q) {
+            v.state = 'idle';
+            break;
+          }
           if (go(base.x, base.y, 120)) {
             v.state = 'idle';
             v.timer = 2;
-            this.healAtBase();
+            this.as(q, () => this.healAtBase());
           } else {
-            p.x = v.x + 10;
-            p.y = v.y - 8;
+            q.x = q.tx = v.x + 10;
+            q.y = q.ty = v.y - 8;
           }
           break;
         case 'idle':
@@ -1028,6 +1131,109 @@ export class Game {
       }
     }
     return best;
+  }
+
+  // ---------- playing together ----------
+
+  /** The trees, sent once when a friend joins (a village's forest depends on its seed and save). */
+  treeList(): number[][] {
+    return this.trees.map((t) => [t.x, t.y, Math.round(t.size * 100)]);
+  }
+
+  /** A friend's game starts from the host's trees. */
+  setTrees(list: number[][]) {
+    this.trees = [];
+    this.treeAt.fill(-1);
+    for (const [x, y, sz] of list) this.addTree(x, y, sz / 100);
+  }
+
+  /** Everything that moves or changes, sent to friends about 12 times a second. */
+  snap(): Snap {
+    const r = Math.round;
+    const fx = this.fx.filter((f) => !this.sentFx.has(f) && this.sentFx.add(f)).slice(-80);
+    return {
+      inv: this.inv, chopped: this.chopped, hasBase: this.hasBase, bearTimer: +this.bearTimer.toFixed(1), wave: this.wave, kills: this.kills,
+      time: r(this.time), banner: this.bannerT > 0 ? this.banner : '', bannerT: +this.bannerT.toFixed(1),
+      objs: [...this.objs.values()].map((o) => [o.kind, o.x, o.y, o.dir, o.arrows, +o.aim.toFixed(2), o.held, +o.swing.toFixed(2), o.carry ? o.carry.item : null, o.carry ? +o.carry.p.toFixed(2) : 0, o.sIn, o.aOut]),
+      stumps: this.trees.flatMap((t, i) => (t.regrow > 0 ? [i] : [])),
+      shakes: this.trees.flatMap((t, i) => (t.shake > 0 ? [i] : [])),
+      bears: this.bears.map((b) => [r(b.x), r(b.y), b.hp, b.max, +b.ang.toFixed(2), +b.hurt.toFixed(2), +b.step.toFixed(1)]),
+      villagers: this.villagers.map((v) => [r(v.x), r(v.y), v.color, v.jack ? 1 : 0, v.state, +v.step.toFixed(1), +v.face.toFixed(2), v.wood]),
+      shots: this.shots.map((q) => [r(q.x), r(q.y), r(q.vx), r(q.vy), +q.life.toFixed(2)]),
+      meats: this.meats.map((m) => [r(m.x), r(m.y), m.n]),
+      players: this.players.map((p) => [p.slot, r(p.x), r(p.y), p.dir, +p.aim.toFixed(2), r(p.hp), p.down ? 1 : 0, +p.hurt.toFixed(2), +p.swing.toFixed(2), +p.step.toFixed(1)]),
+      fx: fx.map((f) => [r(f.x), r(f.y), r(f.vx), r(f.vy), +f.life.toFixed(2), +f.max.toFixed(2), f.color, f.size, f.text ?? '']),
+    };
+  }
+
+  private sentFx = new WeakSet<Fx>();
+
+  /** On a friend's game: take the host's village, but keep walking where you are. */
+  applySnap(s: Snap) {
+    Object.assign(this.inv, s.inv);
+    this.chopped = s.chopped;
+    this.hasBase = s.hasBase;
+    this.bearTimer = s.bearTimer;
+    this.wave = s.wave;
+    this.kills = s.kills;
+    this.time = s.time;
+    if (s.banner && (s.banner !== this.banner || this.bannerT <= 0)) this.showBanner(s.banner);
+    this.bannerT = s.banner ? Math.max(this.bannerT, s.bannerT) : this.bannerT;
+    this.objs.clear();
+    this.occ.fill(null);
+    for (const [kind, x, y, dir, arrows, aim, held, swing, ci, cp, sIn, aOut] of s.objs) {
+      const o = this.addObj(kind, x, y, dir);
+      Object.assign(o, { arrows, aim, held, swing, carry: ci ? { item: ci, p: cp } : null, sIn, aOut });
+    }
+    for (const t of this.trees) t.regrow = 0;
+    for (const i of s.stumps) if (this.trees[i]) this.trees[i].regrow = 1;
+    for (const i of s.shakes) if (this.trees[i]) this.trees[i].shake = 0.25;
+    this.bears = s.bears.map(([x, y, hp, max, ang, hurt, step]) => ({ x, y, hp, max, ang, hurt, step, cool: 0, wiggle: 0, wigAng: 0 }));
+    this.villagers = s.villagers.map(([x, y, color, jack, state, step, face, wood]) => ({ x, y, color, jack: !!jack, state: state as Villager['state'], step, face, wood, tx: x, ty: y, timer: 0, tree: -1 }));
+    this.shots = s.shots.map(([x, y, vx, vy, life]) => ({ x, y, vx, vy, life }));
+    this.meats = s.meats.map(([x, y, n]) => ({ x, y, n, t: 0 }));
+    const others: Player[] = [];
+    for (const [slot, x, y, dir, aim, hp, down, hurt, swing, step] of s.players) {
+      if (slot === this.me.slot) {
+        const p = this.me;
+        if (hurt > p.hurt + 0.1) p.hurt = hurt;
+        p.hp = hp;
+        p.down = !!down;
+        // while a villager carries you, you go where they go
+        if (p.down || Math.hypot(p.x - x, p.y - y) > 8 * T) {
+          p.x = x;
+          p.y = y;
+        }
+        continue;
+      }
+      const o = this.others.find((q) => q.slot === slot) ?? { ...Game.newPlayer(slot), x, y };
+      Object.assign(o, { tx: x, ty: y, dir, aim, hp, down: !!down, hurt, swing, step });
+      others.push(o);
+    }
+    this.others = others;
+    for (const [x, y, vx, vy, life, max, color, size, text] of s.fx) this.fx.push({ x, y, vx, vy, life, max, color, size, text: text || undefined });
+  }
+
+  /** On the host: where a friend says they are. */
+  setOther(slot: number, x: number, y: number, dir: Dir, aim: number, step: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    let o = this.others.find((q) => q.slot === slot);
+    if (!o) this.others.push((o = { ...Game.newPlayer(slot), x, y }));
+    if (o.down) return; // being carried: the villager moves them
+    o.tx = Math.max(12, Math.min(W * T - 12, x));
+    o.ty = Math.max(12, Math.min(H * T - 12, y));
+    o.dir = (dir & 3) as Dir;
+    o.aim = aim;
+    o.step = step;
+  }
+
+  removeOther(slot: number) {
+    this.others = this.others.filter((q) => q.slot !== slot);
+    for (const v of this.villagers) if ((v.state === 'rescue' || v.state === 'carry') && v.who === slot) v.state = 'idle';
+  }
+
+  other(slot: number) {
+    return this.others.find((q) => q.slot === slot);
   }
 
   // ---------- saving ----------

@@ -1,5 +1,6 @@
 // North Pole Village: drawing the world on a canvas.
-import { BASE_TILE, DX, DY, Game, H, T, TOWER_RANGE, W, type Bear, type Dir, type Item, type Obj, type Tool, type Villager } from './game';
+import { BASE_TILE, DX, DY, Game, H, T, TOWER_RANGE, W, type Bear, type Dir, type Item, type Obj, type Player, type Tool, type Villager } from './game';
+import { PLAYER_COLORS } from '../coop/session';
 
 export interface Ghost {
   tool: Tool;
@@ -136,7 +137,7 @@ export class Renderer {
     }
     for (const b of g.bears) items.push({ y: b.y + 10, f: () => this.bear(b) });
     for (const v of g.villagers) items.push({ y: v.y + 10, f: () => this.villager(v, g) });
-    items.push({ y: g.p.y + (g.p.down ? 12 : 10), f: () => this.player(g) });
+    for (const q of g.players) items.push({ y: q.y + (q.down ? 12 : 10), f: () => this.player(q, g.others.length > 0) });
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.f();
 
@@ -821,15 +822,28 @@ export class Renderer {
     }
   }
 
-  player(g: Game) {
+  player(p: Player, tag: boolean) {
     const { ctx } = this;
-    const p = g.p;
+    // player 1 wears the red coat; friends wear their own colors
+    const coat = p.slot === 0 ? '#d0342c' : PLAYER_COLORS[p.slot] ?? '#d0342c';
+    if (tag) {
+      ctx.fillStyle = PLAYER_COLORS[p.slot] ?? '#fff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - 56, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.font = '800 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(p.slot + 1), p.x, p.y - 55.5);
+      ctx.textBaseline = 'alphabetic';
+    }
     if (p.down) {
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(Math.PI / 2);
       ctx.globalAlpha = 0.85;
-      this.person(0, 0, '#d0342c', 0, 0, '#2a4a8a');
+      this.person(0, 0, coat, 0, 0, '#2a4a8a');
       ctx.restore();
       ctx.globalAlpha = 1;
       ctx.font = '18px system-ui, sans-serif';
@@ -837,7 +851,7 @@ export class Renderer {
       ctx.fillText('💫', p.x, p.y - 26 + Math.sin(performance.now() / 200) * 3);
       return;
     }
-    this.person(p.x, p.y, '#d0342c', p.aim, p.step, '#2a4a8a');
+    this.person(p.x, p.y, coat, p.aim, p.step, '#2a4a8a');
     // crossbow
     ctx.save();
     ctx.translate(p.x, p.y - 4);
