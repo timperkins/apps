@@ -655,9 +655,10 @@ const PARA_S = 240;
 const PARA_N = 8;
 const DROP_S = 3.2; // seconds for a paratrooper to come down
 
-// A submarine stays surfaced this long after it fires; Destroyers hear one
-// under the water this far off.
-const SUB_UP = 3;
+// A submarine stays surfaced this long after it fires (long enough for the
+// ship it hit, and anything nearby that can shoot a ship, to fire back);
+// Destroyers hear one under the water this far off.
+const SUB_UP = 8;
 const SONAR = 6 * CELL;
 
 /** A player in a multiplayer game: the side (color) they play and their name. */
