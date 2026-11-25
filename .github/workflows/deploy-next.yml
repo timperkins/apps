@@ -1,0 +1,28 @@
+name: deploy-next
+
+# Every push to the "next" branch deploys RA straight to prod (https://ra.trom.dev), as fast as
+# possible: no typecheck/lint/tests here, since each change is checked on its own PR branch
+# (preview.yml). Main is not hooked up to any deploy for now: the prod workflow (prod.yml, which
+# deploys on pushes to main) is disabled in the repo's Actions settings.
+
+on:
+  push:
+    branches: [next]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-next
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      app: ra
+      target: prod
+      skip_checks: true
+    secrets: inherit
+    permissions:
+      contents: write
+      statuses: write
+      pull-requests: write

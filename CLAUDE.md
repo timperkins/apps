@@ -16,7 +16,7 @@ The design and current status are in `docs/PLAN.md`; read it before changing dep
 1. Find the preview run: `gh run list --branch <branch> --workflow preview.yml --limit 1`.
 2. Wait for it: `gh run watch <run-id>`.
 3. Reply to Tim with the preview link(s) from the run summary, one per changed app, so he can test on his phone.
-   The fixed link (e.g. https://ra-preview.trom.dev) shows the `next` branch, not your branch: it updates when you merge into `next`.
+   For RA, every push to `next` deploys straight to https://ra.trom.dev (`deploy-next.yml`). Main has no deploys for now (`prod.yml` is disabled).
 4. If the run fails, read the logs (`gh run view <run-id> --log-failed`), fix, and push again.
 
 ## Before pushing
