@@ -21,7 +21,7 @@ import { Shroud } from './shroud';
 import { type OreGen, regrowField } from './ore';
 import { type UnitLine, type UnitVoice, announce, sayUnit } from '../voice';
 import { type Loop, type PlayOpts, type Sfx, level, play, ui } from '../sfx';
-import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
+import { type Armor, isNaval, BOOM, CARRIER_JETS, CARRIER_RUNWAY, CARRIER_SLOTS, DECK_Z, BUILDING_DEF, BURN_RUIN, BURN_WRECK, CELL, DIG_S, DUG_ARMOR, DUG_WEAPON, HIT_SPREAD, DAMAGED, UnitKind, type DefenseKind, FIXED_GUN, isDefense, isFoot, Fx, HELI_ALT, JET_ALT, PLANE_ALT, DROP_ALT, isAir, KNOCK_EASE, QUAKE, QUAKE_S, Shot, UNIT_DEF, VERSUS, WEAPON, Weapon, buildingQuake, drawFlame, drawPuff, knockback, makeShot, muzzles, puffAlpha } from './combat';
 import {
   BuildingKind,
   BuildingStates,
@@ -96,7 +96,8 @@ const BNAME: Record<BuildingKind, string> = {
   refinery: 'Ore refinery',
   radar: 'Air command',
   factory: 'Vehicle works',
-  tower: 'Gun tower',
+  tower: 'Turret',
+  pillbox: 'Pillbox',
   silo: 'Ore silo',
   helipad: 'Helipad',
   lab: 'Tech lab',
@@ -244,6 +245,8 @@ interface Unit {
   hp: number;
   idle: number;
   trackAcc: number;
+  wakeP?: [number, number]; // a carrier: where it was last frame, and how fast it is going (a share of its top speed), for the water it churns up
+  wakeK?: number;
   // Laps around the world: on screen the unit's unwrapped position is
   // (sx + lap * w, sy + lapY * h). They are set to the copy the player picked,
   // so orders go the way they panned.
@@ -351,6 +354,15 @@ interface Unit {
   nest?: number; // (not `pad`: isB takes anything with a pad for a building)
   padI?: number; // its stand on its Air command, or its spot on its carrier's deck
   deck?: number; // a jet's carrier (instead of an Air command), by unit id
+  // a jet on its carrier's deck (see deckJet): what it is doing (taxiing out
+  // to the runway, rolling off the bow, coming round astern, gliding in,
+  // pulling up after landing, taxiing back to its spot), where it is on the
+  // deck ([along, across, heading], from the ship's middle and way), the
+  // points it taxis through (on the deck), and how long it has been gliding in
+  dop?: DeckOp;
+  dl?: [number, number, number];
+  dpath?: [number, number][];
+  dtime?: number;
   fireAt?: [number, number, number, number, number]; // a ship's place to fire on its target from: x, y, and where the target was, and its id
   rearm?: number;
   idleAir?: number;
@@ -402,6 +414,16 @@ const ROUTE_MS = 6;
 // How far from the shore a ship keeps its middle (world units): the carrier
 // is too big to come in close, or into narrow channels.
 const SEA_CLEAR: Partial<Record<Kind, number>> = { carrier: 60 };
+// What a jet on a carrier is doing (and its number, for the snapshot): see deckJet.
+type DeckOp = 'out' | 'roll' | 'app' | 'final' | 'brake' | 'in';
+const DECK_OPS: (DeckOp | undefined)[] = [undefined, 'out', 'roll', 'app', 'final', 'brake', 'in'];
+// A carrier's jets: how fast the catapult flings one down the runway, how
+// hard the wires pull one up after landing, how far out astern one lines up
+// to land, and how fast one is mended on the deck (a share a second).
+const CAT_ACC = 46;
+const WIRE_DEC = 60;
+const DECK_APPROACH = 150;
+const DECK_MEND = 0.1;
 // Ships cross whole oceans, so they look for their way for longer (and the
 // carrier, which keeps well out, on a coarser grid).
 const SEA_PATH: PathOpts = { step: 6, maxNodes: 40000 };
@@ -514,15 +536,15 @@ interface Particle {
   vy: number;
   life: number;
   max: number;
-  kind: 'smoke' | 'soot' | 'wake' | 'dust';
+  kind: 'smoke' | 'soot' | 'wake' | 'dust' | 'foam' | 'spray';
   size: number;
   v?: number; // which puff texture
 }
 
-const BASE_B: BuildingKind[] = ['power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'helipad', 'power'];
+const BASE_B: BuildingKind[] = ['power', 'factory', 'barracks', 'refinery', 'silo', 'radar', 'tower', 'tower', 'pillbox', 'helipad', 'power'];
 // Your base in the Combat stage: one of every building (enough power plants
 // to run it all), and a Naval yard out on the nearest water.
-const COMBAT_B: BuildingKind[] = ['yard', 'radar', 'factory', 'refinery', 'barracks', 'lab', 'helipad', 'depot', 'silo', 'uplink', 'power', 'power', 'power', 'power', 'power', 'power', 'tower', 'aa', 'prism', 'wall'];
+const COMBAT_B: BuildingKind[] = ['yard', 'radar', 'factory', 'refinery', 'barracks', 'lab', 'helipad', 'depot', 'silo', 'uplink', 'power', 'power', 'power', 'power', 'power', 'power', 'tower', 'pillbox', 'aa', 'prism', 'wall'];
 // ...and one of every unit (as well as the army it starts with): these on
 // land, Swift jets and the Paratrooper plane on the Air command's stands,
 // and ships by the Naval yard.
@@ -591,7 +613,7 @@ const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5
 // round itself.
 const SIGHT: Record<Kind, number> = { mcv: 7, light: 7, heavy: 7, buggy: 9, apc: 7, hauler: 5, arty: 7, boat: 7, heli: 9, inf: 6, rocket: 6, gren: 6, eng: 5, dog: 8, cmdo: 7, flamer: 5, scorch: 6, lumen: 8, comet: 7, skyguard: 8, heron: 8, jet: 8, plane: 6, otter: 6, destroyer: 8, cruiser: 9, carrier: 9, sub: 6 };
 // and buildings, past the edge of their footprint (the radar mast further)
-const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, yard: 6 };
+const BSIGHT: Partial<Record<BuildingKind, number>> = { radar: 13, tower: 7, pillbox: 6, yard: 6 };
 // Play without the shroud, for testing: ?noshroud in the URL.
 // Show where buildings keep units out, for testing: ?blocks in the URL.
 const SHOW_BLOCKS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('blocks');
@@ -708,7 +730,7 @@ const JOB_STATES = ['seek', 'go', 'dig', 'home', 'ret', 'unload', 'wait', 'dock'
  * the ore now and then, messages for players and who is out of the game. */
 export interface Snapshot {
   t: number;
-  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state, passengers "id:kind:hp,...", unloading, air, carrier id * 100 + deck spot]
+  // [id, kind, side, x, y, angle, turret, hp, flags, tx, ty, target id, load, job state, passengers "id:kind:hp,...", unloading, air, carrier id * 100 + deck spot + 12 * what it is doing on the deck]
   u: (number | string)[][];
   // [id, kind, side, x, y, hp, rise, flags, pad x, y, w, h, rally x, rally y, target id]
   b: (number | string)[][];
@@ -947,7 +969,7 @@ export class IsoGame implements GameLike {
 
   /** Before generate(): the buildings it will place (it needn't wait for them). */
   preload(): Promise<unknown>[] {
-    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy', 'derrick'];
+    const all: BuildingKind[] = ['yard', 'lab', 'power', 'barracks', 'refinery', 'radar', 'factory', 'tower', 'pillbox', 'silo', 'helipad', 'prism', 'aa', 'depot', 'wall', 'uplink', 'navy', 'derrick'];
     const placed = new Set<BuildingKind>(['yard', ...BASE_B]);
     const now: [BuildingKind, number][] = [...placed].map((k) => [k, ENEMY]);
     if (this.stage === 'combat') now.push(...COMBAT_B.map((k): [BuildingKind, number] => [k, this.me]));
@@ -3123,10 +3145,15 @@ export class IsoGame implements GameLike {
 
   private groundZ(u: Unit): number {
     if (isNaval(u.kind) || (u.kind === 'otter' && this.terrain.k(u.x, u.y) === K.Water)) return 0;
-    // a jet over its carrier sits on (or comes down to) the deck
+    // a jet over its carrier sits on (or comes down to) the deck (and flies
+    // round to land at the deck's height, so it doesn't drop onto it)
     if (u.deck !== undefined) {
-      const h = this.padOfJet(u);
-      if (h && Math.hypot(h[0] - u.x, h[1] - u.y) < 8) return DECK_Z;
+      const c = this.carrierOf(u);
+      if (c) {
+        if (u.dop) return DECK_Z;
+        const [lu, lv] = this.deckLocal(c, u.x, u.y);
+        if (lu > -72 && lu < 78 && Math.abs(lv) < 28) return DECK_Z;
+      }
     }
     const dz = this.deckZ(u.x, u.y);
     if (dz >= 0) return dz;
@@ -4078,7 +4105,7 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) if ((u.kind === 'jet' && !u.taxi) || u.kind === 'heron') this.flyAbout(u, dt);
     for (const u of [...this.units]) if (u.kind === 'plane') this.planeAbout(u, dt);
     for (const u of [...this.units]) if (u.fly !== undefined && isFoot(u.kind)) this.paraDrop(u, dt);
-    for (const u of [...this.units]) if (!u.dead && !u.exit) this.fight(u, dt);
+    for (const u of [...this.units]) if (!u.dead && !u.exit && !u.dop) this.fight(u, dt);
     // each field's generator slowly grows its ore back, nearest clumps first
     // (on a player's screen the host's ore arrives with the snapshots)
     // (not where a building has gone up on dug-out ground)
@@ -4086,6 +4113,7 @@ export class IsoGame implements GameLike {
     for (const u of [...this.units]) {
       const st = UNIT[u.kind];
       u.anim += dt;
+      if (u.kind === 'carrier') this.shipWater(u, dt);
       // on a player's screen: drift a little more of the way to where the host has it
       if (u.netErr) {
         const k = 1 - Math.exp(-NET_EASE * dt);
@@ -4139,7 +4167,7 @@ export class IsoGame implements GameLike {
       // (finding ways takes time: past a few milliseconds' worth in a frame,
       // units with somewhere new to go wait for the next)
       const wait = this.routeMs > ROUTE_MS && !isAir(u.kind) && (!u.goal || u.goal[0] !== u.tx || u.goal[1] !== u.ty);
-      if (u.moving && !u.deploy && !wait && !u.digK) {
+      if (u.moving && !u.deploy && !wait && !u.digK && !u.dop) {
         let dx = u.tx - u.x;
         let dy = u.ty - u.y;
         let dist = Math.hypot(dx, dy);
@@ -4475,6 +4503,7 @@ export class IsoGame implements GameLike {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       if (p.kind === 'smoke' || p.kind === 'soot') p.size += dt * 1.8;
+      else if (p.kind === 'spray') p.vy += 70 * dt;
     }
     this.particles = this.particles.filter((p) => p.life < p.max);
     for (const s of this.sparks) {
@@ -4775,7 +4804,7 @@ export class IsoGame implements GameLike {
       (o.cargo ?? []).map((p) => `${p.id}:${p.kind}:${Math.round(p.hp * 1000) / 1000}`).join(','),
       o.unloading ? 1 : 0,
       o.fly === undefined ? -1 : Math.round(o.fly * 100) + (o.ammo ?? 0) * 1000,
-      o.deck === undefined ? 0 : o.deck * 100 + (o.padI ?? 0),
+      o.deck === undefined ? 0 : o.deck * 100 + (o.padI ?? 0) + CARRIER_JETS * DECK_OPS.indexOf(o.dop),
     ]);
     const b = this.buildings.map((o) => [
       o.id,
@@ -4957,7 +4986,10 @@ export class IsoGame implements GameLike {
       // a jet's carrier, and its spot on the deck
       if (kind === 'jet' && deck !== undefined) {
         u.deck = deck ? Math.floor(deck / 100) : undefined;
-        if (deck) u.padI = deck % 100;
+        if (deck) {
+          u.padI = (deck % 100) % CARRIER_JETS;
+          u.dop = DECK_OPS[Math.floor((deck % 100) / CARRIER_JETS)];
+        } else u.dop = undefined;
       }
       // who is riding in it
       if (riders || u.cargo?.length) {
@@ -5505,7 +5537,8 @@ export class IsoGame implements GameLike {
     return out;
   }
 
-  // Send jet u to land on carrier c, on spot i (it takes off if it is down).
+  // Send jet u to land on carrier c, on spot i (it takes off if it is down,
+  // and comes straight round to land: see deckJet).
   private toDeck(u: Unit, c: Unit, i: number): void {
     u.deck = c.id;
     u.padI = i;
@@ -5513,8 +5546,269 @@ export class IsoGame implements GameLike {
     u.target = u.board = undefined;
     u.forced = u.chase = false;
     u.dest = u.aim = undefined;
-    [u.tx, u.ty] = this.nearPoint(u.x, u.y, ...this.slotPoint(c, i));
-    u.moving = true;
+    u.moving = false;
+    u.tx = u.x;
+    u.ty = u.y;
+    u.dop = u.dl = u.dpath = undefined;
+    u.idleAir = 99;
+  }
+
+  // A carrier under way churns up the sea: a bow wave peeling off either side
+  // (left behind as a V as the ship sails on), spray thrown up off the bow,
+  // water washing along its sides and a broad wake churning out astern. The
+  // faster it goes, the more.
+  private shipWater(u: Unit, dt: number): void {
+    const [px, py] = u.wakeP ?? [u.x, u.y];
+    u.wakeP = [u.x, u.y];
+    if (dt <= 0) return;
+    const v = Math.min(1, Math.hypot(u.x - px, u.y - py) / dt / UNIT[u.kind].speed);
+    const k = (u.wakeK = (u.wakeK ?? 0) + (v - (u.wakeK ?? 0)) * Math.min(1, dt * 3));
+    if (k < 0.08 || !this.shown(u)) return;
+    const ca = Math.cos(u.a);
+    const sa = Math.sin(u.a);
+    // a point on the water ([along, across] the ship), and a way to go along
+    // the water, on the screen
+    const at = (lu: number, lv: number, z = 0) => toScreen(u.x + lu * ca - lv * sa, u.y + lu * sa + lv * ca, z);
+    const vel = (lu: number, lv: number): [number, number] => {
+      const wx = lu * ca - lv * sa;
+      const wy = lu * sa + lv * ca;
+      return [wx - wy, (wx + wy) / 2];
+    };
+    const n = (rate: number) => {
+      // how many to make this frame, at so many a second
+      const m = rate * k * dt;
+      return Math.floor(m) + (Math.random() < m % 1 ? 1 : 0);
+    };
+    for (const sd of [-1, 1]) {
+      for (let i = n(45); i--; ) {
+        const [x, y] = at(64 + Math.random() * 8, sd * (6 + Math.random() * 5));
+        const [vx, vy] = vel(-2, sd * (11 + Math.random() * 6) * k);
+        this.particles.push({ x, y, vx, vy, life: 0, max: 2.6 + Math.random(), kind: 'foam', size: 1.1 });
+      }
+      for (let i = n(50); i--; ) {
+        const [x, y] = at(-64 + Math.random() * 120, sd * (24 + Math.random() * 4));
+        const [vx, vy] = vel(0, sd * 6);
+        this.particles.push({ x, y, vx, vy, life: 0, max: 1.2 + Math.random() * 0.8, kind: 'foam', size: 0.9 });
+      }
+      for (let i = n(22); i--; ) {
+        const [x, y] = at(64 + Math.random() * 6, sd * (3 + Math.random() * 4), 1);
+        const [vx, vy] = vel(4, sd * (14 + Math.random() * 14));
+        this.particles.push({ x, y, vx, vy: vy - 22 - Math.random() * 18, life: 0, max: 0.5 + Math.random() * 0.4, kind: 'spray', size: 1 });
+      }
+    }
+    for (let i = n(30); i--; ) {
+      const [x, y] = at(-70 - Math.random() * 8, (Math.random() - 0.5) * 30);
+      this.particles.push({ x, y, vx: 0, vy: 0, life: 0, max: 2.4 + Math.random(), kind: Math.random() < 0.5 ? 'wake' : 'foam', size: 1.6 });
+    }
+  }
+
+  // Where (x, y) is on carrier c's deck: [along, across] from its middle.
+  private deckLocal(c: Unit, x: number, y: number): [number, number] {
+    const [px, py] = this.nearPoint(c.x, c.y, x, y);
+    const ca = Math.cos(c.a);
+    const sa = Math.sin(c.a);
+    return [(px - c.x) * ca + (py - c.y) * sa, -(px - c.x) * sa + (py - c.y) * ca];
+  }
+
+  // A carrier's jet each frame (the host moves it about; a player's screen
+  // keeps one sitting at its spot riding along with the ship). It sits at its
+  // spot on the starboard side, rearming and being mended; given somewhere to
+  // go, it taxis across to the stern end of the runway down the port side,
+  // is flung down it and off the bow. Done, it comes round astern, lines up
+  // with the runway and glides in, lands, pulls up on the wires and taxis
+  // back to its spot.
+  private deckJet(u: Unit, c: Unit, dt: number): void {
+    const host = this.net !== 'client';
+    const ca = Math.cos(c.a);
+    const sa = Math.sin(c.a);
+    const at = (lu: number, lv: number): [number, number] => [c.x + lu * ca - lv * sa, c.y + lu * sa + lv * ca];
+    const [lu, lv] = this.deckLocal(c, u.x, u.y);
+    const [su, sv] = CARRIER_SLOTS[u.padI ?? 0] ?? CARRIER_SLOTS[0];
+    const [rv, ru0, ru1] = CARRIER_RUNWAY;
+    const busy = u.moving || !!u.target;
+    const fly = u.fly ?? 0;
+    // at its spot
+    const parked = !u.dop && fly < 0.05 && Math.hypot(lu - su, lv - sv) < 6;
+    if (parked && !(busy && host)) {
+      [u.x, u.y] = at(su, sv);
+      if (!u.moving) [u.tx, u.ty] = [u.x, u.y];
+      u.a = c.a;
+      u.fly = 0;
+      // (being mended: sparks fly)
+      if (u.hp < 1 && Math.random() < dt * 5) {
+        const [sx, sy] = toScreen(u.x + (Math.random() - 0.5) * 8, u.y + (Math.random() - 0.5) * 8, u.z + MID.jet);
+        this.fx.sparks(sx, sy, 2);
+      }
+      if (!host) return;
+      if ((u.ammo ?? 0) < JET_AMMO && (u.rearm = (u.rearm ?? JET_REARM) - dt) <= 0) {
+        u.ammo = (u.ammo ?? 0) + 1;
+        u.rearm = JET_REARM;
+      }
+      u.hp = Math.min(1, u.hp + DECK_MEND * dt);
+      return;
+    }
+    if (!host) return;
+    // given somewhere to go: off to the runway
+    if (parked) {
+      u.dop = 'out';
+      u.dl = [su, sv, 0];
+      u.dpath = [
+        [Math.max(ru0 + 6, su - 10), -3],
+        [ru0 + 8, rv + 4],
+        [ru0, rv],
+      ];
+    }
+    // on the deck: everything is in the ship's own terms, so it rides along
+    // as the ship sails and turns
+    if (u.dop === 'out' || u.dop === 'roll' || u.dop === 'brake' || u.dop === 'in') {
+      const L = (u.dl ??= [lu, lv, u.a - c.a]);
+      // (told to go while taxiing back, or the order called off on the way out)
+      if (u.dop === 'in' && busy) {
+        u.dop = 'out';
+        u.dpath = [
+          [L[0], rv + 4],
+          [ru0 + 8, rv + 4],
+          [ru0, rv],
+        ];
+      } else if (u.dop === 'out' && !busy) {
+        u.dop = 'in';
+        u.dpath = [
+          [su, -3],
+          [su, sv],
+        ];
+      }
+      const turnTo = (want: number, rate: number) => {
+        const diff = angDiff(want, L[2]);
+        L[2] += Math.sign(diff) * Math.min(Math.abs(diff), rate * dt);
+        return Math.abs(diff) < 0.02;
+      };
+      if (u.dop === 'out' || u.dop === 'in') {
+        u.fly = 0;
+        const p = u.dpath?.[0];
+        // (it waits short of the runway while another jet is on it, taking
+        // off or coming in to land)
+        const hold =
+          u.dop === 'out' &&
+          u.dpath?.length === 1 &&
+          this.units.some((o) => o !== u && o.deck === c.id && !o.dead && ((o.dop === 'roll' && (o.dl?.[0] ?? 0) < ru0 + 90) || o.dop === 'final' || o.dop === 'brake' || (o.dop === 'out' && o.dpath?.length === 0) || (o.dop === 'out' && o.dpath?.length === 1 && o.id < u.id)));
+        if (p && hold) {
+          // (lined up, waiting its turn)
+        } else if (p) {
+          // roll from point to point, turning on the spot onto each new way
+          const dx = p[0] - L[0];
+          const dy = p[1] - L[1];
+          const d = Math.hypot(dx, dy);
+          if (d < 0.6) u.dpath!.shift();
+          else {
+            const want = Math.atan2(dy, dx);
+            turnTo(want, 2.4);
+            const go = Math.max(0, Math.cos(angDiff(want, L[2])) - 0.5) * 2;
+            const sp = Math.min(d, TAXI_SPEED * go * dt);
+            L[0] += Math.cos(want) * sp;
+            L[1] += Math.sin(want) * sp;
+          }
+        } else if (turnTo(0, 1.6)) {
+          // there, facing the bow: off down the runway, or parked
+          if (u.dop === 'out') {
+            u.dop = 'roll';
+            u.spd = 0;
+            this.sound(u.x, u.y, 'build_place', 0.4, { rate: 1.4 });
+          } else u.dop = u.dl = u.dpath = undefined;
+        }
+      } else if (u.dop === 'roll') {
+        // flung down the runway, lifting off as it goes, and away off the bow
+        u.spd = Math.min(UNIT.jet.speed * 1.2, (u.spd ?? 0) + CAT_ACC * dt);
+        L[0] += u.spd * dt;
+        L[1] += Math.sign(rv - L[1]) * Math.min(Math.abs(rv - L[1]), 4 * dt);
+        L[2] = 0;
+        u.fly = Math.max(0, Math.min(1, (L[0] - ru0 - 50) / 120));
+        if (L[0] > ru1) u.dop = u.dl = u.dpath = undefined;
+      } else {
+        // down: the wires pull it up, then it taxis back to its spot
+        u.fly = 0;
+        L[1] = rv;
+        L[2] = 0;
+        u.spd = Math.max(TAXI_SPEED, (u.spd ?? 30) - WIRE_DEC * dt);
+        L[0] += u.spd * dt;
+        if (u.spd <= TAXI_SPEED) {
+          u.dop = 'in';
+          u.dpath = [
+            [L[0] + 6, rv + 6],
+            [su, -3],
+            [su, sv],
+          ];
+        }
+      }
+      if (u.dl) {
+        [u.x, u.y] = at(u.dl[0], u.dl[1]);
+        u.a = c.a + u.dl[2];
+      }
+      if (!u.moving) [u.tx, u.ty] = [u.x, u.y];
+      return;
+    }
+    // in the air (or down somewhere else, about to take off)
+    if (!u.ammo && u.target) {
+      u.target = undefined;
+      u.forced = u.chase = false;
+    }
+    if (busy) {
+      // given something to do: it breaks off landing and goes
+      u.dop = undefined;
+      u.idleAir = 0;
+      u.fly = Math.min(1, fly + dt * 0.7);
+      return;
+    }
+    u.idleAir = (u.idleAir ?? 0) + dt;
+    if (!u.dop) {
+      // hanging about (or out of missiles): up, and round to land
+      u.fly = Math.min(1, fly + dt * 0.7);
+      if ((!u.ammo || u.idleAir > 1.5 || u.hp < 1) && u.fly > 0.5) {
+        u.dop = 'app';
+        u.dtime = 0;
+      }
+      return;
+    }
+    const steer = (x: number, y: number, turn: number) => {
+      const diff = angDiff(Math.atan2(y - u.y, x - u.x), u.a);
+      u.a += Math.sign(diff) * Math.min(Math.abs(diff), turn * dt);
+      return Math.abs(diff);
+    };
+    const ahead = (d: number) => {
+      u.x += Math.cos(u.a) * d;
+      u.y += Math.sin(u.a) * d;
+    };
+    const [tx, ty] = this.nearPoint(u.x, u.y, ...at(ru0 + 6, rv));
+    if (u.dop === 'app') {
+      // round to a point well out astern, in line with the runway
+      u.fly = Math.min(1, fly + dt * 0.7);
+      const [ax, ay] = this.nearPoint(u.x, u.y, ...at(ru0 + 6 - DECK_APPROACH, rv));
+      const off = steer(ax, ay, 2.4);
+      ahead(UNIT.jet.speed * dt);
+      const d = Math.hypot(ax - u.x, ay - u.y);
+      // (one at a time: it circles out there while another is coming in)
+      const busyRunway = this.units.some((o) => o !== u && o.deck === c.id && !o.dead && (o.dop === 'final' || o.dop === 'brake'));
+      if (!busyRunway && (d < 24 || (d < 90 && off > 1.6))) {
+        u.dop = 'final';
+        u.dtime = 0;
+      }
+    } else {
+      // gliding in to the stern end of the runway, coming down as it nears
+      steer(tx, ty, 3);
+      const d = Math.hypot(tx - u.x, ty - u.y);
+      const sp = Math.max(34, Math.min(UNIT.jet.speed, 34 + d * 0.12));
+      ahead(Math.min(sp * dt, d));
+      u.fly = Math.min(fly, Math.max(0, (d - 4) / DECK_APPROACH));
+      u.dtime = (u.dtime ?? 0) + dt;
+      if (d < 4) {
+        u.dop = 'brake';
+        u.dl = [ru0 + 6, rv, 0];
+        u.spd = sp;
+        u.fly = 0;
+        this.sound(u.x, u.y, 'build_place', 0.5, { rate: 0.6 });
+      } else if (u.dtime > 12) u.dop = 'app'; // (it missed: round again)
+    }
+    u.tx = u.x;
+    u.ty = u.y;
   }
 
   // A carrier of side f lying idle at one of its Naval yards with room on
@@ -5872,28 +6166,21 @@ export class IsoGame implements GameLike {
       else if (c) [u.nest, u.padI, u.deck] = [undefined, this.freeSlots(c)[0], c.id];
       home = this.padOfJet(u);
     }
+    // a carrier's jet takes off and lands on its runway
     const ship = this.carrierOf(u);
-    // on its way back to a carrier: it follows the ship as it sails
-    if (ship && home && u.moving && !u.target && Math.hypot(u.tx - home[0], u.ty - home[1]) < 40) [u.tx, u.ty] = home;
-    const atHome = !!home && Math.hypot(home[0] - u.x, home[1] - u.y) < (ship ? 6 : 2);
-    const busy = u.moving || !!u.target;
-    // sitting on (or settling onto) a carrier's deck: it rides along with it
-    if (ship && home && atHome && !busy) {
-      [u.x, u.y] = home;
-      u.tx = u.x;
-      u.ty = u.y;
-      u.a = ship.a;
+    if (ship) {
+      this.deckJet(u, ship, dt);
+      return;
     }
+    const atHome = !!home && Math.hypot(home[0] - u.x, home[1] - u.y) < 2;
+    const busy = u.moving || !!u.target;
     // up when it has somewhere to be; down on its pad
     const up = busy || !atHome;
     u.fly = Math.max(0, Math.min(1, (u.fly ?? 0) + (up ? 1 : -1) * dt * 0.7));
     if (atHome && !busy && (u.fly ?? 0) < 0.05) {
-      // on its stand: turn to face the runway (on a deck, the bow), and
-      // rearm, one missile pair at a time
-      if (!ship) {
-        const diff = angDiff(Math.PI / 2, u.a);
-        u.a += Math.sign(diff) * Math.min(Math.abs(diff), dt);
-      }
+      // on its stand: turn to face the runway, and rearm, one missile pair at a time
+      const diff = angDiff(Math.PI / 2, u.a);
+      u.a += Math.sign(diff) * Math.min(Math.abs(diff), dt);
       if ((u.ammo ?? 0) < JET_AMMO && (u.rearm = (u.rearm ?? JET_REARM) - dt) <= 0) {
         u.ammo = (u.ammo ?? 0) + 1;
         u.rearm = JET_REARM;
@@ -5980,7 +6267,7 @@ export class IsoGame implements GameLike {
     return frames[beat < 0 ? 0 : [1, 0, 2, 0][beat % 4]][d];
   }
 
-  // A gun tower picks the nearest enemy unit in range, turns and fires.
+  // A defense (Turret, Pillbox, Lumen tower, Skyguard battery) picks the nearest enemy unit in range, turns and fires.
   private towerFight(b: Building, dt: number): void {
     const kind = b.kind as DefenseKind;
     const w = WEAPON[kind]!;
@@ -6001,11 +6288,12 @@ export class IsoGame implements GameLike {
     const [ax, ay] = this.aimPoint(gx, gy, t);
     const want = Math.atan2(ay - gy, ax - gx);
     b.gunGoal = want;
-    // (a Lumen tower has nothing to turn: its crystal fires any way)
+    // (a Lumen tower or a Pillbox has nothing to turn: it fires any way)
+    const fixed = FIXED_GUN.has(kind);
     if (kind === 'prism' && !this.prismCharge(b, gx, gy, p.z, dt)) return;
-    if ((kind !== 'prism' && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
+    if ((!fixed && Math.abs(angDiff(want, b.gun)) > 0.1) || b.cool > 0) return;
     b.cool = w.rof * (0.9 + Math.random() * 0.2);
-    const from = muzzles(kind, gx, gy, p.z, 0, b.gun);
+    const from = muzzles(kind, gx, gy, p.z, 0, fixed ? want : b.gun);
     this.shoot(b, kind === 'prism' ? this.prismBoost(b, w, from[0]) : w, t, from);
   }
 
@@ -6161,6 +6449,10 @@ export class IsoGame implements GameLike {
         return twin('cannon_shot', 0.8, 1.1);
       case 'tower':
         return twin('cannon_shot', 0.92);
+      case 'pillbox':
+        // a heavy machine gun: four quick rounds
+        for (let i = 0; i < 4; i++) this.sound(x, y, 'rifle_shot', 0.75, { rate: 1.2, delay: i * 0.06 }, z);
+        return;
       case 'scorch':
         return this.sound(x, y, 'flame_burst', 1, { rate: 0.85 }, z);
       case 'lumen':
@@ -6569,8 +6861,8 @@ export class IsoGame implements GameLike {
     if (u.kind === 'carrier' && this.net !== 'client')
       for (const j of [...this.units])
         if (j.deck === u.id) {
-          if ((j.fly ?? 0) < 0.5 && !j.moving) this.kill(j, true);
-          else j.deck = undefined;
+          if ((j.fly ?? 0) < 0.5) this.kill(j, true);
+          else j.deck = j.dop = j.dl = j.dpath = undefined;
         }
     this.gone.push([u.id, GONE_KILL]);
     if (u.f === this.me) announce('unit_lost');
@@ -6934,10 +7226,18 @@ export class IsoGame implements GameLike {
       c.fillRect(s.x, s.y, 2, 1);
     }
     for (const p of this.particles) {
+      if (p.kind === 'foam') {
+        // a patch of foam spreading and fading on the water
+        const k = p.life / p.max;
+        const r = p.size * (1 + k * 2.5);
+        c.fillStyle = `rgba(236,247,250,${0.8 * (1 - k) ** 1.5})`;
+        c.fillRect(Math.round(p.x - r), Math.round(p.y - r * 0.5), Math.max(1, Math.round(r * 2)), Math.max(1, Math.round(r)));
+        continue;
+      }
       if (p.kind !== 'wake') continue;
       const k = p.life / p.max;
       c.fillStyle = `rgba(225,240,245,${0.75 * (1 - k)})`;
-      const r = 1 + k * 7;
+      const r = (1 + k * 7) * p.size;
       c.fillRect(Math.round(p.x - r), Math.round(p.y), 1, 1);
       c.fillRect(Math.round(p.x + r), Math.round(p.y), 1, 1);
       c.fillRect(Math.round(p.x), Math.round(p.y - r * 0.5), 1, 1);
@@ -7023,7 +7323,13 @@ export class IsoGame implements GameLike {
     for (const it of items) it.draw();
 
     for (const p of this.particles) {
-      if (p.kind === 'wake' || !inView(p.x, p.y)) continue;
+      if (p.kind === 'spray') {
+        // drops thrown up off the bow
+        c.fillStyle = `rgba(238,248,252,${0.85 * (1 - p.life / p.max)})`;
+        c.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+        continue;
+      }
+      if (p.kind === 'wake' || p.kind === 'foam' || !inView(p.x, p.y)) continue;
       const k = p.life / p.max;
       p.v ??= (Math.random() * 64) | 0;
       drawPuff(c, p.kind, p.x, p.y, p.size * 1.8, (p.kind === 'smoke' ? 0.65 : p.kind === 'soot' ? 0.6 : 0.55) * puffAlpha(k), k * 0.6, p.v);
