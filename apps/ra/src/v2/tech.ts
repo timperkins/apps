@@ -66,7 +66,7 @@ export const TECH: Tech[] = [
   { id: 'destroyer', name: 'Destroyer', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'destroyer', from: 'navy', blurb: 'Warship with a long-range gun for ships and the shore. Its sonar finds submarines and its depth charges hit them.' },
   { id: 'sub', name: 'Submarine', tab: 'veh', cost: 1000, needs: ['navy'], unit: 'sub', from: 'navy', blurb: 'Hidden under the water until it fires torpedoes, which only hit ships. It then stays surfaced for 8 seconds, open to anything that can hit a ship. Only Destroyers can hit it submerged.' },
   { id: 'cruiser', name: 'Skyguard cruiser', tab: 'veh', cost: 1200, needs: ['navy', 'radar'], unit: 'cruiser', from: 'navy', blurb: 'Warship with two Skyguard missile launchers that shoot down aircraft from far off. Can\'t hit anything on the ground or water.' },
-  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Carries up to 12 Swift jets, which fly off it to fight and land back on it to rearm. Select jets and tap the Carrier to land them. New jets land on a Carrier parked at the Naval yard.' },
+  { id: 'carrier', name: 'Carrier', tab: 'veh', cost: 2000, needs: ['navy', 'lab'], unit: 'carrier', from: 'navy', blurb: 'Carries up to 12 Swift jets, which take off from its runway to fight and land back on it to rearm and be mended. Very tough. Select jets and tap the Carrier to land them. New jets land on a Carrier parked at the Naval yard.' },
   { id: 'mcv', name: 'MCU', tab: 'veh', cost: 2500, needs: ['factory'], unit: 'mcv', from: 'factory', blurb: 'Deploys into another Construction yard.' },
 ];
 
