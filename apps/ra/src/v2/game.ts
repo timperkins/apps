@@ -4274,7 +4274,7 @@ export class IsoGame implements GameLike {
         if (u.unloading && !u.dead) this.letOut(u, dt);
       }
     for (const u of [...this.units]) if (u.kind === 'jet' && u.taxi) this.taxiStep(u, dt);
-    for (const u of [...this.units]) if ((u.kind === 'jet' && !u.taxi) || u.kind === 'heron') this.flyAbout(u, dt);
+    for (const u of [...this.units]) if ((u.kind === 'jet' && !u.taxi) || u.kind === 'heron' || u.kind === 'heli') this.flyAbout(u, dt);
     for (const u of [...this.units]) if (u.kind === 'plane') this.planeAbout(u, dt);
     for (const u of [...this.units]) if (u.fly !== undefined && isFoot(u.kind)) this.paraDrop(u, dt);
     for (const u of [...this.units]) if (!u.dead && !u.exit && !u.dop) this.fight(u, dt);
@@ -5640,8 +5640,7 @@ export class IsoGame implements GameLike {
   // How high an aircraft is flying over the ground under it (0 for anything
   // on the ground, or a jet sitting on its pad).
   private alt(u: { kind: Kind; fly?: number }): number {
-    if (u.kind === 'heli') return HELI_ALT;
-    if (u.kind === 'heron') return HELI_ALT * (u.fly ?? 1);
+    if (u.kind === 'heli' || u.kind === 'heron') return HELI_ALT * (u.fly ?? 1);
     if (u.kind === 'jet') return JET_ALT * (u.fly ?? 1);
     if (u.kind === 'plane') return PLANE_ALT * (u.fly ?? 1);
     if (u.fly !== undefined && isFoot(u.kind)) return dropAlt(u.fly);
@@ -6360,6 +6359,14 @@ export class IsoGame implements GameLike {
   // Jets and Herons each frame: taking off and landing, and jets going home
   // to rearm when they are out of missiles or have nothing to do.
   private flyAbout(u: Unit, dt: number): void {
+    if (u.kind === 'heli') {
+      // it sets down once it gets where it was sent, but stays up while it
+      // has something to shoot at, and lifts off again for its next order
+      // (it only sets down on open ground, or on a helipad)
+      const want = u.moving || u.target || u.exit || !this.heliCanLand(u.x, u.y) ? 1 : 0;
+      u.fly = (u.fly ?? 1) + Math.sign(want - (u.fly ?? 1)) * Math.min(Math.abs(want - (u.fly ?? 1)), dt * 0.8);
+      return;
+    }
     if (u.kind === 'heron') {
       // it settles onto the ground to let its riders out
       const want = u.unloading ? 0 : 1;
@@ -6410,6 +6417,14 @@ export class IsoGame implements GameLike {
       [u.tx, u.ty] = home;
       u.moving = true;
     }
+  }
+
+  // Is (x, y) somewhere a helicopter can set down: dry, flat ground clear of
+  // buildings, or a helipad?
+  private heliCanLand(x: number, y: number): boolean {
+    if (this.terrain.k(x, y) === K.Water || this.terrain.cliff(x, y)) return false;
+    const blk = this.blockAt(x, y);
+    return blk === 0 || this.buildings.some((b) => b.id === blk && b.kind === 'helipad');
   }
 
   // Is u swimming (the Commando, in the water off a bridge)?
@@ -7232,7 +7247,7 @@ export class IsoGame implements GameLike {
         ];
       }
       case 'heli':
-        return [[art.heli[di], u.x, u.y, u.z + HELI_ALT]];
+        return [[art.heli[di], u.x, u.y, u.z + this.alt(u)]];
       case 'heron':
       case 'jet':
       case 'plane':
@@ -7899,13 +7914,14 @@ export class IsoGame implements GameLike {
         break;
       }
       case 'heli': {
-        const alt = HELI_ALT + Math.sin(u.anim * 2) * 1.2;
-        const z = u.z + alt;
+        const fly = u.fly ?? 1;
+        const z = u.z + this.alt(u) + Math.sin(u.anim * 2) * 1.2 * fly;
         this.blit(art.heli[di], u.x, u.y, z);
         const c = this.ctx;
         const hx = u.x + Math.cos(u.a) * 1;
         const hy = u.y + Math.sin(u.a) * 1;
-        const ra = u.anim * 26;
+        // (the rotor stops once it is down)
+        const ra = fly > 0.02 ? u.anim * 26 : u.id * 0.7;
         c.fillStyle = 'rgba(28,28,28,0.5)';
         for (let b = 0; b < 2; b++) {
           const ang = ra + b * Math.PI * 0.5;
