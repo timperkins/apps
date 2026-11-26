@@ -68,6 +68,10 @@ export class Renderer {
   private snapAt = 0;
   private snapGap = 1000 / 12;
   private effects: { k: number; x: number; y: number; t: number }[] = [];
+  /** When each tree or gold rock was last hit (by tile), for the shake. */
+  private hits = new Map<number, number>();
+  /** Chips and little logs or nuggets that fly off a hit. */
+  private bits: { x: number; y: number; vx: number; vy: number; t: number; wood: boolean; icon: boolean }[] = [];
   snap: Snap | null = null;
   camX = 0; camY = 0; zoom = 1;
   private w = 0; private h = 0; private dpr = 1;
@@ -92,7 +96,10 @@ export class Renderer {
       const t = this.trees.get(id); if (t) { t.wood = amt; continue; }
       const g = this.golds.get(id); if (g) g.gold = amt;
     }
-    for (const f of s.fx) this.effects.push({ k: f[0], x: f[1], y: f[2], t: now });
+    for (const f of s.fx) {
+      if (f[0] === 5 || f[0] === 6) this.nodeHit(f[0] === 5, f[1], f[2], now);
+      else this.effects.push({ k: f[0], x: f[1], y: f[2], t: now });
+    }
     if (smooth) { this.snapGap = Math.max(40, Math.min(250, now - this.snapAt)); this.prev = this.cur; }
     this.snapAt = now;
     const cur = new Map<number, Ent>();
@@ -106,6 +113,24 @@ export class Renderer {
     this.cur = cur;
     if (this.seen.size > cur.size * 2 + 200) for (const id of this.seen.keys()) if (!cur.has(id)) this.seen.delete(id);
     this.snap = s;
+  }
+
+  private nodeHit(tree: boolean, tx: number, ty: number, now: number) {
+    // far off-screen hits (pawns across the map) only need the shake
+    this.hits.set(ty * MW + tx, now);
+    const x = (tx + 0.5) * TILE, y = (ty + (tree ? 0.2 : 0.4)) * TILE;
+    if (Math.abs(x - this.camX) > 1400 || Math.abs(y - this.camY) > 1000) return;
+    for (let i = 0; i < 5; i++) this.bits.push({ x, y: y + (tree ? -20 : 0), vx: (Math.random() - 0.5) * 260, vy: -120 - Math.random() * 160, t: now, wood: tree, icon: false });
+    this.bits.push({ x, y: y - 40, vx: 0, vy: -70, t: now, wood: tree, icon: true });
+    if (this.bits.length > 300) this.bits.splice(0, this.bits.length - 300);
+  }
+  /** Sideways wobble for a tree or rock that was just hit. */
+  private shake(tx: number, ty: number, now: number) {
+    const t = this.hits.get(ty * MW + tx);
+    if (t === undefined) return 0;
+    const a = (now - t) / 1000;
+    if (a > 0.4) { this.hits.delete(ty * MW + tx); return 0; }
+    return Math.sin(a * 55) * 6 * (1 - a / 0.4);
   }
 
   /** Where something is right now (smoothed between snapshots). */
@@ -241,7 +266,13 @@ export class Renderer {
       const px = (t.tx + 0.5) * TILE, py = (t.ty + 0.85) * TILE;
       if (!inView(px, py)) continue;
       const tall = t.v < 2;
-      if (t.wood > 0) list.push({ y: py, f: () => { const im = img(`terrain/tree${t.v + 1}`); if (im) c.drawImage(im, (Math.floor(sec * 6 + t.tx * 0.7 + t.ty) % 8) * 192, 0, 192, tall ? 256 : 192, px - 96, py - (tall ? 232 : 166), 192, tall ? 256 : 192); } });
+      if (t.wood > 0) list.push({ y: py, f: () => {
+        const im = img(`terrain/tree${t.v + 1}`);
+        if (!im) return;
+        const sh = this.shake(t.tx, t.ty, now), fr = (Math.floor(sec * 6 + t.tx * 0.7 + t.ty) % 8) * 192;
+        c.drawImage(im, fr, 0, 192, tall ? 256 : 192, px - 96 + sh, py - (tall ? 232 : 166), 192, tall ? 256 : 192);
+        if (sh) { c.save(); c.globalAlpha = 0.25 * Math.abs(sh) / 6; c.globalCompositeOperation = 'lighter'; c.drawImage(im, fr, 0, 192, tall ? 256 : 192, px - 96 + sh, py - (tall ? 232 : 166), 192, tall ? 256 : 192); c.restore(); }
+      } });
       else list.push({ y: py - 30, f: () => { const im = img(`terrain/stump${t.v + 1}`); if (im) c.drawImage(im, px - 96, py - 226, 192, 256); } });
     }
     for (const g of this.golds.values()) {
@@ -249,7 +280,7 @@ export class Renderer {
       const px = (g.tx + 0.5) * TILE, py = (g.ty + 0.6) * TILE;
       if (!inView(px, py)) continue;
       const n = Math.max(1, Math.min(6, Math.ceil(g.gold / 14)));
-      list.push({ y: py, f: () => { const im = img(`terrain/gold${n}`); if (im) c.drawImage(im, px - 64, py - 84, 128, 128); } });
+      list.push({ y: py, f: () => { const im = img(`terrain/gold${n}`); if (im) c.drawImage(im, px - 64 + this.shake(g.tx, g.ty, now) * 0.6, py - 84, 128, 128); } });
     }
     for (const e of this.cur.values()) {
       const p = this.pos(e.id, now)!;
@@ -266,6 +297,21 @@ export class Renderer {
     if (s && ar) for (const [x, y, a] of s.a) {
       if (!inView(x, y)) continue;
       c.save(); c.translate(x, y); c.rotate(a / 100); c.drawImage(ar, -32, -32, 64, 64); c.restore();
+    }
+    // chips and the little log or nugget that pops up
+    const wood = img('ui/wood'), gold = img('ui/gold');
+    this.bits = this.bits.filter(b => now - b.t < (b.icon ? 750 : 500));
+    for (const b of this.bits) {
+      const a = (now - b.t) / 1000;
+      const x = b.x + b.vx * a, y = b.y + b.vy * a + (b.icon ? 0 : 700 * a * a);
+      if (b.icon) {
+        const im = b.wood ? wood : gold;
+        if (!im) continue;
+        c.save(); c.globalAlpha = Math.max(0, 1 - a / 0.75); c.drawImage(im, x - 18, y - 18, 36, 36); c.restore();
+      } else {
+        c.fillStyle = b.wood ? (b.vx > 0 ? '#c58b4a' : '#7a4a24') : (b.vx > 0 ? '#f6d14a' : '#a9a9a9');
+        c.fillRect(x - 3, y - 3, 6, 6);
+      }
     }
     // effects
     this.effects = this.effects.filter(f => (now - f.t) / 1000 < FX_SHEET[f.k].n / FX_SHEET[f.k].fps);

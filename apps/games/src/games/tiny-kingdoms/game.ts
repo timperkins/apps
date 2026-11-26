@@ -80,7 +80,7 @@ export interface Kingdom {
   castleId: number; cx: number; cy: number; out: boolean;
 }
 export interface Input { mx: number; my: number; atk: boolean; guard: boolean }
-export type Fx = [kind: number, x: number, y: number]; // kinds: 0 explosion, 1 dust, 2 heal, 3 splash, 4 big explosion
+export type Fx = [kind: number, x: number, y: number]; // kinds: 0 explosion, 1 dust, 2 heal, 3 splash, 4 big explosion, 5 tree hit and 6 gold hit (x, y are the tile)
 export type Sound = 'swing' | 'hit' | 'bow' | 'chop' | 'mine' | 'coin' | 'build' | 'boom' | 'heal' | 'baa' | 'horn' | 'win' | 'lose' | 'train' | 'no' | 'hurt';
 export interface SoundEv { s: Sound; x: number; y: number }
 
@@ -622,12 +622,12 @@ export class Game {
     }
     // chop and mine too
     for (const t of this.trees) if (t.wood > 0 && dist(fx, u.y - 10, (t.tx + 0.5) * TILE, (t.ty + 0.6) * TILE) < reach) {
-      const n = Math.min(2, t.wood); t.wood -= n; k.stock.wood += n; hit = true; this.sound('chop', u.x, u.y); this.changedNodes.add(t.id);
+      const n = Math.min(2, t.wood); t.wood -= n; k.stock.wood += n; hit = true; this.sound('chop', u.x, u.y); this.changedNodes.add(t.id); this.fx.push([5, t.tx, t.ty]);
       if (t.wood <= 0) { t.regrow = 90; this.rebuildBlocked(); }
       break;
     }
     for (const g of this.golds) if (g.gold > 0 && dist(fx, u.y - 10, (g.tx + 0.5) * TILE, (g.ty + 0.5) * TILE) < reach) {
-      const n = Math.min(2, g.gold); g.gold -= n; k.stock.gold += n; hit = true; this.sound('mine', u.x, u.y); this.changedNodes.add(g.id);
+      const n = Math.min(2, g.gold); g.gold -= n; k.stock.gold += n; hit = true; this.sound('mine', u.x, u.y); this.changedNodes.add(g.id); this.fx.push([6, g.tx, g.ty]);
       if (g.gold <= 0) { this.fx.push([1, (g.tx + 0.5) * TILE, (g.ty + 0.6) * TILE]); this.rebuildBlocked(); }
       break;
     }
@@ -698,6 +698,7 @@ export class Game {
       if (isTree) { (n as Tree).wood--; if ((n as Tree).wood <= 0) { (n as Tree).regrow = 90; this.rebuildBlocked(); } }
       else { (n as Gold).gold--; if ((n as Gold).gold <= 0) { this.fx.push([1, nx, ny]); this.rebuildBlocked(); } }
       this.changedNodes.add(n.id);
+      this.fx.push([isTree ? 5 : 6, n.tx, n.ty]);
       u.carry = u.job; u.carryN++;
       if (dist(u.x, u.y, this.cameraHint.x, this.cameraHint.y) < 700) this.sound(isTree ? 'chop' : 'mine', u.x, u.y);
     }
