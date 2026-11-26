@@ -203,4 +203,21 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./explorer/index'),
   },
+  {
+    id: 'mob-delvers',
+    title: 'Mob Delvers',
+    tagline: 'Team up to 4, beat 8 missions on 10 difficulties and hunt better gear with your power level.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#1a1426"/>
+      <path d="M60 28L112 54L60 80L8 54Z" fill="#3e5a34"/><path d="M60 28L86 41L60 54L34 41Z" fill="#4a6a3c"/>
+      <rect x="20" y="40" width="10" height="10" fill="#6a4a2a"/><path d="M18 40l7-7 7 7z" fill="#a33a2a"/>
+      <circle cx="96" cy="44" r="5" fill="#e08a2a"/><rect x="95" y="38" width="2" height="3" fill="#3a6a2a"/>
+      <g transform="translate(50 56)"><rect x="-4" y="-2" width="3" height="6" fill="#2a3a5a"/><rect x="1" y="-2" width="3" height="6" fill="#2a3a5a"/><rect x="-5" y="-10" width="10" height="9" fill="#2a7ab0"/><rect x="-4.5" y="-18" width="9" height="8" fill="#e8b890"/><rect x="-5" y="-19" width="10" height="3" fill="#3a2a1a"/><path d="M5 -8L16 -20" stroke="#d8e0ff" stroke-width="2.5"/></g>
+      <g transform="translate(78 58)"><rect x="-5" y="-14" width="10" height="13" fill="#5a8a4a"/><rect x="-4" y="-9" width="2.5" height="2" fill="#ff3a3a"/><rect x="1.5" y="-9" width="2.5" height="2" fill="#ff3a3a"/><rect x="-4" y="-1" width="3" height="5" fill="#3a4a2a"/><rect x="1" y="-1" width="3" height="5" fill="#3a4a2a"/></g>
+      <g fill="#a8f0ff" opacity=".85"><circle cx="66" cy="38" r="2"/><circle cx="30" cy="62" r="1.6"/><circle cx="88" cy="66" r="1.8"/></g>
+      <text x="60" y="15" font-size="11" font-weight="900" text-anchor="middle" fill="#ffe08a" stroke="#2a1206" stroke-width="1" paint-order="stroke" font-family="sans-serif" letter-spacing="1">MOB DELVERS</text>
+      <text x="104" y="30" font-size="8" font-weight="900" text-anchor="middle" fill="#e8d0ff" font-family="sans-serif">⚡</text>
+    </svg>`,
+    load: () => import('./mob-delvers/index'),
+  },
 ];
