@@ -31,7 +31,6 @@ body {
 #hud,
 #menu,
 #toolbar,
-#selMenu,
 #build,
 #picker .box,
 #lobby .box,
@@ -52,8 +51,7 @@ body {
   top: calc(64px + env(safe-area-inset-top));
   padding: 4px;
 }
-#toolbar,
-#selMenu {
+#toolbar {
   padding: 0;
 }
 #build {
@@ -145,7 +143,6 @@ body {
 #menuBtn[aria-expanded='true'],
 #toolbar button.on,
 #toolbar button[aria-pressed='true'],
-#selBar button.type[aria-pressed='true'],
 #build .tabs button[aria-selected='true'],
 #build .tool[aria-pressed='true'],
 #build .item.aiming,
@@ -263,8 +260,7 @@ body {
   height: 24px;
 }
 #menuBtn svg,
-#toolbar button svg,
-#selBar #selMenu button svg {
+#toolbar button svg {
   fill: none;
 }
 #credits {
@@ -354,44 +350,6 @@ body {
   height: 18px;
   fill: none;
 }
-#selMenu button {
-  font-size: 10px;
-}
-#selBar button.type {
-  background: none;
-}
-#selBar button.type .pic {
-  width: 34px;
-  height: 36px;
-}
-#selBar button.type .count,
-#selBar button.type[aria-pressed='true'] .count {
-  color: var(--bubble-ink);
-  background: var(--bubble);
-  border-color: var(--line);
-}
-#selBar button.type.part {
-  border-color: transparent;
-  outline: 2px dashed var(--accent);
-  outline-offset: -4px;
-}
-#selBar button.type.whole,
-#selBar button.type.whole[aria-pressed='true'] {
-  border-color: transparent;
-  background: none;
-  box-shadow: inset 0 -3px 0 var(--grp, var(--accent));
-}
-#types {
-  --grp: var(--accent);
-}
-#types.group {
-  border-color: var(--grp);
-}
-#noTypes {
-  color: var(--dim);
-  opacity: 1;
-}
-
 /* The order check: in the order's color, round like the rings round it */
 #okBtn {
   color: var(--accent-ink);
