@@ -117,6 +117,19 @@ A separate copy of Survivle (`src/games/survivle-long/`, hub id `survivle-long`)
 - 25 open-world extras (listed in `LONG_FEATURES` in `data.ts` and on the title screen): shrines with spirit orbs and fast travel, watchtowers that fill in the big map (M), a glider, sprint (X), horses, day and night, rain, bombs (G), fire arrows, mushrooms, cooking at any fire, camp loot chests, captains, camp alarms, sleeping raiders (sneak attacks ×3), weapon and shield drops, blacksmiths, healing springs, cold in the snow, ore rocks with gems, falling stars, village elder quests and wolf packs.
 - In co-op, the host runs camps and raiders; friends see the raiders and fight them, but camp spears and loot are tracked on each player's own game.
 
+## Tiny Kingdoms
+
+A small real-time castle battle made with the [Tiny Swords](https://pixelfrog-assets.itch.io/tiny-swords) free asset pack by Pixel Frog (the art; code, rules and sounds are original). Code in `src/games/tiny-kingdoms/`, art in its `assets/` folder.
+
+- You are the hero of a little kingdom in a corner of a generated island. The Black kingdom sits in the middle and sends bigger and bigger attacks (Easy, Normal, Hard). Knock down the Black castle to win; lose when every player's castle falls.
+- Pawns chop trees, mine gold and catch sheep by themselves (more go to whatever has the fewest workers). The hero can chop, mine and catch sheep with the sword too.
+- Nine building spots around the castle (walk onto the hammer and press E): houses (+5 room), barracks (warriors, lancers), archery range (archers), towers (shoot arrows) and a monastery (monks heal). Walk up to a building and press E to train. The castle trains pawns and shoots arrows too.
+- Army orders (Q or the button): Follow me, Guard castle, Attack! (march on the Black castle).
+- Keyboard (WASD, Space or click to swing, Shift to block, E, Q, Esc) and touch (stick plus Swing, Use, Block, Army buttons).
+- Play together with up to 4 players, each with their own kingdom and color in a corner: Esc → Play with friends gives a code, friends pick Join a friend on the title screen. The host's game runs the island (`game.ts`) and sends snapshots about 12 times a second through the shared `src/games/coop/` module (PeerJS prefix `trom-tiny-kingdoms-`); friends send their stick and buttons and draw the snapshots smoothed (`render.ts`). Attacks get bigger with more players.
+- No saves (a game is 15–25 minutes); best winning times per difficulty are kept in localStorage (`tiny-kingdoms-best-<difficulty>`).
+- Asset license: free for personal and commercial use, credit welcome (shown on the title and help screens). The pack may not be redistributed or resold on its own, so only the pictures the game uses are here, not the whole pack.
+
 ## Develop
 
 ```
