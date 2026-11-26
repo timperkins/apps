@@ -10,7 +10,7 @@ export const LINE: Record<IconName, string> = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   select: '<path d="M6 3l12 9-5.5 1.2L15.5 20l-2.6 1.1-3-6.6L6 18z"/>',
   home: '<path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/>',
-  build: '<path d="M14.5 6.5a4 4 0 0 1 5-1.6l-2.6 2.6.4 2.2 2.2.4 2.6-2.6a4 4 0 0 1-5.4 4.8L9 20a2 2 0 0 1-3-3l7.7-7.7a4 4 0 0 1 .8-2.8z"/>',
+  build: '<path d="M8 21V3.5M3.5 7h17M8 3.5L3.5 7M8 3.5L18 7M4.5 21h7M17 7v4"/><rect x="14.5" y="11" width="5" height="4.5" rx=".6"/>',
   group: '<circle cx="12" cy="7" r="2.6"/><path d="M7.5 20v-3.5a4.5 4.5 0 0 1 9 0V20"/><circle cx="5" cy="9.5" r="1.8"/><circle cx="19" cy="9.5" r="1.8"/><path d="M2.5 19v-2a3 3 0 0 1 3-3M21.5 19v-2a3 3 0 0 0-3-3"/>',
   all: '<path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><rect x="8.5" y="8.5" width="7" height="7" rx="1"/>',
   clear: '<path d="M6 6l12 12M18 6L6 18"/>',
