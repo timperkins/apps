@@ -31,6 +31,18 @@ jobs:
         run: |
           git fetch --tags --force origin
           apps=$(node scripts/changed-apps.mjs --deployed)
+          # An app last deployed from main (prod.yml) has its deployed/<name> tag on a commit next
+          # doesn't have yet. Deploying next would put older code back on its prod domain, so skip it
+          # until main is merged into next.
+          keep=()
+          for app in $(echo "$apps" | node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).join(" "))'); do
+            if git rev-parse --verify --quiet "refs/tags/deployed/$app" >/dev/null && ! git merge-base --is-ancestor "deployed/$app" HEAD; then
+              echo "::notice::$app: skipped, its prod domain is deployed from main (deployed/$app is not on next)"
+            else
+              keep+=("$app")
+            fi
+          done
+          apps=$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "${keep[@]}")
           echo "Apps to deploy: $apps"
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
 
