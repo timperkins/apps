@@ -220,4 +220,21 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./mob-delvers/index'),
   },
+  {
+    id: 'tiny-kingdoms',
+    title: 'Tiny Kingdoms',
+    tagline: 'Grow a little kingdom, train an army and knock down the Black castle. Up to 4 players.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#47aba9"/>
+      <path d="M8 18q4-10 16-10h72q16 0 16 12v42q0 12-14 12H22Q8 74 8 60z" fill="#b8b958" stroke="#e8f4d8" stroke-width="2"/>
+      <g transform="translate(22 22)"><rect width="34" height="22" fill="#d9cfa8"/><rect y="-6" width="10" height="10" fill="#3f6aa1"/><rect x="24" y="-6" width="10" height="10" fill="#3f6aa1"/><rect x="10" y="-2" width="14" height="6" fill="#a8743f"/><rect x="13" y="10" width="8" height="12" fill="#5a3a20"/></g>
+      <g transform="translate(76 18)"><rect width="22" height="16" fill="#9a9a9a"/><rect y="-6" width="7" height="8" fill="#2c2c38"/><rect x="15" y="-6" width="7" height="8" fill="#2c2c38"/><rect x="8" y="8" width="6" height="8" fill="#2c2c38"/></g>
+      <g fill="#2f6b45"><path d="M88 46l7-16 7 16z"/><path d="M98 54l6-14 6 14z"/></g>
+      <g fill="#f2c23a"><circle cx="18" cy="60" r="4"/><circle cx="25" cy="63" r="3"/></g>
+      <g transform="translate(48 56)"><circle r="6" fill="#4b8ed9"/><path d="M5 -2l12 -10" stroke="#e9eef7" stroke-width="2.5"/></g>
+      <g transform="translate(68 52)"><circle r="6" fill="#3a3a48"/><path d="M-5 -2l-10 -8" stroke="#e9eef7" stroke-width="2.5"/></g>
+      <g fill="#fff"><ellipse cx="40" cy="70" rx="5" ry="3.5"/><circle cx="44" cy="68" r="2.5"/></g>
+    </svg>`,
+    load: () => import('./tiny-kingdoms/index'),
+  },
 ];
