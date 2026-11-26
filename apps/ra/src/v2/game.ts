@@ -614,8 +614,8 @@ function bayOf(b: Building): [number, number] {
 const BAY_SLOTS: [number, number][] = [[0, 0], [-6, 0], [6, 0], [0, -5], [0, 5], [-6, 5], [6, 5], [-6, -5], [6, -5]];
 
 // Which click burst an order marker plays.
-function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }): BurstKind {
-  return m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
+function markKind(m: { foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean; drop?: boolean }): BurstKind {
+  return m.drop ? 'drop' : m.foe ? 'attack' : m.fix ? 'repair' : m.enter ? 'enter' : m.ore ? 'harvest' : 'move';
 }
 
 const MID: Record<Kind, number> = { mcv: 6, light: 4, heavy: 5, buggy: 4, apc: 5, hauler: 5, arty: 5, boat: 4, heli: 4, inf: 5.5, rocket: 5.5, gren: 5.5, eng: 5.5, dog: 3.5, cmdo: 5.5, flamer: 5.5, scorch: 4, lumen: 4, comet: 6, skyguard: 4, heron: 4, jet: 3, plane: 4, otter: 4, destroyer: 5, cruiser: 6, carrier: 17, sub: 2 };
@@ -799,7 +799,7 @@ export class IsoGame implements GameLike {
   props: Prop[] = [];
   particles: Particle[] = [];
   // where you tapped an order: the move (or attack, foe) burst plays there
-  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean }[] = [];
+  markers: { x: number; y: number; z: number; t: number; foe?: boolean; ore?: boolean; enter?: boolean; fix?: boolean; drop?: boolean }[] = [];
   fx = new Fx();
   ruins: Ruin[] = [];
   private fires: Fire[] = [];
@@ -1875,7 +1875,7 @@ export class IsoGame implements GameLike {
         tab: 'defense',
         cost: 0,
         icon: cameoUrl('para'),
-        blurb: ready ? 'Tap, then pick where they should drop (the green cursor)' : `${PARA_N} paratroopers, ready every ${PARA_S / 60} minutes while your Paratrooper plane is home`,
+        blurb: ready ? 'Tap, then pick where they should drop (the blue ring)' : `${PARA_N} paratroopers, ready every ${PARA_S / 60} minutes while your Paratrooper plane is home`,
         state: !home ? 'idle' : ready ? 'ready' : e.lowPower ? 'paused' : 'building',
         progress: home ? Math.max(0, Math.min(1, 1 - e.paraT / PARA_S)) : 0,
         count: 0,
@@ -3567,7 +3567,7 @@ export class IsoGame implements GameLike {
     this.hoverBridge = null;
     // placing a building: the plain arrow, as the ghost itself shows where it goes
     if (this.ghost) return null;
-    if (this.paraAim) return 'move';
+    if (this.paraAim) return 'drop';
     if (this.mode) return this.modeAt(x, y) ? (this.mode === 'repair' ? 'fix' : 'sell') : 'blocked';
     const mine = this.mine();
     // Ctrl or Cmd held over a bridge: fire on it
@@ -3828,7 +3828,7 @@ export class IsoGame implements GameLike {
       this.paraAim = false;
       const [wx, wy] = this.fold(...this.groundAt(x, y));
       this.command({ c: 'para', x: wx, y: wy });
-      this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0 });
+      this.markers.push({ x: wx, y: wy, z: this.terrain.elev(wx, wy), t: 0, drop: true });
       ui('order_confirm');
       this.emit();
       return;

@@ -19,8 +19,12 @@
 // blockhouse or a damaged building of yours, or the Repair button down) is
 // a steel wrench, rocking as if turning a nut, with a gold burst when
 // clicked. The sell cursor (the Sell button down) is a gold dollar sign.
+// The drop cursor (picking where the paratroopers drop) marks a patch of
+// ground rather than a unit: a dashed sky-blue ring lying on the ground,
+// slowly turning, with a little parachute floating down into it, and a
+// sky-blue burst on click.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair' | 'sell';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair' | 'sell' | 'drop';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -33,10 +37,12 @@ const COLORS: Record<string, string> = {
   y: '#f2c94c', // yellow
   Y: '#fff1a8', // light yellow
   o: '#f0901e', // orange
+  b: '#3f9be8', // sky blue
+  B: '#b4e0ff', // light sky blue
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'repair'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'repair' | 'drop'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -225,6 +231,7 @@ const FALLBACK: Record<CursorKind, string> = {
   enter: 'pointer',
   repair: 'pointer',
   sell: 'pointer',
+  drop: 'crosshair',
   rally: 'crosshair',
   blocked: 'not-allowed',
   build: 'crosshair',
@@ -479,6 +486,79 @@ function repairClickRows(f: (typeof REPAIR_CLICK)[number]): string[] {
         for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, y - MC) <= f.flash) put(x, y, 'w');
   });
 }
+// ---------- The drop cursor ----------
+// A dashed ring round (cx, cy), rx across and ry down (flat, as if lying on
+// the ground), its dashes turned on by phase (0 to 1: one dash along).
+const DASHES = 6;
+function dropRing(put: (x: number, y: number, col: string) => void, cx: number, cy: number, rx: number, ry: number, phase: number, col = 'b'): void {
+  const n = Math.ceil((rx + ry) * 4);
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const dash = Math.floor((t / (Math.PI * 2)) * DASHES * 2 + phase * 2) % 2 === 0;
+    if (dash) put(Math.round(cx + Math.cos(t) * rx), Math.round(cy + Math.sin(t) * ry), col);
+  }
+}
+// A little parachute: a light canopy over two cords and a green soldier,
+// his feet at (cx, feet).
+function chute(put: (x: number, y: number, col: string) => void, cx: number, feet: number): void {
+  const top = feet - 7;
+  for (let x = -2; x <= 2; x++) put(cx + x, top, x < 0 ? 'w' : 'B');
+  for (let x = -3; x <= 3; x++) put(cx + x, top + 1, x < -1 ? 'w' : 'B');
+  for (const x of [-3, -1, 1, 3]) put(cx + x, top + 2, 'b');
+  put(cx - 2, top + 3, 's');
+  put(cx + 2, top + 3, 's');
+  put(cx - 1, top + 4, 's');
+  put(cx + 1, top + 4, 's');
+  put(cx, top + 5, 'g');
+  put(cx, top + 6, 'g');
+  put(cx, feet, 'g');
+}
+// The drop cursor through DROP_STEPS frames: the ring turns one dash along
+// as the parachute floats down from high above the spot to just over it.
+const DROP_STEPS = 8;
+const DS = 21;
+const DROP_HOT: [number, number] = [10, 14];
+const DROP_FALL = [0, 2, 4, 6, 8, 10, 10, -1]; // how far the parachute has come down, by frame (-1: gone)
+function dropRows(i: number): string[] {
+  const [cx, cy] = DROP_HOT;
+  return drawn(DS, (put) => {
+    dropRing(put, cx, cy, 8, 4, i / DROP_STEPS);
+    put(cx, cy, 'B');
+    if (DROP_FALL[i] >= 0) chute(put, cx, cy - 11 + DROP_FALL[i]);
+  });
+}
+// A click: the parachute drops onto the spot to a white flash, the ring
+// bursts out flat along the ground, and a new parachute comes in above.
+// (feet: how far above the spot the soldier's feet are; none: hidden)
+const DROP_CLICK: { feet?: number; flash?: number; ring: number; dots?: boolean }[] = [
+  { feet: 3, ring: 4 },
+  { feet: 1, ring: 3 },
+  { flash: 1.5, ring: 3 },
+  { flash: 2.5, ring: 5 },
+  { ring: 7 },
+  { ring: 9 },
+  { feet: 9, ring: 11, dots: true },
+  { feet: 7, ring: 12, dots: true },
+];
+export const DROP_CLICK_FRAMES = DROP_CLICK.length;
+function dropClickRows(f: (typeof DROP_CLICK)[number]): string[] {
+  return drawn(MS, (put) => {
+    if (f.dots) dropRing(put, MC, MC, f.ring, f.ring / 2, 0, 'B');
+    else
+      for (let i = 0, n = f.ring * 8; i < n; i++) {
+        const t = (i / n) * Math.PI * 2;
+        put(Math.round(MC + Math.cos(t) * f.ring), Math.round(MC + Math.sin(t) * (f.ring / 2)), f.ring < 4 ? 'w' : 'B');
+      }
+    if (f.feet !== undefined) chute(put, MC, MC - f.feet);
+    if (f.flash)
+      for (let y = 0; y < MS; y++)
+        for (let x = 0; x < MS; x++) if (Math.hypot(x - MC, (y - MC) * 2) <= f.flash * 2) put(x, y, 'w');
+  });
+}
+// The drop cursor through one fall, and its click burst.
+export const DROP_FRAMES: string[] = [];
+export const DROP_CLICK_CSS: string[] = [];
+
 // The repair cursor through one rock, and its click burst.
 export const REPAIR_FRAMES: string[] = [];
 export const REPAIR_CLICK_CSS: string[] = [];
@@ -516,6 +596,8 @@ export function initCursors(): void {
   for (const f of CHEV_CLICK) ENTER_CLICK_CSS.push(gridCss(chevClickRows(f), [MC, MC], FALLBACK.enter));
   for (let i = 0; i < REPAIR_STEPS; i++) REPAIR_FRAMES.push(gridCss(repairRows(i), [10, 6], FALLBACK.repair));
   for (const f of REPAIR_CLICK) REPAIR_CLICK_CSS.push(gridCss(repairClickRows(f), [MC, MC], FALLBACK.repair));
+  for (let i = 0; i < DROP_STEPS; i++) DROP_FRAMES.push(gridCss(dropRows(i), DROP_HOT, FALLBACK.drop));
+  for (const f of DROP_CLICK) DROP_CLICK_CSS.push(gridCss(dropClickRows(f), [MC, MC], FALLBACK.drop));
   const root = document.documentElement.style;
   for (const kind of Object.keys(FALLBACK) as CursorKind[]) {
     if (kind === 'move') CURSORS[kind] = moveCursor(0);
@@ -525,6 +607,7 @@ export function initCursors(): void {
     else if (kind === 'unload') CURSORS[kind] = UNLOAD_FRAMES[0];
     else if (kind === 'enter') CURSORS[kind] = ENTER_FRAMES[0];
     else if (kind === 'repair') CURSORS[kind] = REPAIR_FRAMES[0];
+    else if (kind === 'drop') CURSORS[kind] = DROP_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
     root.setProperty(`--cur-${kind}`, CURSORS[kind]);
   }
@@ -584,6 +667,27 @@ export function repairRingFrames(): string[] {
   return repairRing;
 }
 
+// The drop cursor's ring, lying round the confirm button for the
+// paratroopers' drop zone, with the parachute floating down above it
+// (ENTER_RING_SIZE across, like the triangles).
+const dropRing_: string[] = [];
+export function dropRingFrames(): string[] {
+  if (!dropRing_.length)
+    for (let i = 0; i < DROP_STEPS; i++) {
+      const c = ENTER_RING_SIZE >> 1;
+      dropRing_.push(
+        gridCanvas(
+          drawn(ENTER_RING_SIZE, (put) => {
+            dropRing(put, c, c, 12, 9, i / DROP_STEPS);
+            if (DROP_FALL[i] >= 0) chute(put, c, c - 20 + DROP_FALL[i]);
+          }),
+          1,
+        ).toDataURL('image/png'),
+      );
+    }
+  return dropRing_;
+}
+
 // ---------- The click bursts, drawn on the map ----------
 // With touch there is no cursor, so the game draws the move or attack burst
 // on the map where you tapped (gold for digging and deploying, the triangles
@@ -592,14 +696,18 @@ export function repairRingFrames(): string[] {
 
 export const BURST_CENTER = MC;
 export const BURST_FRAME = 0.055;
-export type BurstKind = 'move' | 'attack' | 'harvest' | 'enter' | 'repair';
-const bursts: Record<BurstKind, HTMLCanvasElement[]> = { move: [], attack: [], harvest: [], enter: [], repair: [] };
+export type BurstKind = 'move' | 'attack' | 'harvest' | 'enter' | 'repair' | 'drop';
+const bursts: Record<BurstKind, HTMLCanvasElement[]> = { move: [], attack: [], harvest: [], enter: [], repair: [], drop: [] };
 export function burstFrames(kind: BurstKind): HTMLCanvasElement[] {
   const out = bursts[kind];
   if (!out.length) {
     if (kind === 'enter') for (const f of CHEV_CLICK) out.push(gridCanvas(chevClickRows(f), 1));
     else if (kind === 'repair') for (const f of REPAIR_CLICK) out.push(gridCanvas(repairClickRows(f), 1));
+    else if (kind === 'drop') for (const f of DROP_CLICK) out.push(gridCanvas(dropClickRows(f), 1));
     else for (const f of MOVE_CLICK) out.push(gridCanvas(moveRows(0, f, kind === 'attack' ? 'red' : kind === 'harvest' ? 'gold' : 'green'), 1));
   }
   return out;
 }
+
+// For tests and previews: the drop cursor's grids, at rest and clicked.
+export const dropGrids = () => ({ rest: Array.from({ length: DROP_STEPS }, (_, i) => dropRows(i)), click: DROP_CLICK.map(dropClickRows) });
