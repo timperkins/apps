@@ -9,16 +9,16 @@ export const WILD = 5;
 export const COLORS = ['blue', 'red', 'yellow', 'purple', 'black'] as const;
 export const COLOR_NAMES = ['Blue', 'Red', 'Yellow', 'Purple', 'Black'];
 
-export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter';
-export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2';
+export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter' | 'tiny';
+export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2' | 'tinyhouse';
 export type Res = 'gold' | 'wood' | 'meat';
 export type Cost = Partial<Record<Res, number>>;
 export type Order = 'follow' | 'defend' | 'attack';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Anim = 'idle' | 'run' | 'attack' | 'attack2' | 'shoot' | 'heal' | 'chop' | 'mine' | 'stab' | 'guard' | 'graze';
 
-export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter'];
-export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2'];
+export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter', 'tiny'];
+export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2', 'tinyhouse'];
 export const ANIMS: Anim[] = ['idle', 'run', 'attack', 'attack2', 'shoot', 'heal', 'chop', 'mine', 'stab', 'guard', 'graze'];
 
 interface UnitStat { name: string; hp: number; speed: number; dmg: number; range: number; cd: number; aggro: number; pop: number; cost?: Cost; r: number; desc: string }
@@ -30,6 +30,7 @@ export const UNIT: Record<UnitKind, UnitStat> = {
   lancer: { name: 'Lancer', hp: 180, speed: 165, dmg: 25, range: 96, cd: 1.2, aggro: 330, pop: 2, cost: { gold: 30, meat: 25 }, r: 19, desc: 'Long lance, lots of health, hits hard. Takes 2 room.' },
   monk: { name: 'Monk', hp: 80, speed: 135, dmg: 0, range: 240, cd: 2, aggro: 320, pop: 1, cost: { gold: 25, wood: 20 }, r: 15, desc: 'Heals hurt friends nearby, heroes too.' },
   fighter: { name: 'Fighter', hp: 50, speed: 145, dmg: 4, range: 56, cd: 0.9, aggro: 280, pop: 1, cost: {}, r: 14, desc: 'Costs just 1 wood, 1 meat or 1 gold (whatever you have most of). Weak, but cheap!' },
+  tiny: { name: 'Tiny Warriors', hp: 14, speed: 150, dmg: 1, range: 48, cd: 1, aggro: 260, pop: 0, cost: {}, r: 9, desc: 'A crowd of 1,000,000 tiny warriors for just 1 wood, meat or gold. They do almost no damage.' },
   sheep: { name: 'Sheep', hp: 24, speed: 70, dmg: 0, range: 0, cd: 1, aggro: 0, pop: 0, r: 13, desc: '' },
 };
 
@@ -43,9 +44,10 @@ export const BUILD: Record<BuildKind, BuildStat> = {
   tower: { name: 'Tower', hp: 1000, w: 2, h: 2, cost: { wood: 60, gold: 20 }, trains: [], desc: 'Shoots arrows at enemies that come close.' },
   wall: { name: 'Wall', hp: 600, w: 1, h: 1, cost: { wood: 6 }, trains: [], desc: 'Stops enemies until they break it. Your own army walks right through. Keep placing to make a long wall.' },
   mansion: { name: 'Mansion', hp: 1100, w: 3, h: 2, cost: { wood: 90, gold: 40 }, trains: [], pop: 15, desc: 'A big fancy house: room for 15 more units.' },
+  tinyhouse: { name: 'Tiny House', hp: 400, w: 2, h: 1, cost: { wood: 25 }, trains: ['tiny'], desc: 'Holds 1,000,000,000,000,000 tiny warriors. Trains them a million at a time.' },
   tower2: { name: 'Double Arrow Tower', hp: 1600, w: 3, h: 2, cost: { wood: 110, gold: 70 }, trains: [], desc: 'Two towers that shoot two arrows at once, farther than a tower.' },
 };
-export const BUILDABLE: BuildKind[] = ['wall', 'house', 'mansion', 'barracks', 'archery', 'tower', 'tower2', 'monastery'];
+export const BUILDABLE: BuildKind[] = ['wall', 'house', 'mansion', 'tinyhouse', 'barracks', 'archery', 'tower', 'tower2', 'monastery'];
 
 const DIFF: Record<Difficulty, { grace: number; gap: number; mult: number; hp: number }> = {
   easy: { grace: 240, gap: 85, mult: 0.6, hp: 0.8 },
@@ -148,9 +150,15 @@ export function plotSpots(cx: number, cy: number): [number, number][] {
 
 const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
 const enemies = (a: number, b: number) => a !== WILD && b !== WILD && (a === BLACK) !== (b === BLACK);
-/** What a unit costs right now. A fighter takes 1 of whatever you have most of. */
+/** Units that cost 1 of whatever you have most of. */
+export const ANY_COST: UnitKind[] = ['fighter', 'tiny'];
+/** Each tiny warrior you see on the map is a crowd of this many. */
+export const TINY_CROWD = 1_000_000;
+/** How many tiny crowds fit on the map per Tiny House, and in all (more would slow the game down). */
+export const TINY_PER_HOUSE = 30, TINY_MAX = 90;
+/** What a unit costs right now. */
 export function unitCost(kind: UnitKind, stock: Record<Res, number>): Cost {
-  if (kind !== 'fighter') return UNIT[kind].cost ?? {};
+  if (!ANY_COST.includes(kind)) return UNIT[kind].cost ?? {};
   const best = (['wood', 'meat', 'gold'] as Res[]).reduce((a, r) => (stock[r] > stock[a] ? r : a), 'wood' as Res);
   return { [best]: 1 };
 }
@@ -532,7 +540,12 @@ export class Game {
     if (!k || !b || !('maxHp' in b) || b.team !== slot || b.dead || !BUILD[b.kind]?.trains.includes(kind)) return 'Can’t train that here.';
     if (!h || dist(h.x, h.y, b.x, b.y) > 260) return 'Walk over to the building first.';
     const cost = unitCost(kind, k.stock);
-    if (!this.afford(k, cost)) return kind === 'fighter' ? 'You need 1 wood, meat or gold.' : `You need ${costText(cost)}.`;
+    if (!this.afford(k, cost)) return ANY_COST.includes(kind) ? 'You need 1 wood, meat or gold.' : `You need ${costText(cost)}.`;
+    if (kind === 'tiny') {
+      const crowds = this.units.filter(u => !u.dead && u.team === slot && u.kind === 'tiny').length;
+      const houses = this.buildings.filter(x => !x.dead && x.team === slot && x.kind === 'tinyhouse').length;
+      if (crowds >= Math.min(TINY_MAX, houses * TINY_PER_HOUSE)) return crowds >= TINY_MAX ? 'The map can’t fit any more tiny warriors!' : 'Only 30 crowds per Tiny House fit on the map. Build another one!';
+    }
     if (this.pop(slot) + UNIT[kind].pop > this.cap(slot)) return 'No room! Build a house for 5 more.';
     this.pay(k, cost);
     const u = this.addUnit(kind, slot, b.x + (this.r() - 0.5) * 80, b.y + 30 + this.r() * 20);
