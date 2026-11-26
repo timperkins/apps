@@ -192,7 +192,7 @@ export class Renderer {
   private sheetFor(e: Ent): Sheet | undefined {
     const kind = UNIT_KINDS[e.kind] as UnitKind;
     const anim = ANIMS[e.anim] as Anim;
-    const k = kind === 'hero' || kind === 'fighter' ? 'warrior' : kind;
+    const k = kind === 'hero' || kind === 'fighter' || kind === 'tiny' ? 'warrior' : kind;
     if (k === 'pawn' && (e.flags & 6)) return SHEETS[`pawn.run.${['wood', 'gold', 'meat'][((e.flags >> 1) & 3) - 1]}`];
     if (k === 'lancer' && anim === 'attack') return SHEETS[e.aim < -60 ? 'lancer.upright' : e.aim > 60 ? 'lancer.downright' : 'lancer.right'];
     return SHEETS[`${k}.${anim}`] ?? SHEETS[`${k}.idle`];
@@ -333,7 +333,7 @@ export class Renderer {
     let use = sh;
     // a swing plays once, then back to standing
     if (sh.once && t > sh.n / sh.fps + 0.05) { use = this.sheetFor({ ...e, anim: 0 })!; t = now / 1000; }
-    const scale = kind === 'hero' ? 1.15 : kind === 'fighter' ? 0.72 : 1;
+    const scale = kind === 'hero' ? 1.15 : kind === 'fighter' ? 0.72 : kind === 'tiny' ? 0.42 : 1;
     if (kind === 'hero') {
       c.save();
       c.fillStyle = PLAYER_RING[e.team] + '88'; c.strokeStyle = PLAYER_RING[e.team]; c.lineWidth = 3;
@@ -343,7 +343,7 @@ export class Renderer {
     const file = kind === 'sheep' ? `terrain/${use.file}` : `units/${color}/${use.file}`;
     this.drawSheet(use, file, x, y, t, !!(e.flags & 1), scale);
     // health bar when hurt
-    if (e.hp < 100 && kind !== 'sheep') this.bar(x, y - (kind === 'lancer' ? 92 : kind === 'hero' ? 96 : 82), kind === 'hero' ? 56 : 40, e.hp, e.team === BLACK ? '#e04a3a' : '#5bd15b');
+    if (e.hp < 100 && kind !== 'sheep') this.bar(x, y - (kind === 'lancer' ? 92 : kind === 'hero' ? 96 : kind === 'tiny' ? 40 : 82), kind === 'hero' ? 56 : kind === 'tiny' ? 20 : 40, e.hp, e.team === BLACK ? '#e04a3a' : '#5bd15b');
     const name = o.names.get(e.id);
     if (name) {
       c.save();
@@ -392,6 +392,9 @@ export class Renderer {
     if (kind === 'mansion') {
       const im = img(`buildings/${col}/house3`);
       if (im) { const w = im.width * 1.6, h = im.height * 1.6; c.drawImage(im, x - w / 2, y - h + 12, w, h); out = { w, h }; }
+    } else if (kind === 'tinyhouse') {
+      const im = img(`buildings/${col}/house2`);
+      if (im) { const w = im.width * 0.75, h = im.height * 0.75; c.drawImage(im, x - w / 2, y - h + 6, w, h); out = { w, h }; }
     } else if (kind === 'tower2') {
       const im = img(`buildings/${col}/tower`);
       if (im) { for (const dx of [-56, 56]) c.drawImage(im, x + dx - im.width / 2, y - im.height + 8); out = { w: im.width + 112, h: im.height }; }

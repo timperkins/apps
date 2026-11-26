@@ -5,7 +5,7 @@ import { coopBadge, coopMenu, every } from '../coop/ui';
 import type { FriendSession, HostSession, Session } from '../coop/session';
 import { isMuted, play, setMuted, unlockAudio } from './audio';
 import {
-  BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, UNIT_KINDS, canPlace, costText, ghostSpot,
+  ANY_COST, TINY_CROWD, BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, UNIT_KINDS, canPlace, costText, ghostSpot,
   type BuildKind, type Cost, type Difficulty, type Input, type Order, type Res, type Snap, type UnitKind,
 } from './game';
 import { Renderer, artUrl, loadArt, type Overlay } from './render';
@@ -36,7 +36,7 @@ function buildPic(b: BuildKind, slot = 0) {
   const col = COLOR_FILES[slot] ?? 'blue';
   if (b === 'wall') return `<span class="tk-wallpic tk-wall-${col}"><i></i><i></i><i></i></span>`;
   if (b === 'tower2') return `<span class="tk-twin"><img src="${artUrl(`buildings/${col}/tower`)}" alt=""><img src="${artUrl(`buildings/${col}/tower`)}" alt=""></span>`;
-  return `<img src="${artUrl(`buildings/${col}/${b === 'house' ? 'house1' : b === 'mansion' ? 'house3' : b}`)}" alt="">`;
+  return `<img src="${artUrl(`buildings/${col}/${b === 'house' ? 'house1' : b === 'mansion' ? 'house3' : b === 'tinyhouse' ? 'house2' : b}`)}" alt="">`;
 }
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
@@ -47,7 +47,7 @@ const HELP = `
     <li>${icon('wood')} ${icon('gold')} ${icon('meat')} Your <b>pawns</b> chop trees, mine gold and catch sheep by themselves. You can chop, mine and catch sheep with your sword too.</li>
     <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
     <li>${icon('gold')} Walk up to any of your buildings and press <kbd>E</kbd> to <b>sell</b> it, or sell the units it trains, for half the price back.</li>
-    <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, fighters (cost just 1 of anything, but weak), warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery.</li>
+    <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, fighters (cost just 1 of anything, but weak), warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery. A Tiny House trains a crowd of a million tiny warriors for 1 of anything; they barely hurt anyone.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
     <li>${icon('meat')} Press <kbd>1</kbd> to eat: 5 meat heals your hero a lot.</li>
@@ -297,15 +297,16 @@ const game: GameModule = {
       const color = ['blue', 'red', 'yellow', 'purple'][me];
       const have = (u: UnitKind) => { let n = 0; for (const x of ren!.ents()) if (x.kind < 100 && x.team === me && UNIT_KINDS[x.kind] === u) n++; return n; };
       const sellUnits = s.trains.filter(u => have(u) > 0).map(u =>
-        `<button class="tk-sell" data-sell-unit="${u}">Sell a ${UNIT[u].name.toLowerCase()} <span>${u === 'fighter' ? 'frees room' : `+${costHtml(Game.refund(UNIT[u].cost ?? {}))}`}</span><small>you have ${have(u)}</small></button>`).join('');
+        `<button class="tk-sell" data-sell-unit="${u}">${u === 'tiny' ? 'Send home a tiny crowd' : `Sell a ${UNIT[u].name.toLowerCase()}`} <span>${ANY_COST.includes(u) ? (u === 'tiny' ? '' : 'frees room') : `+${costHtml(Game.refund(UNIT[u].cost ?? {}))}`}</span><small>you have ${u === 'tiny' ? (have(u) * TINY_CROWD).toLocaleString() : have(u)}</small></button>`).join('');
       const sellMe = bk === 'castle' ? '' : `<button class="tk-btn red" data-sell-bldg>Sell this ${s.name.toLowerCase()} <small>get back ${costText(Game.refund(s.cost)) || 'nothing'}</small></button>`;
-      showPanel(`<h2>${s.name}</h2>${s.trains.length ? `<p class="tk-sub">Room: ${k?.pop ?? 0} / ${k?.cap ?? 0}${(k?.pop ?? 0) >= (k?.cap ?? 0) ? ' · build a house for more' : ''}</p>` : `<p class="tk-sub">${s.desc}</p>`}
+      const tinyNote = bk === 'tinyhouse' ? `<p class="tk-sub">Tiny warriors: ${(have('tiny') * TINY_CROWD).toLocaleString()} / 1,000,000,000,000,000</p>` : '';
+      showPanel(`<h2>${s.name}</h2>${tinyNote ? tinyNote : s.trains.length ? `<p class="tk-sub">Room: ${k?.pop ?? 0} / ${k?.cap ?? 0}${(k?.pop ?? 0) >= (k?.cap ?? 0) ? ' · build a house for more' : ''}</p>` : `<p class="tk-sub">${s.desc}</p>`}
         <div class="tk-list">${s.trains.map((u, i) => {
           const st = UNIT[u];
-          const file = u === 'monk' ? 'monk_idle' : u === 'fighter' ? 'warrior_idle' : `${u}_idle`;
-          return `<button class="tk-item" data-pick="${u}" ${(u === 'fighter' ? (k?.g ?? 0) + (k?.w ?? 0) + (k?.m ?? 0) > 0 : stockOk(st.cost ?? {})) ? '' : 'data-poor'}>
-            <span class="tk-face${u === 'fighter' ? ' tk-small' : ''}" style="background-image:url(${artUrl(`units/${color}/${file}`)})"></span>
-            <b>${i + 1}. ${st.name}</b><small>${st.desc}</small><span class="tk-costs">${u === 'fighter' ? `<span class="tk-cost tk-any">1 ${icon('wood')}${icon('meat')}${icon('gold')}</span>` : costHtml(st.cost ?? {})}</span></button>`;
+          const file = u === 'monk' ? 'monk_idle' : u === 'fighter' || u === 'tiny' ? 'warrior_idle' : `${u}_idle`;
+          return `<button class="tk-item" data-pick="${u}" ${(ANY_COST.includes(u) ? (k?.g ?? 0) + (k?.w ?? 0) + (k?.m ?? 0) > 0 : stockOk(st.cost ?? {})) ? '' : 'data-poor'}>
+            <span class="tk-face${ANY_COST.includes(u) ? ' tk-small' : ''}" style="background-image:url(${artUrl(`units/${color}/${file}`)})"></span>
+            <b>${i + 1}. ${st.name}</b><small>${st.desc}</small><span class="tk-costs">${ANY_COST.includes(u) ? `<span class="tk-cost tk-any">1 ${icon('wood')}${icon('meat')}${icon('gold')}</span>` : costHtml(st.cost ?? {})}</span></button>`;
         }).join('')}</div>${s.trains.length ? '<p class="tk-sub">Tap again to train more. Selling gives back half the price.</p>' : ''}
         ${sellUnits ? `<div class="tk-sells">${sellUnits}</div>` : ''}${sellMe}<button class="tk-btn ghost" data-close>Close</button>`, 'train');
     };
