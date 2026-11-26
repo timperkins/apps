@@ -410,14 +410,13 @@ export function collectLong(R: Renderer, game: Game, cam: Cam, add: Add) {
       const X = R.sx(cam, GROVE.x + 0.5, GROVE.y + 0.5), Y = R.sy(cam, GROVE.x + 0.5, GROVE.y + 0.5, h);
       ctx.save();
       ctx.translate(X, Y);
-      // a big stone the sword is stuck in
-      ctx.fillStyle = '#5f5b68';
+      ctx.fillStyle = '#6e6a78';
       ctx.beginPath();
-      ctx.roundRect(-18, -22, 36, 22, 4);
+      ctx.roundRect(-16, -14, 32, 14, 3);
       ctx.fill();
       ctx.fillStyle = '#8c8996';
       ctx.beginPath();
-      ctx.ellipse(0, -22, 18, 7, 0, 0, 7);
+      ctx.ellipse(0, -14, 16, 6, 0, 0, 7);
       ctx.fill();
       if (!lx.light) {
         const gl = ctx.createLinearGradient(0, -160, 0, -10);
@@ -425,25 +424,18 @@ export function collectLong(R: Renderer, game: Game, cam: Cam, add: Add) {
         gl.addColorStop(1, `rgba(255,246,176,${0.35 + Math.sin(t * 2) * 0.1})`);
         ctx.fillStyle = gl;
         ctx.fillRect(-12, -160, 24, 150);
-        // half the blade is down inside the stone: only the top half sticks out
-        ctx.fillStyle = '#2a2730';
-        ctx.beginPath();
-        ctx.ellipse(0, -22, 4, 1.6, 0, 0, 7);
-        ctx.fill();
         ctx.shadowColor = '#fff2a0';
         ctx.shadowBlur = 14;
         ctx.fillStyle = '#fff7c8';
-        ctx.fillRect(-2, -38, 4, 16);
+        ctx.fillRect(-2, -46, 4, 32);
         ctx.fillStyle = '#e0b53c';
-        ctx.fillRect(-7, -40, 14, 3);
+        ctx.fillRect(-7, -48, 14, 3);
         ctx.fillStyle = '#3b6fcb';
-        ctx.fillRect(-1.5, -50, 3, 10);
-        ctx.fillStyle = '#e0b53c';
-        ctx.fillRect(-2.5, -52, 5, 2.5);
+        ctx.fillRect(-1.5, -58, 3, 10);
         ctx.shadowBlur = 0;
-        label(ctx, 'The Sword of Light', 0, -60, '#fff2a0');
+        label(ctx, 'The Sword of Light', 0, -66, '#fff2a0');
         const p = game.p;
-        if (Math.hypot(p.x - GROVE.x, p.y - GROVE.y) < 6) label(ctx, `Needs 12 full hearts (you have ${Math.floor(p.hp / 4)})`, 0, -72, p.hp >= LIGHT_HEARTS ? '#9fe37a' : '#ffb0b0');
+        if (Math.hypot(p.x - GROVE.x, p.y - GROVE.y) < 6) label(ctx, `Needs 12 full hearts (you have ${Math.floor(p.hp / 4)})`, 0, -78, p.hp >= LIGHT_HEARTS ? '#9fe37a' : '#ffb0b0');
       }
       ctx.restore();
     });
