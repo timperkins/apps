@@ -172,6 +172,23 @@ export class World {
   }
 
   /** Village cell lookup. */
+  /** Bug spawners within r tiles: [x, z] tile positions. */
+  nestsNear(x: number, z: number, r: number): [number, number][] {
+    const s = this.seed, out: [number, number][] = [];
+    const n0x = Math.floor((x - r) / 200), n1x = Math.floor((x + r) / 200), n0z = Math.floor((z - r) / 200), n1z = Math.floor((z + r) / 200);
+    for (let nx = n0x; nx <= n1x; nx++) for (let nz = n0z; nz <= n1z; nz++) {
+      const cx = ((nx % 5000) + 5000) % 5000, cz = ((nz % 5000) + 5000) % 5000;
+      if (hash(cx, cz, s + 230) >= 0.35) continue;
+      const ex = cx * 200 + 30 + Math.floor(hash(cx, cz, s + 231) * 140), ez = cz * 200 + 30 + Math.floor(hash(cx, cz, s + 232) * 140);
+      const n = 2 + Math.floor(hash(cx, cz, s + 233) * 3);
+      for (let k = 0; k < n; k++) {
+        const a = k * 2.3 + hash(cx, cz, s + 234) * 6;
+        const px = wrap(ex + Math.round(Math.cos(a) * 5)), pz = wrap(ez + Math.round(Math.sin(a) * 5));
+        if (this.feature(px, pz)?.kind === 'nest' && dist2(px, pz, x, z) <= r * r) out.push([px, pz]);
+      }
+    }
+    return out;
+  }
   villageIn(cx: number, cz: number): Village | null {
     const P = WORLD / VILLAGE_CELL;
     cx = ((cx % P) + P) % P;

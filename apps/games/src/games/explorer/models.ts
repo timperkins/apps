@@ -137,8 +137,39 @@ export function buildingModel(b: Building): THREE.Group {
         box(0.2, 1.4, 0.2, 0.15, 0.7, 0.15, '#9aa', g); box(0.8, 0.05, 0.5, 0.15, 1.45, 0.15, '#2a4a9a', g, '#102040');
       } else { box(0.8, 0.6, 0.6, 0.5, 0.3, 0.5, '#9a6a35', g); box(0.84, 0.1, 0.64, 0.5, 0.6, 0.5, '#6b4423', g); box(0.12, 0.14, 0.04, 0.5, 0.45, 0.82, '#e0c040', g); }
       break;
-    case 'furnace': case 'steel_furnace': {
-      const col = b.type === 'furnace' ? '#9a958c' : '#b5523b';
+    case 'steel_chest':
+      box(0.8, 0.6, 0.6, 0.5, 0.3, 0.5, '#8a96a2', g); box(0.84, 0.1, 0.64, 0.5, 0.6, 0.5, '#5a6672', g); box(0.12, 0.14, 0.04, 0.5, 0.45, 0.82, '#333', g);
+      break;
+    case 'lab': {
+      // a round glass dome on a base, glowing while it researches
+      box(1.9, 0.5, 1.9, 1, 0.25, 1, '#d8dde4', g);
+      box(1.95, 0.08, 1.95, 1, 0.5, 1, '#3a4250', g);
+      const dome = ball(0.7, 1, 0.75, 1, '#9fd8ff', g);
+      (dome as THREE.Mesh).material = mat('#9fd8ff', { transparent: 0.55 });
+      parts.glow = ball(0.3, 1, 0.85, 1, '#40ffd0', g, '#20c0a0');
+      parts.spin = new THREE.Group(); parts.spin.position.set(1, 0.85, 1);
+      ['#e04848', '#3fbf5a', '#3a7ae0'].forEach((c, i) => box(0.12, 0.12, 0.12, Math.sin(i * 2.09) * 0.5, 0, Math.cos(i * 2.09) * 0.5, c, parts.spin));
+      g.add(parts.spin);
+      break;
+    }
+    case 'solar_panel':
+      for (const [x, z] of [[0.4, 0.4], [1.6, 0.4], [0.4, 1.6], [1.6, 1.6]]) box(0.08, 0.5, 0.08, x, 0.25, z, '#777', g);
+      box(1.9, 0.08, 1.9, 1, 0.55, 1, '#1c2a4a', g).rotation.x = -0.15;
+      for (let i = 0; i < 3; i++) box(1.86, 0.01, 0.02, 1, 0.6 + (i - 1) * 0.08, 0.37 + i * 0.63, '#8aa0c8', g).rotation.x = -0.15;
+      break;
+    case 'laser_turret': {
+      box(0.8, 0.4, 0.8, 0.5, 0.2, 0.5, '#d8dde4', g);
+      const head = new THREE.Group();
+      head.position.set(0.5, 0.65, 0.5);
+      box(0.45, 0.3, 0.5, 0, 0, 0, '#c0c8d0', head);
+      box(0.12, 0.12, 0.6, 0, 0.05, 0.4, '#333', head);
+      ball(0.07, 0, 0.05, 0.72, '#ff3060', head, '#ff1040');
+      g.add(head);
+      parts.head = head;
+      break;
+    }
+    case 'furnace': case 'steel_furnace': case 'electric_furnace': {
+      const col = b.type === 'furnace' ? '#9a958c' : b.type === 'electric_furnace' ? '#c8ccd2' : '#b5523b';
       box(0.9, 0.9, 0.9, 0.5, 0.45, 0.5, col, g);
       box(0.4, 0.3, 0.05, 0.5, 0.35, 0.96, '#222', g);
       parts.glow = box(0.32, 0.22, 0.03, 0.5, 0.35, 0.98, '#ff7a1a', g, '#ff5a00');
@@ -151,13 +182,13 @@ export function buildingModel(b: Building): THREE.Group {
       parts.spin = cyl(0.12, 0.9, 0.5, 0.2, 0.5, '#888', g);
       box(0.3, 0.2, 0.2, 0.5, 0.3, 1.0, '#333', g); // chute
       break;
-    case 'belt': case 'underground_belt':
+    case 'belt': case 'underground_belt': case 'fast_belt': case 'express_belt':
       box(1, 0.12, 0.9, 0.5, 0.06, 0.5, '#333a40', g);
-      for (let i = 0; i < 3; i++) box(0.9, 0.02, 0.06, 0.5, 0.13, 0.2 + i * 0.3, '#d9a632', g);
+      for (let i = 0; i < 3; i++) box(0.9, 0.02, 0.06, 0.5, 0.13, 0.2 + i * 0.3, b.type === 'fast_belt' ? '#d04030' : b.type === 'express_belt' ? '#3a8ae0' : '#d9a632', g);
       if (b.type === 'underground_belt') box(1, 0.5, 0.5, 0.5, 0.25, b.ug === 'out' ? 0.25 : 0.75, '#7a6a30', g);
       break;
-    case 'grabber': case 'long_grabber': case 'bulk_grabber': {
-      const col = b.type === 'grabber' ? '#e0b030' : b.type === 'long_grabber' ? '#d04040' : '#3a7ad0';
+    case 'grabber': case 'long_grabber': case 'bulk_grabber': case 'fast_grabber': {
+      const col = b.type === 'grabber' ? '#e0b030' : b.type === 'long_grabber' ? '#d04040' : b.type === 'fast_grabber' ? '#40c0e0' : '#3a7ad0';
       box(0.5, 0.2, 0.5, 0.5, 0.1, 0.5, '#555', g);
       const arm = new THREE.Group();
       arm.position.set(0.5, 0.3, 0.5);
@@ -377,7 +408,43 @@ export function mobModel(type: string): Rig {
         legs.push(p);
       }
       if (type === 'scorpion') { const t = new THREE.Group(); t.position.set(0, 0.5, -0.6); box(0.12, 0.12, 0.5, 0, 0.2, -0.1, c1, t).rotation.x = -1; ball(0.12, 0, 0.5, 0.1, c2, t); body.add(t); }
-      if (type === 'bug' || type === 'big_bug') { box(0.04, 0.3, 0.04, 0, 0.62, -0.3, c2, body); ball(0.06, 0, 0.8, -0.3, c2, body, c2); }
+      break;
+    }
+    case 'alien': {
+      // armored alien bug: low carapace, raised plated tail, big pincers and six tall jointed legs
+      const glow = c3 ?? '#ff6a2a';
+      box(0.62, 0.34, 0.6, 0, 0.5, 0.05, c1, body); // thorax
+      box(0.5, 0.12, 0.5, 0, 0.71, 0.05, c1, body).rotation.x = 0.08;
+      for (let i = 0; i < 3; i++) {
+        // tail plates, each one bigger and higher
+        const w = 0.5 + i * 0.12;
+        const pl = box(w, 0.26 + i * 0.05, 0.3, 0, 0.6 + i * 0.07, -0.35 - i * 0.24, i % 2 ? c2 : c1, body);
+        pl.rotation.x = -0.25 - i * 0.08;
+      }
+      box(0.36, 0.08, 0.5, 0, 0.62, -0.62, c2, body).rotation.x = -0.4; // soft belly showing between plates
+      box(0.4, 0.28, 0.32, 0, 0.48, 0.48, c2, body); // head
+      box(0.44, 0.08, 0.36, 0, 0.64, 0.46, c1, body); // head shell
+      for (const sx of [-1, 1]) {
+        ball(0.055, sx * 0.13, 0.55, 0.64, glow, body, glow);
+        ball(0.04, sx * 0.07, 0.6, 0.65, glow, body, glow);
+        // pincers that open and close
+        const pin = new THREE.Group();
+        pin.position.set(sx * 0.14, 0.42, 0.62);
+        box(0.07, 0.07, 0.3, sx * 0.02, 0, 0.14, c1, pin).rotation.y = sx * 0.3;
+        box(0.06, 0.06, 0.22, sx * -0.06, 0, 0.34, '#1a120c', pin).rotation.y = sx * -0.6;
+        body.add(pin);
+        arms.push(pin);
+      }
+      for (let i = 0; i < 3; i++) for (const sx of [-1, 1]) {
+        const lg = new THREE.Group();
+        lg.position.set(sx * 0.3, 0.48, 0.25 - i * 0.28);
+        lg.rotation.y = sx * (i - 1) * -0.35;
+        box(0.5, 0.08, 0.08, sx * 0.22, 0.13, 0, c1, lg).rotation.z = sx * 0.55; // up to the knee
+        box(0.07, 0.62, 0.07, sx * 0.55, -0.06, 0, '#1a120c', lg).rotation.z = sx * -0.3; // down to the foot
+        body.add(lg);
+        legs.push(lg);
+      }
+      for (let i = 0; i < 4; i++) cone(0.05, 0.18, (i % 2 ? 1 : -1) * 0.15, 0.82 + Math.floor(i / 2) * 0.05, -0.2 - Math.floor(i / 2) * 0.28, c2, body); // spikes
       break;
     }
     case 'bird': {
@@ -472,4 +539,34 @@ export function botModel(): THREE.Group {
   const carry = box(0.2, 0.2, 0.2, 0, -0.22, 0, '#fff', g);
   g.userData = { rotors, carry };
   return g;
+}
+
+// ---------- things on belts: shaped like what they are ----------
+const itemModels = new Map<ItemId, THREE.Group>();
+export function itemModel(id: ItemId): THREE.Group {
+  let base = itemModels.get(id);
+  if (!base) {
+    base = new THREE.Group();
+    const c = itemColor(id);
+    const g = base;
+    if (/^(iron|copper|steel|plastic)$/.test(id)) { box(0.32, 0.05, 0.26, 0, 0.03, 0, c, g); box(0.32, 0.05, 0.26, 0.02, 0.08, 0.01, c, g).rotation.y = 0.15; }
+    else if (/_ore$|^(coal|stone|carbon|rusty_rock|carbon_rock|cryser_rock)$/.test(id)) {
+      const m = new THREE.Mesh(cached('dodo', () => new THREE.DodecahedronGeometry(0.15, 0)), mat(c)); m.position.y = 0.12; m.rotation.set(0.4, 0.7, 0.2); g.add(m);
+      if (id === 'iron_ore' || id === 'copper_ore') { const s = new THREE.Mesh(BOX, mat(id === 'iron_ore' ? '#7a5a48' : '#4fbf8f')); s.scale.set(0.08, 0.08, 0.08); s.position.set(0.08, 0.2, 0.05); g.add(s); }
+    } else if (id === 'gear') {
+      const disc = cyl(0.13, 0.06, 0, 0.05, 0, c, g); void disc;
+      for (let i = 0; i < 8; i++) { const t = box(0.06, 0.06, 0.06, Math.cos(i * 0.785) * 0.15, 0.05, Math.sin(i * 0.785) * 0.15, c, g); t.rotation.y = -i * 0.785; }
+      cyl(0.04, 0.07, 0, 0.055, 0, '#333', g);
+    } else if (id === 'circuit' || id === 'advanced_circuit') { box(0.3, 0.04, 0.24, 0, 0.03, 0, c, g); box(0.1, 0.04, 0.08, 0, 0.07, 0, '#1a1a1a', g); box(0.22, 0.01, 0.02, 0, 0.055, 0.08, '#f2c94c', g); }
+    else if (id === 'copper_cable') { for (let i = 0; i < 3; i++) { const t = new THREE.Mesh(cached('torus', () => new THREE.TorusGeometry(0.1, 0.025, 6, 12)), mat(c)); t.rotation.x = Math.PI / 2; t.position.set(0, 0.04 + i * 0.04, 0); g.add(t); } }
+    else if (id === 'wood') { const l = cyl(0.08, 0.34, 0, 0.09, 0, '#8a5a2e', g); l.rotation.z = Math.PI / 2; }
+    else if (id === 'brick') box(0.26, 0.12, 0.13, 0, 0.07, 0, c, g);
+    else if (/_pack$/.test(id)) { cyl(0.1, 0.16, 0, 0.09, 0, c, g); cyl(0.04, 0.1, 0, 0.21, 0, '#dfeef5', g); }
+    else if (id === 'battery') { cyl(0.08, 0.24, 0, 0.12, 0, '#2a2a2a', g); cyl(0.082, 0.06, 0, 0.21, 0, '#e0c030', g); }
+    else if (id === 'iron_stick') { for (const z of [-0.05, 0.05]) { const r = cyl(0.025, 0.32, 0, 0.04, z, c, g); r.rotation.z = Math.PI / 2; } }
+    else if (id === 'ice' || id === 'crystal') { const m = new THREE.Mesh(cached('octa', () => new THREE.OctahedronGeometry(0.14, 0)), mat(c, { transparent: 0.8 })); m.position.y = 0.14; g.add(m); }
+    else { box(0.24, 0.2, 0.24, 0, 0.1, 0, '#a0784a', g); box(0.25, 0.04, 0.25, 0, 0.2, 0, c, g); } // anything else comes in a little crate
+    itemModels.set(id, base);
+  }
+  return base.clone();
 }

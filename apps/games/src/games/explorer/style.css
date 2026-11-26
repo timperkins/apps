@@ -126,3 +126,12 @@
 .ex-alert.flash { animation: ex-flash .5s 3; }
 @keyframes ex-flash { 50% { background: rgba(255,80,40,.95); } }
 .ex-btn[data-robo]:not(.on) { background: #4a5468; border-bottom-color: #2d3444; }
+.ex-view { display: flex; gap: 6px; align-items: center; justify-content: center; margin-bottom: 4px; font-weight: 800; }
+.ex-view .ex-btn { padding: 8px 12px; font-size: 14px; }
+.ex-view .ex-btn.on { outline: 3px solid #ffd23f; }
+.ex-ico { width: 1.15em; height: 1.15em; vertical-align: -0.2em; display: inline-block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+.ex-li.ex-tech { align-items: center; }
+.ex-li.ex-tech > div { flex: 1; min-width: 0; }
+.ex-li.ex-tech small { display: block; margin-top: 2px; }
+.ex-li.ex-tech.done { opacity: .6; }
+.ex-li.ex-tech.no > div { opacity: .7; }

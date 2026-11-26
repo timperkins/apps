@@ -3,12 +3,13 @@
 import './style.css';
 import type { GameModule } from '../types';
 import {
-  BIOME_NAME, BUILDS, type BuildId, CARS, DESTINATIONS, FOOD_MENU, HOMES, ITEMS, MAX_HP, MOBS, PETS, RECIPE, RECIPES, SHOP_NAME, SILO_CARGO, SPACE_UNITS_TO_LAUNCH,
-  STORE_STOCK, WEAPONS, WORLD, type CarId, type ItemId, type Recipe, type ShopKind,
+  BIOME_NAME, BUILDS, DAY_LEN, type BuildId, CARS, DESTINATIONS, FOOD_MENU, HOMES, ITEMS, MAX_HP, MOBS, PETS, RECIPE, RECIPES, SHOP_NAME, SILO_CARGO, SPACE_UNITS_TO_LAUNCH,
+  STORE_STOCK, TECH, TECHS, WEAPONS, WORLD, type Tech, type CarId, type ItemId, type Recipe, type ShopKind,
 } from './data';
 import { DIRS, Game, REACH, newPlayer, type Bot, type Building, type Dim, type Fx, type Ghost, type Mob, type Player, type Target, type Vehicle } from './game';
 import { craftable, type Inv, type Slot } from './inventory';
 import { Renderer } from './render';
+import { iconHtml } from './icons';
 import { ambience, isMuted, setMuted, sfx, stopAudio, unlockAudio } from './audio';
 import { CAVE_SIZE, dist2, wd, wrap, type VillageBuilding } from './world';
 import { every } from '../coop/ui';
@@ -16,11 +17,13 @@ import { MAX_PLAYERS, hostWorld, joinWorld, listHosts, type FriendSession, type 
 
 const SAVE_KEY = 'explorer-save-v1';
 const NAME_KEY = 'explorer-name';
+const VIEW_KEY = 'explorer-view';
 const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
 const PLAYER_COLORS = ['#ffd23f', '#4fc3f7', '#ff6b9d', '#7ddc6a'];
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const money = (n: number) => `$${Math.floor(n).toLocaleString()}`;
-const icon = (id: ItemId) => ITEMS[id]?.icon ?? '❔';
+const emoji = (id: ItemId) => ITEMS[id]?.icon ?? '❔';
+const icon = (id: ItemId) => iconHtml(id, emoji(id));
 const iname = (id: ItemId) => ITEMS[id]?.name ?? id;
 
 type Panel =
@@ -32,7 +35,8 @@ type Panel =
   | { k: 'ship' }
   | { k: 'pause' }
   | { k: 'host' }
-  | { k: 'help' };
+  | { k: 'help' }
+  | { k: 'research' };
 
 // what friends send the host, and the host sends friends
 type ToHost = { t: 'me'; x: number; y: number; z: number; yaw: number; dim: Dim; anim: number; swing: number } | { t: 'do'; a: string; args: Record<string, unknown> };
@@ -48,7 +52,7 @@ type Snap = {
   fx: Fx[];
 };
 
-const GROUPS: [Recipe['group'], string][] = [['basics', '🪵 Basics'], ['parts', '🔧 Parts'], ['production', '🏭 Production'], ['logistics', '➡️ Logistics'], ['power', '⚡ Power & oil'], ['combat', '🔫 Combat'], ['town', '🏘️ Town'], ['space', '🚀 Space']];
+const GROUPS: [Recipe['group'], string][] = [['basics', '🪵 Basics'], ['parts', '🔧 Parts'], ['research', '🔬 Research'], ['production', '🏭 Production'], ['logistics', '➡️ Logistics'], ['power', '⚡ Power & oil'], ['combat', '🔫 Combat'], ['town', '🏘️ Town'], ['space', '🚀 Space']];
 
 const HELP = `
 <h3>Getting around</h3>
@@ -57,6 +61,10 @@ const HELP = `
 <p><b>Left click</b> (hold) to chop trees, break rocks, mine ore, dig the ground, punch, or shoot with a gun in your hand. <b>E</b> uses things: shop doors, cars, caves, mine shafts and machines. <b>1–0</b> pick from your hotbar. With a building in your hand, left click puts it down and <b>R</b> turns it. <b>X</b> picks a building back up. <b>F</b> eats food.</p>
 <h3>Crafting</h3>
 <p>Press <b>Shift</b> (or <b>Tab</b>) for your inventory and the crafting list. No research needed: everything can be made right away if you have the stuff. Crafting takes a little time. Parts (gears, copper cable, circuits, motors, batteries, engines…) get made for you on the way.</p>
+<h3>Research</h3>
+<p>Everything above needs no research. Research unlocks <b>new</b> things: fast and express belts, fast grabbers, steel chests, solar panels, electric furnaces, laser turrets, faster robots and more. Build a <b>lab</b> (🔬 Research tab), give it power, put in science packs, and pick what to research with <b>T</b> or the 🔬 button.</p>
+<h3>2D or 3D</h3>
+<p>On the start screen pick <b>3D</b> or <b>2D (isometric)</b>. In 2D the camera looks down at an angle; <b>Z</b>/<b>C</b> turn it a quarter. You can switch any time in the Esc menu.</p>
 <h3>Ghosts, robots and blueprints</h3>
 <p>Hold <b>Ctrl</b> while you place a building and you put down a <b>ghost</b>: a see-through plan that doesn't use up the building and doesn't work. Put the real thing on a ghost to replace it, or press <b>X</b> on a ghost to remove it. A <b>roboport</b> with power and <b>flying robots</b> in it sends robots to build ghosts within 25 tiles. They get the buildings from chests (and the roboport itself); in the roboport you can let them take things off belts too.</p>
 <p><b>Blueprints:</b> hold <b>B</b> over one corner, move to the other corner and let go. That copies everything in the box. Then click to put the copy down as ghosts, <b>R</b> turns it, <b>Esc</b> puts it away.</p>
@@ -65,7 +73,7 @@ const HELP = `
 <h3>To space</h3>
 <p>Build a rocket silo (1000 stone, 1000 iron), put in 10 space units, carry a space starter and ride the rocket. In space, add platform to grow your ship, asteroid grabbers to catch little asteroids, crushers to turn them into ore, ice and crystals, turrets with ammo for the big ones, and thrusters with thruster fuel (1 crystal + 100 water: put ice in an oil refinery) to fly to the Moon, Mars and beyond.</p>
 <h3>The world</h3>
-<p>The earth is round: go straight for 1,000,000 tiles and you're back where you started. The North Pole is north of the start. At night wolves, bears, scorpions and snow wolves come out depending on where you are. Alien bugs live in purple nests: leave them alone and they mostly leave you alone, but they come for factories near them. Villages have stores, restaurants, cars to rent for a month or buy, houses to buy, pets that protect you, and cops.</p>`;
+<p>The earth is round: go straight for 1,000,000 tiles and you're back where you started. The North Pole is north of the start. At night wolves, bears, scorpions and snow wolves come out depending on where you are. Alien bugs come out of bug spawners: leave them alone and they mostly leave you alone, but they come for factories near them. Spawners keep making new bugs until you destroy them. A day is 4 minutes (10 seconds is 1 hour). Villages have stores, restaurants, cars to rent for a month or buy, houses to buy, pets that protect you, and cops.</p>`;
 
 const game: GameModule = {
   mount(root, { onExit }) {
@@ -74,7 +82,7 @@ const game: GameModule = {
       <div class="ex-hud" hidden>
         <div class="ex-top">
           <div class="ex-stats"><div class="ex-hp"><i></i><span></span></div><div class="ex-line ex-money"></div><div class="ex-line ex-where"></div><div class="ex-line ex-small ex-clock"></div></div>
-          <div class="ex-btns"><button data-b="bag" title="Inventory and crafting (Shift)">🎒</button><button data-b="map" title="Map (M)">🗺️</button><button data-b="friends" title="Host this world for friends">👥</button><button data-b="mute" title="Sound">🔊</button><button data-b="pause" title="Menu (Esc)">⏸</button></div>
+          <div class="ex-btns"><button data-b="bag" title="Inventory and crafting (Shift)">🎒</button><button data-b="map" title="Map (M)">🗺️</button><button data-b="research" title="Research (T)">🔬</button><button data-b="friends" title="Host this world for friends">👥</button><button data-b="mute" title="Sound">🔊</button><button data-b="pause" title="Menu (Esc)">⏸</button></div>
         </div>
         <div class="ex-toasts"></div>
         <div class="ex-hint"></div>
@@ -104,6 +112,9 @@ const game: GameModule = {
     wrapEl.classList.toggle('touch', touch);
 
     const ren = new Renderer(canvas);
+    // 2D (isometric) or 3D: picked on the start screen, remembered on this device
+    const setView = (v: '2d' | '3d') => { ren.iso = v === '2d'; localStorage.setItem(VIEW_KEY, v); if (ren.iso) ren.camDist = Math.max(ren.camDist, 9); };
+    ren.iso = localStorage.getItem(VIEW_KEY) === '2d';
     let g: Game | null = null;
     let playing = false;
     let panel: Panel | null = null;
@@ -165,6 +176,7 @@ const game: GameModule = {
           buildings: [...g.buildings.values()], removed: [...g.w.removed], ore: [...g.w.oreLeft], dug: [...g.w.dug], caveDug: [...g.w.caveDug],
           tiles: [...g.ship.tiles], made: g.ship.made, owned: [...g.owned].map(([k, o]) => [k, o.slot]), cars: [...g.cars.values()],
           ghosts: [...g.ghosts.values()],
+          research: { done: [...g.research.done], cur: g.research.cur, units: g.research.units },
         });
       });
       s.onLeave((slot) => { dropFriend(slot); g?.toast(`${PLAYER_NAMES[slot]} left.`); refreshBadge(); });
@@ -205,6 +217,8 @@ const game: GameModule = {
           for (const [k, slot] of m.owned as [string, number][]) ng.owned.set(k, { slot, inv: [] });
           for (const c of m.cars as Vehicle[]) ng.cars.set(c.id, c);
           for (const gh of (m.ghosts as Ghost[] | undefined) ?? []) ng.addGhost(gh);
+          const res = m.research as { done: string[]; cur: string | null; units: number } | undefined;
+          if (res) { ng.research.done = new Set(res.done); ng.research.cur = res.cur; ng.research.units = res.units; }
           ng.events = [];
           g = ng;
           startPlaying();
@@ -365,6 +379,7 @@ const game: GameModule = {
         case 'cdig': if (g.remote) g.w.caveDug.add(e.k as string); ren.markCave(); break;
         case 'tile': if (g.remote) g.ship.tiles.add(e.k as string); break;
         case 'g+': if (g.remote) { const gh = e.g as Ghost; const old = g.ghosts.get(gh.id); if (old) g.removeGhost(old); g.addGhost(gh); } break;
+        case 'res': if (g.remote) { g.research.done = new Set(e.done as string[]); g.research.cur = e.cur as string | null; g.research.units = e.units as number; } break;
         case 'g-': if (g.remote) { const gh = g.ghosts.get(e.id as number); if (gh) g.removeGhost(gh); } break;
         case 'car+': if (g.remote) g.cars.set((e.c as Vehicle).id, e.c as Vehicle); break;
         case 'car-': if (g.remote) g.cars.delete(e.id as number); break;
@@ -428,13 +443,16 @@ const game: GameModule = {
       const s = readSave();
       const menu = $('.ex-menu');
       menu.innerHTML = `
-        ${s ? `<button class="ex-btn big" data-m="continue">▶ Continue<small>Day ${Math.floor(s.time / 600) + 1} · ${money(s.me.money)}</small></button>` : ''}
+        ${s ? `<button class="ex-btn big" data-m="continue">▶ Continue<small>Day ${Math.floor(s.time / DAY_LEN) + 1} · ${money(s.me.money)}</small></button>` : ''}
+        <div class="ex-view"><span>View:</span><button class="ex-btn ${ren.iso ? 'ghost' : 'on'}" data-view="3d">🧊 3D</button><button class="ex-btn ${ren.iso ? 'on' : 'ghost'}" data-view="2d">🔷 2D (isometric)</button></div>
         <button class="ex-btn ${s ? '' : 'big'}" data-m="new">🌍 New world</button>
         <button class="ex-btn" data-m="join">👥 Join game</button>
         <button class="ex-btn" data-m="help">❓ How to play</button>
         <button class="ex-btn ghost" data-m="exit">← Back to games</button>`;
     }
     $('.ex-menu').addEventListener('click', (e) => {
+      const v = (e.target as HTMLElement).closest<HTMLElement>('[data-view]')?.dataset.view;
+      if (v === '2d' || v === '3d') { setView(v); sfx('click'); titleMenu(); return; }
       const m = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
       unlockAudio();
       sfx('click');
@@ -503,7 +521,10 @@ const game: GameModule = {
       if (k === 'r' && bp) { rotateBlueprint(); sfx('click'); return; }
       if (k === 'control') e.preventDefault();
       if (k === 'm') { if (panel?.k === 'map') closePanel(); else openPanel({ k: 'map' }); return; }
+      if (k === 't') { if (panel?.k === 'research') closePanel(); else openPanel({ k: 'research' }); return; }
       if (k === 'e') { interact(); return; }
+      // in 2D the camera turns a quarter at a time
+      if ((k === 'z' || k === 'c') && ren.iso) { if (!e.repeat) ren.camYaw += k === 'z' ? Math.PI / 2 : -Math.PI / 2; return; }
       if (k === 'r') { placeDir = (placeDir + 1) & 3; sfx('click'); return; }
       if (k === 'x') { if (target?.k === 'build') act('pickup', { id: target.id }); else if (target?.k === 'ghost') act('unghost', { id: target.id }); return; }
       if (k === 'f') { act('eat', { slot: g.me.hand }); return; }
@@ -659,6 +680,7 @@ const game: GameModule = {
       unlockAudio();
       if (b === 'bag') panel?.k === 'bag' ? closePanel() : openPanel({ k: 'bag' });
       else if (b === 'map') panel?.k === 'map' ? closePanel() : openPanel({ k: 'map' });
+      else if (b === 'research') panel?.k === 'research' ? closePanel() : openPanel({ k: 'research' });
       else if (b === 'friends') { if (isFriend()) toast(`You're in ${net!.name}'s world.`); else friendsMenu(); }
       else if (b === 'pause') openPanel({ k: 'pause' });
       else if (b === 'mute') { setMuted(!isMuted()); updateMuteBtn(); }
@@ -681,7 +703,7 @@ const game: GameModule = {
       pickPoint = r.point ? { x: r.point.x, y: r.point.y, z: r.point.z } : null;
       // the far-off ground isn't a target
       if (target && pickPoint && (target.k === 'ground' || target.k === 'feat' || target.k === 'cave' || target.k === 'build' || target.k === 'ghost')) {
-        if (Math.hypot(pickPoint.x, pickPoint.z) > REACH + 1) target = null;
+        if (Math.hypot(pickPoint.x, pickPoint.z) > REACH + 1 + g.reachBonus()) target = null;
       }
     }
     function clickAct() {
@@ -802,6 +824,7 @@ const game: GameModule = {
     }
     function recipeHtml(r: Recipe) {
       if (!g) return '';
+      if (g.locked(r.id)) return `<div class="ex-recipe no" title="${esc(iname(r.out))}"><span class="ic">${icon(r.out)}</span><div><b>🔒 ${esc(iname(r.out))}</b><small>Research ${esc(TECH[r.tech!].name)} first</small></div><em></em></div>`;
       const can = craftable(g.me.inv, r.id);
       return `<div class="ex-recipe ${can ? '' : 'no'}" data-craft="${r.id}" title="${esc(iname(r.out))}">
         <span class="ic">${icon(r.out)}</span>
@@ -836,14 +859,16 @@ const game: GameModule = {
         ${g.remote ? '<button class="ex-btn ghost" data-c="quit">🚪 Leave this world</button>' : `
         <button class="ex-btn" data-c="savequit">💾 Save &amp; quit</button>
         <button class="ex-btn" data-c="save">💾 Save</button>
-        <button class="ex-btn" data-c="load" ${readSave() ? '' : 'disabled'}>📂 Load${readSave() ? ` <small>(day ${Math.floor(readSave()!.time / 600) + 1})</small>` : ''}</button>
+        <button class="ex-btn" data-c="load" ${readSave() ? '' : 'disabled'}>📂 Load${readSave() ? ` <small>(day ${Math.floor(readSave()!.time / DAY_LEN) + 1})</small>` : ''}</button>
         <button class="ex-btn ghost" data-c="quitnosave">🚪 Quit without saving</button>`}
         <button class="ex-btn" data-c="join">👥 Join game</button>
         ${g.remote ? '' : `<button class="ex-btn" data-c="friends">🌐 ${net?.role === 'host' ? 'Stop hosting' : 'Host world'}</button>`}
+        <button class="ex-btn" data-c="view">${ren.iso ? '🧊 Switch to 3D' : '🔷 Switch to 2D (isometric)'}</button>
         <button class="ex-btn ghost" data-c="help">❓ How to play</button></div>`;
       else if (p.k === 'host') html = `<h2>🌐 Host world</h2><p>Friends (up to ${MAX_PLAYERS - 1}) will see your world in their <b>Join game</b> list and can play in it with you. It stays open until you stop hosting or quit.</p>
         <p>Your name: <input class="ex-name" maxlength="24" placeholder="Explorer" value="${esc(myName())}"></p>
         <div class="ex-row"><button class="ex-btn" data-c="openworld">🌐 Open my world</button><button class="ex-btn ghost" data-c="close">Cancel</button></div>`;
+      else if (p.k === 'research') html = researchPanel();
       else if (p.k === 'help') html = `<h2>❓ How to play</h2><div class="ex-help">${HELP}</div><button class="ex-btn" data-c="close">Got it</button>`;
       panelEl.innerHTML = `<div class="ex-box ${p.k === 'bag' || p.k === 'build' || p.k === 'shop' || p.k === 'house' ? 'wide' : ''}"><button class="ex-x" data-c="close">✕</button>${html}</div>`;
       if (p.k === 'map') drawMap();
@@ -855,6 +880,7 @@ const game: GameModule = {
       if (panel.k === 'bag') return bag;
       if (panel.k === 'build') { const b = g.buildings.get(panel.id); return bag + JSON.stringify(b ? { ...b, items: null, swing: 0, aim: 0, burn: Math.ceil(b.burn ?? 0), prog: Math.round((b.prog ?? 0) * 10), oil: Math.floor(b.oil ?? 0), power: Math.round((b.power ?? 0) * 10) } : null) + g.ship.moving; }
       if (panel.k === 'shop' || panel.k === 'house') return bag + JSON.stringify(houseInv) + g.owned.size + g.cars.size;
+      if (panel.k === 'research') return `${[...g.research.done].join()}${g.research.cur}${g.research.units}${g.buildings.size}`;
       if (panel.k === 'ship') return `${g.ship.at}${g.ship.dest}${g.ship.moving}${Math.floor(g.ship.km / 50)}${g.shipSpeed()}`;
       return panel.k;
     }
@@ -869,11 +895,27 @@ const game: GameModule = {
       const status = `<p class="ex-status">${b.on ? '🟢 Working' : '⚪ Idle'}</p>`;
       let body = '';
       switch (b.type) {
-        case 'chest': case 'house':
+        case 'chest': case 'steel_chest': case 'house':
           body = `${b.hub ? `<p>This is your ship's hub. It powers everything on the platform.</p><div class="ex-row"><button class="ex-btn" data-c="ship">🧭 Ship controls</button>${g.ship.at === 0 && !g.ship.moving ? '<button class="ex-btn" data-c="down">🪂 Fly back down to Earth</button>' : ''}</div>` : ''}
             ${b.type === 'house' ? '<div class="ex-row"><button class="ex-btn" data-c="sethome">🛏️ Sleep here (wake up here)</button></div>' : ''}
             <div class="ex-inv">${(b.inv ?? []).map((s, i) => slotHtml(s, `data-btake="inv" data-bid="${b.id}" data-i="${i}"`)).join('')}</div><button class="ex-mini" data-btake="all" data-bid="${b.id}">Take everything</button>`;
           break;
+        case 'electric_furnace':
+          body = `<div class="ex-row">${slotRow('Ore in', b.inp, 'inp', b.id)}<span class="ex-arrow">→ ${Math.round((b.prog ?? 0) * 100)}%</span>${slotRow('Out', b.out, 'out', b.id)}</div>
+            <p class="ex-small">Runs on electricity, no fuel. Smelts twice as fast and also makes steel (2 iron plates → 1 steel).</p>`;
+          break;
+        case 'lab': {
+          const cur = g.research.cur ? TECH[g.research.cur] : null;
+          body = `<p>${cur ? `🔬 Researching <b>${cur.icon} ${esc(cur.name)}</b>: ${g.research.units} / ${cur.units}. Needs ${cur.packs.map((id) => icon(id)).join(' ')} for each step.` : 'Nothing is being researched.'} <button class="ex-mini" data-c="research">Pick research</button></p>
+            ${cur ? `<div class="ex-bar"><i style="width:${(g.research.units / cur.units) * 100}%"></i></div>` : ''}
+            <p class="ex-small">Put science packs in here. More labs research faster.</p>
+            <div class="ex-inv">${(b.inv ?? []).map((s, i) => slotHtml(s, `data-btake="inv" data-bid="${b.id}" data-i="${i}"`)).join('')}</div>`;
+          break;
+        }
+        case 'solar_panel': body = `<p>☀️ ${g.light > 0.3 ? 'Making power from the sun' : 'No sun right now: it makes power only in the day'}. Connect it to power poles like a steam engine.</p>`; break;
+        case 'laser_turret': body = `<p class="ex-small">Shoots hostile animals, alien bugs ${b.dim === 'space' ? 'and asteroids ' : ''}with electricity. No ammo needed.</p>`; break;
+        case 'fast_belt': case 'express_belt': body = `<p>Carries things ${b.type === 'fast_belt' ? 'twice' : 'three times'} as fast. On it: ${(b.items ?? []).map((i) => icon(i.id)).join(' ') || 'nothing'}</p>`; break;
+        case 'fast_grabber': body = `<p>A grabber that moves twice as fast. Holding: ${b.hold ? `${icon(b.hold.id)} ${b.hold.n}` : 'nothing'}</p>`; break;
         case 'furnace': case 'steel_furnace':
           body = `<div class="ex-row">${slotRow('Ore in', b.inp, 'inp', b.id)}${slotRow('Fuel', b.fuel, 'fuel', b.id)}<span class="ex-arrow">→ ${Math.round((b.prog ?? 0) * 100)}%</span>${slotRow('Out', b.out, 'out', b.id)}</div>
             <p class="ex-small">${b.type === 'steel_furnace' ? 'Smelts twice as fast. 2 iron plates → 1 steel.' : 'Iron ore → iron plate, copper ore → copper plate, stone → brick.'} Fuel: coal, wood, carbon or fuel.</p>`;
@@ -886,7 +928,7 @@ const game: GameModule = {
           break;
         case 'assembler': {
           const r = b.recipe ? RECIPE[b.recipe] : null;
-          body = `<p>Makes: <select class="ex-sel" data-recipe="${b.id}"><option value="">(pick something)</option>${RECIPES.filter((x) => x.group !== 'space' || x.id === 'space_unit' || x.id === 'thruster_fuel').map((x) => `<option value="${x.id}" ${b.recipe === x.id ? 'selected' : ''}>${icon(x.out)} ${esc(iname(x.out))}</option>`).join('')}</select></p>
+          body = `<p>Makes: <select class="ex-sel" data-recipe="${b.id}"><option value="">(pick something)</option>${RECIPES.filter((x) => (x.group !== 'space' || x.id === 'space_unit' || x.id === 'thruster_fuel') && !g!.locked(x.id)).map((x) => `<option value="${x.id}" ${b.recipe === x.id ? 'selected' : ''}>${emoji(x.out)} ${esc(iname(x.out))}</option>`).join('')}</select></p>
             ${r ? `<div class="ex-row">${r.inp.map(([id, n]) => `<div class="ex-mslot"><small>${n} needed</small><div class="ex-slot"><span class="ic">${icon(id)}</span><b>${b.parts?.[id] ?? 0}</b></div></div>`).join('')}<span class="ex-arrow">→ ${Math.round((b.prog ?? 0) * 100)}%</span>${slotRow('Out', b.out, 'out', b.id)}</div><button class="ex-mini" data-btake="parts" data-bid="${b.id}">Take the parts back</button>` : ''}`;
           break;
         }
@@ -934,6 +976,24 @@ const game: GameModule = {
       return `<h2>${ITEMS[b.type]?.icon ?? ''} ${esc(b.hub ? 'Ship hub' : def.name)}</h2>${status}${powerLine}${body}
         <div class="ex-row ex-acts">${def.size === 1 && b.type !== 'space_platform' ? '<button class="ex-mini" data-c="rotate">⟳ Turn</button>' : ''}${b.hub ? '' : '<button class="ex-mini" data-c="pickup">✋ Pick up</button>'}</div>
         <h3>Your bag <small>(click to put in · shift-click puts the whole stack)</small></h3>${bagHtml('put')}`;
+    }
+    function researchPanel(): string {
+      if (!g) return '';
+      const R = g.research;
+      const cur = R.cur ? TECH[R.cur] : null;
+      const labs = [...g.buildings.values()].filter((b) => b.type === 'lab').length;
+      const row = (t: Tech) => {
+        const done = R.done.has(t.id), on = R.cur === t.id, can = g!.canResearch(t.id);
+        const unlocks = RECIPES.filter((r) => r.tech === t.id).map((r) => `${icon(r.out)} ${esc(iname(r.out))}`).join(', ');
+        return `<div class="ex-li ex-tech ${done ? 'done' : can ? '' : 'no'}"><span class="ic">${t.icon}</span><div><b>${esc(t.name)}</b><small>${esc(t.what)}${unlocks ? ` Unlocks ${unlocks}.` : ''}</small>
+          <small>${done ? '✅ Done' : `${t.units} × ${t.packs.map((id) => icon(id)).join('')}${t.needs.length ? ` · needs ${t.needs.map((n) => esc(TECH[n].name)).join(', ')}` : ''}`}</small></div>
+          ${done ? '' : on ? '<button data-research="">Stop</button>' : `<button data-research="${t.id}" ${can ? '' : 'disabled'}>Research</button>`}</div>`;
+      };
+      return `<h2>🔬 Research</h2>
+        <p>${cur ? `Now: <b>${cur.icon} ${esc(cur.name)}</b> ${R.units} / ${cur.units}` : 'Pick something to research.'}</p>
+        ${cur ? `<div class="ex-bar"><i style="width:${(R.units / cur.units) * 100}%"></i></div>` : ''}
+        <p class="ex-small">Build labs (🛠️ Research tab), give them power and put in science packs. ${labs ? `You have ${labs} lab${labs > 1 ? 's' : ''}.` : 'You don’t have a lab yet.'} Everything else in the game needs no research: this only unlocks new things.</p>
+        <div class="ex-list">${TECHS.map(row).join('')}</div>`;
     }
     function shopPanel(shop: ShopKind, vb: string): string {
       if (!g) return '';
@@ -1001,6 +1061,7 @@ const game: GameModule = {
       if (d.c === 'friends') { closePanel(); return friendsMenu(); }
       if (d.c === 'openworld') { const n = panelEl.querySelector<HTMLInputElement>('.ex-name')?.value ?? ''; closePanel(); void openWorld(n); return; }
       if (d.c === 'help') return openPanel({ k: 'help' });
+      if (d.c === 'view') { setView(ren.iso ? '3d' : '2d'); return closePanel(); }
       if (d.c === 'cancel') return act('cancel');
       if (d.c === 'ship') return openPanel({ k: 'ship' });
       if (d.c === 'down') { act('down'); return closePanel(); }
@@ -1019,6 +1080,8 @@ const game: GameModule = {
         if (b) act('robo', d.robo === 'chests' ? { id: b.id, chests: b.fromChests === false } : { id: b.id, belts: !b.fromBelts });
         return;
       }
+      if (d.research !== undefined) return act('research', { id: d.research });
+      if (d.c === 'research') return openPanel({ k: 'research' });
       if (d.btake !== undefined) return act('btake', { id: Number(d.bid), from: d.btake, i: Number(d.i ?? 0) });
       if (d.htake !== undefined && panel.k === 'house') return act('htake', { vb: panel.vb, i: Number(d.htake) });
       if (d.buy && panel.k === 'shop') return act('buy', { shop: panel.shop, id: d.buy, n: Number(d.n), vb: d.vb ?? '' });
@@ -1132,7 +1195,7 @@ const game: GameModule = {
         if (door) hint = door.kind === 'shop' ? `E: go in (${SHOP_NAME[door.shop!]})` : g.owned.get(door.id)?.slot === me.slot ? 'E: your house' : 'E: knock';
         else if ([...g.cars.values()].some((c) => c.driver === null && dist2(c.x, c.z, me.x, me.z) < 9 && me.dim === 'earth')) hint = 'E: get in the car';
         else if (me.dim !== 'earth' && me.dim !== 'space' && me.dim !== 'silo' && dist2(me.x, me.z, g.w.cave(me.dim).exit[0], g.w.cave(me.dim).exit[1]) < 9) hint = 'E: climb back out';
-        else if (target?.k === 'feat') { const f = g.w.feature(target.x, target.z); if (f?.kind === 'cave') hint = 'E: go into the cave'; else if (f?.kind === 'shaft') hint = 'E: climb down the mine shaft'; else if (f?.kind === 'ore') hint = `${iname(f.ore!)} (${f.amount} left) · hold click to mine`; else if (f?.kind === 'nest') hint = '🐛 Alien bug nest · hit it to destroy it (the bugs will defend it!)'; else if (f?.kind === 'oil') hint = 'Oil · put a pumpjack here'; else if (f) hint = 'Hold click'; }
+        else if (target?.k === 'feat') { const f = g.w.feature(target.x, target.z); if (f?.kind === 'cave') hint = 'E: go into the cave'; else if (f?.kind === 'shaft') hint = 'E: climb down the mine shaft'; else if (f?.kind === 'ore') hint = `${iname(f.ore!)} (${f.amount} left) · hold click to mine`; else if (f?.kind === 'nest') hint = '🐛 Bug spawner · it keeps making alien bugs · hit it to destroy it (the bugs will defend it!)'; else if (f?.kind === 'oil') hint = 'Oil · put a pumpjack here'; else if (f) hint = 'Hold click'; }
         else if (target?.k === 'build') { const b = g.buildings.get(target.id); if (b) hint = `${b.hub ? 'Ship hub' : BUILDS[b.type].name} · click to open · X to pick up`; }
         else if (target?.k === 'mob') { const m = g.mobs.get(target.id); if (m) hint = `${MOBS[m.type].name}${m.owner !== undefined ? ` (${PLAYER_NAMES[m.owner]}'s pet)` : MOBS[m.type].hostile ? ' ⚠️' : ''}`; }
         if (target?.k === 'ghost') { const gh = g.ghosts.get(target.id); if (gh) hint = `👻 Ghost of a ${BUILDS[gh.type].name.toLowerCase()} · a roboport's robots will build it · X to remove`; }
@@ -1146,7 +1209,7 @@ const game: GameModule = {
       hintEl.textContent = hint;
       hintEl.hidden = !hint;
       if (gotQ.size && gotT <= 0) {
-        toast(`+ ${[...gotQ].map(([id, n]) => `${n} ${icon(id)} ${iname(id)}`).join(', ')}`);
+        toast(`+ ${[...gotQ].map(([id, n]) => `${n} ${emoji(id)} ${iname(id)}`).join(', ')}`);
         gotQ.clear();
       }
     }
@@ -1186,19 +1249,20 @@ const game: GameModule = {
         if (keys.has('a') || keys.has('arrowleft')) mx -= 1;
         if (keys.has('d') || keys.has('arrowright')) mx += 1;
         if (stickId !== null) { mx += stickX; mz += stickY; }
-        if (keys.has('z')) ren.camYaw += dt * 2;
-        if (keys.has('c')) ren.camYaw -= dt * 2;
+        if (keys.has('z') && !ren.iso) ren.camYaw += dt * 2;
+        if (keys.has('c') && !ren.iso) ren.camYaw -= dt * 2;
         if (panel && (panel.k === 'map' || panel.k === 'pause' || panel.k === 'help')) { mx = 0; mz = 0; }
         if (me.car) {
           gg.movePlayer(me, mx, mz, false, false, dt);
-          // the camera follows behind the car
+          // the camera follows behind the car (in 3D)
           let dy = me.yaw + Math.PI - ren.camYaw;
           while (dy > Math.PI) dy -= Math.PI * 2;
           while (dy < -Math.PI) dy += Math.PI * 2;
-          ren.camYaw += dy * Math.min(1, dt * 3);
+          if (!ren.iso) ren.camYaw += dy * Math.min(1, dt * 3);
         } else {
           // walk relative to where the camera looks
-          const cy = Math.cos(ren.camYaw), sy = Math.sin(ren.camYaw);
+          const vy = ren.viewYaw();
+          const cy = Math.cos(vy), sy = Math.sin(vy);
           const wx = mx * cy + mz * sy, wz = -mx * sy + mz * cy;
           gg.movePlayer(me, wx, wz, keys.has(' '), keys.has('q'), dt);
           if (Math.hypot(mx, mz) > 0.1 && now - lastStepSound > 330 && me.y <= gg.groundY(me.dim, me.x, me.z) + 0.1) { lastStepSound = now; sfx('step', 0.6); }
