@@ -1,8 +1,8 @@
 // Tiny Kingdoms: the world and its rules. The host's game runs this; friends only draw snapshots of it.
 
 export const TILE = 64;
-export const MW = 72;
-export const MH = 48;
+export const MW = 110;
+export const MH = 72;
 /** Teams 0–3 are the players' kingdoms (all on one side), 4 is the Black kingdom, 5 is the wild (sheep). */
 export const BLACK = 4;
 export const WILD = 5;
@@ -10,7 +10,7 @@ export const COLORS = ['blue', 'red', 'yellow', 'purple', 'black'] as const;
 export const COLOR_NAMES = ['Blue', 'Red', 'Yellow', 'Purple', 'Black'];
 
 export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep';
-export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower';
+export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2';
 export type Res = 'gold' | 'wood' | 'meat';
 export type Cost = Partial<Record<Res, number>>;
 export type Order = 'follow' | 'defend' | 'attack';
@@ -18,7 +18,7 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Anim = 'idle' | 'run' | 'attack' | 'attack2' | 'shoot' | 'heal' | 'chop' | 'mine' | 'stab' | 'guard' | 'graze';
 
 export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep'];
-export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower'];
+export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2'];
 export const ANIMS: Anim[] = ['idle', 'run', 'attack', 'attack2', 'shoot', 'heal', 'chop', 'mine', 'stab', 'guard', 'graze'];
 
 interface UnitStat { name: string; hp: number; speed: number; dmg: number; range: number; cd: number; aggro: number; pop: number; cost?: Cost; r: number; desc: string }
@@ -40,8 +40,11 @@ export const BUILD: Record<BuildKind, BuildStat> = {
   archery: { name: 'Archery Range', hp: 750, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['archer'], desc: 'Trains archers.' },
   monastery: { name: 'Monastery', hp: 750, w: 3, h: 2, cost: { wood: 80, gold: 30 }, trains: ['monk'], desc: 'Trains monks, who heal.' },
   tower: { name: 'Tower', hp: 1000, w: 2, h: 2, cost: { wood: 60, gold: 20 }, trains: [], desc: 'Shoots arrows at enemies that come close.' },
+  wall: { name: 'Wall', hp: 600, w: 1, h: 1, cost: { wood: 6 }, trains: [], desc: 'Stops enemies until they break it. Your own army walks right through. Keep placing to make a long wall.' },
+  mansion: { name: 'Mansion', hp: 1100, w: 3, h: 2, cost: { wood: 90, gold: 40 }, trains: [], pop: 15, desc: 'A big fancy house: room for 15 more units.' },
+  tower2: { name: 'Double Arrow Tower', hp: 1600, w: 3, h: 2, cost: { wood: 110, gold: 70 }, trains: [], desc: 'Two towers that shoot two arrows at once, farther than a tower.' },
 };
-export const BUILDABLE: BuildKind[] = ['house', 'barracks', 'archery', 'tower', 'monastery'];
+export const BUILDABLE: BuildKind[] = ['wall', 'house', 'mansion', 'barracks', 'archery', 'tower', 'tower2', 'monastery'];
 
 const DIFF: Record<Difficulty, { grace: number; gap: number; mult: number; hp: number }> = {
   easy: { grace: 240, gap: 85, mult: 0.6, hp: 0.8 },
@@ -115,8 +118,8 @@ export function makeLand(seed: number): Uint8Array {
 }
 
 /** Castle spots (bottom middle, in tiles) for players 1–4, and the Black castle in the middle. */
-export const CASTLE_AT: [number, number][] = [[14, 12], [58, 12], [14, 38], [58, 38]];
-export const BLACK_AT: [number, number] = [36, 26];
+export const CASTLE_AT: [number, number][] = [[17, 14], [93, 14], [17, 60], [93, 60]];
+export const BLACK_AT: [number, number] = [55, 38];
 // open ground left free of trees around each castle, so there's room to build
 const PLOT_REL: [number, number][] = [[-7, 0], [7, 0], [-7, 4], [-2.5, 4], [2.5, 4], [7, 4], [-4.5, 8], [0, 8], [4.5, 8]];
 
@@ -132,7 +135,7 @@ export function canPlace(kind: BuildKind, tx: number, ty: number, code: (x: numb
   const s = BUILD[kind];
   for (let y = ty; y < ty + s.h; y++) for (let x = tx; x < tx + s.w; x++) if (code(x, y) !== 0) return false;
   // keep the door clear: no building right in front
-  for (let x = tx; x < tx + s.w; x++) if (code(x, ty + s.h) === 2) return false;
+  if (kind !== 'wall') for (let x = tx; x < tx + s.w; x++) if (code(x, ty + s.h) === 2) return false;
   return true;
 }
 
@@ -250,10 +253,11 @@ export class Game {
       this.herdSpots.push([cx + sx * 4, cy + sy * 13]);
     });
     // forests and gold out in the open land
-    for (let i = 0; i < 9; i++) forest(8 + this.r() * (MW - 16), 6 + this.r() * (MH - 12), 8);
+    for (let i = 0; i < 26; i++) forest(8 + this.r() * (MW - 16), 6 + this.r() * (MH - 12), 9);
+    for (let i = 0; i < 6; i++) mine(10 + this.r() * (MW - 20), 8 + this.r() * (MH - 16), 3);
     mine(BLACK_AT[0] - 11, BLACK_AT[1] - 1, 5);
     mine(BLACK_AT[0] + 11, BLACK_AT[1] - 1, 5);
-    this.herdSpots.push([BLACK_AT[0], 8], [BLACK_AT[0], MH - 7], [8, BLACK_AT[1]], [MW - 8, BLACK_AT[1]]);
+    this.herdSpots.push([BLACK_AT[0], 9], [BLACK_AT[0], MH - 8], [9, BLACK_AT[1]], [MW - 9, BLACK_AT[1]], [BLACK_AT[0] - 22, 20], [BLACK_AT[0] + 22, MH - 20]);
     for (const [hx, hy] of this.herdSpots) for (let i = 0; i < 4; i++) this.spawnSheep(hx, hy);
   }
 
@@ -333,7 +337,7 @@ export class Game {
       const r = this.rect(b);
       for (let ty = Math.floor(r.y0 / TILE); ty <= Math.floor((r.y1 - 1) / TILE); ty++)
         for (let tx = Math.floor(r.x0 / TILE); tx <= Math.floor((r.x1 - 1) / TILE); tx++)
-          if (tx >= 0 && ty >= 0 && tx < MW && ty < MH) bl[ty * MW + tx] = 2;
+          if (tx >= 0 && ty >= 0 && tx < MW && ty < MH) bl[ty * MW + tx] = b.kind === 'wall' ? 5 + b.team : 2;
     }
     for (const t of this.trees) if (t.wood > 0) bl[t.ty * MW + t.tx] = 3;
     for (const g of this.golds) if (g.gold > 0) bl[g.ty * MW + g.tx] = 3;
@@ -346,22 +350,26 @@ export class Game {
     return { x0: b.x - s.w * TILE / 2 + 8, x1: b.x + s.w * TILE / 2 - 8, y0: b.y - s.h * TILE + 4, y1: b.y - 6 };
   }
 
-  walkable(x: number, y: number) {
+  /** Open ground for `team` (walls are open to their own side, like a gate). */
+  walkable(x: number, y: number, team = -1) {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
-    return tx >= 0 && ty >= 0 && tx < MW && ty < MH && this.blocked[ty * MW + tx] === 0;
+    if (tx < 0 || ty < 0 || tx >= MW || ty >= MH) return false;
+    const b = this.blocked[ty * MW + tx];
+    return b === 0 || b === 5 + team;
   }
+  private open(i: number, team: number) { const b = this.blocked[i]; return b === 0 || b === 5 + team; }
 
-  private clearLine(ax: number, ay: number, bx: number, by: number) {
+  private clearLine(ax: number, ay: number, bx: number, by: number, team: number) {
     const d = dist(ax, ay, bx, by), n = Math.ceil(d / 20);
-    for (let i = 1; i < n; i++) if (!this.walkable(ax + (bx - ax) * i / n, ay + (by - ay) * i / n)) return false;
+    for (let i = 1; i < n; i++) if (!this.walkable(ax + (bx - ax) * i / n, ay + (by - ay) * i / n, team)) return false;
     return true;
   }
 
   /** A* on the tile grid to a goal tile (or next to it, when it is a tree, gold or building). Returns tile indexes. */
-  private findPath(sx: number, sy: number, gx: number, gy: number): number[] {
+  private findPath(sx: number, sy: number, gx: number, gy: number, team: number): number[] {
     const start = Math.floor(sy / TILE) * MW + Math.floor(sx / TILE);
     const gtx = Math.max(0, Math.min(MW - 1, Math.floor(gx / TILE))), gty = Math.max(0, Math.min(MH - 1, Math.floor(gy / TILE)));
-    const goalBlocked = this.blocked[gty * MW + gtx] !== 0;
+    const goalBlocked = !this.open(gty * MW + gtx, team);
     const done = (i: number) => {
       const x = i % MW, y = (i / MW) | 0;
       return goalBlocked ? Math.abs(x - gtx) <= 1 && Math.abs(y - gty) <= 1 : x === gtx && y === gty;
@@ -373,7 +381,7 @@ export class Game {
     const h = (i: number) => { const dx = Math.abs(i % MW - gtx), dy = Math.abs(((i / MW) | 0) - gty); return Math.max(dx, dy) + 0.41 * Math.min(dx, dy); };
     f[start] = h(start);
     let best = start, bestH = h(start), steps = 0;
-    while (open.length && steps++ < 4000) {
+    while (open.length && steps++ < 9000) {
       let bi = 0;
       for (let i = 1; i < open.length; i++) if (f[open[i]] < f[open[bi]]) bi = i;
       const cur = open[bi];
@@ -389,9 +397,9 @@ export class Game {
         const nx = cx + dx, ny = cy + dy;
         if (nx < 0 || ny < 0 || nx >= MW || ny >= MH) continue;
         const ni = ny * MW + nx;
-        if (this.blocked[ni] || closed[ni]) continue;
+        if (!this.open(ni, team) || closed[ni]) continue;
         // no cutting corners past walls
-        if (dx && dy && (this.blocked[cy * MW + nx] || this.blocked[ny * MW + cx])) continue;
+        if (dx && dy && (!this.open(cy * MW + nx, team) || !this.open(ny * MW + cx, team))) continue;
         const ng = g[cur] + (dx && dy ? 1.41 : 1);
         if (ng < g[ni]) { g[ni] = ng; from[ni] = cur; f[ni] = ng + h(ni); open.push(ni); }
       }
@@ -406,18 +414,18 @@ export class Game {
     const d = dist(u.x, u.y, x, y);
     if (d <= near) { this.setAnim(u, 'idle'); return true; }
     let wx = x, wy = y;
-    if (!this.clearLine(u.x, u.y, x, y)) {
+    if (!this.clearLine(u.x, u.y, x, y, u.team)) {
       const goal = Math.floor(y / TILE) * MW + Math.floor(x / TILE);
       u.pathT -= dt;
       if (goal !== u.pathGoal || u.pathT <= 0 || !u.path.length) {
-        u.path = this.findPath(u.x, u.y, x, y);
+        u.path = this.findPath(u.x, u.y, x, y, u.team);
         u.pathGoal = goal;
         u.pathT = 1 + this.r();
       }
       // skip ahead to the farthest waypoint we can see
       while (u.path.length > 1) {
         const n = u.path[1];
-        if (this.clearLine(u.x, u.y, (n % MW + 0.5) * TILE, (((n / MW) | 0) + 0.5) * TILE)) u.path.shift(); else break;
+        if (this.clearLine(u.x, u.y, (n % MW + 0.5) * TILE, (((n / MW) | 0) + 0.5) * TILE, u.team)) u.path.shift(); else break;
       }
       if (u.path.length) {
         const n = u.path[0];
@@ -436,15 +444,27 @@ export class Game {
   /** Moves by (dx, dy), sliding along walls. */
   private step(u: Unit, dx: number, dy: number) {
     const r = 10;
-    const box = (x: number, y: number) => this.walkable(x - r, y) && this.walkable(x + r, y) && this.walkable(x, y - r / 2) && this.walkable(x, y + r / 2);
+    const t = u.team, box = (x: number, y: number) => this.walkable(x - r, y, t) && this.walkable(x + r, y, t) && this.walkable(x, y - r / 2, t) && this.walkable(x, y + r / 2, t);
     // already touching a wall (pushed there by a crowd or a new building): only the feet have to be clear
-    const ok = box(u.x, u.y) ? box : (x: number, y: number) => this.walkable(x, y) || !this.walkable(u.x, u.y);
+    const ok = box(u.x, u.y) ? box : (x: number, y: number) => this.walkable(x, y, t) || !this.walkable(u.x, u.y, t);
     if (ok(u.x + dx, u.y + dy)) { u.x += dx; u.y += dy; u.stuck = 0; return; }
     if (dx && ok(u.x + dx, u.y)) { u.x += dx; u.stuck = 0; return; }
     if (dy && ok(u.x, u.y + dy)) { u.y += dy; u.stuck = 0; return; }
     u.stuck += 1;
-    if (u.stuck === 20) u.pathT = 0;
+    if (u.stuck === 20) { u.pathT = 0; this.breakWall(u); }
     if (u.stuck > 90 && u.kind !== 'hero') this.unstick(u);
+  }
+
+  /** Blocked by an enemy wall: hit it. */
+  private breakWall(u: Unit) {
+    if (u.kind === 'pawn' || u.kind === 'sheep' || u.kind === 'monk' || u.kind === 'hero') return;
+    let best = 0, bd = 150;
+    for (const b of this.buildings) {
+      if (b.dead || b.kind !== 'wall' || !enemies(u.team, b.team)) continue;
+      const d = this.distToRect(u.x, u.y, b);
+      if (d < bd) { bd = d; best = b.id; }
+    }
+    if (best) { u.target = best; u.think = 2; }
   }
 
   /** Last resort for someone wedged in a corner: hop to the closest open tile. */
@@ -452,7 +472,7 @@ export class Game {
     const tx = Math.floor(u.x / TILE), ty = Math.floor(u.y / TILE);
     for (let r = 1; r <= 4; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       const x = tx + dx, y = ty + dy;
-      if (x < 0 || y < 0 || x >= MW || y >= MH || this.blocked[y * MW + x]) continue;
+      if (x < 0 || y < 0 || x >= MW || y >= MH || !this.open(y * MW + x, u.team)) continue;
       u.x = (x + 0.5) * TILE; u.y = (y + 0.5) * TILE; u.stuck = 0; u.path = []; u.pathT = 0;
       return;
     }
@@ -477,7 +497,7 @@ export class Game {
   tileCode(x: number, y: number) {
     if (x < 0 || y < 0 || x >= MW || y >= MH) return 1;
     const b = this.blocked[y * MW + x];
-    return b === 0 ? 0 : b === 1 ? 1 : b;
+    return b === 0 ? 0 : b === 1 ? 1 : b === 3 ? 3 : 2;
   }
 
   /** Build anywhere there's room, close to your hero. Returns a message when it can't. */
@@ -664,7 +684,7 @@ export class Game {
     const side = u.x < nx ? -1 : 1;
     const sx = nx + side * 48, sy = ny + 14;
     if (dist(u.x, u.y, nx, ny) > 64) {
-      const tx = this.walkable(sx, sy) ? sx : nx, ty = this.walkable(sx, sy) ? sy : ny;
+      const tx = this.walkable(sx, sy, u.team) ? sx : nx, ty = this.walkable(sx, sy, u.team) ? sy : ny;
       this.moveTo(u, tx, ty, dt, 10);
       if (u.stuck > 60) { u.stuck = 0; u.node = 0; }
       return;
@@ -857,6 +877,7 @@ export class Game {
     for (const b of this.buildings) {
       if (b.dead || !enemies(u.team, b.team)) continue;
       const d = this.distToRect(u.x, u.y, b);
+      if (b.kind === 'wall' && d > 40) continue; // walls only when they're in the way
       if (d < Math.max(s.aggro, 260) && d < bd) { bd = d; best = b.id; }
     }
     return best;
@@ -865,7 +886,7 @@ export class Game {
   private nearestPlayerBuilding(x: number, y: number): Building | undefined {
     let best: Building | undefined, bd = Infinity;
     for (const b of this.buildings) {
-      if (b.dead || b.team === BLACK) continue;
+      if (b.dead || b.team === BLACK || b.kind === 'wall') continue;
       const d = dist(x, y, b.x, b.y) - (b.kind === 'castle' ? 300 : 0);
       if (d < bd) { bd = d; best = b; }
     }
@@ -901,11 +922,11 @@ export class Game {
     b.hp -= n;
     if (b.hp <= 0) {
       b.dead = true;
-      this.fx.push([4, b.x, b.y - 60], [0, b.x - 50, b.y - 30], [0, b.x + 50, b.y - 40]);
-      this.sound('boom', b.x, b.y);
+      if (b.kind === 'wall') { this.fx.push([1, b.x, b.y - 30]); this.sound('hit', b.x, b.y); }
+      else { this.fx.push([4, b.x, b.y - 60], [0, b.x - 50, b.y - 30], [0, b.x + 50, b.y - 40]); this.sound('boom', b.x, b.y); }
       if (b.id === this.blackCastle) { this.state = 'won'; this.sound('win', b.x, b.y); this.say('The Black castle has fallen. You win!'); }
-      else if (b.team === BLACK) this.say(`The Black ${BUILD[b.kind].name.toLowerCase()} is down!`);
-      else if (b.kind !== 'castle') this.say(`${COLOR_NAMES[b.team]} lost a ${BUILD[b.kind].name.toLowerCase()}.`);
+      else if (b.team === BLACK && b.kind !== 'wall') this.say(`The Black ${BUILD[b.kind].name.toLowerCase()} is down!`);
+      else if (b.kind !== 'castle' && b.kind !== 'wall') this.say(`${COLOR_NAMES[b.team]} lost a ${BUILD[b.kind].name.toLowerCase()}.`);
     }
   }
 
@@ -930,20 +951,27 @@ export class Game {
   }
 
   private buildingTick(b: Building, dt: number) {
-    if (b.kind !== 'tower' && b.kind !== 'castle') return;
+    if (b.kind !== 'tower' && b.kind !== 'tower2' && b.kind !== 'castle') return;
     b.cd -= dt;
     if (b.cd > 0) return;
-    const range = b.kind === 'tower' ? 420 : 400;
-    let best: Unit | null = null, bd = range;
+    const range = b.kind === 'tower2' ? 480 : b.kind === 'tower' ? 420 : 400;
+    // the two nearest enemies (a double tower shoots both)
+    let best: Unit | null = null, second: Unit | null = null, bd = range, sd = range;
     for (const v of this.units) {
       if (v.dead || !enemies(b.team, v.team)) continue;
       const d = dist(b.x, b.y - 40, v.x, v.y);
-      if (d < bd) { bd = d; best = v; }
+      if (d < bd) { second = best; sd = bd; bd = d; best = v; } else if (d < sd) { sd = d; second = v; }
     }
-    if (best) {
-      b.cd = b.kind === 'tower' ? 0.9 : b.team === BLACK ? 0.7 : 1.1;
-      this.shoot(b.x, b.y - (b.kind === 'tower' ? 170 : 120), best, (b.kind === 'tower' ? 14 : 12) * (b.team === BLACK ? DIFF[this.diff].hp : 1), b.team);
+    if (!best) return;
+    const mul = b.team === BLACK ? DIFF[this.diff].hp : 1;
+    if (b.kind === 'tower2') {
+      b.cd = 0.8;
+      this.shoot(b.x - 56, b.y - 170, best, 15 * mul, b.team);
+      this.shoot(b.x + 56, b.y - 170, second ?? best, 15 * mul, b.team);
+      return;
     }
+    b.cd = b.kind === 'tower' ? 0.9 : b.team === BLACK ? 0.7 : 1.1;
+    this.shoot(b.x, b.y - (b.kind === 'tower' ? 170 : 120), best, (b.kind === 'tower' ? 14 : 12) * mul, b.team);
   }
 
   /** Units push apart a little so they don't stack on one spot. */
@@ -966,8 +994,8 @@ export class Game {
           const d = dist(u.x, u.y, v.x, v.y);
           if (d < min && d > 0.01) {
             const push = (min - d) * 0.25, nx = (u.x - v.x) / d, ny = (u.y - v.y) / d;
-            if (u.kind !== 'hero' && this.walkable(u.x + nx * push, u.y + ny * push)) { u.x += nx * push; u.y += ny * push; }
-            if (v.kind !== 'hero' && this.walkable(v.x - nx * push, v.y - ny * push)) { v.x -= nx * push; v.y -= ny * push; }
+            if (u.kind !== 'hero' && this.walkable(u.x + nx * push, u.y + ny * push, u.team)) { u.x += nx * push; u.y += ny * push; }
+            if (v.kind !== 'hero' && this.walkable(v.x - nx * push, v.y - ny * push, v.team)) { v.x -= nx * push; v.y -= ny * push; }
           } else if (d <= 0.01) u.x += 1;
         }
       }

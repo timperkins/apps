@@ -99,3 +99,8 @@
   .tk-item > img, .tk-face { width: 48px; height: 48px; }
   .tk-face { background-size: auto 84px; background-position: -27px -21px; }
 }
+.tk-wallpic { grid-row: 1 / 3; width: 64px; height: 64px; display: flex; align-items: flex-end; justify-content: center; gap: 0; }
+.tk-wallpic i { width: 20px; height: 40px; background: #d9cca4; border: 2px solid #2a2a3a; border-top: 8px solid var(--trim, #3f86a8); box-sizing: border-box; }
+.tk-wall-red { --trim: #c4544a; } .tk-wall-yellow { --trim: #d0a93a; } .tk-wall-purple { --trim: #8f5bb0; }
+.tk-twin { grid-row: 1 / 3; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; }
+.tk-twin img { width: 32px; height: 64px; object-fit: contain; image-rendering: pixelated; }

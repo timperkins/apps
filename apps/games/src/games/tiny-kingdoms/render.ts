@@ -138,7 +138,7 @@ export class Renderer {
     for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
       if (at(x, y) && (!at(x - 1, y) || !at(x + 1, y) || !at(x, y - 1) || !at(x, y + 1))) this.shoreTiles.push(y * MW + x);
     }
-    for (let i = 0; i < 260; i++) {
+    for (let i = 0; i < 600; i++) {
       const x = Math.floor(r() * MW), y = Math.floor(r() * MH), roll = r();
       const px = (x + 0.2 + r() * 0.6) * TILE, py = (y + 0.3 + r() * 0.5) * TILE;
       if (at(x, y) && at(x - 1, y) && at(x + 1, y) && at(x, y + 1) && at(x, y - 1)) {
@@ -311,10 +311,14 @@ export class Renderer {
   private drawBuilding(e: Ent, now: number, o: Overlay) {
     const c = this.ctx;
     const kind = BUILD_KINDS[e.kind - 100] as BuildKind;
-    const file = kind === 'house' ? `buildings/${COLORS[e.team]}/house${(e.seq % 3) + 1}` : `buildings/${COLORS[e.team]}/${kind}`;
-    const im = img(file);
-    if (!im) return;
-    c.drawImage(im, e.x - im.width / 2, e.y - im.height + 8);
+    if (kind === 'wall') {
+      this.drawWall(e.x, e.y, e.team, 1);
+      if (e.hp < 100) this.bar(e.x, e.y - 92, 44, e.hp, e.team === BLACK ? '#e04a3a' : '#5bd15b');
+      return;
+    }
+    const size = this.drawBuildingArt(kind, e.team, e.x, e.y, e.seq);
+    if (!size) return;
+    const im = { width: size.w, height: size.h };
     if (e.id === o.nearBuilding) {
       c.save(); c.strokeStyle = 'rgba(255,240,170,.9)'; c.lineWidth = 4; c.setLineDash([12, 8]);
       const s = BUILD[kind];
@@ -333,6 +337,53 @@ export class Renderer {
     if (e.hp < 100) this.bar(e.x, e.y - im.height + 30, Math.min(160, im.width * 0.6), e.hp, e.team === BLACK ? '#e04a3a' : '#5bd15b');
   }
 
+  /** Building art for a kind (mansions and double towers are made from the pack's houses and towers). Returns its size. */
+  private drawBuildingArt(kind: BuildKind, team: number, x: number, y: number, seq = 0, alpha = 1) {
+    const c = this.ctx, col = COLORS[team];
+    c.save();
+    if (alpha < 1) c.globalAlpha = alpha;
+    let out: { w: number; h: number } | null = null;
+    if (kind === 'mansion') {
+      const im = img(`buildings/${col}/house3`);
+      if (im) { const w = im.width * 1.6, h = im.height * 1.6; c.drawImage(im, x - w / 2, y - h + 12, w, h); out = { w, h }; }
+    } else if (kind === 'tower2') {
+      const im = img(`buildings/${col}/tower`);
+      if (im) { for (const dx of [-56, 56]) c.drawImage(im, x + dx - im.width / 2, y - im.height + 8); out = { w: im.width + 112, h: im.height }; }
+    } else if (kind === 'wall') {
+      this.drawWall(x, y, team, alpha); out = { w: 64, h: 90 };
+    } else {
+      const im = img(kind === 'house' ? `buildings/${col}/house${(seq % 3) + 1}` : `buildings/${col}/${kind}`);
+      if (im) { c.drawImage(im, x - im.width / 2, y - im.height + 8); out = { w: im.width, h: im.height }; }
+    }
+    c.restore();
+    return out;
+  }
+
+  /** A little stone wall block in the castle colors, with the kingdom's color on top. */
+  private drawWall(x: number, y: number, team: number, alpha: number) {
+    const c = this.ctx;
+    const trim = ['#3f86a8', '#c4544a', '#d0a93a', '#8f5bb0', '#4a4a5a'][team] ?? '#888';
+    c.save();
+    if (alpha < 1) c.globalAlpha = alpha;
+    const x0 = x - 32, top = y - 84;
+    c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(x0 + 4, y - 8, 64, 10);
+    c.fillStyle = '#2a2a3a'; c.fillRect(x0, top + 14, 64, 72);
+    c.fillStyle = '#d9cca4'; c.fillRect(x0 + 3, top + 17, 58, 52);
+    c.fillStyle = '#9c917a'; c.fillRect(x0 + 3, top + 69, 58, 14);
+    c.strokeStyle = '#a89c7c'; c.lineWidth = 2;
+    c.beginPath();
+    for (const ry of [30, 43, 56]) { c.moveTo(x0 + 3, top + ry); c.lineTo(x0 + 61, top + ry); }
+    for (const [ry, xs] of [[17, [22, 44]], [30, [12, 34, 54]], [43, [22, 44]], [56, [12, 34, 54]]] as [number, number[]][])
+      for (const bx of xs) { c.moveTo(x0 + bx, top + ry); c.lineTo(x0 + bx, top + ry + 13); }
+    c.stroke();
+    // battlements in the kingdom's color
+    c.fillStyle = '#2a2a3a';
+    for (const mx of [0, 24, 46]) c.fillRect(x0 + mx, top, 18, 18);
+    c.fillStyle = trim;
+    for (const mx of [0, 24, 46]) c.fillRect(x0 + mx + 3, top + 3, 12, 13);
+    c.restore();
+  }
+
   private drawGhost(gh: NonNullable<Overlay['ghost']>, me: number, sec: number) {
     const c = this.ctx, st = BUILD[gh.kind];
     const x0 = gh.tx * TILE, y0 = gh.ty * TILE, w = st.w * TILE, h = st.h * TILE;
@@ -341,9 +392,8 @@ export class Renderer {
     c.strokeStyle = gh.ok ? 'rgba(200,255,200,.95)' : 'rgba(255,170,160,.95)';
     c.lineWidth = 3; c.setLineDash([10, 8]); c.lineDashOffset = -sec * 20;
     c.beginPath(); c.roundRect(x0 + 2, y0 + 2, w - 4, h - 4, 8); c.fill(); c.stroke();
-    const im = img(`buildings/${COLORS[me]}/${gh.kind === 'house' ? 'house1' : gh.kind}`);
-    if (im) { c.globalAlpha = 0.55; c.drawImage(im, x0 + w / 2 - im.width / 2, y0 + h - im.height + 8); }
     c.restore();
+    this.drawBuildingArt(gh.kind, me, x0 + w / 2, y0 + h, 0, 0.55);
   }
 
   /** What's on a tile for building, from what this player can see: 0 open, 1 water, 2 building, 3 tree or gold. */
