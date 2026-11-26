@@ -5,7 +5,7 @@ import { coopBadge, coopMenu, every } from '../coop/ui';
 import type { FriendSession, HostSession, Session } from '../coop/session';
 import { isMuted, play, setMuted, unlockAudio } from './audio';
 import {
-  BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, plotSpots,
+  BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, canPlace, costText, ghostSpot,
   type BuildKind, type Cost, type Difficulty, type Input, type Order, type Res, type Snap, type UnitKind,
 } from './game';
 import { Renderer, artUrl, loadArt, type Overlay } from './render';
@@ -17,7 +17,7 @@ const ORDER_ICON: Record<Order, string> = { follow: '🚩', defend: '🛡️', a
 
 type ToHost =
   | { t: 'in'; mx: number; my: number; atk: boolean; guard: boolean }
-  | { t: 'build'; plot: number; kind: BuildKind }
+  | { t: 'build'; kind: BuildKind; tx: number; ty: number }
   | { t: 'train'; bid: number; kind: UnitKind }
   | { t: 'order'; o: Order };
 type ToFriend =
@@ -34,13 +34,13 @@ const HELP = `
   <p>You are the hero of a little kingdom. The <b>Black kingdom</b> in the middle of the island sends bigger and bigger attacks at your castle. Grow strong, then march in and knock down the Black castle to win.</p>
   <ul>
     <li>${icon('wood')} ${icon('gold')} ${icon('meat')} Your <b>pawns</b> chop trees, mine gold and catch sheep by themselves. You can chop, mine and catch sheep with your sword too.</li>
-    <li>${icon('hammer')} Walk onto an empty spot by your castle and press <kbd>E</kbd> to <b>build</b>: houses (room for more units), barracks, an archery range, towers and a monastery.</li>
+    <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
     <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
   </ul>
   <h3>Keys</h3>
-  <p><kbd>WASD</kbd>/arrows walk · <kbd>Space</kbd> or click swing · <kbd>Shift</kbd> block · <kbd>E</kbd> build or train · <kbd>Q</kbd> army order · <kbd>Esc</kbd> menu. Phones get a stick and buttons.</p>
+  <p><kbd>WASD</kbd>/arrows walk · <kbd>Space</kbd> or click swing · <kbd>Shift</kbd> block · <kbd>B</kbd> build · <kbd>E</kbd> train at a building · <kbd>Q</kbd> army order · <kbd>Esc</kbd> menu. Phones get a stick and buttons.</p>
   <p>👥 <b>Play together</b>: up to 4 players, each with their own kingdom in a corner of the island. Press <kbd>Esc</kbd> → Play with friends to get a code; friends pick Join a friend on the title screen.</p>
   <p class="tk-credit">Art: <a href="https://pixelfrog-assets.itch.io/tiny-swords" target="_blank" rel="noopener">Tiny Swords</a> by Pixel Frog.</p>`;
 
@@ -55,6 +55,7 @@ const game: GameModule = {
       </div>
       <div class="tk-side">
         <canvas class="tk-mini" width="216" height="144"></canvas>
+        <button class="tk-order" data-b="build">🔨 Build (B)</button>
         <button class="tk-order" data-b="order"></button>
       </div>
       <div class="tk-btns">
@@ -71,6 +72,7 @@ const game: GameModule = {
           <button data-t="use">✋<span>Use</span></button>
           <button data-t="guard">🛡️<span>Block</span></button>
           <button data-t="order">🚩<span>Army</span></button>
+          <button data-t="build">🔨<span>Build</span></button>
         </div>
       </div>
       <div class="tk-dim tk-panel-wrap" hidden><div class="tk-panel"></div></div>
@@ -81,7 +83,7 @@ const game: GameModule = {
     const canvas = $<HTMLCanvasElement>('.tk-canvas');
     const mini = $<HTMLCanvasElement>('.tk-mini');
     const resEl = $('.tk-res'), waveEl = $('.tk-wave'), heroEl = $('.tk-hero'), toastsEl = $('.tk-toasts'), hintEl = $('.tk-hint');
-    const orderBtn = $('.tk-order'), muteBtn = $('[data-b="mute"]');
+    const orderBtn = $('[data-b="order"]'), muteBtn = $('[data-b="mute"]');
     const panelWrap = $('.tk-panel-wrap'), panel = $('.tk-panel'), titleEl = $('.tk-title');
     const touchMode = matchMedia('(pointer: coarse)').matches;
     wrap.classList.toggle('touch', touchMode);
@@ -108,14 +110,14 @@ const game: GameModule = {
       const m = Math.hypot(mx, my);
       if (m > 1) { mx /= m; my /= m; }
       const blocking = keys.has('shift') || keys.has('k') || touchGuard;
-      return { mx, my, atk: !panelOpen() && (keys.has(' ') || keys.has('j') || touchAtk || mouseAtk), guard: blocking };
+      return { mx, my, atk: !panelOpen() && !placing && (keys.has(' ') || keys.has('j') || touchAtk || mouseAtk), guard: blocking };
     };
     const panelOpen = () => !panelWrap.hidden;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!playing) return;
       const k = e.key.toLowerCase();
-      if (k === 'escape') { e.preventDefault(); if (panelOpen()) closePanel(); else openPause(); return; }
+      if (k === 'escape') { e.preventDefault(); if (panelOpen()) closePanel(); else if (placing) cancelPlace(); else openPause(); return; }
       if (panelOpen()) {
         // number keys pick from the open menu
         const n = Number(k);
@@ -124,6 +126,8 @@ const game: GameModule = {
         return;
       }
       if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+      if (placing && (k === ' ' || k === 'enter')) { e.preventDefault(); if (!e.repeat) place(); return; }
+      if (k === 'b' && !e.repeat) { if (placing) cancelPlace(); else openBuild(); }
       if (k === 'e' && !e.repeat) use();
       if (k === 'q' && !e.repeat) cycleOrder();
       if (k === '1' || k === '2' || k === '3') setOrder(ORDERS[Number(k) - 1]);
@@ -134,7 +138,13 @@ const game: GameModule = {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
-    canvas.addEventListener('pointerdown', e => { if (!touchMode && e.button === 0) mouseAtk = true; unlockAudio(); });
+    canvas.addEventListener('pointerdown', e => {
+      unlockAudio();
+      if (touchMode) return;
+      if (placing) { if (e.button === 0) place(); else cancelPlace(); return; }
+      if (e.button === 0) mouseAtk = true;
+    });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
     const onPointerUp = () => { mouseAtk = false; };
     window.addEventListener('pointerup', onPointerUp);
 
@@ -163,6 +173,7 @@ const game: GameModule = {
         if (t === 'guard') touchGuard = true;
         if (t === 'use') use();
         if (t === 'order') cycleOrder();
+        if (t === 'build') { if (placing) cancelPlace(); else openBuild(); }
       });
       const up = () => { if (t === 'atk') touchAtk = false; if (t === 'guard') touchGuard = false; };
       b.addEventListener('pointerup', up);
@@ -173,6 +184,7 @@ const game: GameModule = {
     muteBtn.addEventListener('click', () => { setMuted(!isMuted()); muteBtn.textContent = isMuted() ? '🔇' : '🔊'; });
     muteBtn.textContent = isMuted() ? '🔇' : '🔊';
     $('[data-b="menu"]').addEventListener('click', () => openPause());
+    $('[data-b="build"]').addEventListener('click', () => { if (placing) cancelPlace(); else openBuild(); });
 
     // ---------- toasts ----------
     const toast = (m: string) => {
@@ -188,34 +200,41 @@ const game: GameModule = {
     // ---------- what's around me ----------
     const myKingdom = () => lastSnap?.k.find(k => k.s === me);
     const myHero = () => { const k = myKingdom(); return k && ren ? ren.ent(k.h) : undefined; };
-    const nearThings = () => {
-      const k = myKingdom(), h = myHero();
-      const res: { plot: number; building: number } = { plot: -1, building: 0 };
-      if (!k || !h || !ren) return res;
-      const [cx, cy] = CASTLE_AT[me];
-      const spots = plotSpots(cx, cy);
-      let bd = 150;
-      spots.forEach(([x, y], i) => {
-        const occupied = k.p[i] && ren!.ent(k.p[i]);
-        const d = Math.hypot(h.x - x * TILE, h.y - (y * TILE - 50));
-        if (!occupied && d < bd) { bd = d; res.plot = i; }
-      });
-      if (res.plot >= 0) return res;
-      let bb = 230;
+    /** Your building close enough to train at, if any. */
+    const nearBuilding = () => {
+      const h = myHero();
+      if (!h || !ren) return 0;
+      let best = 0, bb = 230;
       for (const e of ren.ents()) {
         if (e.kind < 100 || e.team !== me) continue;
-        const kind = BUILD_KINDS[e.kind - 100];
-        if (!BUILD[kind].trains.length) continue;
+        if (!BUILD[BUILD_KINDS[e.kind - 100]].trains.length) continue;
         const d = Math.hypot(h.x - e.x, h.y - (e.y - 20));
-        if (d < bb) { bb = d; res.building = e.id; }
+        if (d < bb) { bb = d; best = e.id; }
       }
-      return res;
+      return best;
+    };
+    // putting down a building: it goes right behind the hero
+    let placing: BuildKind | null = null;
+    const ghost = () => {
+      const h = myHero();
+      if (!placing || !h || !ren) return null;
+      const { tx, ty } = ghostSpot(placing, h.x, h.y);
+      return { kind: placing, tx, ty, ok: canPlace(placing, tx, ty, (x, y) => ren!.tileCode(x, y)) };
+    };
+    const cancelPlace = () => { placing = null; };
+    const place = () => {
+      const gh = ghost();
+      if (!gh) { placing = null; return; }
+      if (!gh.ok) { fail('No room here. Find open grass, away from trees and water.'); return; }
+      if (!stockOk(BUILD[gh.kind].cost)) { fail(`You need ${costText(BUILD[gh.kind].cost)}.`); placing = null; return; }
+      doBuild(gh.kind, gh.tx, gh.ty);
+      placing = null;
     };
 
     // ---------- commands (the host runs them, friends send them) ----------
     const sendHost = (m: ToHost) => { if (net?.role === 'friend') net.send(m); };
     const fail = (m: string | null) => { if (m) { toast(m); play('no'); } };
-    const doBuild = (plot: number, kind: BuildKind) => { if (net?.role === 'friend') sendHost({ t: 'build', plot, kind }); else if (g) fail(g.build(me, plot, kind)); };
+    const doBuild = (kind: BuildKind, tx: number, ty: number) => { if (net?.role === 'friend') sendHost({ t: 'build', kind, tx, ty }); else if (g) fail(g.build(me, kind, tx, ty)); };
     const doTrain = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'train', bid, kind }); else if (g) fail(g.train(me, bid, kind)); };
     const setOrder = (o: Order) => {
       if (net?.role === 'friend') sendHost({ t: 'order', o }); else g?.setOrder(me, o);
@@ -237,13 +256,13 @@ const game: GameModule = {
     const stockOk = (c: Cost) => { const k = myKingdom(); return !!k && (Object.keys(c) as Res[]).every(r => ({ gold: k.g, wood: k.w, meat: k.m })[r] >= (c[r] ?? 0)); };
     const use = () => {
       if (!playing || panelOpen()) return;
-      const n = nearThings();
-      if (n.plot >= 0) openBuild(n.plot);
-      else if (n.building) openTrain(n.building);
-      else toast('Walk onto a building spot (hammer) or up to your castle or barracks.');
+      if (placing) { place(); return; }
+      const b = nearBuilding();
+      if (b) openTrain(b);
+      else openBuild();
     };
-    const openBuild = (plot: number) => {
-      panelFor = plot;
+    const openBuild = () => {
+      if (!playing || panelOpen() || !myHero()) return;
       showPanel(`<h2>${icon('hammer')} Build</h2><div class="tk-list">${BUILDABLE.map((b, i) => {
         const s = BUILD[b];
         return `<button class="tk-item" data-pick="${b}" ${stockOk(s.cost) ? '' : 'data-poor'}>
@@ -270,7 +289,14 @@ const game: GameModule = {
       const t = e.target as HTMLElement;
       if (t.closest('[data-close]')) { closePanel(); return; }
       const pick = t.closest<HTMLElement>('[data-pick]')?.dataset.pick;
-      if (pick && panelKind === 'build') { doBuild(panelFor, pick as BuildKind); closePanel(); return; }
+      if (pick && panelKind === 'build') {
+        const kind = pick as BuildKind;
+        closePanel();
+        if (!stockOk(BUILD[kind].cost)) { fail(`You need ${costText(BUILD[kind].cost)}.`); return; }
+        placing = kind;
+        toast(touchMode ? 'Walk to open grass, then tap ✋ to put it down. 🔨 cancels.' : 'Walk to open grass, then press E or Space (or click) to put it down. Esc cancels.');
+        return;
+      }
       if (pick && panelKind === 'train') { doTrain(panelFor, pick as UnitKind); setTimeout(() => panelKind === 'train' && openTrain(panelFor), 120); return; }
       const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
       if (act) pauseAction(act);
@@ -350,7 +376,7 @@ const game: GameModule = {
         const m = raw as ToHost;
         if (!g || !m || net !== s) return;
         if (m.t === 'in') g.inputs.set(slot, { mx: Math.max(-1, Math.min(1, +m.mx || 0)), my: Math.max(-1, Math.min(1, +m.my || 0)), atk: !!m.atk, guard: !!m.guard });
-        else if (m.t === 'build' && BUILDABLE.includes(m.kind)) { const err = g.build(slot, m.plot | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
+        else if (m.t === 'build' && BUILDABLE.includes(m.kind)) { const err = g.build(slot, m.kind, m.tx | 0, m.ty | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'train' && m.kind in UNIT) { const err = g.train(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'order' && ORDERS.includes(m.o)) g.setOrder(slot, m.o);
       });
@@ -454,7 +480,7 @@ const game: GameModule = {
       net?.close();
       net = null;
       refreshBadge();
-      playing = false; g = null; ren = null; lastSnap = null;
+      playing = false; g = null; ren = null; lastSnap = null; placing = null;
       wrap.classList.remove('playing');
       panelWrap.hidden = true;
       showTitle();
@@ -490,21 +516,21 @@ const game: GameModule = {
       const heroPos = k ? ren.pos(k.h, now) : null;
       const focus = heroPos ?? (k ? { x: CASTLE_AT[me][0] * TILE, y: CASTLE_AT[me][1] * TILE + 60 } : { x: CASTLE_AT[me][0] * TILE, y: CASTLE_AT[me][1] * TILE });
       // what's drawn over the map
-      const near = nearThings();
-      const ov: Overlay = { me, plots: [], nearBuilding: near.building, names: new Map() };
-      if (k) {
-        const [cx, cy] = CASTLE_AT[me];
-        plotSpots(cx, cy).forEach(([x, y], i) => ov.plots.push({ x: x * TILE, y: y * TILE, empty: !(k.p[i] && ren!.ent(k.p[i])), near: near.plot === i }));
-      }
+      if (placing && !myHero()) placing = null;
+      const gh = ghost();
+      const nb = gh ? 0 : nearBuilding();
+      const ov: Overlay = { me, ghost: gh, nearBuilding: nb, names: new Map() };
       if (lastSnap) for (const kk of lastSnap.k) if (net || kk.s !== me) ov.names.set(kk.h, kk.s === me ? 'You' : `P${kk.s + 1}`);
       ren.draw(now, ov, focus);
       if (Math.floor(now / 250) !== Math.floor((now - dt * 1000) / 250)) ren.minimap(mini, me);
       // hint over the hero
-      if (heroPos && !panelOpen() && (near.plot >= 0 || near.building)) {
+      if (heroPos && !panelOpen() && (gh || nb)) {
         const p = ren.toScreen(heroPos.x, heroPos.y - 130);
         hintEl.hidden = false;
         hintEl.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
-        hintEl.textContent = near.plot >= 0 ? `${touchMode ? '✋' : 'E'}: build here` : `${touchMode ? '✋' : 'E'}: train`;
+        const key = touchMode ? '✋' : 'E';
+        hintEl.textContent = gh ? (gh.ok ? `${key}: put the ${BUILD[gh.kind].name.toLowerCase()} here` : 'No room here') : `${key}: train`;
+        hintEl.classList.toggle('bad', !!gh && !gh.ok);
       } else hintEl.hidden = true;
       // the HUD, only when it changes
       const s = lastSnap;

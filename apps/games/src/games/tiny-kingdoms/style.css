@@ -25,6 +25,7 @@
 .tk-toasts { position: absolute; top: 110px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; width: min(92vw, 520px); }
 .tk-toast { padding: 7px 14px; border-radius: 10px; background: rgba(40, 28, 16, .85); color: #fff6de; font-weight: 700; font-size: 15px; text-align: center; transition: opacity .6s; }
 .tk-toast.out { opacity: 0; }
+.tk-hint.bad { background: #ffd9d2; border-color: #a33; }
 .tk-hint { position: absolute; left: 0; top: 0; padding: 5px 10px; border-radius: 8px; background: #fff6de; border: 2px solid #6b4a2b; font-weight: 800; font-size: 14px; pointer-events: none; white-space: nowrap; }
 
 /* panels: Tiny Swords paper */
@@ -69,10 +70,11 @@
 .tk-touch { position: absolute; inset: auto 0 0 0; height: 0; }
 .tk-stick { position: absolute; left: max(22px, env(safe-area-inset-left)); bottom: max(26px, env(safe-area-inset-bottom)); width: 124px; height: 124px; border-radius: 50%; background: rgba(255, 246, 222, .35); border: 3px solid rgba(107, 74, 43, .6); touch-action: none; }
 .tk-stick i { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px; border-radius: 50%; background: rgba(255, 246, 222, .9); border: 3px solid #6b4a2b; }
-.tk-tbtns { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(170px, calc(env(safe-area-inset-bottom) + 160px)); display: grid; grid-template-columns: repeat(2, 64px); gap: 10px; }
+.tk-tbtns { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(170px, calc(env(safe-area-inset-bottom) + 160px)); display: grid; grid-template-columns: repeat(3, 64px); gap: 10px; }
 .tk-tbtns button { width: 64px; height: 64px; border-radius: 50%; border: 3px solid #6b4a2b; background: rgba(255, 246, 222, .9); font-size: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; touch-action: none; padding: 0; }
 .tk-tbtns button span { font: 700 10px system-ui; }
 .tk-tbtns .big { background: rgba(255, 214, 140, .95); }
+.tk.touch .tk-order[data-b="build"] { display: none; }
 .tk.touch .tk-mini { width: 150px; height: 100px; }
 .tk.touch .tk-hero { bottom: max(8px, env(safe-area-inset-bottom)); }
 .tk.touch .tk-hp { width: 140px; }
