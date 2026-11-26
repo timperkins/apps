@@ -2,7 +2,7 @@
 import {
   ALL_ARMOR, ALL_ARTIFACTS, ALL_MELEE, ALL_RANGED, ARTIFACTS, DIFFS, ELEMENT_BONUS, ENCHANTS, HERO_MAX, ICE_SLOW, LAST_LEVEL, LEVELS, MAX_LEVEL, MAX_SOULS, MOB_GEAR_CHANCE, MONSTERS,
   armorDef, armorOf, enchCost, enchChoices, enchantArmor, enchantMelee, enchantRanged, gear, gearMul, heroXpNeed, isArmor, isArtifact, isMelee, isRanged, itemName, makeKey, meleeOf, modeOf,
-  parseKey, powerOf, rangedOf, rollDropLevel, threatDmg,
+  MINI_BOSSES, parseKey, powerOf, rangedOf, rollDropLevel, threatDmg,
   type ArtifactId, type Element, type EnchId, type EnchSet, type GearId, type ItemKey, type LevelDef, type Melee, type ModeId, type MonsterDef, type MonsterKind, type MonsterShot,
 } from './data';
 import { T, generateCamp, generateDungeon, isWallTile, rng, tileAt, type Level, type Prop } from './dungeon';
@@ -456,10 +456,10 @@ export class Game {
     return Math.min(MAX_LEVEL, this.M.threat[this.diff] + (this.mode === 'dungeon' ? this.levelIdx : 0));
   }
   private get hpMul() {
-    return gearMul(this.threat) * this.M.hp;
+    return gearMul(this.threat) * this.M.hp * (this.mode === 'dungeon' ? this.D.hp : 1);
   }
   private get dmgMul() {
-    return threatDmg(this.threat) * this.M.dmg;
+    return threatDmg(this.threat) * this.M.dmg * (this.mode === 'dungeon' ? this.D.dmg : 1);
   }
 
   // ---------- unlocking ----------
@@ -561,7 +561,7 @@ export class Game {
     this.mode = 'dungeon';
     this.levelIdx = idx;
     this.def = LEVELS[idx];
-    this.L = generateDungeon(this.def, seed);
+    this.L = generateDungeon({ ...this.def, rooms: this.def.rooms + this.D.rooms }, seed);
     this.x = this.L.start.x;
     this.y = this.L.start.y;
     this.resetRun();
@@ -610,6 +610,14 @@ export class Game {
     const tier = this.levelIdx;
     const midRoom = Math.floor(L.rooms.length / 2);
     const hogRoom = r() < 0.6 ? 1 + Math.floor(r() * (L.rooms.length - 2)) : -1;
+    // every mission can have surprise mini-bosses; more likely (and up to two) on higher difficulties
+    const surprise = new Map<number, MonsterKind>();
+    const free = L.rooms.map((_, i) => i).filter((i) => i > 1 && i !== L.bossRoom && i !== midRoom);
+    for (const chance of [this.D.mini, this.D.mini2]) {
+      if (!free.length || r() >= chance) continue;
+      const room = free.splice(Math.floor(r() * free.length), 1)[0];
+      surprise.set(room, MINI_BOSSES[Math.floor(r() * MINI_BOSSES.length)]);
+    }
     L.rooms.forEach((rm, i) => {
       if (i === 0) return;
       if (i === L.bossRoom) {
@@ -629,6 +637,11 @@ export class Game {
       }
       if (i === midRoom && this.def.mini) {
         const m = this.spawn(this.def.mini, rm.cx + 0.5, rm.cy + 0.5);
+        m.ench = undefined;
+      }
+      const sk = surprise.get(i);
+      if (sk) {
+        const m = this.spawn(sk, rm.cx + 0.5, rm.cy + 0.5);
         m.ench = undefined;
       }
       if (i === hogRoom) {
@@ -658,7 +671,7 @@ export class Game {
       slowT: 0, burnT: 0, stunT: 0, flash: 0, kx: 0, ky: 0, walk: Math.random() * 10, hover: Math.random() * 6, dead: false,
     };
     // Hard and Nightmare: some monsters come enchanted
-    if (!def.mini && def.style !== 'boss' && kind !== 'loot-hog' && Math.random() < this.M.enchanted) this.enchantMob(m, false);
+    if (!def.mini && def.style !== 'boss' && kind !== 'loot-hog' && Math.random() < this.M.enchanted + (this.mode === 'dungeon' ? this.D.ench : 0)) this.enchantMob(m, false);
     this.monsters.push(m);
     return m;
   }

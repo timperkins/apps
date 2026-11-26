@@ -410,9 +410,34 @@ export interface Difficulty {
   gear: number;
   xp: number;
   color: string;
+  /** monster health and damage on top of their level */
+  hp: number;
+  dmg: number;
+  /** extra chance a monster comes enchanted */
+  ench: number;
+  /** extra rooms, so higher difficulties are longer */
+  rooms: number;
+  /** chance of a surprise mini-boss, and of a second one */
+  mini: number;
+  mini2: number;
 }
 const DCOL = ['#7ad07a', '#a0d878', '#c8e07a', '#e8d870', '#ffc050', '#ff9a40', '#ff7a40', '#ff5a50', '#ff4a7a', '#d04aff'];
-export const DIFFS: Difficulty[] = DCOL.map((color, i) => ({ name: `D${i + 1}`, more: Math.floor(i / 3), gear: 0.55 + i * 0.03, xp: 1 + i * 0.25, color }));
+// Higher difficulties get much harder fast: D10 monsters have about 5.6x the health and 3.3x the damage of D1
+// (on top of their higher level), there are more of them, more come enchanted and the missions are longer.
+export const DIFFS: Difficulty[] = DCOL.map((color, i) => ({
+  name: `D${i + 1}`,
+  more: Math.floor(i / 2) + (i >= 7 ? 1 : 0),
+  gear: 0.55 + i * 0.03,
+  xp: 1 + i * 0.3,
+  color,
+  hp: 1 + 0.2 * i + 0.035 * i * i,
+  dmg: 1 + 0.12 * i + 0.015 * i * i,
+  ench: i * 0.03,
+  rooms: Math.round(i * 0.7),
+  mini: Math.min(0.9, 0.35 + i * 0.06),
+  mini2: Math.max(0, (i - 5) * 0.15),
+}));
+export const MINI_BOSSES: MonsterKind[] = ['void-stalker', 'ember-golem', 'hex-lord'];
 
 /** odds a mob drops a piece of gear: 0.3% */
 export const MOB_GEAR_CHANCE = 0.003;
@@ -529,49 +554,49 @@ export const LEVELS: LevelDef[] = [
     id: 'village', name: 'Ruined Village', blurb: 'A village of broken houses where shamblers and rattlers wander. Start here.',
     floor: ['#7a6e60', '#6a5f52'], wall: ['#8a7a66', '#5a4c3e'], accent: '#ffcf6a', ambient: '#140f0a', light: 0.7,
     monsters: ['shambler', 'shambler', 'rattler', 'gloop'], outdoor: 0.75, deco: 'village', out: ['grass', '#6fae4a', '#5f9a40', '#3f8a3a', '#2f6e2c'],
-    guardian: { kind: 'armored-shambler', name: 'Old Grubjaw', scale: 2.0, hp: 380 }, rooms: 14, map: { x: 18, y: 78 },
+    guardian: { kind: 'armored-shambler', name: 'Old Grubjaw', scale: 2.0, hp: 380 }, rooms: 20, map: { x: 18, y: 78 },
   },
   {
     id: 'pumpkins', name: 'Pumpkin Trail', blurb: 'A long trail outside with pumpkins everywhere. Watch for fizzlers in the patches.',
     floor: ['#8a7a5a', '#7a6a4c'], wall: ['#6a5a3a', '#4a3a24'], accent: '#ff9a2a', ambient: '#150c06', light: 0.6,
     monsters: ['shambler', 'rattler', 'fizzler', 'bog-rider'], outdoor: 0.92, deco: 'pumpkins', out: ['grass', '#8aa04a', '#7a9040', '#6a7a2a', '#4a5a1a'],
-    guardian: { kind: 'hex-lord', name: 'The Hex Lord', scale: 1.3, hp: 520 }, rooms: 15, map: { x: 9, y: 44 },
+    guardian: { kind: 'hex-lord', name: 'The Hex Lord', scale: 1.3, hp: 520 }, rooms: 21, map: { x: 9, y: 44 },
   },
   {
     id: 'canyon', name: 'Canyon of Doom', blurb: 'Red rock walls, dry riverbeds and marauder camps.',
     floor: ['#b0704a', '#a0623e'], wall: ['#c07a4a', '#7a3e22'], accent: '#ffb070', ambient: '#1a0a04', light: 0.5,
     monsters: ['marauder', 'rattler', 'fizzler', 'hexer', 'marauder'], outdoor: 0.8, deco: 'canyon', out: ['dirt', '#c08a5a', '#b07a4c', '#a05a30', '#7a3e22'],
-    guardian: { kind: 'void-stalker', name: 'Shade of the Canyon', scale: 1.3, hp: 620 }, rooms: 16, map: { x: 28, y: 12 },
+    guardian: { kind: 'void-stalker', name: 'Shade of the Canyon', scale: 1.3, hp: 620 }, rooms: 22, map: { x: 28, y: 12 },
   },
   {
     id: 'mines', name: 'Ember Mines', blurb: 'Old mine tunnels lit by glowing ember ore, with lava in the low parts.',
     floor: ['#4a3e3a', '#3e3430'], wall: ['#5a4a44', '#2e2420'], accent: '#ff5a3a', ambient: '#140604', light: 0.9,
     monsters: ['armored-shambler', 'rattler', 'gloop', 'fizzler', 'shambler'], outdoor: 0.1, deco: 'mines', hazard: 'lava', out: ['dirt', '#5a4a40', '#4a3a32', '#3a3a2a', '#5a2a1a'],
-    guardian: { kind: 'ember-golem', name: 'The Ember Golem', scale: 1.4, hp: 800 }, rooms: 16, map: { x: 48, y: 90 },
+    guardian: { kind: 'ember-golem', name: 'The Ember Golem', scale: 1.4, hp: 800 }, rooms: 22, map: { x: 48, y: 90 },
   },
   {
     id: 'halls', name: 'Great Halls', blurb: 'A huge stone castle with banners, carpets and an army of marauders.',
     floor: ['#8a8070', '#7a7062'], wall: ['#a09888', '#605848'], accent: '#e0c060', ambient: '#0e0c08', light: 0.75,
     monsters: ['marauder', 'hexer', 'armored-rattler', 'armored-shambler', 'marauder'], outdoor: 0.15, deco: 'halls', out: ['grass', '#6a9a4a', '#5a8a40', '#3f7a3a', '#2f5e2c'],
-    guardian: { kind: 'hex-lord', name: 'Hex Lord Morvane', scale: 1.5, hp: 900 }, mini: 'ember-golem', rooms: 17, map: { x: 60, y: 8 },
+    guardian: { kind: 'hex-lord', name: 'Hex Lord Morvane', scale: 1.5, hp: 900 }, mini: 'ember-golem', rooms: 23, map: { x: 60, y: 8 },
   },
   {
     id: 'caves', name: 'Deep Caves', blurb: 'Dark, wet caves full of glowing crystals. Something huge and blind lives at the bottom.',
     floor: ['#3e4a52', '#343e46'], wall: ['#4a5a64', '#222c34'], accent: '#5ae0d0', ambient: '#04080a', light: 0.95,
     monsters: ['gloop', 'armored-shambler', 'rattler', 'fizzler', 'armored-rattler'], outdoor: 0, deco: 'caves', hazard: 'water', out: ['dirt', '#3e4a52', '#343e46', '#2a3a3a', '#1a2a2a'],
-    guardian: { kind: 'gloomguard', name: 'The Gloomguard', scale: 1, hp: 2000 }, mini: 'void-stalker', rooms: 18, map: { x: 82, y: 80 }, final: true,
+    guardian: { kind: 'gloomguard', name: 'The Gloomguard', scale: 1, hp: 2000 }, mini: 'void-stalker', rooms: 24, map: { x: 82, y: 80 }, final: true,
   },
   {
     id: 'creek', name: 'Fizzler Creek', blurb: 'A sunny creek with lily pads and tall reeds, and far too many fizzlers.',
     floor: ['#6a8a5a', '#5a7a4c'], wall: ['#5a7a4a', '#3a5a2a'], accent: '#7ae0ff', ambient: '#06100c', light: 0.5,
     monsters: ['fizzler', 'fizzler', 'gloop', 'bog-rider', 'shambler'], outdoor: 0.85, deco: 'creek', hazard: 'water', out: ['grass', '#7ab85a', '#6aa84c', '#4a9a3a', '#2f7a2c'],
-    guardian: { kind: 'void-stalker', name: 'The Creek Stalker', scale: 1.4, hp: 900 }, mini: 'hex-lord', rooms: 17, map: { x: 91, y: 48 },
+    guardian: { kind: 'void-stalker', name: 'The Creek Stalker', scale: 1.4, hp: 900 }, mini: 'hex-lord', rooms: 23, map: { x: 91, y: 48 },
   },
   {
     id: 'void', name: 'The Void Realm', blurb: 'Floating islands of violet glass in a starless sky, with black crystal spires. Nyxwing waits at the end.',
     floor: ['#4a3e62', '#3e3456'], wall: ['#2a2238', '#140e20'], accent: '#c07aff', ambient: '#05030a', light: 0.85,
     monsters: ['void-stalker', 'armored-shambler', 'hexer', 'armored-rattler', 'fizzler'], outdoor: 0.3, deco: 'void', out: ['dirt', '#5a4a7a', '#4e406c', '#3a2a5a', '#1a1030'],
-    guardian: { kind: 'nyxwing', name: 'Nyxwing, the Void Wyrm', scale: 1, hp: 2600 }, mini: 'void-stalker', rooms: 18, map: { x: 89, y: 14 }, final: true,
+    guardian: { kind: 'nyxwing', name: 'Nyxwing, the Void Wyrm', scale: 1, hp: 2600 }, mini: 'void-stalker', rooms: 24, map: { x: 89, y: 14 }, final: true,
   },
 ];
 export const LAST_LEVEL = LEVELS.length - 1;

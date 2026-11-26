@@ -109,9 +109,10 @@ export function generateDungeon(def: LevelDef, seed: number): Level {
     parent.push(pi);
     L.rooms.push({ x, y, w, h, cx: x + Math.floor(w / 2), cy: y + Math.floor(h / 2) });
   }
-  // some areas are outside: you start outdoors, then go in and out on the way to the guardian
+  // half of every level is outside: the first half of the way is open air, then you go into the dungeon for the second half
+  const half = Math.ceil(L.rooms.length / 2);
   L.rooms.forEach((rm, i) => {
-    rm.out = i === L.rooms.length - 1 ? def.deco === 'pumpkins' || def.deco === 'creek' : i === 0 ? def.outdoor > 0.05 : r() < def.outdoor;
+    rm.out = i < half;
   });
   for (const rm of L.rooms)
     for (let y = rm.y; y < rm.y + rm.h; y++)
