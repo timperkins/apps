@@ -25,7 +25,7 @@ export interface Action {
 // vehicle deploys; enter: the selected soldiers get into the transport there).
 // fix and sell: the build menu's Repair or Sell button is down, over a
 // building of yours it would repair or sell.
-export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'unfold' | 'enter' | 'rally' | 'build' | 'blocked' | 'repair' | 'fix' | 'sell' | null;
+export type CursorAt = 'pick' | 'move' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'unfold' | 'enter' | 'rally' | 'build' | 'blocked' | 'repair' | 'fix' | 'sell' | null;
 
 export interface UnitType {
   kind: string;

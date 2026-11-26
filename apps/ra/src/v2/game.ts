@@ -3588,9 +3588,10 @@ export class IsoGame implements GameLike {
     // over a picked unit of yours that can deploy (a Foundry vehicle that
     // can unfold here, a G.I. to dig in or climb out, a transport with
     // soldiers in it): deploy it. A Foundry vehicle gets the three falling
-    // triangles ('unfold'); the rest get the orange deploy cursor.
+    // triangles ('unfold'), a helicopter letting its soldiers out the
+    // arrowheads pointing out ('unload'); the rest get the orange deploy cursor.
     const h = hit?.u;
-    if (h && h.sel && h.f === this.me && this.deploysNow(h)) return h.kind === 'mcv' ? 'unfold' : 'deploy';
+    if (h && h.sel && h.f === this.me && this.deploysNow(h)) return h.kind === 'mcv' ? 'unfold' : isAir(h.kind) && h.cargo?.length ? 'unload' : 'deploy';
     if (hit && (hit.u.f === this.me || !mine.length)) return 'pick';
     if (!mine.length) {
       if (this.buildingAt(x, y)) return null;
