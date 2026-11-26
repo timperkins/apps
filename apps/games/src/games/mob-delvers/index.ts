@@ -8,6 +8,7 @@ import {
   armorDef, armorOf, dropRange, enchChoices, enchantArmor, enchantMelee, enchantRanged, heroXpNeed, isArmor, isArtifact, isMelee, isRanged, itemName, meleeOf, modeOf, parseKey, powerOf, rangedOf,
   type ArtifactId, type EnchId, type ItemKey, type ModeId,
 } from './data';
+import { DIFFS } from './data';
 import { BASE_HP, Game, MOB_ENCH_NAME, newSave, POTION_EVERY, type AimMode, type Input, type SaveData } from './game';
 import { GuestSession, HostSession, MAX_TEAM } from './mp';
 import { listHosts, type HostInfo } from './net';
@@ -1108,7 +1109,7 @@ const game: GameModule = {
             const beat = g.bestOn(L.id, mode) >= i;
             return `<button class="dv-diff ${i === diffSel ? 'on' : ''}" data-diff="${i}" ${open ? '' : 'disabled'} style="--c:${['#7ad07a', '#a0d878', '#c8e07a', '#e8d870', '#ffc050', '#ff9a40', '#ff7a40', '#ff5a50', '#ff4a7a', '#d04aff'][i]}" title="${open ? `Difficulty ${i + 1}` : `Beat ${L.name} on difficulty 1 first`}">${open ? '' : '🔒'}${i + 1}${beat ? '⭐' : ''}</button>`;
           }).join('')}</div>
-          <p class="dv-small-note">${g.diffOpen(L.id, mode, 1) ? '' : `<span class="dv-dim">Beat difficulty 1 here once and you can pick any difficulty for this map.</span><br>`}Monsters level <b>${tl}</b> · ⚡ your power <b>${P}</b> · gear drops level <b>${lo}–${hi}</b> (best on D${diffSel + 1}: ${M.maxDrop[diffSel]})${L.hazard ? ` · watch for ${L.hazard === 'lava' ? 'lava' : L.hazard === 'ice' ? 'slippery ice' : 'deep water'}` : ''}</p>
+          <p class="dv-small-note">${g.diffOpen(L.id, mode, 1) ? '' : `<span class="dv-dim">Beat difficulty 1 here once and you can pick any difficulty for this map.</span><br>`}Monsters level <b>${tl}</b> (${DIFFS[diffSel].hp.toFixed(1)}× health, ${DIFFS[diffSel].dmg.toFixed(1)}× damage) · surprise mini-boss <b>${Math.round(DIFFS[diffSel].mini * 100)}%</b>${DIFFS[diffSel].mini2 > 0 ? ` (2nd: ${Math.round(DIFFS[diffSel].mini2 * 100)}%)` : ''} · ⚡ your power <b>${P}</b> · gear drops level <b>${lo}–${hi}</b> (best on D${diffSel + 1}: ${M.maxDrop[diffSel]})${L.hazard ? ` · watch for ${L.hazard === 'lava' ? 'lava' : L.hazard === 'ice' ? 'slippery ice' : 'deep water'}` : ''}</p>
           <div class="dv-row">
             ${locked ? `<button class="dv-btn" disabled>🔒 Beat ${LEVELS[0].name} first</button>` : '<button class="dv-btn dv-go" data-x="go">Start mission</button>'}
             <button class="dv-btn" data-x="close">Close</button>
