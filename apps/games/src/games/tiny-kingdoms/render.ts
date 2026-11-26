@@ -192,7 +192,7 @@ export class Renderer {
   private sheetFor(e: Ent): Sheet | undefined {
     const kind = UNIT_KINDS[e.kind] as UnitKind;
     const anim = ANIMS[e.anim] as Anim;
-    const k = kind === 'hero' ? 'warrior' : kind;
+    const k = kind === 'hero' || kind === 'fighter' ? 'warrior' : kind;
     if (k === 'pawn' && (e.flags & 6)) return SHEETS[`pawn.run.${['wood', 'gold', 'meat'][((e.flags >> 1) & 3) - 1]}`];
     if (k === 'lancer' && anim === 'attack') return SHEETS[e.aim < -60 ? 'lancer.upright' : e.aim > 60 ? 'lancer.downright' : 'lancer.right'];
     return SHEETS[`${k}.${anim}`] ?? SHEETS[`${k}.idle`];
@@ -333,7 +333,7 @@ export class Renderer {
     let use = sh;
     // a swing plays once, then back to standing
     if (sh.once && t > sh.n / sh.fps + 0.05) { use = this.sheetFor({ ...e, anim: 0 })!; t = now / 1000; }
-    const scale = kind === 'hero' ? 1.15 : 1;
+    const scale = kind === 'hero' ? 1.15 : kind === 'fighter' ? 0.72 : 1;
     if (kind === 'hero') {
       c.save();
       c.fillStyle = PLAYER_RING[e.team] + '88'; c.strokeStyle = PLAYER_RING[e.team]; c.lineWidth = 3;

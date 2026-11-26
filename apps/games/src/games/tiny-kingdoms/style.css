@@ -109,3 +109,5 @@
 .tk-sell span { display: flex; gap: 6px; align-items: center; }
 .tk-sell .tk-ico { width: 20px; height: 20px; }
 .tk-sell small { font-weight: 500; font-size: 11px; opacity: .8; }
+.tk-face.tk-small { background-size: auto 84px; background-position: -27px -12px; }
+.tk-any { white-space: nowrap; gap: 1px; } .tk-any .tk-ico { width: 18px; height: 18px; }

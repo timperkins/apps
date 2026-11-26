@@ -9,7 +9,7 @@ export const WILD = 5;
 export const COLORS = ['blue', 'red', 'yellow', 'purple', 'black'] as const;
 export const COLOR_NAMES = ['Blue', 'Red', 'Yellow', 'Purple', 'Black'];
 
-export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep';
+export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter';
 export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2';
 export type Res = 'gold' | 'wood' | 'meat';
 export type Cost = Partial<Record<Res, number>>;
@@ -17,7 +17,7 @@ export type Order = 'follow' | 'defend' | 'attack';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Anim = 'idle' | 'run' | 'attack' | 'attack2' | 'shoot' | 'heal' | 'chop' | 'mine' | 'stab' | 'guard' | 'graze';
 
-export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep'];
+export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter'];
 export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2'];
 export const ANIMS: Anim[] = ['idle', 'run', 'attack', 'attack2', 'shoot', 'heal', 'chop', 'mine', 'stab', 'guard', 'graze'];
 
@@ -29,6 +29,7 @@ export const UNIT: Record<UnitKind, UnitStat> = {
   archer: { name: 'Archer', hp: 70, speed: 140, dmg: 11, range: 330, cd: 1.3, aggro: 380, pop: 1, cost: { gold: 10, wood: 20 }, r: 15, desc: 'Shoots from far away. Keep them behind warriors.' },
   lancer: { name: 'Lancer', hp: 180, speed: 165, dmg: 25, range: 96, cd: 1.2, aggro: 330, pop: 2, cost: { gold: 30, meat: 25 }, r: 19, desc: 'Long lance, lots of health, hits hard. Takes 2 room.' },
   monk: { name: 'Monk', hp: 80, speed: 135, dmg: 0, range: 240, cd: 2, aggro: 320, pop: 1, cost: { gold: 25, wood: 20 }, r: 15, desc: 'Heals hurt friends nearby, heroes too.' },
+  fighter: { name: 'Fighter', hp: 50, speed: 145, dmg: 4, range: 56, cd: 0.9, aggro: 280, pop: 1, cost: {}, r: 14, desc: 'Costs just 1 wood, 1 meat or 1 gold (whatever you have most of). Weak, but cheap!' },
   sheep: { name: 'Sheep', hp: 24, speed: 70, dmg: 0, range: 0, cd: 1, aggro: 0, pop: 0, r: 13, desc: '' },
 };
 
@@ -36,7 +37,7 @@ interface BuildStat { name: string; hp: number; w: number; h: number; cost: Cost
 export const BUILD: Record<BuildKind, BuildStat> = {
   castle: { name: 'Castle', hp: 2600, w: 5, h: 2, cost: {}, trains: ['pawn'], pop: 10, desc: 'Your home. Shoots arrows at enemies close by. Keep it standing!' },
   house: { name: 'House', hp: 450, w: 2, h: 1, cost: { wood: 30 }, trains: [], pop: 5, desc: 'Room for 5 more units.' },
-  barracks: { name: 'Barracks', hp: 900, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['warrior', 'lancer'], desc: 'Trains warriors and lancers.' },
+  barracks: { name: 'Barracks', hp: 900, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['fighter', 'warrior', 'lancer'], desc: 'Trains fighters, warriors and lancers.' },
   archery: { name: 'Archery Range', hp: 750, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['archer'], desc: 'Trains archers.' },
   monastery: { name: 'Monastery', hp: 750, w: 3, h: 2, cost: { wood: 80, gold: 30 }, trains: ['monk'], desc: 'Trains monks, who heal.' },
   tower: { name: 'Tower', hp: 1000, w: 2, h: 2, cost: { wood: 60, gold: 20 }, trains: [], desc: 'Shoots arrows at enemies that come close.' },
@@ -147,6 +148,12 @@ export function plotSpots(cx: number, cy: number): [number, number][] {
 
 const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
 const enemies = (a: number, b: number) => a !== WILD && b !== WILD && (a === BLACK) !== (b === BLACK);
+/** What a unit costs right now. A fighter takes 1 of whatever you have most of. */
+export function unitCost(kind: UnitKind, stock: Record<Res, number>): Cost {
+  if (kind !== 'fighter') return UNIT[kind].cost ?? {};
+  const best = (['wood', 'meat', 'gold'] as Res[]).reduce((a, r) => (stock[r] > stock[a] ? r : a), 'wood' as Res);
+  return { [best]: 1 };
+}
 const costText = (c: Cost) => (Object.keys(c) as Res[]).map(k => `${c[k]} ${k}`).join(', ');
 export { costText };
 
@@ -524,8 +531,8 @@ export class Game {
     const k = this.kingdom(slot), b = this.get(bid) as Building | undefined, h = this.hero(slot);
     if (!k || !b || !('maxHp' in b) || b.team !== slot || b.dead || !BUILD[b.kind]?.trains.includes(kind)) return 'Can’t train that here.';
     if (!h || dist(h.x, h.y, b.x, b.y) > 260) return 'Walk over to the building first.';
-    const cost = UNIT[kind].cost ?? {};
-    if (!this.afford(k, cost)) return `You need ${costText(cost)}.`;
+    const cost = unitCost(kind, k.stock);
+    if (!this.afford(k, cost)) return kind === 'fighter' ? 'You need 1 wood, meat or gold.' : `You need ${costText(cost)}.`;
     if (this.pop(slot) + UNIT[kind].pop > this.cap(slot)) return 'No room! Build a house for 5 more.';
     this.pay(k, cost);
     const u = this.addUnit(kind, slot, b.x + (this.r() - 0.5) * 80, b.y + 30 + this.r() * 20);
