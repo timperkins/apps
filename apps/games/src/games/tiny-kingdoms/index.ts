@@ -21,7 +21,8 @@ type ToHost =
   | { t: 'train'; bid: number; kind: UnitKind }
   | { t: 'sell'; bid: number }
   | { t: 'sellUnit'; bid: number; kind: UnitKind }
-  | { t: 'order'; o: Order };
+  | { t: 'order'; o: Order }
+  | { t: 'eat' };
 type ToFriend =
   | { t: 'init'; seed: number; diff: Difficulty; nodes: { trees: number[][]; golds: number[][] } }
   | { t: 's'; s: Snap }
@@ -49,9 +50,11 @@ const HELP = `
     <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
+    <li>${icon('meat')} Press <kbd>1</kbd> to eat: 5 meat heals your hero a lot.</li>
+    <li>👥 Playing together, heroes can hit each other (armies stay friends).</li>
   </ul>
   <h3>Keys</h3>
-  <p><kbd>WASD</kbd>/arrows walk · <kbd>Space</kbd> or click swing · <kbd>Shift</kbd> block · <kbd>B</kbd> build · <kbd>E</kbd> train at a building · <kbd>Q</kbd> army order · <kbd>Esc</kbd> menu. Phones get a stick and buttons.</p>
+  <p><kbd>WASD</kbd>/arrows walk · <kbd>Space</kbd> or click swing · <kbd>Shift</kbd> block · <kbd>1</kbd> eat · <kbd>B</kbd> build · <kbd>E</kbd> train at a building · <kbd>Q</kbd> army order · <kbd>Esc</kbd> menu. Phones get a stick and buttons.</p>
   <p>👥 <b>Play together</b>: up to 4 players, each with their own kingdom in a corner of the island. Press <kbd>Esc</kbd> → Play with friends to get a code; friends pick Join a friend on the title screen.</p>
   <p class="tk-credit">Art: <a href="https://pixelfrog-assets.itch.io/tiny-swords" target="_blank" rel="noopener">Tiny Swords</a> by Pixel Frog.</p>`;
 
@@ -84,6 +87,7 @@ const game: GameModule = {
           <button data-t="guard">🛡️<span>Block</span></button>
           <button data-t="order">🚩<span>Army</span></button>
           <button data-t="build">🔨<span>Build</span></button>
+          <button data-t="eat">🍖<span>Eat</span></button>
         </div>
       </div>
       <div class="tk-dim tk-panel-wrap" hidden><div class="tk-panel"></div></div>
@@ -141,7 +145,7 @@ const game: GameModule = {
       if (k === 'b' && !e.repeat) { if (placing) cancelPlace(); else openBuild(); }
       if (k === 'e' && !e.repeat) use();
       if (k === 'q' && !e.repeat) cycleOrder();
-      if (k === '1' || k === '2' || k === '3') setOrder(ORDERS[Number(k) - 1]);
+      if (k === '1' && !e.repeat) eat();
       keys.add(k);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
@@ -185,6 +189,7 @@ const game: GameModule = {
         if (t === 'use') use();
         if (t === 'order') cycleOrder();
         if (t === 'build') { if (placing) cancelPlace(); else openBuild(); }
+        if (t === 'eat') eat();
       });
       const up = () => { if (t === 'atk') touchAtk = false; if (t === 'guard') touchGuard = false; };
       b.addEventListener('pointerup', up);
@@ -246,6 +251,7 @@ const game: GameModule = {
     const sendHost = (m: ToHost) => { if (net?.role === 'friend') net.send(m); };
     const fail = (m: string | null) => { if (m) { toast(m); play('no'); } };
     const doBuild = (kind: BuildKind, tx: number, ty: number) => { if (net?.role === 'friend') sendHost({ t: 'build', kind, tx, ty }); else if (g) fail(g.build(me, kind, tx, ty)); };
+    const eat = () => { if (!playing) return; if (net?.role === 'friend') sendHost({ t: 'eat' }); else if (g) fail(g.eat(me)); };
     const doSell = (bid: number) => { if (net?.role === 'friend') sendHost({ t: 'sell', bid }); else if (g) fail(g.sell(me, bid)); };
     const doSellUnit = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'sellUnit', bid, kind }); else if (g) fail(g.sellUnit(me, bid, kind)); };
     const doTrain = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'train', bid, kind }); else if (g) fail(g.train(me, bid, kind)); };
@@ -403,6 +409,7 @@ const game: GameModule = {
         else if (m.t === 'sellUnit' && m.kind in UNIT) { const err = g.sellUnit(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'train' && m.kind in UNIT) { const err = g.train(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'order' && ORDERS.includes(m.o)) g.setOrder(slot, m.o);
+        else if (m.t === 'eat') { const err = g.eat(slot); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
       });
       refreshBadge();
       toast(`Friends can join with the code ${s.code}`);

@@ -72,6 +72,7 @@ export function play(s: Sound, vol = 1) {
     case 'horn': tone(147, 0.9, 'sawtooth', 0.09, -10); tone(220, 0.9, 'sawtooth', 0.05, -15, 0.05); break;
     case 'win': [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.3, 'triangle', 0.1, 0, i * 0.13)); break;
     case 'lose': [392, 330, 262, 196].forEach((f, i) => tone(f, 0.4, 'triangle', 0.1, 0, i * 0.2)); break;
+    case 'eat': [0, 0.12, 0.24].forEach(d => noise(0.07, 0.35, 1400, d)); tone(520, 0.12, 'triangle', 0.06, 200, 0.3); break;
     case 'no': tone(160, 0.14, 'square', 0.05); break;
   }
 }

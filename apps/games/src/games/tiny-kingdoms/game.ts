@@ -65,7 +65,7 @@ export interface Unit {
   path: number[]; pathGoal: number; pathT: number; stuck: number;
   homeX: number; homeY: number; // sheep and black guards
   hitT: number; garrison?: boolean; dead?: boolean;
-  dmgMul: number; wx: number; wy: number; aimY: number;
+  dmgMul: number; wx: number; wy: number; aimY: number; eatT: number;
 }
 export interface Building {
   id: number; kind: BuildKind; team: number;
@@ -81,7 +81,7 @@ export interface Kingdom {
 }
 export interface Input { mx: number; my: number; atk: boolean; guard: boolean }
 export type Fx = [kind: number, x: number, y: number]; // kinds: 0 explosion, 1 dust, 2 heal, 3 splash, 4 big explosion, 5 tree hit and 6 gold hit (x, y are the tile)
-export type Sound = 'swing' | 'hit' | 'bow' | 'chop' | 'mine' | 'coin' | 'build' | 'boom' | 'heal' | 'baa' | 'horn' | 'win' | 'lose' | 'train' | 'no' | 'hurt';
+export type Sound = 'swing' | 'hit' | 'bow' | 'chop' | 'mine' | 'coin' | 'build' | 'boom' | 'heal' | 'baa' | 'horn' | 'win' | 'lose' | 'train' | 'no' | 'hurt' | 'eat';
 export interface SoundEv { s: Sound; x: number; y: number }
 
 /** Small seeded random, so every player builds the same island from the seed. */
@@ -311,7 +311,7 @@ export class Game {
     const u: Unit = {
       id: this.nid++, kind, team, x, y, hp: s.hp * mul, maxHp: s.hp * mul, anim: 'idle', seq: 0, animT: 0, left: x > MW * TILE / 2,
       cd: 0, target: 0, think: this.r() * 0.3, carryN: 0, node: 0, path: [], pathGoal: -1, pathT: 0, stuck: 0,
-      homeX: x, homeY: y, wx: x, wy: y, aimY: 0, hitT: 0, dmgMul: team === BLACK ? DIFF[this.diff].hp : 1,
+      homeX: x, homeY: y, wx: x, wy: y, aimY: 0, eatT: 0, hitT: 0, dmgMul: team === BLACK ? DIFF[this.diff].hp : 1,
     };
     this.units.push(u);
     this.byId.set(u.id, u);
@@ -572,6 +572,21 @@ export class Game {
     return null;
   }
 
+  /** Eat 5 meat to heal the hero. */
+  eat(slot: number): string | null {
+    const k = this.kingdom(slot), h = this.hero(slot);
+    if (!k || !h) return 'Your hero is knocked out.';
+    if (h.hp >= h.maxHp) return 'You’re not hurt.';
+    if (k.stock.meat < 5) return 'You need 5 meat to eat.';
+    if (h.eatT > 0) return null;
+    k.stock.meat -= 5;
+    h.hp = Math.min(h.maxHp, h.hp + 80);
+    h.eatT = 0.6;
+    this.fx.push([2, h.x, h.y]);
+    this.sound('eat', h.x, h.y);
+    return null;
+  }
+
   setOrder(slot: number, o: Order) {
     const k = this.kingdom(slot);
     if (!k) return;
@@ -592,6 +607,7 @@ export class Game {
       u.animT += dt;
       u.cd -= dt;
       u.hitT -= dt;
+      u.eatT -= dt;
       u.think -= dt;
       switch (u.kind) {
         case 'hero': this.heroTick(u, dt); break;
@@ -650,8 +666,10 @@ export class Game {
     const reach = UNIT.hero.range, fx = u.x + (u.left ? -30 : 30);
     let hit = false;
     for (const v of this.units) {
-      if (v.dead || v === u || !(enemies(u.team, v.team) || v.kind === 'sheep')) continue;
-      if (dist(fx, u.y, v.x, v.y) < reach) { this.damage(v, UNIT.hero.dmg, u); hit = true; }
+      // other players' heroes can be hit too (only heroes: armies stay friends)
+      const rival = v.kind === 'hero' && v.team !== u.team && v.team !== BLACK;
+      if (v.dead || v === u || !(enemies(u.team, v.team) || v.kind === 'sheep' || rival)) continue;
+      if (dist(fx, u.y, v.x, v.y) < reach) { this.damage(v, rival ? UNIT.hero.dmg * 0.6 : UNIT.hero.dmg, u); hit = true; }
     }
     for (const b of this.buildings) {
       if (b.dead || !enemies(u.team, b.team)) continue;
