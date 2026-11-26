@@ -120,12 +120,6 @@ export interface Arrow {
   hostile?: boolean;
   /** A fire arrow: sets enemies burning. */
   fire?: boolean;
-  /** Boom Shot level: sticks in and explodes 3 seconds later. */
-  boom?: number;
-  /** Chain Zap level. */
-  zap?: number;
-  /** Seeker level: curves toward enemies. */
-  seek?: number;
 }
 
 export interface Chest {
@@ -585,16 +579,7 @@ export class Game {
     p.swingT = 0.28;
     p.swingCd = this.lx.weapon === 'spear' ? 0.5 : 0.4;
     sfx.swing();
-    const en = this.lx.en;
-    const spin = en.spinNow();
-    const dmg = Math.round(this.lx.meleeDmg(this.swordDmg) * (spin ? en.spinMul() : 1) * 100) / 100;
-    if (spin) {
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        this.puff(p.x + Math.cos(a) * reach * 0.8, p.y + Math.sin(a) * reach * 0.8, p.z + 0.8, '#c8ffd0', 1, 1.2);
-      }
-      this.float(p.x, p.y, p.z + 1.6, 'Whirlwind!', '#a8ffb0');
-    }
+    const dmg = this.lx.meleeDmg(this.swordDmg);
     const bossDmg = dmg * this.lx.bossMul();
     for (let i = -3; i <= 3; i++) {
       const a = p.face + i * 0.4;
@@ -604,23 +589,17 @@ export class Game {
     let left = SWING_MAX;
     const close = this.enemies
       .map((e) => ({ e, dx: e.x - p.x, dy: e.y - p.y, d: Math.hypot(e.x - p.x, e.y - p.y) }))
-      .filter((q) => q.d < reach && Math.abs(q.e.z - p.z) < 2 && (spin || q.d < 0.6 || angDiff(ang(q.dx, q.dy), p.face) < (this.lx.weapon === 'spear' ? 0.7 : 1.4)))
+      .filter((q) => q.d < reach && Math.abs(q.e.z - p.z) < 2 && (q.d < 0.6 || angDiff(ang(q.dx, q.dy), p.face) < (this.lx.weapon === 'spear' ? 0.7 : 1.4)))
       .sort((a, b) => a.d - b.d);
     for (const { e, dx, dy, d } of close) {
       if (left <= 0) break;
       left--;
-      let killed: boolean;
       if (this.role === 'guest') {
         this.net?.hitEnemy(e.id, dmg, dx / (d || 1), dy / (d || 1));
         e.hurtT = 0.25;
         sfx.hit();
         this.float(e.x, e.y, e.z, `${dmg}`, '#fff');
-        killed = e.hp - dmg <= 0;
-      } else {
-        this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
-        killed = !this.enemies.includes(e);
-      }
-      en.meleeHit(this, e, dmg, killed);
+      } else this.hurtEnemy(e, dmg, dx / (d || 1), dy / (d || 1));
     }
     // other players in the arc: in multiplayer you fight each other
     for (const o of this.others) {
@@ -743,10 +722,8 @@ export class Game {
     const base = this.lx.feast > 0 ? Math.round(this.bowDmg * 1.5) : this.bowDmg;
     const dmg = ice ? Math.max(0.1, Math.round(this.bowDmg) / 10) : fire ? base + 2 : base;
     const arrow: Arrow = { x: p.x, y: p.y, z: p.z + 0.9, dx: Math.cos(a), dy: Math.sin(a), life: 1.8, dmg, ice: ice || undefined, fire: fire || undefined };
-    for (const ar of [arrow, ...this.lx.en.onShoot(arrow)]) {
-      if (this.role === 'guest') this.net?.shoot(ar);
-      else this.arrowsFlying.push(ar);
-    }
+    if (this.role === 'guest') this.net?.shoot(arrow);
+    else this.arrowsFlying.push(arrow);
     sfx.bow();
   }
 
@@ -1235,7 +1212,6 @@ export class Game {
     if (this.coop && !pvp) q = 1; // multiplayer: a hit from a Murk or boss is a quarter heart
     if (p.hurtT > 0 || this.knockedOut || this.won) return;
     if (!pvp) {
-      this.lx.en.hurtBack(this, fromX, fromY);
       q = this.lx.absorb(this, q, fromX, fromY);
       if (q <= 0) {
         p.hurtT = 0.3;
@@ -1281,7 +1257,6 @@ export class Game {
       }
       this.coins += k.coins;
       this.float(e.x, e.y, e.z + 0.5, `+${k.coins} coin${k.coins > 1 ? 's' : ''}`, '#ffd34d');
-      this.lx.en.addXp(this, 1 + k.coins);
       this.arrows += bonusArrows;
       if (this.job === 'grocer') this.addMeat(e.x, e.y, e.z);
       if (this.job === 'guard' && !isRaider(e.kind) && e.kind !== 8) {
@@ -1321,7 +1296,6 @@ export class Game {
       this.world.sealed = false;
       sfx.win();
       this.coins += 50;
-      this.lx.en.addXp(this, 60);
       this.toast('The Dark Beast is defeated! +50 coins');
       this.say('won', 'You did it! The Dark Beast is gone and the land is saved!', 999);
     }
@@ -1840,7 +1814,6 @@ export class Game {
   private updateArrows(dt: number) {
     for (let i = this.arrowsFlying.length - 1; i >= 0; i--) {
       const a = this.arrowsFlying[i];
-      this.lx.en.steer(this, a, dt);
       const step = 15 * dt;
       a.x += a.dx * step;
       a.y += a.dy * step;
@@ -1877,9 +1850,7 @@ export class Game {
               e.burn = 4;
               this.puff(e.x, e.y, e.z + 0.6, '#ff7a2a', 12, 2);
             }
-            this.lx.en.arrowHitEnemy(this, a, e);
             this.hurtEnemy(e, a.dmg, a.ice ? 0 : a.dx, a.ice ? 0 : a.dy, a.owner);
-            a.boom = undefined;
             dead = true;
             break;
           }
@@ -1898,13 +1869,11 @@ export class Game {
         }
       }
       const b = this.boss;
-      let onBoss = false;
       if (!dead && b.active && !b.dead && this.beastBodies().some((q) => Math.hypot(q.x - a.x, q.y - a.y) < 1.4 * q.r)) {
         this.hurtBoss(a.dmg);
-        dead = onBoss = true;
+        dead = true;
       }
       if (!dead && this.minis.arrowHit(this, a.x, a.y, a.dmg)) dead = true;
-      if (dead && a.boom && a.life > 0) this.lx.en.arrowHitElse(this, a, onBoss);
       if (dead) this.arrowsFlying.splice(i, 1);
     }
   }

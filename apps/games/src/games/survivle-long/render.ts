@@ -4,7 +4,7 @@ import { BOSS_HP, CROP_TIME, GOODS, ENEMY_KINDS, jobById, outfitById, swordColor
 import { WALL_HP, type Game, type Particle, type Wall } from './game';
 import { MINI_KINDS, type Mini } from './minis';
 import { GROVE } from './world';
-import { SITE_COL, collectLong, drawGlider, drawHorse, drawRaider, drawSky, drawWolf, heroGear, hudEnch, hudLong } from './render-long';
+import { SITE_COL, collectLong, drawGlider, drawHorse, drawRaider, drawSky, drawWolf, heroGear, hudLong } from './render-long';
 import { BOARD, STORE, CX, CY, FLOOR_H, G, OVEN, SIZE, T, VILLAGES, WARPS, gen, hash, lairPad, tG, tH, tT } from './world';
 
 export const TW = 48;
@@ -689,7 +689,6 @@ export class Renderer {
     if (opts.hud) {
       this.hud(game, cam);
       hudLong(this, game, cam);
-      hudEnch(this, game);
     }
   }
 
@@ -1175,12 +1174,6 @@ export class Renderer {
         ctx.beginPath();
         ctx.arc(X, Y, a.ice ? 3.2 : 2, 0, 7);
         ctx.fill();
-        if (a.boom || a.seek || a.zap) {
-          ctx.fillStyle = a.boom ? 'rgba(255,90,40,.55)' : a.seek ? 'rgba(197,138,255,.45)' : 'rgba(255,233,90,.45)';
-          ctx.beginPath();
-          ctx.arc(X, Y, a.boom ? 6 : 5, 0, 7);
-          ctx.fill();
-        }
         if (a.ice) {
           ctx.fillStyle = 'rgba(160,230,255,.35)';
           ctx.beginPath();

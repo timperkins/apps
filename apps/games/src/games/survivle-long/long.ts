@@ -6,7 +6,6 @@ import {
   armorById, isRaider, raiderArmor, raiderShield, raiderWeapon, shieldById, type ArmorSlot, type Recipe, type Weapon,
 } from './data';
 import { sfx } from './audio';
-import { Ench, type EnchSave } from './enchant';
 import type { Enemy, Game, Target } from './game';
 import {
   CAMP_SPEARS, G, GROVE, ORE_ROCKS, S, T, VILLAGES, blocksMove, castleR, inRoom, siteIn, sitesNear, tG, tH, tT, villageAt, type Site,
@@ -80,7 +79,6 @@ export interface LongSave {
   discovered: number[];
   camps: [number, CampState][];
   mined: string[];
-  ench?: EnchSave;
   quest: { id: string; village: number; got: number } | null;
   questsDone: number;
 }
@@ -88,8 +86,6 @@ export interface LongSave {
 const HORSE_COLS = ['#8a5a2b', '#3a2a1e', '#e8e0d0', '#6b4424', '#a07850'];
 
 export class Long {
-  /** Enchantments, levels and enchantment points. */
-  en = new Ench();
   weapon: Weapon = 'sword';
   spears = 0;
   light = false;
@@ -294,7 +290,6 @@ export class Long {
         if (c.alive === 0 && c.spawned && !c.cleared) {
           c.cleared = true;
           g.toast('Camp cleared! A loot chest appeared by the fire.');
-          this.en.addXp(g, 10);
           g.say('campclear', 'You cleared the whole camp! Check the chest by the fire.', 20);
           sfx.chest();
           if (this.quest && QUESTS.find((q) => q.id === this.quest!.id)?.kind === 'camp') this.quest.got++;
@@ -458,7 +453,6 @@ export class Long {
     this.chili = Math.max(0, this.chili - dt);
     this.feast = Math.max(0, this.feast - dt);
     this.blockT = this.blocking ? this.blockT + dt : 0;
-    this.en.update(g, dt);
     for (const [k, v] of this.springCd) if (v - dt <= 0) this.springCd.delete(k); else this.springCd.set(k, v - dt);
     // rain storms now and then
     if (this.rainLeft > 0) {
@@ -756,7 +750,6 @@ export class Long {
     if (this.sprint && g.p.stamina > 0.01 && g.p.moving && !g.p.inWater) m = 1.65;
     if (this.blocking && this.shield) m *= 0.5;
     if (this.gliding) m = 1.4;
-    else m *= this.en.speedMul();
     return m;
   }
 
@@ -905,7 +898,6 @@ export class Long {
         if (!this.found.has(s.key)) {
           this.found.add(s.key);
           this.orbs++;
-          this.en.addXp(g, 8);
           sfx.win();
           g.puff(s.x + 0.5, s.y + 0.5, p.z + 1, '#7fe0ff', 30, 3);
           g.toast(`The shrine wakes up! +1 spirit orb (${this.orbs}). You can fast travel here now.`);
@@ -1132,7 +1124,7 @@ export class Long {
       bombs: this.bombs, fireArrows: this.fireArrows, arrowType: this.arrowType, glider: this.glider, red: this.red, blue: this.blue,
       meat: this.meat, stars: this.stars, gems: this.gems, orbs: this.orbs, stamUp: this.stamUp, found: [...this.found], towers: [...this.towers],
       discovered: [...this.discovered], camps: [...this.camps].map(([k, c]) => [k, { ...c, spawned: false, alive: 0, alarm: false }]),
-      mined: [...this.mined], quest: this.quest, questsDone: this.questsDone, ench: this.en.toSave(),
+      mined: [...this.mined], quest: this.quest, questsDone: this.questsDone,
     };
   }
 
@@ -1149,7 +1141,6 @@ export class Long {
     l.discovered = new Set(s.discovered);
     l.camps = new Map(s.camps);
     l.mined = new Set(s.mined);
-    l.en = Ench.fromSave(s.ench);
     if (!l.weapons().includes(l.weapon)) l.weapon = 'sword';
     return l;
   }

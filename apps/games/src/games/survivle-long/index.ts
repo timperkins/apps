@@ -6,7 +6,6 @@ import { Game, type SaveData } from './game';
 import { Renderer, drawHero, drawBeast, type Cam } from './render';
 import { ARMOR, JOBS, LONG_FEATURES, OUTFITS, PRICES, QUESTS, RECIPES, SHIELDS, bowName, outfitById, shieldById, swordName, TIME_LIMIT } from './data';
 import { drawBigMap } from './bigmap';
-import { ENCHANTS, ENCH_MAX, ENCH_SLOTS, GEAR_NAMES, enchSrc, roman, type EnchGear } from './enchant';
 import { isMuted, setMuted, sfx } from './audio';
 import { CX, CY, FLOOR_H, VILLAGES, setVillageCount } from './world';
 import { hostGame, joinGame, type Session } from './coop';
@@ -58,7 +57,7 @@ const CONTROLS = `
     <div><b>E</b> chests · spears · cook · shrines · horses · people</div>
     <div><b>G</b> throw a bomb · <b>M</b> big map</div>
     <div><b>B</b> build a wall (5 wood) · <b>C</b> campfire (3 wood) · <b>H</b> eat</div>
-    <div><b>I</b> gear, armor &amp; clothes · <b>N</b> enchant · <b>Esc</b> pause</div>
+    <div><b>I</b> gear, armor &amp; clothes · <b>Esc</b> pause</div>
   </div>`;
 
 const VOICE_KEY = 'survivle-long-voice';
@@ -128,7 +127,7 @@ const game: GameModule = {
           <button data-t="fire">🔥</button>
           <button data-t="eat">🍎</button>
         </div>
-        <div class="svl-ttop"><button data-t="gear">🎒</button><button data-t="ench">✨</button><button data-t="pause">⏸</button><button data-t="map">🗺</button><button data-t="sprint">🏃</button></div>
+        <div class="svl-ttop"><button data-t="gear">🎒</button><button data-t="pause">⏸</button><button data-t="map">🗺</button><button data-t="sprint">🏃</button></div>
       </div>
       <div class="svl-ui"></div>`;
     root.appendChild(el);
@@ -235,7 +234,6 @@ const game: GameModule = {
       if (a === 'pause') return overlay === 'none' ? pause() : play();
       if (a === 'gear') return overlay === 'gear' ? play() : overlay === 'none' ? gear() : undefined;
       if (a === 'map') return overlay === 'map' ? play() : overlay === 'none' ? bigMap() : undefined;
-      if (a === 'ench') return overlay === 'ench' ? play() : overlay === 'none' ? enchMenu() : undefined;
       if (overlay !== 'none') return;
       if (a === 'swing') g.attack();
       else if (a === 'switch') g.lx.cycleWeapon(g);
@@ -277,7 +275,7 @@ const game: GameModule = {
 
     type Mode = 'title' | 'create' | 'cutscene' | 'play' | 'end';
     let mode: Mode = 'title';
-    let overlay: 'none' | 'pause' | 'gear' | 'shop' | 'load' | 'jobs' | 'cook' | 'shrine' | 'smith' | 'elder' | 'map' | 'ench' = 'none';
+    let overlay: 'none' | 'pause' | 'gear' | 'shop' | 'load' | 'jobs' | 'cook' | 'shrine' | 'smith' | 'elder' | 'map' = 'none';
     let g = new Game('', 12345);
     const cam: Cam = { x: CX + 0.5, y: CY + 30, z: FLOOR_H };
     let titleT = 0;
@@ -326,7 +324,6 @@ const game: GameModule = {
               <li><b>The Sword of Light</b>: 30 damage, double to bosses. You need 12 full hearts to pull it out. Follow the gold arrow.</li>
               <li><b>Raider camps</b> around a fire with 4 spears with apples on them. Take the spears!</li>
               <li><b>Raiders</b> with swords, bows, spears, armor and shields. <b>Shields break</b>, yours too.</li>
-              <li><b>Enchanting</b> (N or ✨): 10 enchantments with pictures, like Boom Shot (every 4th arrow explodes 3 seconds later), Chain Zap, Whirlwind and Spikes. Level up to get points.</li>
               <li><b>Shift</b> changes weapons. <b>Armor</b> from the blacksmith, captains and loot chests.</li>
               ${LONG_FEATURES.map((f, i) => `<li>${i + 1}. ${esc(f)}</li>`).join('')}
             </ul>
@@ -478,34 +475,6 @@ const game: GameModule = {
       g.lx.onElder = (vi) => elderMenu(vi);
     }
 
-    function enchMenu(msg = '') {
-      overlay = 'ench';
-      const en = g.lx.en;
-      const gearBox = (gear: EnchGear) => {
-        const used = en.on(gear).length;
-        return `<div class="svl-ench-gear"><h3>${GEAR_NAMES[gear]} <span class="svl-sub">${used} / ${ENCH_SLOTS} slots</span></h3>
-          ${ENCHANTS.filter((d) => d.gear === gear).map((d) => {
-            const l = en.get(d.id);
-            const why = en.blocked(d.id);
-            const dots = Array.from({ length: ENCH_MAX }, (_, i) => `<i class="${i < l ? 'on' : ''}"></i>`).join('');
-            return `<button class="svl-ench ${l ? 'has' : ''}" data-a="ench" data-id="${d.id}" ${why ? 'disabled' : ''} style="--c:${d.color}">
-              <img src="${enchSrc(d)}" alt="" width="52" height="52">
-              <span class="svl-ench-txt"><b>${d.name}${l ? ` ${roman(l)}` : ''}</b><span class="svl-dots">${dots}</span>
-              <span class="svl-sub">${esc(d.what(Math.min(ENCH_MAX, l + (l < ENCH_MAX ? 1 : 0))))}${l && l < ENCH_MAX ? ' (next level)' : ''}</span></span>
-              <em>${l >= ENCH_MAX ? 'MAX' : why && !why.startsWith('Needs') ? 'full' : `${en.cost(d.id)} ✨`}</em></button>`;
-          }).join('')}</div>`;
-      };
-      show(`
-        <div class="svl-dim-bg"><div class="svl-panel wide">
-          <h2>✨ Enchanting</h2>
-          <p class="svl-dim">Level <b>${en.level}</b> · ${en.xp} / ${en.xpNeed()} xp to the next level · <b class="svl-pts">${en.points} enchantment point${en.points === 1 ? '' : 's'}</b><br>
-          Beat enemies, clear camps and wake shrines to level up. Every level gives 1 point. Level I costs 1 point, II costs 2, III costs 3. Each kind of gear holds ${ENCH_SLOTS} enchantments.</p>
-          ${msg ? `<p class="svl-msg">${esc(msg)}</p>` : ''}
-          <div class="svl-cols">${gearBox('melee')}${gearBox('bow')}${gearBox('armor')}</div>
-          <div class="svl-row"><button data-a="unench" class="svl-btn ghost" ${en.spent() ? '' : 'disabled'}>Take them all off (get points back)</button><button data-a="close" class="svl-btn big">Done</button></div>
-        </div></div>`);
-    }
-
     function cookMenu(msg = '') {
       overlay = 'cook';
       const lx = g.lx;
@@ -655,7 +624,6 @@ const game: GameModule = {
             <button data-a="resume" class="svl-btn big">Resume</button>
             ${g.role === 'guest' ? '' : '<button data-a="save" class="svl-btn">Save</button><button data-a="load" class="svl-btn">Load</button>'}
             <button data-a="gear" class="svl-btn">Gear &amp; clothes</button>
-            <button data-a="enchmenu" class="svl-btn">✨ Enchant${g.lx.en.points ? ` (${g.lx.en.points})` : ''}</button>
             ${g.role === 'guest' ? '<button data-a="leave" class="svl-btn">Leave game</button>' : '<button data-a="savequit" class="svl-btn">Save and quit</button>'}
             <button data-a="mute" class="svl-btn ghost">${isMuted() ? 'Sound: off' : 'Sound: on'}</button>
           </div>
@@ -738,7 +706,6 @@ const game: GameModule = {
             <div><h3>Armor (${Math.round(g.lx.armorDef() * 100)}% less damage)</h3>${g.lx.ownedArmor.length ? g.lx.ownedArmor.map((id) => { const a = ARMOR.find((q) => q.id === id)!; return `<button class="svl-item ${g.lx.armor[a.slot] === id ? 'on' : ''}" data-a="armor" data-id="${id}"><i style="background:${a.color};border-color:#222"></i>${a.name}${a.warm ? ' (warm)' : ''}</button>`; }).join('') : '<p class="svl-dim">No armor yet. The blacksmith in each village sells it.</p>'}</div>
             <div><h3>Shield &amp; more</h3><p class="svl-dim">${g.lx.shield ? `🛡 ${shieldById(g.lx.shield.id)?.name}: ${g.lx.shield.hp} / ${shieldById(g.lx.shield.id)?.hp}` : '🛡 No shield'}<br>💣 ${g.lx.bombs} bombs · 🔥 ${g.lx.fireArrows} fire arrows · ❄ ${g.iceArrows} ice arrows<br>🍄 ${g.lx.red} red, ${g.lx.blue} blue · 🍖 ${g.lx.meat} meat<br>🔮 ${g.lx.orbs} spirit orbs · ⭐ ${g.lx.stars} · 💎 ${g.lx.gems}${g.lx.glider ? '<br>🪂 Glider' : ''}</p></div>
           </div>
-          <div class="svl-row"><button data-a="enchmenu" class="svl-btn">✨ Enchant${g.lx.en.points ? ` (${g.lx.en.points} points)` : ''}</button></div>
           <p class="svl-dim">Chests hide on cliff tops and deep in forests. Each one holds a better sword or bow (up to 5 damage better than your best). The best sword does 15. Four mini bosses guard the corners of the map: beat one for a permanent heart.</p>
           <div class="svl-row"><button data-a="close" class="svl-btn big">Done</button></div>
         </div></div>`);
@@ -825,9 +792,6 @@ const game: GameModule = {
           return title();
         }
         case 'gear': return gear();
-        case 'enchmenu': return enchMenu();
-        case 'ench': return enchMenu(g.lx.en.enchant(b.dataset.id!));
-        case 'unench': return enchMenu(g.lx.en.refund());
         case 'mute': {
           setMuted(!isMuted());
           return pause();
@@ -988,11 +952,6 @@ const game: GameModule = {
       if (e.code === 'KeyI' || e.code === 'Tab') {
         if (overlay === 'gear') play();
         else if (overlay === 'none') gear();
-        return;
-      }
-      if (e.code === 'KeyN') {
-        if (overlay === 'ench') play();
-        else if (overlay === 'none') enchMenu();
         return;
       }
       if (e.code === 'KeyM') {

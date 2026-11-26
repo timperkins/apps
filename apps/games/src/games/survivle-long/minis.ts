@@ -347,7 +347,6 @@ export class Minis {
     g.maxHp += gain;
     g.p.hp = g.maxHp;
     g.coins += 60;
-    g.lx.en.addXp(g, 30);
     sfx.win();
     g.toast(`You beat the ${k.name}! ${gain ? '+1 heart forever and ' : ''}+60 coins`);
     const left = this.list.filter((q) => !q.dead).length;
