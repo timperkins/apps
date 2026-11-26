@@ -245,7 +245,7 @@ function moveLine(x1: number, y1: number, x2: number, y2: number) {
 initCursors();
 const RINGS: Record<string, string[]> = { move: moveRingFrames(), foe: attackRingFrames(), ore: harvestRingFrames() };
 const CURSOR_NAMES: [CursorKind, string][] = [
-  ['arrow', 'Pointer'], ['hand', 'Button'], ['move', 'Move'], ['attack', 'Attack'], ['harvest', 'Harvest'], ['deploy', 'Deploy'], ['enter', 'Go in'],
+  ['arrow', 'Pointer'], ['hand', 'Button'], ['move', 'Move'], ['attack', 'Attack'], ['harvest', 'Harvest'], ['deploy', 'Deploy'], ['unload', 'Unload'], ['enter', 'Go in'],
   ['corners', 'Pick unit'], ['rally', 'Rally'], ['build', 'Place'], ['blocked', 'Can’t'], ['grab', 'Drag'],
 ];
 const cursorImg = (css: string) => css.match(/url\(([^)]+)\)/)?.[1] ?? '';

@@ -10,7 +10,9 @@
 // cursor (over a selected unit of yours that can deploy, dig in or let its
 // soldiers out) and the harvest cursor (over ore with an ore hauler selected)
 // are the move cursor in orange and gold, turning the same way, with a gold
-// burst on click. The enter cursor (soldiers onto a transport, an ore hauler
+// burst on click. The unload cursor (over a selected helicopter of yours
+// with soldiers in it) is the deploy cursor turned inside out: the same four
+// gold arrowheads, but pointing out from the spot, as the soldiers will go. The enter cursor (soldiers onto a transport, an ore hauler
 // onto its refinery) is three yellow triangles stacked one over another,
 // pointing down at the spot, a light running down them, with a gold burst
 // when clicked. The repair cursor (an engineer onto a damaged bridge's
@@ -18,7 +20,7 @@
 // a steel wrench, rocking as if turning a nut, with a gold burst when
 // clicked. The sell cursor (the Sell button down) is a gold dollar sign.
 
-export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair' | 'sell';
+export type CursorKind = 'arrow' | 'hand' | 'grab' | 'grabbing' | 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'rally' | 'blocked' | 'build' | 'repair' | 'sell';
 
 const COLORS: Record<string, string> = {
   k: '#10140c', // outline
@@ -34,7 +36,7 @@ const COLORS: Record<string, string> = {
 };
 
 // Rows of 16 characters, '.' is clear. hot is the click point.
-const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'enter' | 'repair'>, { rows: string[]; hot: [number, number] }> = {
+const ART: Record<Exclude<CursorKind, 'move' | 'corners' | 'attack' | 'harvest' | 'deploy' | 'unload' | 'enter' | 'repair'>, { rows: string[]; hot: [number, number] }> = {
   arrow: {
     hot: [0, 0],
     rows: [
@@ -219,6 +221,7 @@ const FALLBACK: Record<CursorKind, string> = {
   attack: 'crosshair',
   harvest: 'crosshair',
   deploy: 'crosshair',
+  unload: 'move',
   enter: 'pointer',
   repair: 'pointer',
   sell: 'pointer',
@@ -279,6 +282,7 @@ function drawn(size: number, draw: (put: (x: number, y: number, col: string) => 
 const MS = 25; // grid size: room for the ring to burst out
 const MC = 12; // the click point
 const REST = 4;
+const UNLOAD_REST = 6; // the unload cursor's arrowheads: bases 6 out, tips 10
 export const MOVE_STEPS = 12; // drawn turns through a quarter circle
 
 interface MoveFrame {
@@ -302,7 +306,9 @@ export const MOVE_CLICK_FRAMES = MOVE_CLICK.length;
 // The arrowheads' colors: green (move), red (attack) or orange and gold (deploy, harvest).
 type Tint = 'green' | 'red' | 'gold';
 const TINT: Record<Tint, [string, string]> = { green: ['g', 'G'], red: ['r', 'R'], gold: ['o', 'Y'] };
-function moveRows(a: number, f: MoveFrame, tint: Tint = 'green'): string[] {
+// out: the arrowheads point out from the click point instead, their bases d
+// pixels out and their tips 4 beyond (the unload cursor).
+function moveRows(a: number, f: MoveFrame, tint: Tint = 'green', out = false): string[] {
   const [dark, light] = TINT[tint];
   return drawn(MS, (put) => {
     for (let y = 0; y < MS; y++)
@@ -318,7 +324,7 @@ function moveRows(a: number, f: MoveFrame, tint: Tint = 'green'): string[] {
           const t = a + (k * Math.PI) / 2;
           const along = vx * Math.cos(t) + vy * Math.sin(t);
           const across = -vx * Math.sin(t) + vy * Math.cos(t);
-          const into = along - f.d;
+          const into = out ? f.d + 4 - along : along - f.d;
           if (into >= -0.3 && into <= 4 && Math.abs(across) <= into * 0.8 + 0.5) put(x, y, into > 3 ? light : dark);
         }
         if (f.flash && r <= f.flash) put(x, y, 'w');
@@ -493,6 +499,9 @@ export const CORNER_FRAMES: string[] = [];
 export const DEPLOY_FRAMES: string[] = [];
 // The enter cursor through one run of its light.
 export const ENTER_FRAMES: string[] = [];
+// The unload cursor through one quarter turn, and its click burst.
+export const UNLOAD_FRAMES: string[] = [];
+export const UNLOAD_CLICK_CSS: string[] = [];
 
 // Build every cursor and publish them as --cur-<kind> on the page.
 export function initCursors(): void {
@@ -501,6 +510,8 @@ export function initCursors(): void {
   for (const f of MOVE_CLICK) ATTACK_CLICK_CSS.push(gridCss(moveRows(0, f, 'red'), [MC, MC], FALLBACK.attack));
   for (let i = 0; i < MOVE_STEPS; i++) DEPLOY_FRAMES.push(gridCss(moveRows(spin(i), { d: REST }, 'gold'), [MC, MC], FALLBACK.deploy));
   for (const f of MOVE_CLICK) DEPLOY_CLICK_CSS.push(gridCss(moveRows(0, f, 'gold'), [MC, MC], FALLBACK.deploy));
+  for (let i = 0; i < MOVE_STEPS; i++) UNLOAD_FRAMES.push(gridCss(moveRows(spin(i), { d: UNLOAD_REST }, 'gold', true), [MC, MC], FALLBACK.unload));
+  for (const f of MOVE_CLICK) UNLOAD_CLICK_CSS.push(gridCss(moveRows(0, f, 'gold', true), [MC, MC], FALLBACK.unload));
   for (let i = 0; i < CHEV_STEPS; i++) ENTER_FRAMES.push(gridCss(chevronRows(i), [8, 16], FALLBACK.enter));
   for (const f of CHEV_CLICK) ENTER_CLICK_CSS.push(gridCss(chevClickRows(f), [MC, MC], FALLBACK.enter));
   for (let i = 0; i < REPAIR_STEPS; i++) REPAIR_FRAMES.push(gridCss(repairRows(i), [10, 6], FALLBACK.repair));
@@ -511,6 +522,7 @@ export function initCursors(): void {
     else if (kind === 'corners') CURSORS[kind] = CORNER_FRAMES[0];
     else if (kind === 'attack') CURSORS[kind] = ATTACK_FRAMES[0];
     else if (kind === 'harvest' || kind === 'deploy') CURSORS[kind] = DEPLOY_FRAMES[0];
+    else if (kind === 'unload') CURSORS[kind] = UNLOAD_FRAMES[0];
     else if (kind === 'enter') CURSORS[kind] = ENTER_FRAMES[0];
     else if (kind === 'repair') CURSORS[kind] = REPAIR_FRAMES[0];
     else CURSORS[kind] = gridCss(ART[kind].rows, ART[kind].hot, FALLBACK[kind]);
