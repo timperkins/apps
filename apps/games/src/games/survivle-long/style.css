@@ -117,3 +117,19 @@
   .svl-stick { bottom: 18px; }
   .svl-say { top: 60px; max-width: 46%; }
 }
+/* enchanting */
+.svl-ench-gear h3 { display: flex; align-items: baseline; gap: 8px; }
+.svl-ench-gear h3 .svl-sub { display: inline; }
+.svl-ench { display: flex; align-items: center; gap: 10px; width: 100%; margin: 4px 0; padding: 6px 10px 6px 6px; background: #241a38; color: #f4ecff;
+  border: 2px solid #4a3870; border-radius: 12px; font: inherit; text-align: left; cursor: pointer; }
+.svl-ench img { flex: none; width: 52px; height: 52px; filter: grayscale(.55) brightness(.85); }
+.svl-ench.has { border-color: var(--c); background: #2e2248; box-shadow: 0 0 10px -2px var(--c); }
+.svl-ench.has img { filter: none; }
+.svl-ench:hover:not(:disabled) { border-color: var(--c); }
+.svl-ench:disabled { opacity: .55; cursor: default; }
+.svl-ench-txt { flex: 1; min-width: 0; }
+.svl-ench em { flex: none; font-style: normal; color: #ffd34d; font-size: 13px; font-weight: 700; }
+.svl-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.svl-dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.18); }
+.svl-dots i.on { background: var(--c); }
+.svl-pts { color: #ffe27a; }

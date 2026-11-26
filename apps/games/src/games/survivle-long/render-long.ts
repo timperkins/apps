@@ -5,6 +5,7 @@ import type { Enemy, Game } from './game';
 import { ELDER, SMITH, type Horse } from './long';
 import type { Cam, HeroGear, Renderer } from './render';
 import { drawHero } from './render';
+import { ENCHANTS, enchImg, roman } from './enchant';
 import { CAMP_SPEARS, CAMP_TENTS, GROVE, ORE_ROCKS, S, VILLAGES, tH, type Site } from './world';
 
 export const SITE_COL: Record<number, string> = {
@@ -396,6 +397,7 @@ export function collectLong(R: Renderer, game: Game, cam: Cam, add: Add) {
   const lx = game.lx;
   const world = game.world;
   const close = (x: number, y: number, r = 50) => Math.abs(x - cam.x) < r && Math.abs(y - cam.y) < r;
+  drawEnchFx(R, game, cam, add);
   for (const s of lx.near) {
     if (!close(s.x, s.y)) continue;
     const h = tH(world.tile(s.x, s.y));
@@ -816,6 +818,7 @@ export function hudLong(R: Renderer, game: Game, cam: Cam) {
   const n = lx.night(game);
   bits.push(n > 0.5 ? '🌙 Night' : '☀ Day');
   if (lx.rain > 0.3) bits.push('🌧 Rain');
+  bits.push(`✨ Lv ${lx.en.level} ${lx.en.xp}/${lx.en.xpNeed()}${lx.en.points ? ` (${lx.en.points} pts)` : ''}`);
   if (lx.orbs) bits.push(`🔮 ${lx.orbs}/4`);
   if (lx.soup > 0) bits.push(`🥣 ${fmt(lx.soup)}`);
   if (lx.chili > 0) bits.push(`🌶 ${fmt(lx.chili)}`);
@@ -848,5 +851,123 @@ export function hudLong(R: Renderer, game: Game, cam: Cam) {
     ctx.fillRect(X - 20, Y, 40, 5);
     ctx.fillStyle = lx.shield.hp / max < 0.3 ? '#ff6a4a' : '#bfe3ff';
     ctx.fillRect(X - 20, Y, (40 * lx.shield.hp) / max, 5);
+  }
+}
+
+/** Boom Shot bombs stuck in things, Chain Zap and Thunder Strike lightning, the Whirlwind ring. */
+function drawEnchFx(R: Renderer, game: Game, cam: Cam, add: Add) {
+  const ctx = R.ctx;
+  const en = game.lx.en;
+  const t = game.time;
+  for (const s of en.sticks) {
+    add(s.x, s.y + 0.01, () => {
+      const X = R.sx(cam, s.x, s.y), Y = R.sy(cam, s.x, s.y, s.z);
+      const left = 3 - s.t;
+      // the arrow poking out
+      ctx.strokeStyle = '#7a4a22';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(X, Y);
+      ctx.lineTo(X - 9, Y - 8);
+      ctx.stroke();
+      // the little bomb on it, blinking faster as it gets close
+      const blink = Math.floor(t * (left < 1 ? 14 : left < 2 ? 8 : 4)) % 2 === 0;
+      ctx.fillStyle = '#2a2030';
+      ctx.beginPath();
+      ctx.arc(X, Y, 5, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = blink ? '#ff3a2a' : '#7a2018';
+      ctx.beginPath();
+      ctx.arc(X, Y - 1, 2.2, 0, 7);
+      ctx.fill();
+      if (blink) {
+        ctx.fillStyle = 'rgba(255,90,40,.3)';
+        ctx.beginPath();
+        ctx.arc(X, Y, 11 + (3 - left) * 3, 0, 7);
+        ctx.fill();
+      }
+      ctx.font = '900 13px ui-rounded, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      R.shadowText(`${Math.ceil(left)}`, X, Y - 12, '#ffd34d');
+    });
+  }
+  const bolt = (x1: number, y1: number, x2: number, y2: number, seg: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    for (let i = 1; i < seg; i++) {
+      const k = i / seg;
+      const j = (Math.sin(t * 90 + i * 7.3) * 0.5 + Math.sin(t * 53 + i * 3.1) * 0.5) * 7;
+      ctx.lineTo(x1 + (x2 - x1) * k + j, y1 + (y2 - y1) * k + j * 0.3);
+    }
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+  for (const z of en.zaps) {
+    const [x0, y0] = z.pts[0];
+    add(x0, y0 + 0.02, () => {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, z.t * 5);
+      ctx.lineJoin = 'round';
+      for (const [w, col] of [[6, 'rgba(255,240,120,.35)'], [2.5, '#fff6b0']] as [number, string][]) {
+        ctx.lineWidth = w;
+        ctx.strokeStyle = col;
+        if (z.sky) {
+          const X = R.sx(cam, x0, y0), Y = R.sy(cam, x0, y0, z.pts[0][2]);
+          bolt(X + 10, Y - 260, X, Y, 9);
+        } else
+          for (let i = 1; i < z.pts.length; i++) {
+            const a = z.pts[i - 1], b = z.pts[i];
+            bolt(R.sx(cam, a[0], a[1]), R.sy(cam, a[0], a[1], a[2]), R.sx(cam, b[0], b[1]), R.sy(cam, b[0], b[1], b[2]), 6);
+          }
+      }
+      ctx.restore();
+    });
+  }
+  if (en.spinT > 0) {
+    const p = game.p;
+    add(p.x, p.y + 0.03, () => {
+      const X = R.sx(cam, p.x, p.y), Y = R.sy(cam, p.x, p.y, p.z) - 14;
+      const k = en.spinT / 0.35;
+      ctx.save();
+      ctx.strokeStyle = `rgba(200,255,210,${k})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(X, Y, 46 * (1.2 - k * 0.4), 24 * (1.2 - k * 0.4), 0, (1 - k) * 9, (1 - k) * 9 + Math.PI * 1.6);
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+}
+
+/** The enchantment pictures on the HUD, the level and the XP bar. */
+export function hudEnch(R: Renderer, game: Game) {
+  const ctx = R.ctx;
+  const en = game.lx.en;
+  const W = R.W, H = R.H;
+  const gear = game.lx.weapon === 'bow' ? 'bow' : 'melee';
+  const list = ENCHANTS.filter((d) => (d.gear === gear || d.gear === 'armor') && en.get(d.id) > 0);
+  const sz = 30;
+  let x = W / 2 - (list.length * (sz + 6)) / 2;
+  const y = H - 84;
+  for (const d of list) {
+    const im = enchImg(d);
+    if (im.complete && im.naturalWidth) ctx.drawImage(im, x, y, sz, sz);
+    // Boom Shot shows which shot is next to explode
+    if (d.id === 'boom') {
+      const n = en.shots % 4;
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = i < n ? '#ffd34d' : 'rgba(0,0,0,.55)';
+        ctx.fillRect(x + 2 + i * 7, y + sz + 2, 5, 3);
+      }
+    }
+    ctx.font = '900 10px ui-rounded, system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    R.shadowText(roman(en.get(d.id)), x + sz + 1, y + sz - 2, '#fff');
+    x += sz + 6;
+  }
+  if (en.levelT < 3) {
+    ctx.font = '900 22px ui-rounded, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    R.shadowText(`✨ Level ${en.level}! Press N to enchant`, W / 2, H / 2 - 110 - en.levelT * 8, Math.floor(en.levelT * 6) % 2 ? '#ffe27a' : '#fff');
   }
 }

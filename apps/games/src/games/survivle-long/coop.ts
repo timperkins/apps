@@ -350,6 +350,7 @@ export async function joinGame(code: string, name: string, outfit: string, onLef
       case 'reward':
         g.coins += m.coins;
         g.arrows += m.arrows;
+        g.lx.en.addXp(g, 1 + m.coins);
         g.float(g.p.x, g.p.y, g.p.z + 1.5, `+${m.coins} coin${m.coins > 1 ? 's' : ''}`, '#ffd34d');
         if (g.job === 'grocer') g.addMeat(g.p.x, g.p.y, g.p.z + 0.5);
         if (g.job === 'guard') {
