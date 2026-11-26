@@ -5,7 +5,7 @@ import { coopBadge, coopMenu, every } from '../coop/ui';
 import type { FriendSession, HostSession, Session } from '../coop/session';
 import { isMuted, play, setMuted, unlockAudio } from './audio';
 import {
-  BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, canPlace, costText, ghostSpot,
+  BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, UNIT_KINDS, canPlace, costText, ghostSpot,
   type BuildKind, type Cost, type Difficulty, type Input, type Order, type Res, type Snap, type UnitKind,
 } from './game';
 import { Renderer, artUrl, loadArt, type Overlay } from './render';
@@ -19,6 +19,8 @@ type ToHost =
   | { t: 'in'; mx: number; my: number; atk: boolean; guard: boolean }
   | { t: 'build'; kind: BuildKind; tx: number; ty: number }
   | { t: 'train'; bid: number; kind: UnitKind }
+  | { t: 'sell'; bid: number }
+  | { t: 'sellUnit'; bid: number; kind: UnitKind }
   | { t: 'order'; o: Order };
 type ToFriend =
   | { t: 'init'; seed: number; diff: Difficulty; nodes: { trees: number[][]; golds: number[][] } }
@@ -43,6 +45,7 @@ const HELP = `
   <ul>
     <li>${icon('wood')} ${icon('gold')} ${icon('meat')} Your <b>pawns</b> chop trees, mine gold and catch sheep by themselves. You can chop, mine and catch sheep with your sword too.</li>
     <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
+    <li>${icon('gold')} Walk up to any of your buildings and press <kbd>E</kbd> to <b>sell</b> it, or sell the units it trains, for half the price back.</li>
     <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
@@ -215,7 +218,6 @@ const game: GameModule = {
       let best = 0, bb = 230;
       for (const e of ren.ents()) {
         if (e.kind < 100 || e.team !== me) continue;
-        if (!BUILD[BUILD_KINDS[e.kind - 100]].trains.length) continue;
         const d = Math.hypot(h.x - e.x, h.y - (e.y - 20));
         if (d < bb) { bb = d; best = e.id; }
       }
@@ -244,6 +246,8 @@ const game: GameModule = {
     const sendHost = (m: ToHost) => { if (net?.role === 'friend') net.send(m); };
     const fail = (m: string | null) => { if (m) { toast(m); play('no'); } };
     const doBuild = (kind: BuildKind, tx: number, ty: number) => { if (net?.role === 'friend') sendHost({ t: 'build', kind, tx, ty }); else if (g) fail(g.build(me, kind, tx, ty)); };
+    const doSell = (bid: number) => { if (net?.role === 'friend') sendHost({ t: 'sell', bid }); else if (g) fail(g.sell(me, bid)); };
+    const doSellUnit = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'sellUnit', bid, kind }); else if (g) fail(g.sellUnit(me, bid, kind)); };
     const doTrain = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'train', bid, kind }); else if (g) fail(g.train(me, bid, kind)); };
     const setOrder = (o: Order) => {
       if (net?.role === 'friend') sendHost({ t: 'order', o }); else g?.setOrder(me, o);
@@ -285,18 +289,26 @@ const game: GameModule = {
       panelFor = bid;
       const bk = BUILD_KINDS[e.kind - 100], s = BUILD[bk], k = myKingdom();
       const color = ['blue', 'red', 'yellow', 'purple'][me];
-      showPanel(`<h2>${s.name}</h2><p class="tk-sub">Room: ${k?.pop ?? 0} / ${k?.cap ?? 0}${(k?.pop ?? 0) >= (k?.cap ?? 0) ? ' · build a house for more' : ''}</p>
+      const have = (u: UnitKind) => { let n = 0; for (const x of ren!.ents()) if (x.kind < 100 && x.team === me && UNIT_KINDS[x.kind] === u) n++; return n; };
+      const sellUnits = s.trains.filter(u => have(u) > 0).map(u =>
+        `<button class="tk-sell" data-sell-unit="${u}">Sell a ${UNIT[u].name.toLowerCase()} <span>+${costHtml(Game.refund(UNIT[u].cost ?? {}))}</span><small>you have ${have(u)}</small></button>`).join('');
+      const sellMe = bk === 'castle' ? '' : `<button class="tk-btn red" data-sell-bldg>Sell this ${s.name.toLowerCase()} <small>get back ${costText(Game.refund(s.cost)) || 'nothing'}</small></button>`;
+      showPanel(`<h2>${s.name}</h2>${s.trains.length ? `<p class="tk-sub">Room: ${k?.pop ?? 0} / ${k?.cap ?? 0}${(k?.pop ?? 0) >= (k?.cap ?? 0) ? ' · build a house for more' : ''}</p>` : `<p class="tk-sub">${s.desc}</p>`}
         <div class="tk-list">${s.trains.map((u, i) => {
           const st = UNIT[u];
           const file = u === 'monk' ? 'monk_idle' : `${u}_idle`;
           return `<button class="tk-item" data-pick="${u}" ${stockOk(st.cost ?? {}) ? '' : 'data-poor'}>
             <span class="tk-face" style="background-image:url(${artUrl(`units/${color}/${file}`)})"></span>
             <b>${i + 1}. ${st.name}</b><small>${st.desc}</small><span class="tk-costs">${costHtml(st.cost ?? {})}</span></button>`;
-        }).join('')}</div><p class="tk-sub">Tap again to train more.</p><button class="tk-btn ghost" data-close>Close</button>`, 'train');
+        }).join('')}</div>${s.trains.length ? '<p class="tk-sub">Tap again to train more. Selling gives back half the price.</p>' : ''}
+        ${sellUnits ? `<div class="tk-sells">${sellUnits}</div>` : ''}${sellMe}<button class="tk-btn ghost" data-close>Close</button>`, 'train');
     };
     panel.addEventListener('click', e => {
       const t = e.target as HTMLElement;
       if (t.closest('[data-close]')) { closePanel(); return; }
+      if (t.closest('[data-sell-bldg]') && panelKind === 'train') { doSell(panelFor); closePanel(); return; }
+      const su = t.closest<HTMLElement>('[data-sell-unit]')?.dataset.sellUnit;
+      if (su && panelKind === 'train') { doSellUnit(panelFor, su as UnitKind); setTimeout(() => panelKind === 'train' && openTrain(panelFor), 150); return; }
       const pick = t.closest<HTMLElement>('[data-pick]')?.dataset.pick;
       if (pick && panelKind === 'build') {
         const kind = pick as BuildKind;
@@ -387,6 +399,8 @@ const game: GameModule = {
         if (!g || !m || net !== s) return;
         if (m.t === 'in') g.inputs.set(slot, { mx: Math.max(-1, Math.min(1, +m.mx || 0)), my: Math.max(-1, Math.min(1, +m.my || 0)), atk: !!m.atk, guard: !!m.guard });
         else if (m.t === 'build' && BUILDABLE.includes(m.kind)) { const err = g.build(slot, m.kind, m.tx | 0, m.ty | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
+        else if (m.t === 'sell') { const err = g.sell(slot, m.bid | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
+        else if (m.t === 'sellUnit' && m.kind in UNIT) { const err = g.sellUnit(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'train' && m.kind in UNIT) { const err = g.train(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'order' && ORDERS.includes(m.o)) g.setOrder(slot, m.o);
       });
@@ -539,7 +553,9 @@ const game: GameModule = {
         hintEl.hidden = false;
         hintEl.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
         const key = touchMode ? '✋' : 'E';
-        hintEl.textContent = gh ? (gh.ok ? `${key}: put the ${BUILD[gh.kind].name.toLowerCase()} here` : 'No room here') : `${key}: train`;
+        const nbKind = nb ? ren.ent(nb) : undefined;
+        const trains = !!nbKind && BUILD[BUILD_KINDS[nbKind.kind - 100]].trains.length > 0;
+        hintEl.textContent = gh ? (gh.ok ? `${key}: put the ${BUILD[gh.kind].name.toLowerCase()} here` : 'No room here') : trains ? `${key}: train or sell` : `${key}: sell`;
         hintEl.classList.toggle('bad', !!gh && !gh.ok);
       } else hintEl.hidden = true;
       // the HUD, only when it changes
