@@ -51,7 +51,7 @@ const HELP = `
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
     <li>${icon('meat')} Press <kbd>1</kbd> to eat: 5 meat heals your hero a lot.</li>
-    <li>👥 Playing together, heroes can hit each other (armies stay friends).</li>
+    <li>👥 Playing together, heroes can hit each other and each other’s buildings (armies stay friends).</li>
   </ul>
   <h3>Keys</h3>
   <p><kbd>WASD</kbd>/arrows walk · <kbd>Space</kbd> or click swing · <kbd>Shift</kbd> block · <kbd>1</kbd> eat · <kbd>B</kbd> build · <kbd>E</kbd> train at a building · <kbd>Q</kbd> army order · <kbd>Esc</kbd> menu. Phones get a stick and buttons.</p>
