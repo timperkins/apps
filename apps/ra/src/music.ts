@@ -80,7 +80,7 @@ onAudioUnlock((c) => {
   let p = Promise.resolve();
   for (const m of order) {
     p = p.then(() =>
-      fetch(`${base}music/${m}.mp3`)
+      fetch(`${base}music/${m}.mp3?v=${__AUDIO_V__}`)
         .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
         .then((b) => c.decodeAudioData(b))
         .then((buf) => {

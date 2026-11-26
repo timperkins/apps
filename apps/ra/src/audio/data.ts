@@ -468,30 +468,30 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   tank: {
     title: 'Vehicle crews',
-    voice: 'Desert Ranger – Male 01',
-    voiceId: 'iEvYV2o9zHf3RDl9U51b',
-    style: 'Deep American voice, muffled as if through a gas-mask radio.',
+    voice: 'Pyle',
+    voiceId: 'weNdhGmYaizQlfiLlyJq',
+    style: 'Low baritone, plainspoken military veteran, deadpan and dry.',
     units: ['light', 'heavy', 'scorch', 'lumen', 'skyguard', 'arty', 'comet', 'apc', 'mcv', 'boat'],
   },
   copter: {
     title: 'Copter pilot',
-    voice: 'Eryn – Strong Female Military Commander',
-    voiceId: 'wa4sQVgbDDzUDEzJwch3',
-    style: 'Strong, commanding American female voice.',
+    voice: 'Oliver – Friendly Professional',
+    voiceId: 'snyKKuaGYk1VUEh42zbW',
+    style: 'Warm, laid-back Australian.',
     units: ['heli'],
   },
   pilot: {
     title: 'Jet and plane pilot',
-    voice: 'Everley Rhodes – VO Pro',
-    voiceId: 'Xm5W2LBUW4LWizr18Fbd',
-    style: 'Confident American female voice. Asked for: crisp, cool, over a cockpit radio; focused for the attack lines.',
+    voice: 'Penfist – Military Broadcaster',
+    voiceId: 'PODaWQBE9fnXYis1ztG8',
+    style: 'Military-trained radio broadcaster, confident.',
     units: ['jet', 'heron', 'plane'],
   },
   scout: {
     title: 'Scout',
-    voice: 'Emma – Wry, Gritty Hero',
-    voiceId: 'dmWfLQZJq7wNPv9WmtiM',
-    style: 'Wry, gritty young American woman with dry humor.',
+    voice: 'John Mansfield',
+    voiceId: 'jD9ZLAx3sVOQk9LCF0zD',
+    style: 'Mid-twenties East Coast American, low and no-nonsense.',
     units: ['buggy'],
   },
   harvester: {
@@ -510,9 +510,9 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   commando: {
     title: 'Commando',
-    voice: 'Pauly – Brooklyn Wise Guy',
-    voiceId: 'OBLxU3DhFiBOh33EeRvi',
-    style: 'Brash, wisecracking New Yorker. Asked for: cocky, confident; grinning for the attack lines.',
+    voice: 'Revenant – RTS Stealth Ghost Soldier',
+    voiceId: 'AocjYzHzWRalprWmBG9m',
+    style: 'Gritty American soldier, sinister and calculating, made for RTS units.',
     units: ['cmdo'],
   },
   flamer: {
@@ -524,9 +524,9 @@ export const VOICES: Record<UnitVoice | 'announcer', VoiceInfo> = {
   },
   navy: {
     title: 'Sea captain',
-    voice: 'Arkadius – Old Storyteller',
-    voiceId: 'O4uxPTtvgxrA0QCLHI1J',
-    style: 'Old Scottish storyteller, deep and raspy. Asked for: gruff old sea captain, commanding; fierce for the attack lines.',
+    voice: 'Spartan',
+    voiceId: 'S75jVZ0i3J6Xa5BbK8CE',
+    style: 'Calm, grounded American baritone, measured.',
     units: ['otter', 'destroyer', 'cruiser', 'carrier', 'sub'],
   },
   dog: {
@@ -678,3 +678,35 @@ export const MUSIC: Record<MoodId, MusicInfo> = {
     when: 'Any of your combat units is on the move well away from your base (24 cells from your nearest building, or from the MCU before it deploys), and for 8 seconds after.',
   },
 };
+
+// ---------- New options to choose from ----------
+
+// Three new ElevenLabs takes of every sound effect, made from the same
+// prompts (Text to Sound v3), trimmed and matched in loudness to the clip the
+// game played: public/sfx/options/<name>_<1..3>.mp3. Where a take was picked
+// it became the game's clip, and the clip it replaced took its slot.
+export const SFX_OPTIONS = 3;
+
+// Takes that were picked and now play in the game, by the slot they came
+// from; that slot holds the clip they replaced.
+export const SFX_APPLIED: Partial<Record<Sfx | Loop, number>> = {
+  shell_whistle: 2,
+  flame_burst: 1,
+  dog_attack: 2,
+  bullet_hit: 2,
+  dog_yelp: 1,
+  ore_unload: 3,
+  credits_tick: 2,
+};
+
+export interface VoiceOption {
+  slug: string; // file name part: public/voice-options/<voice>/<voice>_select_<slug>.mp3
+  voice: string; // the ElevenLabs voice
+  voiceId: string;
+  style: string;
+}
+
+// New voices to try for some units, each saying that unit's first select
+// line (Eleven v4). None waiting now: the six picked voices replaced the old
+// ones in the game, every line.
+export const VOICE_OPTIONS: Partial<Record<UnitVoice, { why?: string; options: VoiceOption[] }>> = {};
