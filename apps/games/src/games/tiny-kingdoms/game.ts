@@ -679,8 +679,10 @@ export class Game {
       if (dist(fx, u.y, v.x, v.y) < reach) { this.damage(v, rival ? UNIT.hero.dmg * 0.6 : UNIT.hero.dmg, u); hit = true; }
     }
     for (const b of this.buildings) {
-      if (b.dead || !enemies(u.team, b.team)) continue;
-      if (this.distToRect(fx, u.y, b) < reach - 20) { this.damageB(b, UNIT.hero.dmg, u); hit = true; }
+      // other players' buildings can be hit too, at a bit less damage
+      const rivalB = b.team !== u.team && b.team < BLACK;
+      if (b.dead || !(enemies(u.team, b.team) || rivalB)) continue;
+      if (this.distToRect(fx, u.y, b) < reach - 20) { this.damageB(b, rivalB ? UNIT.hero.dmg * 0.6 : UNIT.hero.dmg, u); hit = true; }
     }
     // chop and mine too
     for (const t of this.trees) if (t.wood > 0 && dist(fx, u.y - 10, (t.tx + 0.5) * TILE, (t.ty + 0.6) * TILE) < reach) {
