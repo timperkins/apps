@@ -535,6 +535,43 @@ export class Game {
     return null;
   }
 
+  /** Half the price back, rounded down. */
+  static refund(c: Cost): Cost {
+    const out: Cost = {};
+    for (const r of Object.keys(c) as Res[]) { const n = Math.floor((c[r] ?? 0) / 2); if (n) out[r] = n; }
+    return out;
+  }
+
+  /** Sell one of your buildings (not the castle) for half its price. */
+  sell(slot: number, bid: number): string | null {
+    const k = this.kingdom(slot), b = this.get(bid) as Building | undefined, h = this.hero(slot);
+    if (!k || !b || !('variant' in b) || b.team !== slot || b.dead) return 'Can’t sell that.';
+    if (b.kind === 'castle') return 'You can’t sell your castle!';
+    if (!h || this.distToRect(h.x, h.y, b) > 220) return 'Walk over to it first.';
+    const back = Game.refund(BUILD[b.kind].cost);
+    for (const r of Object.keys(back) as Res[]) k.stock[r] += back[r] ?? 0;
+    b.dead = true;
+    this.fx.push([1, b.x - 30, b.y - 20], [1, b.x + 30, b.y - 30], [1, b.x, b.y - 50]);
+    this.sound('coin', b.x, b.y);
+    return null;
+  }
+
+  /** Sell one unit of a kind that this building trains (the closest one to it) for half its price. */
+  sellUnit(slot: number, bid: number, kind: UnitKind): string | null {
+    const k = this.kingdom(slot), b = this.get(bid) as Building | undefined, h = this.hero(slot);
+    if (!k || !b || !('variant' in b) || b.team !== slot || b.dead || !BUILD[b.kind].trains.includes(kind)) return 'Can’t sell that here.';
+    if (!h || dist(h.x, h.y, b.x, b.y) > 260) return 'Walk over to the building first.';
+    let best: Unit | null = null, bd = Infinity;
+    for (const u of this.units) if (!u.dead && u.team === slot && u.kind === kind) { const d = dist(u.x, u.y, b.x, b.y); if (d < bd) { bd = d; best = u; } }
+    if (!best) return `You don’t have any ${UNIT[kind].name.toLowerCase()}s.`;
+    const back = Game.refund(UNIT[kind].cost ?? {});
+    for (const r of Object.keys(back) as Res[]) k.stock[r] += back[r] ?? 0;
+    best.dead = true;
+    this.fx.push([1, best.x, best.y - 10]);
+    this.sound('coin', best.x, best.y);
+    return null;
+  }
+
   setOrder(slot: number, o: Order) {
     const k = this.kingdom(slot);
     if (!k) return;
