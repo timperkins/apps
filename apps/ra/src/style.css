@@ -742,6 +742,13 @@ body {
   box-shadow: inset 2px 2px 0 #fff1a8, inset -2px -2px 0 #a07a1c, 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
+/* the paratroopers' drop zone: sky blue, inside the drop cursor's ring */
+#confirm.sky #okBtn {
+  color: #0c1c2c;
+  background: #3f9be8;
+  box-shadow: inset 2px 2px 0 #b4e0ff, inset -2px -2px 0 #1d5a94, 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+
 #okBtn svg {
   width: 18px;
   height: 18px;
