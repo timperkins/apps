@@ -26,6 +26,8 @@ export const ICE_SLOW = 3;
 export type MeleeShape = 'sword' | 'daggers' | 'axe' | 'spear' | 'hammer' | 'glaive' | 'sickle' | 'scythe' | 'cleaver' | 'fist' | 'mace' | 'katana';
 
 export interface Melee {
+  /** the enchantments on it, for the effect enchantments */
+  fx?: EnchSet;
   kind: 'melee';
   name: string;
   desc: string;
@@ -54,6 +56,8 @@ export interface Melee {
   soulBonus?: number;
 }
 export interface Ranged {
+  /** the enchantments on it, for the effect enchantments */
+  fx?: EnchSet;
   kind: 'ranged';
   name: string;
   desc: string;
@@ -81,6 +85,8 @@ export interface Ranged {
   soulHeal?: number;
 }
 export interface Armor {
+  /** the enchantments on it, for the effect enchantments */
+  fx?: EnchSet;
   kind: 'armor';
   name: string;
   desc: string;
@@ -221,13 +227,19 @@ export const ALL_ARMOR = Object.keys(ARMOR) as ArmorId[];
 export type EnchId =
   | 'sharp' | 'swift' | 'sweep' | 'wildfire' | 'chill' | 'leech' | 'crit' | 'soulheal' | 'siphon'
   | 'power' | 'quick' | 'pierce' | 'flametip' | 'frosttip' | 'poison' | 'multishot' | 'soularrow'
-  | 'tough' | 'quickstep' | 'mend' | 'nimble' | 'heart' | 'soulguard' | 'thorns';
+  | 'tough' | 'quickstep' | 'mend' | 'nimble' | 'heart' | 'soulguard' | 'thorns'
+  // effect enchantments: they do something you can see, not just bigger numbers
+  | 'boomshot' | 'chainzap' | 'seeker' | 'bounce'
+  | 'thunder' | 'whirl' | 'frostbite' | 'shockwave'
+  | 'frostnova' | 'blastback';
 export interface Ench {
   name: string;
   icon: string;
   for: 'melee' | 'ranged' | 'armor';
   /** what each tier (1..3) does */
   tiers: [string, string, string];
+  /** an effect enchantment (something you can see happen) */
+  fx?: boolean;
 }
 export const ENCHANTS: Record<EnchId, Ench> = {
   sharp: { name: 'Sharpness', icon: '🗡️', for: 'melee', tiers: ['+15% damage', '+30% damage', '+45% damage'] },
@@ -254,6 +266,16 @@ export const ENCHANTS: Record<EnchId, Ench> = {
   heart: { name: 'Big Heart', icon: '💗', for: 'armor', tiers: ['+15 health', '+30 health', '+45 health'] },
   soulguard: { name: 'Soul Healing', icon: '👻', for: 'armor', tiers: ['every soul heals 2', 'every soul heals 4', 'every soul heals 6'] },
   thorns: { name: 'Thorns', icon: '🌵', for: 'armor', tiers: ['hurt back 30% of hits', 'hurt back 60%', 'hurt back 90%'] },
+  boomshot: { name: 'Boom Shot', icon: '💣', for: 'ranged', fx: true, tiers: ['every 4th arrow sticks in and explodes 3 seconds later', 'bigger boom (×2.5 damage)', 'huge boom (×3.5 damage)'] },
+  chainzap: { name: 'Chain Zap', icon: '⚡', for: 'ranged', fx: true, tiers: ['arrow hits zap 1 more enemy', 'zap 2 more enemies', 'zap 3 more enemies'] },
+  seeker: { name: 'Seeker', icon: '🎯', for: 'ranged', fx: true, tiers: ['arrows curve toward enemies', 'sharper turns, +10% damage', 'sharpest turns, +20% damage'] },
+  bounce: { name: 'Bounce Shot', icon: '↪️', for: 'ranged', fx: true, tiers: ['25% of hits bounce to another enemy', '50% bounce', '75% bounce'] },
+  thunder: { name: 'Thunder Strike', icon: '🌩️', for: 'melee', fx: true, tiers: ['every 5th hit calls down lightning', 'stronger lightning', 'strongest lightning'] },
+  whirl: { name: 'Whirlwind', icon: '🌪️', for: 'melee', fx: true, tiers: ['every 3rd swing spins all the way round (+25%)', 'spin does +50%', 'spin does +75%'] },
+  frostbite: { name: 'Frost Bite', icon: '🧊', for: 'melee', fx: true, tiers: ['25% of hits freeze enemies solid', '50% freeze', '75% freeze'] },
+  shockwave: { name: 'Shockwave', icon: '〰️', for: 'melee', fx: true, tiers: ['every 4th swing sends a shockwave forward', 'stronger shockwave', 'strongest shockwave'] },
+  frostnova: { name: 'Frost Nova', icon: '❄️', for: 'armor', fx: true, tiers: ['15% of hits on you freeze everything near you', '30% freeze', '45% freeze'] },
+  blastback: { name: 'Blast Back', icon: '💥', for: 'armor', fx: true, tiers: ['15% of hits on you set off a blast around you', '30% blast', '45% blast, bigger'] },
 };
 /** points to reach a tier: tier 1 costs 1, tier 2 costs 2 more, tier 3 costs 3 more */
 export const enchCost = (tier: number) => (tier * (tier + 1)) / 2;
@@ -290,6 +312,7 @@ export function enchantMelee(w: Melee, e: EnchSet = {}): Melee {
     crit: 0.1 * t('crit'),
     soulHeal: 2 * t('soulheal'),
     soulBonus: 0.1 * t('siphon'),
+    fx: e,
   };
 }
 export function enchantRanged(w: Ranged, e: EnchSet = {}): Ranged {
@@ -297,7 +320,7 @@ export function enchantRanged(w: Ranged, e: EnchSet = {}): Ranged {
   const t = (k: EnchId) => e[k] ?? 0;
   return {
     ...w,
-    dmg: Math.round(w.dmg * (1 + 0.15 * t('power'))),
+    dmg: Math.round(w.dmg * (1 + 0.15 * t('power') + 0.1 * Math.max(0, t('seeker') - 1))),
     rate: w.rate * (1 - 0.1 * t('quick')),
     pierce: w.pierce + t('pierce'),
     burnChance: [0, 0.4, 0.7, 1][t('flametip')],
@@ -305,6 +328,7 @@ export function enchantRanged(w: Ranged, e: EnchSet = {}): Ranged {
     poisonChance: [0, 0.3, 0.6, 1][t('poison')],
     extraShot: 0.2 * t('multishot'),
     soulHeal: 2 * t('soularrow'),
+    fx: e,
   };
 }
 export function enchantArmor(a: Armor, e: EnchSet = {}): Armor {
@@ -319,6 +343,7 @@ export function enchantArmor(a: Armor, e: EnchSet = {}): Armor {
     hp: a.hp + 15 * t('heart'),
     soulHeal: 2 * t('soulguard'),
     thorns: 0.3 * t('thorns'),
+    fx: e,
   };
 }
 

@@ -180,7 +180,9 @@
 .dv-btncol { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
 .dv-enb { font-size: 12px !important; padding: 3px 8px !important; }
 .dv-ench-t { color: #c8a8ff !important; }
-.dv-eico { font-size: 26px; width: 40px; text-align: center; }
+.dv-eico { width: 52px; height: 52px; flex: none; image-rendering: auto !important; filter: drop-shadow(0 2px 0 rgba(0,0,0,.4)); }
+.dv-eimg { width: 20px; height: 20px; vertical-align: -5px; image-rendering: auto !important; }
+.dv-fxtag { display: inline-block; margin-left: 4px; padding: 0 5px; background: #ff7a3a; color: #2a1206; font: 800 10px/16px ui-monospace, monospace; vertical-align: 2px; }
 .dv-pips { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
 .dv-pips i { width: 10px; height: 10px; background: #3a2a4a; border: 1px solid #6a4aa0; }
 .dv-pips i.on { background: #c08aff; box-shadow: 0 0 6px #c08aff; }
