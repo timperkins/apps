@@ -109,6 +109,11 @@ export interface Shot {
   home?: number;
   back?: number;
   knock?: number;
+  /** effect enchantments on this arrow: Boom Shot damage, Seeker turn level, Bounce Shot chance, Chain Zap jumps */
+  stick?: number;
+  seek?: number;
+  bounceP?: number;
+  zap?: number;
   /** who healed from souls it earned ('' = host, else a guest id) */
   owner?: string;
 }
@@ -157,6 +162,15 @@ export interface Warn {
   total: number;
 }
 /** a delayed hit on the floor (the Hex Lord's spikes) */
+/** a Boom Shot arrow stuck in a monster (or the floor), counting down to its explosion */
+interface Stick {
+  x: number;
+  y: number;
+  mid: number;
+  t: number;
+  dmg: number;
+  blink: number;
+}
 interface Strike {
   x: number;
   y: number;
@@ -212,7 +226,8 @@ export type Act =
   | { a: 'art'; id: ArtifactId; lv: number; face: number }
   | { a: 'revive'; who?: string }
   | { a: 'chest'; i: number }
-  | { a: 'portal' };
+  | { a: 'portal' }
+  | { a: 'afx'; k: 'nova' | 'blast'; t: number; lv: number };
 interface Tgt {
   /** '' = the host's own hero, '-' = nobody */
   id: string;
@@ -317,6 +332,9 @@ export class Game {
   rings: Ring[] = [];
   warns: Warn[] = [];
   private strikes: Strike[] = [];
+  private sticks: Stick[] = [];
+  /** shots, swings and hits per player ('' = host), for every-Nth enchantments */
+  private fxCount = new Map<string, { s: number; w: number; h: number }>();
   shake = 0;
   nextId = 1;
   kills = 0;
@@ -581,6 +599,7 @@ export class Game {
     this.totems = [];
     this.bolts = [];
     this.strikes = [];
+    this.sticks = [];
     this.targetId = 0;
     this.speedT = this.ironT = 0;
     this.artCd = [0, 0, 0];
@@ -835,6 +854,14 @@ export class Game {
     this.floatLocal(this.x, this.y, `-${real}`, '#ff5a5a');
     this.burst(this.x, this.y, 0.8, '#d83a3a', 6);
     this.sound('hurt');
+    // Frost Nova and Blast Back
+    const afx = this.armor.fx ?? {};
+    const alv = parseKey(this.save.armor).lv;
+    for (const [k, t] of [['nova', afx.frostnova ?? 0], ['blast', afx.blastback ?? 0]] as const) {
+      if (!t || Math.random() >= 0.15 * t) continue;
+      if (this.remote) this.onAct({ a: 'afx', k, t, lv: alv });
+      else this.armorFx(this.x, this.y, k, t, alv);
+    }
     // thorns hurt back whatever hit you
     const th = this.armor.thorns ?? 0;
     if (th > 0 && !this.remote) {
@@ -980,14 +1007,39 @@ export class Game {
     this.swingT = this.swingDur = Math.min(0.32, w.rate * 0.85);
     this.sound(w.shape === 'fist' ? 'punch' : w.effect === 'stun' ? 'slam' : 'swing');
     if (this.remote) this.onAct({ a: 'swing', face: this.face, key: this.save.melee, en: this.enchOf(this.save.melee) });
-    else this.meleeHit(this.x, this.y, this.face, w, (n) => this.leechHeal(n));
+    else this.meleeHit(this.x, this.y, this.face, w, (n) => this.leechHeal(n), '');
   }
 
   private leechHeal(n: number) {
     if (this.dead || this.hp >= this.maxHp) return;
     this.hp = Math.min(this.maxHp, this.hp + n);
   }
-  meleeHit(x0: number, y0: number, face: number, w: Melee, heal?: (n: number) => void) {
+  private counter(owner: string) {
+    let c = this.fxCount.get(owner);
+    if (!c) this.fxCount.set(owner, (c = { s: 0, w: 0, h: 0 }));
+    return c;
+  }
+  meleeHit(x0: number, y0: number, face: number, w: Melee, heal?: (n: number) => void, owner = '') {
+    const fx = w.fx ?? {};
+    const cnt = this.counter(owner);
+    cnt.w++;
+    // Whirlwind: every 3rd swing spins all the way round and hits harder
+    if (fx.whirl && cnt.w % 3 === 0) {
+      w = { ...w, arc: 360, dmg: Math.round(w.dmg * (1 + 0.25 * fx.whirl)), reach: w.reach * 1.15 };
+      this.ring(x0, y0, w.reach, '#a8ffb0', 0.35);
+      this.burst(x0, y0, 0.6, '#d8ffe0', 14, 4);
+      this.sound('swing');
+    }
+    // Shockwave: every 4th swing sends a wave rolling forward
+    if (fx.shockwave && cnt.w % 4 === 0) {
+      const sp = 9;
+      this.shots.push({
+        x: x0 + Math.cos(face) * 0.5, y: y0 + Math.sin(face) * 0.5, z: 0.4, vx: Math.cos(face) * sp, vy: Math.sin(face) * sp,
+        dmg: Math.round(w.dmg * (0.6 + 0.3 * fx.shockwave)), from: 'hero', kind: 'sonic', pierce: 99, hit: new Set(), life: 0.7, knock: 5, color: '#e8f4ff', owner,
+      });
+      this.sound('sonic');
+    }
+    let first: Monster | null = null;
     const half = (w.arc * Math.PI) / 360;
     for (const m of this.monsters) {
       if (m.dead || (m.charmT ?? 0) > 0) continue;
@@ -998,9 +1050,21 @@ export class Game {
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
       if (w.arc < 360 && Math.abs(da) > half + 0.25 && d > 0.6) continue;
-      const fx = w.effect ?? (w.burnChance && Math.random() < w.burnChance ? 'burn' : w.slowChance && Math.random() < w.slowChance ? 'slow' : undefined);
-      this.hurtMonster(m, w.dmg, x0, y0, w.knock, fx, w.element, w.crit ?? 0);
+      const eff = w.effect ?? (w.burnChance && Math.random() < w.burnChance ? 'burn' : w.slowChance && Math.random() < w.slowChance ? 'slow' : undefined);
+      // Frost Bite: some hits freeze the monster solid
+      const freeze = !!fx.frostbite && Math.random() < 0.25 * fx.frostbite;
+      this.hurtMonster(m, w.dmg, x0, y0, w.knock, freeze ? 'stun' : eff, freeze ? undefined : w.element, w.crit ?? 0);
+      if (freeze) this.freeze(m, 1.2);
       if (w.leech && heal) heal(w.leech);
+      if (!first) first = m;
+    }
+    // Thunder Strike: every 5th swing that hits calls lightning down on what you hit
+    if (first && fx.thunder && ++cnt.h % 5 === 0) {
+      const tx = first.x, ty = first.y, dmg = w.dmg * (1.2 + 0.8 * fx.thunder);
+      this.bolt(tx, ty);
+      this.ring(tx, ty, 1.8, '#ffe95a', 0.3);
+      this.sound('thunder');
+      for (const m of this.monsters) if (!m.dead && !(m.charmT ?? 0) && Math.hypot(m.x - tx, m.y - ty) < 1.8 + m.def.radius) this.hurtMonster(m, dmg, tx, ty, 3, 'stun');
     }
     if (w.effect === 'stun') {
       this.ring(x0, y0, w.reach, '#ffe066', 0.35);
@@ -1056,6 +1120,9 @@ export class Game {
   /** the arrows themselves, from any player */
   fireArrows(x0: number, y0: number, angle: number, rangedKey: ItemKey, en: EnchSet = {}, q?: Quiver, owner = '') {
     const w = enchantRanged(rangedOf(rangedKey), en);
+    const cnt = this.counter(owner);
+    // Boom Shot: every 4th time you shoot, the arrow sticks in and blows up 3 seconds later
+    const boom = en.boomshot && ++cnt.s % 4 === 0 ? Math.round(w.dmg * [0, 1.6, 2.5, 3.5][en.boomshot]) : 0;
     const { id } = parseKey(rangedKey);
     const kind = q === 'firework' ? 'firework' : w.shape === 'crossbow' ? 'bolt' : id === 'starlight-bow' || id === 'storm-bow' ? 'star' : 'arrow';
     const shots = w.shots + (w.extraShot && Math.random() < w.extraShot ? 2 : 0);
@@ -1067,7 +1134,9 @@ export class Game {
       if (!effect) effect = w.burnChance && Math.random() < w.burnChance ? 'burn' : w.slowChance && Math.random() < w.slowChance ? 'slow' : w.poisonChance && Math.random() < w.poisonChance ? 'poison' : undefined;
       this.shots.push({
         x: x0 + Math.cos(a) * 0.4, y: y0 + Math.sin(a) * 0.4, z: 0.9, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-        dmg: w.dmg, from: 'hero', kind, pierce: q === 'firework' ? 0 : w.pierce, hit: new Set(), life: 1.4, element: q === 'fire' ? 'fire' : w.element, color, effect, owner,
+        dmg: w.dmg, from: 'hero', kind, pierce: q === 'firework' ? 0 : w.pierce, hit: new Set(), life: 1.4, element: q === 'fire' ? 'fire' : w.element,
+        color: boom && i === 0 ? '#ff5a3a' : color, effect, owner,
+        stick: boom && i === 0 ? boom : undefined, seek: en.seeker, bounceP: en.bounce ? 0.25 * en.bounce : undefined, zap: en.chainzap,
       });
       if (q === 'firework') break;
     }
@@ -1322,6 +1391,7 @@ export class Game {
       this.updateAllies(dt);
       this.updateBeams(dt);
       this.updateStrikes(dt);
+      this.updateSticks(dt);
       this.reveal();
     }
     this.updateTotems(dt);
@@ -1562,8 +1632,9 @@ export class Game {
       return;
     }
     if (!p || p.dead) return;
-    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, enchantMelee(meleeOf(cleanKey(a.key, isMelee)), cleanEnch(a.en)), (n) => this.onPeerGain(id, { heal: n }));
+    if (a.a === 'swing') this.meleeHit(p.x, p.y, a.face, enchantMelee(meleeOf(cleanKey(a.key, isMelee)), cleanEnch(a.en)), (n) => this.onPeerGain(id, { heal: n }), id);
     else if (a.a === 'shoot') this.fireArrows(p.x, p.y, a.angle, cleanKey(a.key, isRanged) || 'shortbow~1~0', cleanEnch(a.en), a.q === 'fire' || a.q === 'poison' || a.q === 'firework' ? a.q : undefined, id);
+    else if (a.a === 'afx' && (a.k === 'nova' || a.k === 'blast')) this.armorFx(p.x, p.y, a.k, Math.max(1, Math.min(3, Math.round(a.t) || 1)), Math.max(1, Math.min(MAX_LEVEL, Math.round(a.lv) || 1)));
     else if (a.a === 'art' && isArtifact(a.id)) this.artifactAt(a.id, p.x, p.y, Math.max(1, Math.min(MAX_LEVEL, Math.round(a.lv) || 1)), +a.face || 0, id);
     else if (a.a === 'chest') {
       const c = this.L.props[a.i];
@@ -1643,6 +1714,72 @@ export class Game {
       }
     }
     this.beams = this.beams.filter((b) => b.t > 0);
+  }
+
+  /** freezes a monster solid for a moment (big ones are only slowed) */
+  private freeze(m: Monster, t: number) {
+    if (m.dead) return;
+    const heavy = m.guardian || m.def.style === 'boss' || m.def.mini;
+    if (heavy) m.slowT = Math.max(m.slowT, t * 2);
+    else {
+      m.stunT = Math.max(m.stunT, t);
+      m.state = 'recover';
+      m.slowT = Math.max(m.slowT, t + 1);
+    }
+    this.burst(m.x, m.y, 0.7 * m.scale, '#bff1ff', 10, 2.5);
+  }
+  /** Chain Zap: lightning jumps from the monster you hit to the closest others */
+  private chainZap(from: Monster, jumps: number, dmg: number) {
+    const done = new Set([from.id]);
+    let cur = from;
+    for (let j = 0; j < jumps; j++) {
+      let next: Monster | null = null, nd = 4.5;
+      for (const o of this.monsters) {
+        if (o.dead || done.has(o.id) || (o.charmT ?? 0) > 0) continue;
+        const d = Math.hypot(o.x - cur.x, o.y - cur.y);
+        if (d < nd) {
+          nd = d;
+          next = o;
+        }
+      }
+      if (!next) break;
+      done.add(next.id);
+      // a spark trail between them
+      for (let k = 1; k <= 5; k++) {
+        const f = k / 6;
+        this.burst(cur.x + (next.x - cur.x) * f + (Math.random() - 0.5) * 0.3, cur.y + (next.y - cur.y) * f + (Math.random() - 0.5) * 0.3, 0.8, '#ffe95a', 2, 0.6, 0.07);
+      }
+      this.hurtMonster(next, dmg, cur.x, cur.y, 1);
+      cur = next;
+    }
+    if (done.size > 1) this.sound('thunder');
+  }
+  /** Boom Shot arrows tick, blink, follow their monster, then explode */
+  private updateSticks(dt: number) {
+    for (const k of this.sticks) {
+      k.t -= dt;
+      const m = k.mid ? this.monsters.find((q) => q.id === k.mid) : undefined;
+      if (m && !m.dead) {
+        k.x = m.x;
+        k.y = m.y;
+      }
+      k.blink -= dt;
+      if (k.blink <= 0) {
+        k.blink = k.t > 1 ? 0.5 : 0.18;
+        this.burst(k.x, k.y, 0.9, '#ff3a2a', 3, 0.8, 0.09);
+      }
+      if (k.t <= 0) this.explode(k.x, k.y, 2.2, k.dmg, false, true);
+    }
+    this.sticks = this.sticks.filter((k) => k.t > 0);
+  }
+  /** armor effect enchantments, wherever that player is */
+  armorFx(x: number, y: number, k: 'nova' | 'blast', t: number, lv: number) {
+    if (k === 'nova') {
+      this.ring(x, y, 3.2, '#bff1ff', 0.45);
+      this.burst(x, y, 0.5, '#e8fbff', 22, 4);
+      this.sound('cast');
+      for (const m of this.monsters) if (!m.dead && !(m.charmT ?? 0) && Math.hypot(m.x - x, m.y - y) < 3.2 + m.def.radius) this.freeze(m, 1.6);
+    } else this.explode(x, y, t >= 3 ? 2.8 : 2.2, Math.round(12 * gearMul(lv) * (1 + 0.5 * t)), false, true);
   }
 
   private updateStrikes(dt: number) {
@@ -2069,6 +2206,29 @@ export class Game {
           s.vy += (Math.sin(a) * 7 - s.vy) * Math.min(1, dt * 6);
         }
       }
+      // Seeker: arrows curve toward the closest monster in front of them
+      if (s.seek && s.from === 'hero') {
+        let best: Monster | null = null, bd = 6;
+        const sp = Math.hypot(s.vx, s.vy) || 1;
+        for (const m of this.monsters) {
+          if (m.dead || s.hit.has(m.id) || (m.charmT ?? 0) > 0) continue;
+          const dx = m.x - s.x, dy = m.y - s.y, d = Math.hypot(dx, dy);
+          if (d < bd && (dx * s.vx + dy * s.vy) / (d * sp) > 0.2) {
+            bd = d;
+            best = m;
+          }
+        }
+        if (best) {
+          const want = Math.atan2(best.y - s.y, best.x - s.x);
+          let da = want - Math.atan2(s.vy, s.vx);
+          while (da > Math.PI) da -= Math.PI * 2;
+          while (da < -Math.PI) da += Math.PI * 2;
+          const turn = Math.max(-1, Math.min(1, da)) * (2 + 2.5 * s.seek) * dt;
+          const a = Math.atan2(s.vy, s.vx) + turn;
+          s.vx = Math.cos(a) * sp;
+          s.vy = Math.sin(a) * sp;
+        }
+      }
       const steps = 3;
       for (let k = 0; k < steps && s.life > 0; k++) {
         s.x += (s.vx * dt) / steps;
@@ -2083,6 +2243,7 @@ export class Game {
             continue;
           }
           s.life = 0;
+          if (s.stick && !this.remote) this.sticks.push({ x: s.x - s.vx * 0.02, y: s.y - s.vy * 0.02, mid: 0, t: 3, dmg: s.stick, blink: 0 });
           this.burst(s.x - s.vx * 0.01, s.y - s.vy * 0.01, s.z, s.from === 'hero' ? (s.color ?? '#d8c8a0') : this.shotColor(s.kind), 4, 1.5);
           if (s.effect === 'bigboom') this.explode(s.x - s.vx * 0.02, s.y - s.vy * 0.02, 2.6, s.dmg * 2.5, false, true);
           break;
@@ -2094,6 +2255,34 @@ export class Game {
               s.hit.add(m.id);
               const eff = s.effect === 'boom' || s.effect === 'bigboom' ? undefined : s.effect;
               this.hurtMonster(m, s.dmg, s.x - s.vx, s.y - s.vy, s.knock ?? 2, eff, s.element);
+              if (!this.remote) {
+                if (s.stick) {
+                  this.sticks.push({ x: m.x, y: m.y, mid: m.id, t: 3, dmg: s.stick, blink: 0 });
+                  s.stick = undefined;
+                }
+                if (s.zap) this.chainZap(m, s.zap, Math.max(1, Math.round(s.dmg * 0.45)));
+                // Bounce Shot: fly off toward another monster nearby
+                if (s.bounceP && Math.random() < s.bounceP) {
+                  let next: Monster | null = null, nd = 5;
+                  for (const o of this.monsters) {
+                    if (o.dead || o === m || s.hit.has(o.id) || (o.charmT ?? 0) > 0) continue;
+                    const d = Math.hypot(o.x - m.x, o.y - m.y);
+                    if (d < nd) {
+                      nd = d;
+                      next = o;
+                    }
+                  }
+                  if (next) {
+                    const sp = Math.hypot(s.vx, s.vy) || 8;
+                    const a = Math.atan2(next.y - s.y, next.x - s.x);
+                    s.vx = Math.cos(a) * sp;
+                    s.vy = Math.sin(a) * sp;
+                    s.life = Math.max(s.life, 0.9);
+                    this.burst(s.x, s.y, s.z, '#ffe8a0', 5, 2);
+                    break;
+                  }
+                }
+              }
               if (s.effect === 'bigboom') {
                 this.explode(s.x, s.y, 2.6, s.dmg * 2.5, false, true);
                 s.life = 0;

@@ -9,6 +9,7 @@ import {
   type ArtifactId, type EnchId, type ItemKey, type ModeId,
 } from './data';
 import { DIFFS } from './data';
+import { enchIcon } from './enchart';
 import { BASE_HP, Game, MOB_ENCH_NAME, newSave, POTION_EVERY, type AimMode, type Input, type SaveData } from './game';
 import { GuestSession, HostSession, MAX_TEAM } from './mp';
 import { listHosts, type HostInfo } from './net';
@@ -846,7 +847,7 @@ const game: GameModule = {
       return isMelee(id) ? MELEE[id].desc : isRanged(id) ? RANGED[id].desc : isArmor(id) ? ARMOR[id].desc : '';
     }
     const isEquipped = (key: ItemKey) => g.save.melee === key || g.save.ranged === key || g.save.armor === key || g.save.slots.includes(key);
-    const enchText = (key: ItemKey) => Object.entries(g.enchOf(key)).map(([k, t]) => `${ENCHANTS[k as EnchId].icon}${'I'.repeat(t ?? 0)}`).join(' ');
+    const enchText = (key: ItemKey) => Object.entries(g.enchOf(key)).map(([k, t]) => `<img class="dv-eimg" src="${enchIcon(k as EnchId)}" alt="" title="${ENCHANTS[k as EnchId].name}">${'I'.repeat(t ?? 0)}`).join(' ');
 
     // --- inventory (Shift): 6 slots on the left, everything you own on the right ---
     let invSel: ItemKey | '' = '';
@@ -883,7 +884,7 @@ const game: GameModule = {
         const pAfter = art ? g.power : powerOf(isMelee(id) ? k : s.melee, isRanged(id) ? k : s.ranged, isArmor(id) ? k : s.armor);
         detail = `<div class="dv-dhead"><img src="${gearIcon(k)}" alt=""><div><b>${esc(itemName(k))}</b><span class="dv-lvb">Level ${parseKey(k).lv}</span>${diff ? `<span class="${diff > 0 ? 'dv-up' : 'dv-down'}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)} vs yours</span>` : ''}</div></div>
           <p>${statLine(k)}</p>${itemDesc(k) ? `<p class="dv-dim">${esc(itemDesc(k))}</p>` : ''}
-          ${en ? `<p class="dv-ench-t">✨ ${en}</p>` : ''}
+          ${en ? `<p class="dv-ench-t">✨ ${en}</p>` : !art ? `<p class="dv-ench-t dv-dim">Can be enchanted with: ${enchChoices(k).map((c) => `<img class="dv-eimg" src="${enchIcon(c)}" alt=""> ${ENCHANTS[c].name}`).join(' · ')}</p>` : ''}
           ${!art && !eqd ? `<p class="dv-dim">Power if you wear it: ⚡ ${pAfter} (now ${g.power})</p>` : ''}
           <div class="dv-row dv-left">
             ${art
@@ -961,14 +962,15 @@ const game: GameModule = {
       const key = invSel;
       if (!key) return show('gear');
       const en = g.enchOf(key);
-      const rows = enchChoices(key)
+      // the item's 3 choices, plus anything already on it (older items rolled from a smaller list)
+      const rows = [...new Set([...enchChoices(key), ...(Object.keys(en) as EnchId[])])]
         .map((k) => {
           const E = ENCHANTS[k];
           const t = en[k] ?? 0;
           const can = g.enchPoints >= t + 1;
           const pips = [1, 2, 3].map((i) => `<i class="${i <= t ? 'on' : ''}"></i>`).join('');
           const btn = t >= 3 ? '<span class="dv-tagx">Max</span>' : `<button class="dv-btn ${can ? 'dv-go' : ''}" data-ench="${k}" ${can ? '' : 'disabled'}>✨ ${t + 1}</button>`;
-          return `<div class="dv-item ${t ? 'eq' : ''}"><b class="dv-eico">${E.icon}</b><div class="dv-it"><b>${E.name} <span class="dv-pips">${pips}</span></b><small>${t ? `Now: ${E.tiers[t - 1]}` : E.tiers.join(' → ')}${t && t < 3 ? ` · next: ${E.tiers[t]}` : ''}</small></div>${btn}</div>`;
+          return `<div class="dv-item ${t ? 'eq' : ''}"><img class="dv-eico" src="${enchIcon(k)}" alt=""><div class="dv-it"><b>${E.name} <span class="dv-pips">${pips}</span>${E.fx ? ' <span class="dv-fxtag">EFFECT</span>' : ''}</b><small>${t ? `Now: ${E.tiers[t - 1]}` : E.tiers.join(' → ')}${t && t < 3 ? ` · next: ${E.tiers[t]}` : ''}</small></div>${btn}</div>`;
         })
         .join('');
       panel(`<h2>✨ Enchant: ${esc(itemName(key))} <small>Lv ${parseKey(key).lv}</small></h2>
