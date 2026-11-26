@@ -38,12 +38,7 @@ const menu = document.querySelector<HTMLDivElement>('#menu')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
 const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
-const selMenu = document.querySelector<HTMLDivElement>('#selMenu')!;
-const typesEl = document.querySelector<HTMLSpanElement>('#types')!;
 const groupBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar button.grp')];
-const noTypes = document.querySelector<HTMLSpanElement>('#noTypes')!;
-const allBtn = document.querySelector<HTMLButtonElement>('#allBtn')!;
-const clearBtn = document.querySelector<HTMLButtonElement>('#clearBtn')!;
 const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
 const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
 const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
@@ -94,40 +89,66 @@ document.addEventListener('pointerdown', (e) => {
   if (!menu.hidden && !menu.contains(e.target as Node) && !menuBtn.contains(e.target as Node)) setMenu(false);
 });
 
-// ---------- Toolbar and the selection menu ----------
-// Select (touch screens only: with a mouse you drag a box, and the menu never
-// shows) opens the selection menu above the toolbar (so does tapping a unit):
-// a button for each kind of unit of yours on screen, with how many there are,
-// which adds them all to the selection or takes them out of it, then All and
-// Clear. A drag on a touch screen pans; with a mouse it draws a box.
+// ---------- Toolbar: Select and Deselect ----------
+// With a mouse you drag a box to select (and Shift+click, Ctrl+A), so there is
+// no Select button. On a touch screen a drag pans, so Select arms a box
+// instead: the next drag on the map draws one and selects what is in it.
+// Once something is selected the button turns into Deselect. The first time
+// Select is pressed, a short demo shows the drag.
 
 let lastNames: string[] = [];
-let selOpen = false;
-// Once you order the selection somewhere it is locked as a group: the menu
-// shows just those units, as one button with how many there are, and taps
-// send them rather than pick others, until you clear it. A selection made
-// with the menu's buttons is locked too as soon as you pan away or tap the
-// map, so it doesn't drop the units that go off screen.
+let armed = false;
+// Once you order the selection somewhere it is locked as a group: taps on
+// its own units send them rather than pick others, until you deselect.
 let locked = false;
-// A mouse (and no touch screen as the main pointer): no Select button, and no
-// selection menu either (you drag a box, Shift+click and Ctrl+A instead).
 const mouseOnly = window.matchMedia('(hover: hover) and (pointer: fine)');
-// the selection was made with the menu, at this camera position
-let menuPick: { x: number; y: number } | null = null;
 function lockGroup(): void {
-  menuPick = null;
   if (!game || !game.selectedPoints().length || !game.selectedTypes) return;
   if (!game.selectedTypes().length) return; // a building: nothing to lock
   locked = true;
-  typesKey = '';
-  if (!selOpen) setSelOpen(true);
 }
-function pickedWithMenu(): void {
-  if (!locked && lastNames.length) menuPick = { x: cen.x, y: cen.y };
+let selectIcon = '';
+function updateSelectBtn(): void {
+  const has = lastNames.length > 0;
+  const icon = has ? 'clear' : 'select';
+  if (icon !== selectIcon) {
+    selectIcon = icon;
+    selectBtn.innerHTML = lineIcon(icon);
+  }
+  selectBtn.setAttribute('aria-pressed', String(armed && !has));
+  selectBtn.title = has ? 'Deselect (Esc)' : armed ? 'Drag on the map to select units (tap again to cancel)' : 'Select units: then drag a box (Q)';
+  selectBtn.setAttribute('aria-label', has ? 'Deselect' : 'Select units');
 }
-// Every frame: a menu selection is locked once the view moves.
-function lockOnPan(): void {
-  if (menuPick && !locked && Math.hypot(cen.x - menuPick.x, cen.y - menuPick.y) > 2) lockGroup();
+function setArmed(on: boolean): void {
+  armed = on && !mouseOnly.matches;
+  updateSelectBtn();
+}
+function pressSelect(): void {
+  if (!game) return;
+  if (lastNames.length) {
+    game.deselect();
+    return;
+  }
+  setArmed(!armed);
+  if (armed) dragDemo();
+}
+selectBtn.addEventListener('click', pressSelect);
+
+// The first time Select is pressed: a finger drags a box open over the
+// middle of the screen, with a caption, then it fades.
+const DEMO_KEY = 'ra-drag-demo';
+function dragDemo(): void {
+  if (load(DEMO_KEY)) return;
+  save(DEMO_KEY, '1');
+  const el = document.createElement('div');
+  el.id = 'dragDemo';
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = '<i class="box"></i><i class="finger"></i><span class="cap">Drag to select</span>';
+  document.body.append(el);
+  el.addEventListener('animationend', (e) => {
+    if (e.target === el) el.remove();
+  });
+  window.setTimeout(() => el.remove(), 3000);
 }
 
 // ---------- Groups ----------
@@ -216,19 +237,6 @@ function goToSelection(): void {
   clampCen();
 }
 
-function setSelOpen(open: boolean): void {
-  selOpen = open && !mouseOnly.matches;
-  selectBtn.setAttribute('aria-pressed', String(open));
-  typesKey = '';
-  updateSelBar();
-}
-selectBtn.addEventListener('click', () => setSelOpen(!selOpen));
-allBtn.addEventListener('click', () => {
-  selectView(true);
-  pickedWithMenu();
-});
-clearBtn.addEventListener('click', () => game?.deselect());
-
 // Commands for the selection (Deploy, Pack up...), drawn as buttons before
 // More and Clear. They are refreshed every frame, but the buttons are only
 // rebuilt when something about them changes.
@@ -236,12 +244,10 @@ clearBtn.addEventListener('click', () => game?.deselect());
 const ICONS: Record<string, IconName> = { deploy: 'deploy', ok: 'check', x: 'close', star: 'star', pack: 'pack', unload: 'unload', chute: 'chute' };
 let actsKey = '';
 let hasActs = false;
-// The bar above the toolbar: commands for the selection, and the selection menu.
+// The bar above the toolbar: commands for the selection.
 function updateSelBar(): void {
-  const menuOn = selOpen && !placingNow();
-  selMenu.hidden = !menuOn;
   actsEl.hidden = !hasActs;
-  selBar.hidden = !menuOn && !hasActs;
+  selBar.hidden = !hasActs;
 }
 
 // The map rect that counts as on screen: the view, or from space the near
@@ -251,76 +257,6 @@ function viewRect(): [number, number, number, number] {
   return [camX(), camY(), camX() + view.w, camY() + view.h];
 }
 
-// The selection menu's buttons, checked every frame as units come and go
-// from the view, and only rebuilt when something about them changes.
-let typesKey = '';
-function refreshTypes(): void {
-  if (!selOpen || selMenu.hidden || !game) return;
-  const types = locked ? (game.selectedTypes?.() ?? []) : (game.unitTypes?.(...viewRect()) ?? []);
-  const key = JSON.stringify([locked, types.map((t) => [t.kind, t.count, t.sel]), lastNames.length]);
-  if (key === typesKey) return;
-  typesKey = key;
-  noTypes.hidden = locked || types.length > 0 || !game.unitTypes;
-  // All and Clear share one slot, so the bar doesn't shift: All while nothing
-  // is selected (grayed out with nothing on screen), Clear once something is
-  const any = lastNames.length > 0;
-  allBtn.hidden = any;
-  allBtn.disabled = !!game.unitTypes && types.length === 0;
-  clearBtn.hidden = !any;
-  typesEl.classList.toggle('group', locked);
-  typesEl.hidden = false;
-  if (locked) {
-    // the group as one button: the picture of its most common kind and how
-    // many there are in all; tap it to go to them
-    const total = types.reduce((n, t) => n + t.count, 0);
-    const top = [...types].sort((a, b) => b.count - a.count)[0];
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'type whole';
-    b.setAttribute('aria-pressed', 'true');
-    b.title = `${types.map((t) => `${t.count} ${t.name}`).join(', ')}: tap to go to them (Clear to pick again)`;
-    b.setAttribute('aria-label', b.title);
-    if (top) b.append(pictureOf(top.icon));
-    b.append(countOf(String(total)));
-    b.addEventListener('click', goToSelection);
-    typesEl.replaceChildren(b);
-    return;
-  }
-  typesEl.replaceChildren(
-    ...types.map((t) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'type';
-      const all = t.sel === t.count;
-      b.classList.toggle('part', t.sel > 0 && !all);
-      b.setAttribute('aria-pressed', String(all));
-      b.title = `${t.name}: ${t.sel ? `${t.sel} of ${t.count} selected` : `${t.count} on screen`}`;
-      b.setAttribute('aria-label', b.title);
-      b.append(pictureOf(t.icon), countOf(t.sel && !all ? `${t.sel}/${t.count}` : String(t.count)));
-      // a kind not all selected: add the rest; all selected: drop them
-      b.addEventListener('click', () => {
-        game.selectKind?.(t.kind, !all, ...viewRect());
-        pickedWithMenu();
-      });
-      return b;
-    }),
-  );
-}
-function pictureOf(src: string): HTMLSpanElement {
-  const img = document.createElement('img');
-  img.src = src;
-  img.alt = '';
-  const pic = document.createElement('span');
-  pic.className = 'pic';
-  pic.append(img);
-  return pic;
-}
-function countOf(text: string): HTMLSpanElement {
-  const n = document.createElement('span');
-  n.className = 'count';
-  n.textContent = text;
-  return n;
-}
 function refreshActions(): void {
   const acts = (!planet && game?.actions?.()) || [];
   const key = JSON.stringify(acts);
@@ -351,21 +287,13 @@ function selectView(add: boolean): void {
 }
 
 function showSelection(names: string[]): void {
-  // picking something opens the menu, so you can add other kinds to it
-  if (names.length && !lastNames.length && !selOpen) setSelOpen(true);
   lastNames = names;
-  typesKey = '';
-  if (!names.length) {
+  if (names.length) armed = false;
+  else {
     setPending(null);
     locked = false;
-    menuPick = null;
-    // with a mouse there is no Select button to close it: it goes with the selection
-    if (selOpen && mouseOnly.matches) {
-      selOpen = false;
-      selectBtn.setAttribute('aria-pressed', 'false');
-    }
   }
-  updateSelBar();
+  updateSelectBtn();
 }
 
 // ---------- Confirming orders on a touch screen ----------
@@ -874,7 +802,7 @@ function leaveGame(): void {
   built = { w: 0, h: 0 };
   loading.hidden = true;
   picker.hidden = true;
-  setSelOpen(false);
+  setArmed(false);
   showMpMenu();
   if (m) m.leave();
   else lobby.show();
@@ -1153,7 +1081,7 @@ const panels = new MutationObserver((ms) => {
     return;
   }
 });
-for (const el of [menu, selMenu, document.querySelector('#build')]) if (el) panels.observe(el, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
+for (const el of [menu, document.querySelector('#build')]) if (el) panels.observe(el, { attributes: true, attributeFilter: ['hidden'], attributeOldValue: true });
 document.addEventListener('click', (e) => {
   const b = (e.target as Element | null)?.closest?.('button, select, a');
   if (!b || performance.now() - panelT < 100) return;
@@ -1433,8 +1361,6 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (multi || down) return;
   if (game.moveMarks !== undefined) game.moveMarks = e.pointerType !== 'mouse';
-  // the first tap after picking with the menu locks the selection as a group
-  if (menuPick && !locked && !placingNow()) lockGroup();
   const p = toMap(e.clientX, e.clientY);
   if (placingNow()) {
     if (e.button === 2) {
@@ -1458,7 +1384,7 @@ canvas.addEventListener('pointerdown', (e) => {
     }
     return;
   }
-  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || e.pointerType !== 'mouse' || e.button === 1 || locked };
+  down = { ...p, cx: e.clientX, cy: e.clientY, lx: e.clientX, ly: e.clientY, id: e.pointerId, pan: planet || (e.pointerType !== 'mouse' && !armed) || e.button === 1 || locked };
   dragging = false;
 });
 canvas.addEventListener('pointermove', (e) => {
@@ -1547,7 +1473,10 @@ const finish = (e: PointerEvent, cancel: boolean) => {
         else if (what === 'deploy' || what === 'unfold') game.act?.('deploy');
         else game.click(down.x, down.y, add);
       } else touchTap(down.x, down.y);
-    } else if (!down.pan && !locked) game.boxSelect(down.x, down.y, p.x, p.y, add);
+    } else if (!down.pan && !locked) {
+      game.boxSelect(down.x, down.y, p.x, p.y, add);
+      if (armed) setArmed(false);
+    }
   }
   box = null;
   down = null;
@@ -1687,10 +1616,10 @@ window.addEventListener('keydown', (e) => {
     else if (game.targeting?.()) stopTargeting();
     else if (pending) setPending(null);
     else if (lastNames.length) game.deselect();
-    else setSelOpen(false);
+    else setArmed(false);
   }
   if (e.key === 'b') document.querySelector<HTMLButtonElement>('#buildBtn:not([hidden])')?.click();
-  if (e.key === 'q') setSelOpen(!selOpen);
+  if (e.key === 'q') pressSelect();
   if (e.key === 'f') game.act?.('deploy');
   // Space deploys too (and doesn't scroll the page or press a focused button)
   if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1841,8 +1770,6 @@ function draw(now: number, first: boolean): void {
   }
   refreshActions();
   syncGhost();
-  lockOnPan();
-  refreshTypes();
   refreshGroups();
   placeConfirm();
   placeDeploy();

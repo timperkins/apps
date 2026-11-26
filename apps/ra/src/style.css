@@ -466,10 +466,7 @@ body {
 }
 
 #selBar[hidden],
-#selMenu[hidden],
-#types[hidden],
 #acts[hidden],
-#noTypes[hidden],
 #confirm[hidden] {
   display: none;
 }
@@ -481,171 +478,109 @@ body {
   gap: 6px;
 }
 
-/* the selection menu, all on one row: the color groups and a button per
-   kind of unit on screen (scrolling sideways when there are too many), then
-   Color and All or Clear, which always show */
-#selMenu {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: center;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
+/* The first press of Select on a touch screen: a finger drags a selection
+   box open over the middle of the screen, then it all fades (main.ts dragDemo) */
+#dragDemo {
+  position: fixed;
+  z-index: 3;
+  left: 50%;
+  top: 42%;
+  width: 140px;
+  height: 100px;
+  margin: -50px 0 0 -70px;
+  pointer-events: none;
+  animation: demo-fade 1.9s ease forwards;
+}
+
+#dragDemo .box {
+  position: absolute;
+  left: 0;
+  top: 0;
   box-sizing: border-box;
-  padding: 5px;
+  border: 2px solid #9dff9d;
+  background: rgba(140, 255, 140, 0.14);
+  animation: demo-box 1.9s ease-in-out forwards;
+}
+
+#dragDemo .finger {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.3);
+  animation: demo-finger 1.9s ease-in-out forwards;
+}
+
+#dragDemo .cap {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 16px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  font-family: var(--f-text);
+  font-size: 12px;
+  color: var(--ink);
   background: var(--panel);
   border: 2px solid var(--edge);
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5), 0 3px 0 rgba(0, 0, 0, 0.35);
 }
 
-#selScroll {
-  flex: 0 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  /* room for the count bubbles, which stick out of the buttons */
-  margin: -9px 0 -3px -3px;
-  padding: 9px 8px 3px 3px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  touch-action: pan-x;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+@keyframes demo-fade {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
-#selScroll::-webkit-scrollbar {
-  display: none;
+@keyframes demo-box {
+  0%,
+  18% {
+    width: 0;
+    height: 0;
+  }
+  72%,
+  100% {
+    width: 100%;
+    height: 100%;
+  }
 }
 
-#types {
-  --grp: #9dff9d;
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* a group you have given orders to: fixed until you clear it, shown as one
-   button with how many there are */
-#types.group {
-  padding: 3px;
-  border: 1px dashed var(--grp);
-  background: color-mix(in srgb, var(--grp) 8%, transparent);
-}
-
-#selBar button.type.whole .count,
-#selBar button.type.whole[aria-pressed='true'] .count {
-  background: var(--grp);
-}
-
-#selBar button.type.whole,
-#selBar button.type.whole[aria-pressed='true'] {
-  border-color: var(--grp);
-  background: color-mix(in srgb, var(--grp) 28%, transparent);
-}
-
-
-#selBar button.type:disabled {
-  cursor: var(--cur-arrow);
-}
-
-#noTypes {
-  padding: 0 6px;
-  font-family: var(--f-text);
-  font-size: 10px;
-  color: var(--ink);
-  opacity: 0.75;
-}
-
-#selMenu button {
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
-  min-width: 42px;
-  height: 44px;
-  padding: 3px 4px 2px;
-  font-size: 8px;
-  line-height: 1;
-  letter-spacing: 0;
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.12), inset -1px -1px 0 rgba(0, 0, 0, 0.5);
-}
-
-#selBar #selMenu button svg {
-  flex: none;
-  width: 22px;
-  height: 22px;
-}
-
-#selBar button.type {
-  flex: none;
-  position: relative;
-  width: 42px;
-  padding: 0;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-/* the build-menu picture of the unit, cropped in close */
-#selBar button.type .pic {
-  width: 38px;
-  height: 40px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-#selBar button.type img {
-  flex: none;
-  width: 96px;
-  height: 72px;
-  margin-top: -6px;
-  image-rendering: pixelated;
-}
-
-#selBar button.type .count {
-  position: absolute;
-  top: -7px;
-  right: -7px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  box-sizing: border-box;
-  border-radius: 8px;
-  font-size: 9px;
-  line-height: 16px;
-  text-align: center;
-  color: #10170d;
-  background: var(--ink);
-  border: 1px solid #10170d;
-}
-
-#selBar button.type[aria-pressed='true'] {
-  background: rgba(157, 255, 157, 0.28);
-  border-color: #9dff9d;
-}
-
-#selBar button.type[aria-pressed='true'] .count {
-  background: #9dff9d;
-}
-
-#selBar button.type.part {
-  border-color: #9dff9d;
-  border-style: dashed;
-}
-
-/* All and Clear take turns in one slot: the same width, so nothing moves */
-#selBar #allBtn,
-#selBar #clearBtn {
-  flex: none;
-  width: 56px;
-  min-width: 56px;
-}
-
-#allBtn:disabled {
-  opacity: 0.5;
-  cursor: var(--cur-arrow);
+@keyframes demo-finger {
+  0% {
+    left: 0;
+    top: 0;
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  18% {
+    left: 0;
+    top: 0;
+    transform: scale(1);
+    opacity: 1;
+  }
+  72% {
+    left: 100%;
+    top: 100%;
+    transform: scale(1);
+    opacity: 1;
+  }
+  90%,
+  100% {
+    left: 100%;
+    top: 100%;
+    transform: scale(1.4);
+    opacity: 0;
+  }
 }
 
 /* confirming an order on a touch screen: a round check over the spot, with
