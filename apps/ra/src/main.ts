@@ -38,7 +38,6 @@ const menu = document.querySelector<HTMLDivElement>('#menu')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
 const selectBtn = document.querySelector<HTMLButtonElement>('#selectBtn')!;
 const selBar = document.querySelector<HTMLDivElement>('#selBar')!;
-const groupBtns = [...document.querySelectorAll<HTMLButtonElement>('#toolbar button.grp')];
 const actsEl = document.querySelector<HTMLDivElement>('#acts')!;
 const confirmEl = document.querySelector<HTMLDivElement>('#confirm')!;
 const okBtn = document.querySelector<HTMLButtonElement>('#okBtn')!;
@@ -152,15 +151,11 @@ function dragDemo(): void {
 }
 
 // ---------- Groups ----------
-// Group 1 and Group 2 show on the toolbar while units are selected (and
-// while a group has units in it). With the group empty, tapping it puts the
-// selection in it; once it has units, tapping it selects them again,
-// wherever they are, and tapping it again takes you to them. A long press
-// (or Shift+click, or Shift+1 and Shift+2) puts the selection in it instead.
+// The 1 and 2 keys select Group 1 or Group 2 again (pressing it again takes
+// you to them); Shift+1 and Shift+2 put the selection in it.
 function assignGroup(g: number): void {
   if (g >= GROUP_COUNT || !game?.setGroup || !game.selectedTypes?.().length) return;
   game.setGroup(g);
-  groupsKey = '';
   play('order_confirm', 0.6, { ui: true });
   lockGroup();
 }
@@ -172,49 +167,6 @@ function pickGroup(g: number): void {
   lockGroup();
   if (was) goToSelection();
 }
-for (const [g, b] of groupBtns.entries()) {
-  let press = 0;
-  let held = false;
-  b.addEventListener('pointerdown', () => {
-    held = false;
-    clearTimeout(press);
-    press = window.setTimeout(() => {
-      held = true;
-      assignGroup(g);
-    }, 500);
-  });
-  const stop = () => clearTimeout(press);
-  b.addEventListener('pointerup', stop);
-  b.addEventListener('pointerleave', stop);
-  b.addEventListener('pointercancel', stop);
-  b.addEventListener('contextmenu', (e) => e.preventDefault());
-  b.addEventListener('click', (e) => {
-    if (held) return; // a long press already did it
-    const has = game?.groups?.().some((x) => x.n === g);
-    if (e.shiftKey || e.ctrlKey || e.metaKey || !has) assignGroup(g);
-    else pickGroup(g);
-  });
-}
-// Every frame: which group buttons show, and how many units are in each.
-let groupsKey = '';
-function refreshGroups(): void {
-  const groups = game?.groups ? game.groups() : [];
-  const canSet = !!game?.setGroup && (game.selectedTypes?.().length ?? 0) > 0;
-  const key = JSON.stringify([groups.map((g) => [g.n, g.count, g.sel]), canSet]);
-  if (key === groupsKey) return;
-  groupsKey = key;
-  for (const [i, b] of groupBtns.entries()) {
-    const g = groups.find((x) => x.n === i);
-    b.hidden = !g && !canSet;
-    b.setAttribute('aria-pressed', String(!!g?.sel));
-    b.querySelector('.count')!.textContent = g ? String(g.count) : '';
-    b.title = g
-      ? `Group ${i + 1}: ${g.count} unit${g.count === 1 ? '' : 's'} (${i + 1})${g.sel ? ', tap again to go to them' : ''}. Hold (or Shift+${i + 1}) to put the selection in it`
-      : `Put the selection in Group ${i + 1} (Shift+${i + 1})`;
-    b.setAttribute('aria-label', b.title);
-  }
-}
-
 // Center the view on the selection (the copy of it nearest the camera).
 function goToSelection(): void {
   const pts = game?.selectedPoints() ?? [];
@@ -1770,7 +1722,6 @@ function draw(now: number, first: boolean): void {
   }
   refreshActions();
   syncGhost();
-  refreshGroups();
   placeConfirm();
   placeDeploy();
   build.update(now);
