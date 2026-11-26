@@ -27,6 +27,14 @@ type ToFriend =
 
 const icon = (r: string) => `<img class="tk-ico" src="${artUrl(`ui/${r}`)}" alt="${r}">`;
 const costHtml = (c: Cost) => (Object.keys(c) as Res[]).map(r => `<span class="tk-cost">${icon(r)}${c[r]}</span>`).join('');
+const COLOR_FILES = ['blue', 'red', 'yellow', 'purple'];
+/** A small picture of a building for the build menu. */
+function buildPic(b: BuildKind, slot = 0) {
+  const col = COLOR_FILES[slot] ?? 'blue';
+  if (b === 'wall') return `<span class="tk-wallpic tk-wall-${col}"><i></i><i></i><i></i></span>`;
+  if (b === 'tower2') return `<span class="tk-twin"><img src="${artUrl(`buildings/${col}/tower`)}" alt=""><img src="${artUrl(`buildings/${col}/tower`)}" alt=""></span>`;
+  return `<img src="${artUrl(`buildings/${col}/${b === 'house' ? 'house1' : b === 'mansion' ? 'house3' : b}`)}" alt="">`;
+}
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 const HELP = `
@@ -228,7 +236,8 @@ const game: GameModule = {
       if (!gh.ok) { fail('No room here. Find open grass, away from trees and water.'); return; }
       if (!stockOk(BUILD[gh.kind].cost)) { fail(`You need ${costText(BUILD[gh.kind].cost)}.`); placing = null; return; }
       doBuild(gh.kind, gh.tx, gh.ty);
-      placing = null;
+      // walls: keep going, one block after another
+      if (gh.kind !== 'wall') placing = null;
     };
 
     // ---------- commands (the host runs them, friends send them) ----------
@@ -266,7 +275,7 @@ const game: GameModule = {
       showPanel(`<h2>${icon('hammer')} Build</h2><div class="tk-list">${BUILDABLE.map((b, i) => {
         const s = BUILD[b];
         return `<button class="tk-item" data-pick="${b}" ${stockOk(s.cost) ? '' : 'data-poor'}>
-          <img src="${artUrl(`buildings/${['blue', 'red', 'yellow', 'purple'][me]}/${b === 'house' ? 'house1' : b}`)}" alt="">
+          ${buildPic(b, me)}
           <b>${i + 1}. ${s.name}</b><small>${s.desc}</small><span class="tk-costs">${costHtml(s.cost)}</span></button>`;
       }).join('')}</div><button class="tk-btn ghost" data-close>Close</button>`, 'build');
     };
@@ -294,7 +303,8 @@ const game: GameModule = {
         closePanel();
         if (!stockOk(BUILD[kind].cost)) { fail(`You need ${costText(BUILD[kind].cost)}.`); return; }
         placing = kind;
-        toast(touchMode ? 'Walk to open grass, then tap ✋ to put it down. 🔨 cancels.' : 'Walk to open grass, then press E or Space (or click) to put it down. Esc cancels.');
+        if (kind === 'wall') toast(touchMode ? 'Tap ✋ for each wall block as you walk. 🔨 when you’re done.' : 'Press E or Space (or click) for each wall block as you walk. Esc when you’re done.');
+        else toast(touchMode ? 'Walk to open grass, then tap ✋ to put it down. 🔨 cancels.' : 'Walk to open grass, then press E or Space (or click) to put it down. Esc cancels.');
         return;
       }
       if (pick && panelKind === 'train') { doTrain(panelFor, pick as UnitKind); setTimeout(() => panelKind === 'train' && openTrain(panelFor), 120); return; }
