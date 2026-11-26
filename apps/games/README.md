@@ -170,3 +170,22 @@ A blocky action dungeon crawler. Original code, art, monsters and sounds. Code i
 - **Saves:** Esc → Save, Load or Save & quit, with 3 save slots that keep coins, all owned gear, artifacts, arrows and cleared dungeons. The game also autosaves for Continue.
 - **Team play (up to 4 players):** built like Factori-owen. Esc → Open to join lists your game in the shared `hosts` collection (tagged `game: 'md'`); a friend picks Join a friend on the title screen. WebRTC carries the game, and the host's game runs monsters, loot and the level. Each player keeps their own gear and coins. Monsters chase the closest player; a fallen player is revived by any teammate (hold E next to them), and if everyone falls the host picks what's next.
 - Saves in localStorage under `md-save-v1` (settings under `md-settings`). Falling in a dungeon sends you back to camp with everything you found.
+
+## Mob Delvers
+
+An action dungeon crawler made from Tim's kid's notes. Original code, names, monsters, bosses, art and sounds. Code in `src/games/mob-delvers/` (started from a copy of M.D.).
+
+- **Camp and mission map:** you start at camp with a campfire, tents and the mission table. The mission map has camp in the middle and 8 missions around it: Ruined Village, Pumpkin Trail, Canyon of Doom, Ember Mines, Great Halls, Deep Caves, Fizzler Creek and The Void Realm. Beat the Ruined Village first, then play the rest in any order.
+- **Difficulties 1–10:** every map starts on difficulty 1. Beating difficulty 1 on a map opens all 10 difficulties on that map.
+- **Modes:** Easy and Normal from the start, Hard after beating The Void Realm, Nightmare after beating it on Hard. Higher modes and difficulties have tougher mobs (Hard and Nightmare add enchanted mobs) and better drops.
+- **Power and drops:** gear never levels up. Your power is (sword level + bow level + armor level) ÷ 3, and each drop's level is rolled from your power, the mode and the difficulty, using the formulas and max-level tables from the notes (`dropRange` in `data.ts`). The mission map shows the drop range before you start. Drops are at least level 3 from difficulty 3 and at least level 6 from difficulty 6. Beating a mission always drops gear, and sometimes an artifact. In co-op each player gets their own drop, rolled from their own power.
+- **Inventory (Shift):** 6 slots (bow, sword, armor and 3 artifacts) plus all your items. Shows your power, each item's level and how it compares with what you have on. Salvage gives back enchanting points.
+- **Enchanting:** one point per hero level. Every item has 3 random enchantments to pick from, each with tiers I–III (1, 2 and 3 points).
+- **Souls:** beaten mobs drop souls (up to 100). Soul artifacts use them: Soul Beacon (beam), Soul Mender (heals near you) and Soul Quiver (3 bouncing soul arrows).
+- **Artifacts:** Soul Beacon, Healing Totem, Hay Bundle (a llama ally), Old Bone (a wolf ally), Soul Mender, Firework Arrow, Charm Medallion (5 mobs fight for you for 10 s), Soul Quiver, Fire Quiver, Poison Quiver, Gust Horn, Thunder Charm, Ghost Boots and Ironhide Charm. Artifacts have levels too.
+- **Weapons:** 26 melee weapons, 15 bows and crossbows, and a set of armors.
+- **Mobs:** shamblers, rattlers, gloops (split in two), fizzlers (hiss, then explode), bog riders, marauders, armored shamblers and rattlers, hexers (enchant other mobs) and the loot hog (chase it for gear). Mini-bosses: the Void Stalker (blinks behind you), the Ember Golem and the Hex Lord. Final bosses: the Gloomguard in the Deep Caves and Nyxwing, the Void Wyrm, in The Void Realm.
+- **HUD:** a big 100 HP heart (armor adds more), soul bar, power and hero level, the artifact bar with soul costs, and damage numbers over everything you hit.
+- **Controls:** WASD walk, Space melee, click or F bow, Z/X/C or 1/2/3 artifacts, Q or Alt potion, V or right click roll, E use, Shift inventory, M map, Esc menu. Phones get a stick and buttons.
+- **Team play (up to 4 players):** built like Factori-owen. Esc → Open to join lists your game in the `hosts` collection (tagged `game: 'mob-delvers'`); friends pick it from Join a friend. The host's game runs the level over WebRTC; each player keeps their own gear.
+- Saves in localStorage under `dv-save-v1`, with 3 save slots.
