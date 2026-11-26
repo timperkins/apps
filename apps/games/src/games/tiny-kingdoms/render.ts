@@ -47,7 +47,8 @@ interface Ent { id: number; kind: number; team: number; x: number; y: number; an
 
 export interface Overlay {
   me: number; // my slot
-  plots: { x: number; y: number; empty: boolean; near: boolean }[];
+  /** The building you're about to put down, where it would go. */
+  ghost: { kind: BuildKind; tx: number; ty: number; ok: boolean } | null;
   nearBuilding: number; // id of a building you can use
   names: Map<number, string>; // hero id -> label
 }
@@ -233,17 +234,6 @@ export class Renderer {
       const f = Math.floor(sec * 7 + d.off) % d.n;
       c.drawImage(im, f * d.size, 0, d.size, d.size, d.x - d.size / 2, d.y - d.size * 0.6, d.size, d.size);
     }
-    for (const p of o.plots) if (p.empty && inView(p.x, p.y)) {
-      c.save();
-      c.strokeStyle = p.near ? 'rgba(255,240,170,.95)' : 'rgba(255,255,255,.45)';
-      c.fillStyle = p.near ? 'rgba(255,240,170,.18)' : 'rgba(255,255,255,.08)';
-      c.lineWidth = 3; c.setLineDash([10, 8]);
-      c.beginPath(); c.roundRect(p.x - 90, p.y - 120, 180, 120, 14); c.fill(); c.stroke();
-      const ham = img('ui/hammer');
-      if (ham) c.drawImage(ham, p.x - 24, p.y - 84 + (p.near ? Math.sin(sec * 5) * 4 : 0), 48, 48);
-      c.restore();
-    }
-
     // everything that stands up, back to front
     type D = { y: number; f: () => void };
     const list: D[] = [];
@@ -270,6 +260,7 @@ export class Renderer {
     list.sort((a, b) => a.y - b.y);
     for (const d of list) d.f();
 
+    if (o.ghost) this.drawGhost(o.ghost, o.me, sec);
     // arrows
     const ar = img('fx/arrow');
     if (s && ar) for (const [x, y, a] of s.a) {
@@ -340,6 +331,34 @@ export class Renderer {
       }
     }
     if (e.hp < 100) this.bar(e.x, e.y - im.height + 30, Math.min(160, im.width * 0.6), e.hp, e.team === BLACK ? '#e04a3a' : '#5bd15b');
+  }
+
+  private drawGhost(gh: NonNullable<Overlay['ghost']>, me: number, sec: number) {
+    const c = this.ctx, st = BUILD[gh.kind];
+    const x0 = gh.tx * TILE, y0 = gh.ty * TILE, w = st.w * TILE, h = st.h * TILE;
+    c.save();
+    c.fillStyle = gh.ok ? 'rgba(120,230,120,.35)' : 'rgba(240,80,70,.4)';
+    c.strokeStyle = gh.ok ? 'rgba(200,255,200,.95)' : 'rgba(255,170,160,.95)';
+    c.lineWidth = 3; c.setLineDash([10, 8]); c.lineDashOffset = -sec * 20;
+    c.beginPath(); c.roundRect(x0 + 2, y0 + 2, w - 4, h - 4, 8); c.fill(); c.stroke();
+    const im = img(`buildings/${COLORS[me]}/${gh.kind === 'house' ? 'house1' : gh.kind}`);
+    if (im) { c.globalAlpha = 0.55; c.drawImage(im, x0 + w / 2 - im.width / 2, y0 + h - im.height + 8); }
+    c.restore();
+  }
+
+  /** What's on a tile for building, from what this player can see: 0 open, 1 water, 2 building, 3 tree or gold. */
+  tileCode(x: number, y: number) {
+    if (x < 0 || y < 0 || x >= MW || y >= MH || !this.land[y * MW + x]) return 1;
+    for (const e of this.cur.values()) {
+      if (e.kind < 100) continue;
+      const s = BUILD[BUILD_KINDS[e.kind - 100]];
+      const bx0 = Math.floor((e.x - s.w * TILE / 2 + 8) / TILE), bx1 = Math.floor((e.x + s.w * TILE / 2 - 9) / TILE);
+      const by0 = Math.floor((e.y - s.h * TILE + 4) / TILE), by1 = Math.floor((e.y - 7) / TILE);
+      if (x >= bx0 && x <= bx1 && y >= by0 && y <= by1) return 2;
+    }
+    for (const t of this.trees.values()) if (t.wood > 0 && t.tx === x && t.ty === y) return 3;
+    for (const g of this.golds.values()) if (g.gold > 0 && g.tx === x && g.ty === y) return 3;
+    return 0;
   }
 
   private bar(x: number, y: number, w: number, pct: number, color: string) {

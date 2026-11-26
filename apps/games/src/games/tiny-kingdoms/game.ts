@@ -74,7 +74,7 @@ export interface Gold { id: number; tx: number; ty: number; gold: number }
 export interface Arrow { x: number; y: number; tx: number; ty: number; target: number; dmg: number; team: number; speed: number; ang: number }
 export interface Kingdom {
   slot: number; stock: Record<Res, number>; order: Order; heroId: number; respawn: number;
-  castleId: number; cx: number; cy: number; plots: { x: number; y: number; bid: number }[]; out: boolean;
+  castleId: number; cx: number; cy: number; out: boolean;
 }
 export interface Input { mx: number; my: number; atk: boolean; guard: boolean }
 export type Fx = [kind: number, x: number, y: number]; // kinds: 0 explosion, 1 dust, 2 heal, 3 splash, 4 big explosion
@@ -117,9 +117,26 @@ export function makeLand(seed: number): Uint8Array {
 /** Castle spots (bottom middle, in tiles) for players 1–4, and the Black castle in the middle. */
 export const CASTLE_AT: [number, number][] = [[14, 12], [58, 12], [14, 38], [58, 38]];
 export const BLACK_AT: [number, number] = [36, 26];
+// open ground left free of trees around each castle, so there's room to build
 const PLOT_REL: [number, number][] = [[-7, 0], [7, 0], [-7, 4], [-2.5, 4], [2.5, 4], [7, 4], [-4.5, 8], [0, 8], [4.5, 8]];
 
-/** The building spots around a castle (bottom middle, in tiles). */
+/** Where a new building goes for a hero standing at (hx, hy): just behind them, so they stand at its door. In tiles. */
+export function ghostSpot(kind: BuildKind, hx: number, hy: number) {
+  const s = BUILD[kind];
+  return { tx: Math.round(hx / TILE - s.w / 2), ty: Math.floor(hy / TILE) - s.h };
+}
+/** Bottom middle (pixels) of a building whose top-left tile is (tx, ty). */
+export const spotPx = (kind: BuildKind, tx: number, ty: number) => ({ x: (tx + BUILD[kind].w / 2) * TILE, y: (ty + BUILD[kind].h) * TILE });
+/** Tile codes: 0 open grass, 1 water or off the map, 2 building, 3 tree or gold. */
+export function canPlace(kind: BuildKind, tx: number, ty: number, code: (x: number, y: number) => number) {
+  const s = BUILD[kind];
+  for (let y = ty; y < ty + s.h; y++) for (let x = tx; x < tx + s.w; x++) if (code(x, y) !== 0) return false;
+  // keep the door clear: no building right in front
+  for (let x = tx; x < tx + s.w; x++) if (code(x, ty + s.h) === 2) return false;
+  return true;
+}
+
+/** Open ground near a castle (bottom middle, in tiles). */
 export function plotSpots(cx: number, cy: number): [number, number][] {
   const sx = cx < MW / 2 ? 1 : -1, sy = cy < MH / 2 ? 1 : -1;
   return PLOT_REL.map(([dx, dy]) => [cx + dx * sx, cy + dy * sy + (sy < 0 ? -1 : 0)] as [number, number]);
@@ -134,7 +151,7 @@ export interface Snap {
   t: number; // game time
   e: number[][]; // [id, kindIndex(units then buildings), team, x, y, anim, seq, flags, hp%]
   a: number[][]; // arrows [x, y, angle*100]
-  k: { s: number; g: number; w: number; m: number; o: Order; h: number; r: number; pop: number; cap: number; out: boolean; p: number[] }[];
+  k: { s: number; g: number; w: number; m: number; o: Order; h: number; r: number; pop: number; cap: number; out: boolean }[];
   n: number[][]; // node changes [id, amount]
   fx: Fx[];
   snd: SoundEv[];
@@ -207,7 +224,7 @@ export class Game {
     const keepOut: [number, number, number][] = [];
     const spots = [...CASTLE_AT, BLACK_AT];
     spots.forEach(([x, y], i) => keepOut.push([x, y - 1, i === 4 ? 9 : 5]));
-    for (const [cx, cy] of CASTLE_AT) for (const p of this.plotSpots(cx, cy)) keepOut.push([p[0], p[1] - 1, 2.6]);
+    for (const [cx, cy] of CASTLE_AT) for (const p of plotSpots(cx, cy)) keepOut.push([p[0], p[1] - 1, 2.6]);
     const free = (x: number, y: number) =>
       x > 1 && y > 1 && x < MW - 2 && y < MH - 2 && this.land[y * MW + x] && this.landAround(x, y) &&
       keepOut.every(([kx, ky, kr]) => Math.hypot(x - kx, y - ky) > kr) &&
@@ -257,7 +274,6 @@ export class Game {
     return null;
   }
 
-  plotSpots(cx: number, cy: number) { return plotSpots(cx, cy); }
 
   /** A player's kingdom, made the first time they play (the host at the start, friends when they join). */
   addKingdom(slot: number): Kingdom {
@@ -267,7 +283,7 @@ export class Game {
     const castle = this.addBuilding('castle', slot, cx * TILE, cy * TILE);
     const k: Kingdom = {
       slot, stock: { ...START_STOCK }, order: 'follow', heroId: 0, respawn: 0, castleId: castle.id, cx: cx * TILE, cy: cy * TILE,
-      plots: this.plotSpots(cx, cy).map(([x, y]) => ({ x: x * TILE, y: y * TILE, bid: 0 })), out: false,
+      out: false,
     };
     this.kingdoms.push(k);
     this.spawnHero(k);
@@ -457,22 +473,29 @@ export class Game {
   private afford(k: Kingdom, c: Cost) { return (Object.keys(c) as Res[]).every(r => k.stock[r] >= (c[r] ?? 0)); }
   private pay(k: Kingdom, c: Cost) { for (const r of Object.keys(c) as Res[]) k.stock[r] -= c[r] ?? 0; }
 
-  /** Build on one of your empty spots. Returns a message when it can't. */
-  build(slot: number, plot: number, kind: BuildKind): string | null {
-    const k = this.kingdom(slot), h = this.hero(slot), p = k?.plots[plot];
-    if (!k || !p || !BUILDABLE.includes(kind)) return 'Can’t build there.';
-    if (p.bid && this.get(p.bid) && !(this.get(p.bid) as Building).dead) return 'Something is built there already.';
-    if (!h || dist(h.x, h.y, p.x, p.y - 32) > 200) return 'Walk over to the spot first.';
+  /** What's on a tile, for building (0 open, 1 water, 2 building, 3 tree or gold). */
+  tileCode(x: number, y: number) {
+    if (x < 0 || y < 0 || x >= MW || y >= MH) return 1;
+    const b = this.blocked[y * MW + x];
+    return b === 0 ? 0 : b === 1 ? 1 : b;
+  }
+
+  /** Build anywhere there's room, close to your hero. Returns a message when it can't. */
+  build(slot: number, kind: BuildKind, tx: number, ty: number): string | null {
+    const k = this.kingdom(slot), h = this.hero(slot);
+    if (!k || k.out || !BUILDABLE.includes(kind)) return 'Can’t build now.';
+    const { x, y } = spotPx(kind, tx, ty);
+    if (!h || dist(h.x, h.y, x, y) > 260) return 'Walk over there first.';
+    if (!canPlace(kind, tx, ty, (a, b) => this.tileCode(a, b))) return 'No room there. Find open grass.';
     if (!this.afford(k, BUILD[kind].cost)) return `You need ${costText(BUILD[kind].cost)}.`;
+    const b = this.addBuilding(kind, slot, x, y);
     // move anyone standing on it out of the way
-    const b = this.addBuilding(kind, slot, p.x, p.y);
     const r = this.rect(b);
     for (const u of this.units) if (u.x > r.x0 - 12 && u.x < r.x1 + 12 && u.y > r.y0 - 12 && u.y < r.y1 + 12) u.y = r.y1 + 26;
     this.pay(k, BUILD[kind].cost);
-    p.bid = b.id;
     this.rebuildBlocked();
-    this.fx.push([1, p.x - 40, p.y - 20], [1, p.x + 40, p.y - 20], [1, p.x, p.y - 50]);
-    this.sound('build', p.x, p.y);
+    this.fx.push([1, x - 40, y - 20], [1, x + 40, y - 20], [1, x, y - 50]);
+    this.sound('build', x, y);
     return null;
   }
 
@@ -880,7 +903,6 @@ export class Game {
       b.dead = true;
       this.fx.push([4, b.x, b.y - 60], [0, b.x - 50, b.y - 30], [0, b.x + 50, b.y - 40]);
       this.sound('boom', b.x, b.y);
-      for (const k of this.kingdoms) for (const p of k.plots) if (p.bid === b.id) p.bid = 0;
       if (b.id === this.blackCastle) { this.state = 'won'; this.sound('win', b.x, b.y); this.say('The Black castle has fallen. You win!'); }
       else if (b.team === BLACK) this.say(`The Black ${BUILD[b.kind].name.toLowerCase()} is down!`);
       else if (b.kind !== 'castle') this.say(`${COLOR_NAMES[b.team]} lost a ${BUILD[b.kind].name.toLowerCase()}.`);
@@ -1019,7 +1041,7 @@ export class Game {
       t: this.time,
       e,
       a: this.arrows.map(a => [Math.round(a.x), Math.round(a.y), Math.round(a.ang * 100)]),
-      k: this.kingdoms.map(k => ({ s: k.slot, g: Math.floor(k.stock.gold), w: Math.floor(k.stock.wood), m: Math.floor(k.stock.meat), o: k.order, h: k.heroId, r: Math.ceil(k.respawn), pop: this.pop(k.slot), cap: this.cap(k.slot), out: k.out, p: k.plots.map(p => p.bid) })),
+      k: this.kingdoms.map(k => ({ s: k.slot, g: Math.floor(k.stock.gold), w: Math.floor(k.stock.wood), m: Math.floor(k.stock.meat), o: k.order, h: k.heroId, r: Math.ceil(k.respawn), pop: this.pop(k.slot), cap: this.cap(k.slot), out: k.out })),
       n,
       fx: this.fx.splice(0),
       snd: this.sounds.splice(0),
