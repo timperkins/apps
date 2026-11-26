@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { BUILDS, CHUNK, DESTINATIONS, MOBS, ROCK_COLOR, WATER_LEVEL, type Biome, type BuildId } from './data';
 import type { Building, Dim, Fx, Game, Mob, Player, Target, Vehicle } from './game';
 import { DIRS } from './game';
-import { GeoBuilder, T, ball, botModel, box, buildingModel, carModel, itemColor, mat, mobModel, personModel, rocketModel, type Rig } from './models';
+import { GeoBuilder, T, ball, botModel, box, buildingModel, itemModel, carModel, itemColor, mat, mobModel, personModel, rocketModel, type Rig } from './models';
 import { CAVE_SIZE, key, wd, wrap, type Feature } from './world';
 
 const VIEW = 5; // chunks each way
@@ -20,7 +20,14 @@ interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz
 export class Renderer {
   r: THREE.WebGLRenderer;
   scene = new THREE.Scene();
-  cam: THREE.PerspectiveCamera;
+  persp: THREE.PerspectiveCamera;
+  ortho: THREE.OrthographicCamera;
+  /** 2D mode: an isometric view from a fixed angle (turns in quarter steps). */
+  iso = false;
+  private isoYaw = Math.PI / 4;
+  get cam(): THREE.Camera { return this.iso ? this.ortho : this.persp; }
+  /** Which way the camera faces, for walking: in 2D it's the isometric angle. */
+  viewYaw() { return this.iso ? this.isoYaw : this.camYaw; }
   camYaw = Math.PI;
   camPitch = 0.45;
   camDist = 9;
@@ -67,7 +74,8 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.r.setPixelRatio(Math.min(devicePixelRatio, 1.5));
-    this.cam = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
+    this.persp = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
+    this.ortho = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 500);
     this.scene.add(this.hemi, this.sun, this.sun.target, this.lamp, this.earth, this.cave, this.space);
     for (let i = 0; i < 4; i++) { const l = new THREE.PointLight('#ffb050', 0, 14, 1.6); this.lights.push(l); this.scene.add(l); }
     this.scene.fog = new THREE.Fog('#9fd0ff', 60, VIEW * CHUNK - 8);
@@ -111,9 +119,11 @@ export class Renderer {
 
   resize(w: number, h: number) {
     this.r.setSize(w, h, false);
-    this.cam.aspect = w / h;
-    this.cam.updateProjectionMatrix();
+    this.persp.aspect = w / h;
+    this.persp.updateProjectionMatrix();
+    this.aspect = w / h;
   }
+  private aspect = 1;
   /** Scene position of a world point. */
   sx(x: number, dim: Dim) { return dim === 'earth' ? wd(x, this.ox) : x - this.ox; }
   sz(z: number, dim: Dim) { return dim === 'earth' ? wd(z, this.oz) : z - this.oz; }
@@ -258,10 +268,15 @@ export class Renderer {
         fb.add(T.cyl(), x + 0.3, y + 0.05, z - 0.2, 0.5, 0.06, 0.4, '#2a2040');
         break;
       case 'nest':
-        fb.add(T.ico(), x, y + 0.4, z, 2.2, 1.3, 2.2, '#5b2a7a', v * 3);
-        fb.add(T.ico(), x, y + 0.9, z, 1.2, 0.9, 1.2, '#7a3a9a', v * 2);
-        for (let i = 0; i < 5; i++) fb.add(T.cone(), x + Math.cos(i * 1.3) * 0.8, y + 0.9, z + Math.sin(i * 1.3) * 0.8, 0.2, 0.9, 0.2, '#5ef2c4', 0, Math.cos(i * 1.3) * 0.5, -Math.sin(i * 1.3) * 0.5);
-        fb.add(T.box(), x, y + 0.5, z + 0.95, 0.6, 0.45, 0.2, '#14081c');
+        // bug spawner: a lumpy armored mound with a glowing mouth the bugs crawl out of, ringed with spikes
+        fb.add(T.ico(), x, y + 0.45, z, 2.6, 1.4, 2.4, '#4a3426', v * 3);
+        fb.add(T.ico(), x - 0.5, y + 0.9, z - 0.3, 1.3, 1.1, 1.2, '#5c4130', v * 2);
+        fb.add(T.ico(), x + 0.55, y + 0.8, z - 0.2, 1.1, 0.9, 1.1, '#6a4a34', v * 2 + 1);
+        fb.add(T.ico(), x, y + 0.75, z + 0.85, 1.1, 0.8, 0.5, '#d08848', 0);
+        fb.add(T.box(), x, y + 0.7, z + 1.08, 0.6, 0.45, 0.1, '#ff6a2a');
+        fb.add(T.box(), x, y + 0.7, z + 1.12, 0.36, 0.28, 0.06, '#3a0c04');
+        for (let i = 0; i < 8; i++) { const a = i * 0.785 + v; fb.add(T.cone(), x + Math.cos(a) * 1.15, y + 0.5, z + Math.sin(a) * 1.05, 0.14, 0.9, 0.14, i % 2 ? '#d08848' : '#2a1c14', 0, Math.cos(a) * 0.6, -Math.sin(a) * 0.6); }
+        for (let i = 0; i < 3; i++) fb.add(T.ico(), x + (i - 1) * 0.6, y + 0.12, z - 1.1 + (i % 2) * 0.2, 0.5, 0.25, 0.5, '#7a2f8a', i);
         break;
       case 'cave':
         fb.add(T.dodo(), x, y + 0.9, z - 0.2, 3.4, 2.6, 2.6, '#7a7468', v * 3);
@@ -484,6 +499,24 @@ export class Renderer {
     this.drawTarget(g, dim, me, target, mineProg);
 
     // camera
+    if (this.iso) {
+      // isometric: look down at 35° from one of four corners, far away with no perspective
+      const snap = Math.round((this.camYaw - Math.PI / 4) / (Math.PI / 2)) * (Math.PI / 2) + Math.PI / 4;
+      let d = snap - this.isoYaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      this.isoYaw += d * Math.min(1, dt * 8);
+      const half = this.camDist * (me.car ? 1.4 : 1) * 0.95;
+      this.ortho.left = -half * this.aspect; this.ortho.right = half * this.aspect; this.ortho.top = half; this.ortho.bottom = -half;
+      this.ortho.updateProjectionMatrix();
+      const pitch = Math.atan(1 / Math.SQRT2), D = ISO_DIST, ty = me.y + 0.8;
+      this.ortho.position.set(Math.sin(this.isoYaw) * Math.cos(pitch) * D, ty + Math.sin(pitch) * D, Math.cos(this.isoYaw) * Math.cos(pitch) * D);
+      this.ortho.lookAt(0, ty, 0);
+      fog.near += D; fog.far += D;
+      this.stars.position.copy(this.ortho.position);
+      this.r.render(this.scene, this.ortho);
+      fog.near -= D; fog.far -= D;
+      return;
+    }
     const ty = me.y + 1.5;
     const cd = this.camDist * (me.car ? 1.4 : 1);
     const cp = Math.cos(this.camPitch);
@@ -497,9 +530,9 @@ export class Renderer {
       const pc = Math.cos(pitch);
       cx = Math.sin(this.camYaw) * pc * cd; cz = Math.cos(this.camYaw) * pc * cd; cy = ty + Math.sin(pitch) * cd;
     }
-    this.cam.position.set(cx, cy, cz);
-    this.cam.lookAt(0, ty, 0);
-    this.r.render(this.scene, this.cam);
+    this.persp.position.set(cx, cy, cz);
+    this.persp.lookAt(0, ty, 0);
+    this.r.render(this.scene, this.persp);
   }
 
   private updateSigns(g: Game) {
@@ -665,13 +698,19 @@ export class Renderer {
     if (b.items) {
       let holder = o.userData.items as THREE.Group | undefined;
       if (!holder) { holder = new THREE.Group(); o.add(holder); o.userData.items = holder; }
-      while (holder.children.length < b.items.length) holder.add(box(0.26, 0.2, 0.26, 0, 0.25, 0, '#fff'));
+      while (holder.children.length < b.items.length) { const e = new THREE.Group(); e.userData.id = ''; holder.add(e); }
       holder.children.forEach((c, i) => {
         const it = b.items![i];
         c.visible = !!it;
         if (!it) return;
-        (c as THREE.Mesh).material = mat(itemColor(it.id));
-        c.position.set(0, 0.24, it.p - 0.5);
+        if (c.userData.id !== it.id) {
+          // swap in the right shape for this item
+          c.clear();
+          c.add(itemModel(it.id));
+          c.traverse((o) => { o.userData.b = b.id; });
+          c.userData.id = it.id;
+        }
+        c.position.set(0, 0.14, it.p - 0.5);
       });
     }
   }
@@ -708,12 +747,14 @@ export class Renderer {
     const def = MOBS[m.type];
     rig.legs.forEach((l, i) => {
       if (def.shape === 'bug') l.rotation.y = Math.sin(m.anim * 4 + i) * 0.4;
+      else if (def.shape === 'alien') { const side = i % 2 ? 1 : -1; l.rotation.x = Math.sin(m.anim * 5 + i * 2.1) * 0.35; l.position.y = 0.48 + Math.max(0, Math.sin(m.anim * 5 + i * 2.1)) * 0.06; void side; }
       else if (def.shape === 'fish') l.rotation.y = Math.sin(m.anim * 2) * 0.5;
       else if (def.shape === 'snake') l.position.x = Math.sin(m.anim * 3 + i) * 0.12;
       else l.rotation.x = (i % 2 ? sw : -sw) * (i < 2 ? 1 : -1);
     });
     rig.arms.forEach((a, i) => {
-      if (def.shape === 'bat' || def.shape === 'bird') a.rotation.z = Math.sin(performance.now() / 70 + m.id) * 0.8 * (i ? 1 : -1);
+      if (def.shape === 'alien') a.rotation.y = (i ? -1 : 1) * (0.15 + 0.25 * Math.abs(Math.sin(performance.now() / 160 + m.id)));
+      else if (def.shape === 'bat' || def.shape === 'bird') a.rotation.z = Math.sin(performance.now() / 70 + m.id) * 0.8 * (i ? 1 : -1);
       else a.rotation.x = (i ? -sw : sw);
     });
   }
@@ -1029,6 +1070,7 @@ export class Renderer {
 
 function verOf(b: Building) { return `${b.type}${b.hub ? 'h' : ''}${b.ug ?? ''}`; }
 
+const ISO_DIST = 120;
 const TERRAIN_MAT = new THREE.MeshLambertMaterial({ vertexColors: true });
 const GHOST_MAT = new THREE.MeshLambertMaterial({ color: '#7fc8ff', emissive: '#1a4a80', transparent: true, opacity: 0.45, depthWrite: false });
 const WATER_GEO = new THREE.PlaneGeometry(CHUNK, CHUNK).rotateX(-Math.PI / 2);

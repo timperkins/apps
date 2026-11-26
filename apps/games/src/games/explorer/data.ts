@@ -4,7 +4,7 @@
 export const WORLD = 1_000_000; // tiles around, both ways: go straight for a million tiles and you're back
 export const CHUNK = 32;
 export const WATER_LEVEL = 0;
-export const DAY_LEN = 600; // seconds for a whole day (7 min day, 3 min night)
+export const DAY_LEN = 240; // seconds for a whole day: Tim says 10 seconds is 1 hour in the game
 export const MONTH_DAYS = 30;
 
 export type ItemId = string;
@@ -43,6 +43,9 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   engine_unit: { name: 'Engine', icon: '🔧', stack: 50, sell: 55 },
   battery: { name: 'Battery', icon: '🔋', stack: 100, sell: 25 },
   robot: { name: 'Flying robot', icon: '🛸', stack: 50, sell: 150 },
+  red_pack: { name: 'Red science pack', icon: '🧪', stack: 200, sell: 20 },
+  green_pack: { name: 'Green science pack', icon: '🟢', stack: 200, sell: 45 },
+  blue_pack: { name: 'Blue science pack', icon: '🔵', stack: 200, sell: 120 },
   plastic: { name: 'Plastic', icon: '🟪', stack: 100, sell: 12 },
   fuel: { name: 'Fuel', icon: '🛢️', stack: 50, fuel: 30, sell: 15 },
   oil: { name: 'Crude oil', icon: '🛢️', stack: 50, sell: 8 },
@@ -82,7 +85,8 @@ export type BuildId =
   | 'chest' | 'furnace' | 'steel_furnace' | 'miner' | 'belt' | 'underground_belt' | 'grabber' | 'long_grabber' | 'bulk_grabber'
   | 'assembler' | 'power_pole' | 'big_power_pole' | 'substation' | 'steam_engine' | 'water_pump' | 'pipe' | 'underground_pipe'
   | 'pumpjack' | 'oil_refinery' | 'turret' | 'road' | 'roundabout' | 'stop_light' | 'house' | 'rocket_silo'
-  | 'space_platform' | 'thruster' | 'crusher' | 'asteroid_grabber' | 'wall' | 'campfire' | 'torch' | 'roboport';
+  | 'space_platform' | 'thruster' | 'crusher' | 'asteroid_grabber' | 'wall' | 'campfire' | 'torch' | 'roboport'
+  | 'lab' | 'fast_belt' | 'express_belt' | 'fast_grabber' | 'steel_chest' | 'solar_panel' | 'electric_furnace' | 'laser_turret';
 
 export interface BuildDef {
   name: string;
@@ -140,6 +144,15 @@ export const BUILDS: Record<BuildId, BuildDef> = {
   campfire: { name: 'Campfire', size: 1, hp: 50 },
   torch: { name: 'Torch', size: 1, hp: 30, space: true },
   roboport: { name: 'Roboport', size: 2, hp: 500, power: 50, space: true, slots: 10, robo: 25 },
+  lab: { name: 'Lab', size: 2, hp: 300, power: 60, space: true, slots: 6 },
+  // unlocked by research
+  fast_belt: { name: 'Fast belt', size: 1, hp: 80, flat: true, space: true },
+  express_belt: { name: 'Express belt', size: 1, hp: 100, flat: true, space: true },
+  fast_grabber: { name: 'Fast grabber', size: 1, hp: 80, power: 30, space: true },
+  steel_chest: { name: 'Steel chest', size: 1, hp: 300, slots: 64, space: true },
+  solar_panel: { name: 'Solar panel', size: 2, hp: 200 },
+  electric_furnace: { name: 'Electric furnace', size: 1, hp: 350, power: 120, space: true },
+  laser_turret: { name: 'Laser turret', size: 1, hp: 600, power: 150, space: true },
 };
 
 // every building is also an item you carry
@@ -149,8 +162,9 @@ for (const [id, b] of Object.entries(BUILDS)) {
     bulk_grabber: '🤖', assembler: '🛠️', power_pole: '🔌', big_power_pole: '🗼', substation: '⚡', steam_engine: '♨️', water_pump: '🚰',
     pipe: '🪈', underground_pipe: '↘️', pumpjack: '🛢️', oil_refinery: '🏗️', turret: '🔫', road: '🛣️', roundabout: '⭕', stop_light: '🚦',
     house: '🏠', rocket_silo: '🚀', space_platform: '⬛', thruster: '🔥', crusher: '🪓', asteroid_grabber: '🧲', wall: '🧱', campfire: '🏕️', torch: '🕯️', roboport: '📡',
+    lab: '🔬', fast_belt: '⏩', express_belt: '⏭️', fast_grabber: '🦾', steel_chest: '🗄️', solar_panel: '☀️', electric_furnace: '🔌', laser_turret: '🔆',
   };
-  ITEMS[id] = { name: b.name, icon: icons[id] ?? '📦', stack: id === 'road' || id === 'belt' || id === 'pipe' || id === 'space_platform' || id === 'wall' ? 100 : 50, build: id as BuildId };
+  ITEMS[id] = { name: b.name, icon: icons[id] ?? '📦', stack: id === 'road' || id === 'belt' || id === 'fast_belt' || id === 'express_belt' || id === 'pipe' || id === 'space_platform' || id === 'wall' ? 100 : 50, build: id as BuildId };
 }
 
 export interface Recipe {
@@ -159,13 +173,26 @@ export interface Recipe {
   n: number;
   inp: [ItemId, number][];
   time: number; // seconds by hand
-  group: 'basics' | 'parts' | 'logistics' | 'power' | 'production' | 'town' | 'combat' | 'space';
+  group: 'basics' | 'parts' | 'logistics' | 'power' | 'production' | 'town' | 'combat' | 'space' | 'research';
+  /** Needs this research first. */
+  tech?: string;
 }
 
 const R = (out: ItemId, n: number, inp: [ItemId, number][], time: number, group: Recipe['group']): Recipe => ({ id: out, out, n, inp, time, group });
 
-/** No research needed for anything. */
+/** Everything from Tim's pages needs no research; research only unlocks new things (see TECHS). */
 export const RECIPES: Recipe[] = [
+  R('lab', 1, [['circuit', 10], ['gear', 10], ['belt', 4]], 2, 'research'),
+  R('red_pack', 1, [['copper', 1], ['gear', 1]], 2.5, 'research'),
+  R('green_pack', 1, [['grabber', 1], ['belt', 1]], 3, 'research'),
+  R('blue_pack', 2, [['engine_unit', 2], ['advanced_circuit', 3], ['battery', 1]], 8, 'research'),
+  { ...R('fast_belt', 1, [['gear', 5], ['belt', 1]], 0.5, 'logistics'), tech: 'fast_belts' },
+  { ...R('express_belt', 1, [['gear', 10], ['fast_belt', 1], ['plastic', 2]], 0.5, 'logistics'), tech: 'express_belts' },
+  { ...R('fast_grabber', 1, [['grabber', 1], ['circuit', 2], ['iron', 2]], 0.5, 'logistics'), tech: 'fast_grabbers' },
+  { ...R('steel_chest', 1, [['steel', 8]], 0.5, 'basics'), tech: 'steel_chests' },
+  { ...R('solar_panel', 1, [['steel', 5], ['circuit', 15], ['copper', 5]], 10, 'power'), tech: 'solar' },
+  { ...R('electric_furnace', 1, [['steel', 10], ['advanced_circuit', 5], ['brick', 10]], 5, 'production'), tech: 'electric_furnaces' },
+  { ...R('laser_turret', 1, [['steel', 20], ['circuit', 20], ['battery', 12]], 20, 'combat'), tech: 'laser_turrets' },
   R('gear', 1, [['iron', 2]], 0.5, 'parts'),
   R('copper_cable', 2, [['copper', 1]], 0.4, 'parts'),
   R('iron_stick', 2, [['iron', 1]], 0.4, 'parts'),
@@ -258,7 +285,7 @@ export const BIOME_NAME: Record<Biome, string> = {
 };
 
 // ---------- animals and other moving things ----------
-export type MobShape = 'quad' | 'bug' | 'bird' | 'fish' | 'person' | 'bat' | 'snake';
+export type MobShape = 'alien' | 'quad' | 'bug' | 'bird' | 'fish' | 'person' | 'bat' | 'snake';
 export interface MobDef {
   name: string;
   shape: MobShape;
@@ -297,8 +324,8 @@ export const MOBS: Record<string, MobDef> = {
   cave_spider: { name: 'Cave spider', shape: 'bug', hp: 30, speed: 4, dmg: 6, hostile: true, size: 0.8, colors: ['#2a2230', '#c03a8a'], biomes: 'cave', drops: [['bug_shell', 0, 1]], coins: 7, sound: 'hiss' },
   snake: { name: 'Snake', shape: 'snake', hp: 20, speed: 2.6, dmg: 6, hostile: true, size: 0.9, colors: ['#5c8a2c', '#e0c040'], biomes: ['desert', 'forest'], night: true, drops: [], coins: 6, sound: 'hiss' },
   // alien bugs: leave you alone until you get close, hurt your base, and defend themselves
-  bug: { name: 'Alien bug', shape: 'bug', hp: 30, speed: 3.6, dmg: 6, hostile: true, size: 0.9, colors: ['#5b2a7a', '#5ef2c4'], biomes: 'none', drops: [['bug_shell', 1, 1]], coins: 6, sound: 'chitter' },
-  big_bug: { name: 'Big alien bug', shape: 'bug', hp: 90, speed: 3, dmg: 14, hostile: true, size: 1.6, colors: ['#7a2a4a', '#f2e45e'], biomes: 'none', drops: [['bug_shell', 2, 3], ['crystal', 0, 1]], coins: 18, sound: 'chitter' },
+  bug: { name: 'Alien bug', shape: 'alien', hp: 30, speed: 3.6, dmg: 6, hostile: true, size: 0.9, colors: ['#5c4130', '#d08848', '#ff6a2a'], biomes: 'none', drops: [['bug_shell', 1, 1]], coins: 6, sound: 'chitter' },
+  big_bug: { name: 'Big alien bug', shape: 'alien', hp: 90, speed: 3, dmg: 14, hostile: true, size: 1.6, colors: ['#3e3a52', '#9a8a3a', '#ff3030'], biomes: 'none', drops: [['bug_shell', 2, 3], ['crystal', 0, 1]], coins: 18, sound: 'chitter' },
   // people
   villager: { name: 'Villager', shape: 'person', hp: 40, speed: 1.4, dmg: 0, hostile: false, size: 1, colors: ['#3d7fd9', '#f1c9a0', '#5a3a22'], biomes: 'none', drops: [], sound: 'voice' },
   cop: { name: 'Cop', shape: 'person', hp: 120, speed: 3.4, dmg: 12, hostile: false, size: 1, colors: ['#1d2a5a', '#e9c29c', '#111111'], biomes: 'none', drops: [], sound: 'voice' },
@@ -362,3 +389,29 @@ export const FUEL_KM = 400; // how far one thruster fuel goes
 
 export const START_MONEY = 150;
 export const MAX_HP = 100;
+
+// ---------- research: only new things (Tim: not the things already on his pages) ----------
+export interface Tech {
+  id: string;
+  name: string;
+  icon: string;
+  what: string; // what it does, for the research list
+  packs: ItemId[]; // one of each per unit
+  units: number;
+  time: number; // seconds per unit in one lab
+  needs: string[];
+}
+export const TECHS: Tech[] = [
+  { id: 'quick_hands', name: 'Quick hands', icon: '✋', what: 'Crafting by hand is 40% faster.', packs: ['red_pack'], units: 15, time: 5, needs: [] },
+  { id: 'fast_belts', name: 'Fast belts', icon: '⏩', what: 'Fast belts move things twice as fast.', packs: ['red_pack'], units: 25, time: 5, needs: [] },
+  { id: 'fast_grabbers', name: 'Fast grabbers', icon: '🦾', what: 'Fast grabbers move things twice as fast.', packs: ['red_pack'], units: 20, time: 5, needs: [] },
+  { id: 'steel_chests', name: 'Steel chests', icon: '🗄️', what: 'Steel chests hold twice as much (64 slots).', packs: ['red_pack'], units: 15, time: 5, needs: [] },
+  { id: 'solar', name: 'Solar power', icon: '☀️', what: 'Solar panels make free power in the day (not at night). Connect them with power poles.', packs: ['red_pack', 'green_pack'], units: 40, time: 10, needs: [] },
+  { id: 'faster_robots', name: 'Faster robots', icon: '🛸', what: 'Flying robots fly 60% faster.', packs: ['red_pack', 'green_pack'], units: 40, time: 10, needs: [] },
+  { id: 'electric_furnaces', name: 'Electric furnaces', icon: '🔌', what: 'Electric furnaces need no fuel, smelt twice as fast and also make steel.', packs: ['red_pack', 'green_pack'], units: 50, time: 10, needs: ['steel_chests'] },
+  { id: 'laser_turrets', name: 'Laser turrets', icon: '🔆', what: 'Laser turrets shoot with electricity: no ammo needed.', packs: ['red_pack', 'green_pack'], units: 60, time: 10, needs: ['solar'] },
+  { id: 'long_reach', name: 'Long arms', icon: '🙌', what: 'Reach things 3 tiles further away.', packs: ['red_pack', 'green_pack'], units: 30, time: 10, needs: ['quick_hands'] },
+  { id: 'express_belts', name: 'Express belts', icon: '⏭️', what: 'Express belts move things three times as fast.', packs: ['red_pack', 'green_pack', 'blue_pack'], units: 80, time: 15, needs: ['fast_belts'] },
+  { id: 'super_robots', name: 'Super roboports', icon: '📡', what: 'Roboports send robots twice as far (50 tiles).', packs: ['red_pack', 'green_pack', 'blue_pack'], units: 80, time: 15, needs: ['faster_robots'] },
+];
+export const TECH: Record<string, Tech> = Object.fromEntries(TECHS.map((t) => [t.id, t]));

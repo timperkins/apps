@@ -1,7 +1,7 @@
 // The game itself: players, animals, buildings, machines, power, oil, the rocket silo and the space ship.
 // The host's copy runs everything; friends' copies only show what the host sends and move their own player.
 import {
-  AMMO_BONUS, BUILDS, CARS, CRUSH, DAY_LEN, DESTINATIONS, FUEL_KM, HOMES, ITEMS, MAX_HP, MOBS, MONTH_DAYS, RECIPE, ROCK_HP, ROCK_ITEM,
+  AMMO_BONUS, BUILDS, CARS, CRUSH, DAY_LEN, DESTINATIONS, FUEL_KM, HOMES, ITEMS, MAX_HP, MOBS, MONTH_DAYS, RECIPE, ROCK_HP, TECH, ROCK_ITEM,
   SILO_CARGO, SMELT, SPACE_UNITS_TO_LAUNCH, START_MONEY, THRUSTER_SPEED, WATER_LEVEL, WEAPONS, FOOD_MENU, STORE_STOCK, PETS,
   type BuildId, type CarId, type HomeId, type ItemId, type RockKind, type RockSize, type WeaponId,
 } from './data';
@@ -149,7 +149,10 @@ const NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4'];
 export const COLORS = ['#ffd23f', '#4fc3f7', '#ff6b9d', '#7ddc6a'];
 
 export const isFluid = (t: BuildId) => t === 'pipe' || t === 'underground_pipe' || t === 'water_pump' || t === 'steam_engine' || t === 'pumpjack' || t === 'oil_refinery';
-export const isGrabber = (t: BuildId) => t === 'grabber' || t === 'long_grabber' || t === 'bulk_grabber';
+export const isGrabber = (t: BuildId) => t === 'grabber' || t === 'long_grabber' || t === 'bulk_grabber' || t === 'fast_grabber';
+export const isBelt = (t: BuildId) => t === 'belt' || t === 'underground_belt' || t === 'fast_belt' || t === 'express_belt';
+export const isChest = (t: BuildId) => t === 'chest' || t === 'steel_chest';
+const SOLAR_POWER = 120;
 
 export function newPlayer(slot: number, w: World): Player {
   const inv = newInv(40);
@@ -194,6 +197,7 @@ export class Game {
   private spawnT = 0;
   private raidT = 120;
   private nestBugs = new Map<string, number>();
+  private nestT = new Map<string, number>();
   private villagePeople = new Map<string, number>();
   dirtyPlayers = new Set<number>();
 
@@ -418,6 +422,15 @@ export class Game {
         this.sfx(ok ? 'place' : 'nope', p.x, p.y, p.z, p.dim);
         return;
       }
+      case 'research': {
+        const id = str('id');
+        if (id === '') { this.research.cur = null; this.research.units = 0; this.resEvent(); return; }
+        if (!this.canResearch(id) || this.research.cur === id) return;
+        this.research.cur = id; this.research.units = 0;
+        for (const b of this.buildings.values()) if (b.type === 'lab') b.prog = 0;
+        this.resEvent();
+        return;
+      }
       case 'unghost': { const gh = this.ghosts.get(num('id')); if (gh && gh.dim === p.dim) { this.removeGhost(gh); this.sfx('pickup', gh.x + 0.5, p.y, gh.z + 0.5, p.dim); } return; }
       case 'robo': {
         const b = this.buildings.get(num('id'));
@@ -433,7 +446,7 @@ export class Game {
       case 'hand': p.hand = Math.max(0, Math.min(9, num('i'))); this.dirty(p); return;
       case 'bput': return this.bput(p, num('id'), num('slot'), args.all === true);
       case 'btake': return this.btake(p, num('id'), str('from'), num('i'));
-      case 'recipe': { const b = this.buildings.get(num('id')); if (b && b.type === 'assembler' && (RECIPE[str('r')] || str('r') === '')) { b.recipe = str('r') || null; b.prog = 0; this.bchanged(b); } return; }
+      case 'recipe': { const b = this.buildings.get(num('id')); if (b && b.type === 'assembler' && ((RECIPE[str('r')] && !this.locked(str('r'))) || str('r') === '')) { b.recipe = str('r') || null; b.prog = 0; this.bchanged(b); } return; }
       case 'rotate': { const b = this.buildings.get(num('id')); if (b && this.near(p, b.x, b.z, REACH + 2)) { b.dir = (b.dir + 1) & 3; this.bchanged(b); this.powerDirty = this.fluidDirty = true; } return; }
       case 'open': p.open = num('id') || null; return;
       case 'enter': return this.enter(p, args.tg as Target);
@@ -463,6 +476,7 @@ export class Game {
   }
 
   near(p: Player, x: number, z: number, r = REACH) {
+    r += this.reachBonus();
     return dist2(p.x, p.z, x, z) <= r * r;
   }
 
@@ -472,6 +486,7 @@ export class Game {
     const have0 = counts(p.inv);
     const have = new Map(have0);
     const steps = plan(have, id, n * r.n);
+    if (this.locked(id)) { this.toast(`Research ${TECH[r.tech!].name} first (🔬 in a lab).`, p); return; }
     if (!steps) { this.toast(`You need more stuff to make ${ITEMS[r.out].name}.`, p); return; }
     // take what the whole job uses out of the bag now; parts made along the way go straight into the next step
     const refund: [ItemId, number][] = [];
@@ -487,7 +502,8 @@ export class Game {
     const last = steps[steps.length - 1];
     for (const s of steps) {
       const rr = RECIPE[s.id];
-      for (let i = 0; i < s.times; i++) p.craftQ.push({ id: s.id, left: handTime(rr.time), total: handTime(rr.time), part: s !== last, req, refund: s === last && i === s.times - 1 ? refund : undefined } as Player['craftQ'][number]);
+      const ht = handTime(rr.time) * (this.has('quick_hands') ? 0.6 : 1);
+      for (let i = 0; i < s.times; i++) p.craftQ.push({ id: s.id, left: ht, total: ht, part: s !== last, req, refund: s === last && i === s.times - 1 ? refund : undefined } as Player['craftQ'][number]);
     }
     this.sfx('click', p.x, p.y, p.z, p.dim);
     this.dirty(p);
@@ -610,7 +626,7 @@ export class Game {
       this.removeFeature(k);
       this.fx.push({ k: 'puff', x: x + 0.5, y: y + 1, z: z + 0.5, dim: 'earth', c: '#c9a0ff', n: 30 });
       this.sfx('boom', x + 0.5, y, z + 0.5, 'earth');
-      if (p) { add(p.inv, 'bug_shell', 4); add(p.inv, 'crystal', 2); p.money += 60; this.toast('Nest destroyed! +4 bug shells, +2 crystals, +$60', p); this.dirty(p); }
+      if (p) { add(p.inv, 'bug_shell', 4); add(p.inv, 'crystal', 2); p.money += 60; this.toast('Bug spawner destroyed! +4 bug shells, +2 crystals, +$60', p); this.dirty(p); }
     } else this.nestHp.set(k, hp);
   }
 
@@ -702,7 +718,7 @@ export class Game {
   private alertT = 0;
   private alertN = 0;
   private alertWhat = '';
-  /** A building got destroyed: it blows up, and everyone sees an alert by the hotbar (at most one every 10 seconds). */
+  /** A building got destroyed: it blows up, and everyone sees an alert by the hotbar. */
   blowUp(b: Building, by: string) {
     const size = BUILDS[b.type].size;
     const big = b.type === 'rocket_silo' || b.type === 'steam_engine';
@@ -715,14 +731,13 @@ export class Game {
     this.alertN++;
     this.alertWhat = `${by} destroyed ${this.alertN > 1 ? `${this.alertN} buildings` : `a ${BUILDS[b.type].name.toLowerCase()}`}`;
     this.alertAt = { x: Math.round(cx), z: Math.round(cz), dim: b.dim };
-    if (this.alertT <= 0) this.sendAlert();
+    this.sendAlert();
   }
   private alertAt = { x: 0, z: 0, dim: 'earth' as Dim };
   private sendAlert() {
     if (!this.alertN) return;
     this.events.push({ t: 'alert', s: `⚠️ ${this.alertWhat}!`, x: this.alertAt.x, z: this.alertAt.z, dim: this.alertAt.dim });
     this.alertN = 0;
-    this.alertT = 10;
   }
   tickAlerts(dt: number) {
     if (this.alertT > 0) { this.alertT -= dt; if (this.alertT <= 0) this.sendAlert(); }
@@ -906,12 +921,12 @@ export class Game {
     const b: Building = { id: id ?? this.nextId++, type, dim, x, z, dir, hp: def.hp, owner };
     if (id && id >= this.nextId) this.nextId = id + 1;
     if (def.slots) b.inv = newInv(def.slots);
-    if (type === 'furnace' || type === 'steel_furnace' || type === 'miner' || type === 'steam_engine' || type === 'crusher' || type === 'oil_refinery' || type === 'assembler' || type === 'thruster') {
+    if (type === 'furnace' || type === 'steel_furnace' || type === 'electric_furnace' || type === 'miner' || type === 'steam_engine' || type === 'crusher' || type === 'oil_refinery' || type === 'assembler' || type === 'thruster') {
       b.inp = null; b.fuel = null; b.out = null; b.burn = 0; b.prog = 0;
     }
     if (type === 'crusher' || type === 'oil_refinery') b.inv = newInv(4);
     if (type === 'assembler') { b.recipe = null; b.parts = {}; }
-    if (type === 'belt' || type === 'underground_belt') b.items = [];
+    if (isBelt(type)) b.items = [];
     if (isGrabber(type) || type === 'asteroid_grabber') { b.hold = null; b.swing = 0; }
     if (type === 'rocket_silo') { b.units = 0; b.inv = newInv(10); b.launch = 0; b.rider = null; }
     if (type === 'pumpjack') b.oil = 0;
@@ -1001,13 +1016,14 @@ export class Game {
       return true;
     };
     switch (b.type) {
-      case 'chest': case 'house': case 'roboport':
+      case 'chest': case 'steel_chest': case 'house': case 'roboport':
         if (!b.inv || room(b.inv, id) < 1) return false;
         if (doIt) add(b.inv, id, 1);
         return true;
-      case 'furnace': case 'steel_furnace': {
+      case 'furnace': case 'steel_furnace': case 'electric_furnace': {
         const sm = SMELT[id];
-        if (sm && (!sm.steelOnly || b.type === 'steel_furnace') && !(b.type === 'furnace' && id === 'iron')) return fill('inp', 50);
+        if (sm && (!sm.steelOnly || b.type !== 'furnace') && !(b.type === 'furnace' && id === 'iron')) return fill('inp', 50);
+        if (b.type === 'electric_furnace') return false;
         if (it.fuel) return fill('fuel', 50);
         return false;
       }
@@ -1040,9 +1056,14 @@ export class Game {
         return true;
       case 'crusher':
         return CRUSH[id] ? fill('inp', 50) : false;
+      case 'lab':
+        if (!/_pack$/.test(id) || !b.inv || room(b.inv, id) < 1) return false;
+        if (count(b.inv, id) >= 50) return false;
+        if (doIt) add(b.inv, id, 1);
+        return true;
       case 'oil_refinery':
         return id === 'ice' ? fill('inp', 50) : false;
-      case 'belt': case 'underground_belt': {
+      case 'belt': case 'underground_belt': case 'fast_belt': case 'express_belt': {
         if (b.ug === 'out' && b.type === 'underground_belt') return false;
         const items = b.items!;
         if (items.length >= 4) return false;
@@ -1063,17 +1084,17 @@ export class Game {
       return s.id;
     };
     switch (b.type) {
-      case 'chest': case 'house': case 'crusher': case 'oil_refinery': {
-        if (b.type !== 'chest' && b.type !== 'house') { const o = from('out'); if (o) return o; }
+      case 'chest': case 'steel_chest': case 'house': case 'crusher': case 'oil_refinery': case 'lab': {
+        if (b.type === 'crusher' || b.type === 'oil_refinery') { const o = from('out'); if (o) return o; }
         for (let i = (b.inv?.length ?? 0) - 1; i >= 0; i--) {
           const s = b.inv![i];
           if (s && want(s.id)) { s.n--; if (s.n <= 0) b.inv![i] = null; return s.id; }
         }
         return null;
       }
-      case 'furnace': case 'steel_furnace': case 'assembler': case 'miner':
+      case 'furnace': case 'steel_furnace': case 'electric_furnace': case 'assembler': case 'miner':
         return from('out');
-      case 'belt': case 'underground_belt': {
+      case 'belt': case 'underground_belt': case 'fast_belt': case 'express_belt': {
         const items = b.items!;
         let best = -1;
         for (let i = 0; i < items.length; i++) if (want(items[i].id) && (best < 0 || items[i].p > items[best].p)) best = i;
@@ -1123,6 +1144,8 @@ export class Game {
     this.dirty(p);
   }
 
+  reachBonus() { return this.has('long_reach') ? 3 : 0; }
+  roboRange() { return BUILDS.roboport.robo! * (this.has('super_robots') ? 2 : 1); }
   // ---------- ghosts ----------
   ghostAt(dim: Dim, x: number, z: number): Ghost | null {
     const id = this.gocc.get(this.occKey(dim, x, z));
@@ -1169,7 +1192,7 @@ export class Game {
   }
   private inRange(port: Building, dim: Dim, x: number, z: number) {
     if (port.dim !== dim) return false;
-    const r = BUILDS.roboport.robo!;
+    const r = this.roboRange();
     const dx = dim === 'earth' ? wd(x, port.x + 1) : x - port.x - 1, dz = dim === 'earth' ? wd(z, port.z + 1) : z - port.z - 1;
     return Math.abs(dx) <= r && Math.abs(dz) <= r;
   }
@@ -1180,8 +1203,8 @@ export class Game {
     for (const o of this.buildings.values()) {
       if (o === port || o.dim !== port.dim) continue;
       let has = false;
-      if (o.type === 'chest' && port.fromChests !== false) has = !!o.inv?.some((s) => s?.id === id);
-      else if ((o.type === 'belt' || o.type === 'underground_belt') && port.fromBelts) has = !!o.items?.some((i) => i.id === id);
+      if (isChest(o.type) && port.fromChests !== false) has = !!o.inv?.some((s) => s?.id === id);
+      else if (isBelt(o.type) && port.fromBelts) has = !!o.items?.some((i) => i.id === id);
       if (!has || !this.inRange(port, o.dim, o.x, o.z)) continue;
       const d = dist2(o.x, o.z, gx, gz);
       if (d < bd) { bd = d; best = o; }
@@ -1189,7 +1212,7 @@ export class Game {
     return best;
   }
   private takeFrom(src: Building, id: ItemId): boolean {
-    if (src.type === 'belt' || src.type === 'underground_belt') {
+    if (isBelt(src.type)) {
       const i = src.items?.findIndex((x) => x.id === id) ?? -1;
       if (i < 0) return false;
       src.items!.splice(i, 1);
@@ -1225,7 +1248,7 @@ export class Game {
         }
       }
     }
-    const SPEED = 9;
+    const SPEED = this.has('faster_robots') ? 14 : 9;
     for (const r of this.bots) {
       let tx: number, tz: number;
       const gh = this.ghosts.get(r.ghost);
@@ -1304,16 +1327,17 @@ export class Game {
     }
     for (const b of this.buildings.values()) {
       const def = BUILDS[b.type];
-      if (!def.power && b.type !== 'steam_engine') continue;
+      const gen = b.type === 'steam_engine' || b.type === 'solar_panel';
+      if (!def.power && !gen) continue;
       for (const p of poles) {
         if (p.dim !== b.dim) continue;
         const a = BUILDS[p.type].area!;
         const s = def.size;
         if (wd(b.x + s - 1, p.x) >= -a && wd(b.x, p.x) <= a && wd(b.z + s - 1, p.z) >= -a && wd(b.z, p.z) <= a) {
           const n = find(p.id);
-          if (b.type === 'steam_engine') { if (!this.nets.has(n)) this.nets.set(n, { supply: 0, demand: 0, engines: [] }); this.nets.get(n)!.engines.push(b); }
+          if (gen) { if (!this.nets.has(n)) this.nets.set(n, { supply: 0, demand: 0, engines: [] }); const e = this.nets.get(n)!.engines; if (!e.includes(b)) e.push(b); }
           else this.netOf.set(b.id, n);
-          if (b.type !== 'steam_engine') break;
+          if (!gen) break;
         }
       }
     }
@@ -1329,7 +1353,11 @@ export class Game {
       this.nets.get(n)!.demand += BUILDS[b.type].power!;
       if (b.on) active.set(n, (active.get(n) ?? 0) + BUILDS[b.type].power!);
     }
-    for (const n of this.nets.values()) for (const e of n.engines) if (e.water && ((e.burn ?? 0) > 0 || e.fuel)) n.supply += ENGINE_POWER;
+    const sun = Math.max(0, (this.light - 0.15) / 0.85);
+    for (const n of this.nets.values()) for (const e of n.engines) {
+      if (e.type === 'solar_panel') { n.supply += SOLAR_POWER * sun; e.on = sun > 0.05; }
+      else if (e.water && ((e.burn ?? 0) > 0 || e.fuel)) n.supply += ENGINE_POWER;
+    }
     for (const b of this.buildings.values()) {
       if (!BUILDS[b.type].power) continue;
       if (b.dim === 'space') { b.power = 1; continue; }
@@ -1341,6 +1369,7 @@ export class Game {
       const use = active.get(id) ?? 0;
       const share = Math.min(1, use / Math.max(1, n.supply));
       for (const e of n.engines) {
+        if (e.type === 'solar_panel') continue;
         if (!e.water) { e.on = false; continue; }
         if (use > 0 && (e.burn ?? 0) <= 0 && e.fuel) { e.burn = ITEMS[e.fuel.id].fuel! * 2; e.fuel.n--; if (e.fuel.n <= 0) e.fuel = null; }
         if (use > 0 && (e.burn ?? 0) > 0) { e.burn! -= TICK * share; e.on = true; } else e.on = false;
@@ -1376,11 +1405,13 @@ export class Game {
   // ---------- machines ----------
   private tickBuilding(b: Building, dt: number) {
     switch (b.type) {
-      case 'belt': case 'underground_belt': return this.tickBelt(b, dt);
-      case 'grabber': case 'long_grabber': case 'bulk_grabber': return this.tickGrabber(b, dt);
+      case 'belt': case 'underground_belt': case 'fast_belt': case 'express_belt': return this.tickBelt(b, dt);
+      case 'grabber': case 'long_grabber': case 'bulk_grabber': case 'fast_grabber': return this.tickGrabber(b, dt);
       case 'asteroid_grabber': return this.tickRockGrabber(b, dt);
       case 'miner': return this.tickMiner(b, dt);
-      case 'furnace': case 'steel_furnace': return this.tickFurnace(b, dt);
+      case 'furnace': case 'steel_furnace': case 'electric_furnace': return this.tickFurnace(b, dt);
+      case 'lab': return this.tickLab(b, dt);
+      case 'laser_turret': return this.tickTurret(b, dt);
       case 'assembler': return this.tickAssembler(b, dt);
       case 'pumpjack': if ((b.power ?? 0) > 0 && (b.oil ?? 0) < 200) { b.oil = (b.oil ?? 0) + dt * 2 * b.power!; b.on = true; } else b.on = false; return;
       case 'oil_refinery': return this.tickRefinery(b, dt);
@@ -1405,7 +1436,7 @@ export class Game {
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const limit = i === 0 ? 1 : items[i - 1].p - 0.26;
-      it.p = Math.min(limit, it.p + BELT_SPEED * dt);
+      it.p = Math.min(limit, it.p + BELT_SPEED * (b.type === 'express_belt' ? 3 : b.type === 'fast_belt' ? 2 : 1) * dt);
     }
     const first = items[0];
     if (first.p >= 1) {
@@ -1416,7 +1447,7 @@ export class Game {
       } else {
         const [tx, tz] = this.ahead(b);
         const t = this.buildingAt(b.dim, tx, tz);
-        if (t && (t.type === 'belt' || t.type === 'underground_belt')) {
+        if (t && isBelt(t.type)) {
           if (t.dir !== ((b.dir + 2) & 3)) ok = this.accept(t, first.id, true);
         } else if (t && !isGrabber(t.type)) ok = this.accept(t, first.id, true);
       }
@@ -1429,7 +1460,7 @@ export class Game {
     if (pw <= 0) return;
     const reach = b.type === 'long_grabber' ? 2 : 1;
     const bulk = b.type === 'bulk_grabber' ? 5 : 1;
-    const speed = (b.type === 'bulk_grabber' ? 0.9 : 1.3) * pw;
+    const speed = (b.type === 'bulk_grabber' ? 0.9 : b.type === 'fast_grabber' ? 2.8 : 1.3) * pw;
     const [fx, fz] = [b.x - DIRS[b.dir][0] * reach, b.z - DIRS[b.dir][1] * reach];
     const [tx, tz] = this.ahead(b, reach);
     const src = this.buildingAt(b.dim, fx, fz), dst = this.buildingAt(b.dim, tx, tz);
@@ -1485,15 +1516,21 @@ export class Game {
     const sm = b.inp ? SMELT[b.inp.id] : null;
     const need = b.inp?.id === 'iron' ? 2 : 1;
     if (!sm || !b.inp || b.inp.n < need || (b.out && (b.out.id !== sm.out || b.out.n >= 100))) { b.on = false; return; }
-    if ((b.burn ?? 0) <= 0) {
-      if (!b.fuel) { b.on = false; return; }
-      b.burn = ITEMS[b.fuel.id].fuel!;
-      b.fuel.n--;
-      if (b.fuel.n <= 0) b.fuel = null;
+    let speed = b.type === 'steel_furnace' ? 2 : 1;
+    if (b.type === 'electric_furnace') {
+      // runs on electricity, no fuel
+      if ((b.power ?? 0) <= 0) { b.on = false; return; }
+      speed = 2 * b.power!;
+    } else {
+      if ((b.burn ?? 0) <= 0) {
+        if (!b.fuel) { b.on = false; return; }
+        b.burn = ITEMS[b.fuel.id].fuel!;
+        b.fuel.n--;
+        if (b.fuel.n <= 0) b.fuel = null;
+      }
+      b.burn! -= dt;
     }
     b.on = true;
-    b.burn! -= dt;
-    const speed = b.type === 'steel_furnace' ? 2 : 1;
     b.prog = (b.prog ?? 0) + (dt * speed) / sm.time;
     if (b.prog >= 1) {
       b.prog = 0;
@@ -1563,10 +1600,42 @@ export class Game {
       if (Math.random() < 0.3) this.sfx('crush', b.x + 0.5, 0, b.z + 0.5, b.dim);
     }
   }
+  // ---------- research ----------
+  research = { done: new Set<string>(), cur: null as string | null, units: 0 };
+  has(tech: string) { return this.research.done.has(tech); }
+  canResearch(id: string) { const t = TECH[id]; return !!t && !this.has(id) && t.needs.every((n) => this.has(n)); }
+  locked(recipe: string) { const t = RECIPE[recipe]?.tech; return !!t && !this.has(t); }
+  private resEvent() { this.events.push({ t: 'res', done: [...this.research.done], cur: this.research.cur, units: this.research.units }); }
+  private tickLab(b: Building, dt: number) {
+    const cur = this.research.cur ? TECH[this.research.cur] : null;
+    if (!cur || (b.power ?? 0) <= 0 || !b.inv) { b.on = false; return; }
+    if ((b.prog ?? 0) <= 0) {
+      // one of each pack for every unit of research
+      if (!cur.packs.every((id) => count(b.inv!, id) > 0)) { b.on = false; return; }
+      for (const id of cur.packs) remove(b.inv, id, 1);
+      b.prog = 0.0001;
+    }
+    b.on = true;
+    b.prog = (b.prog ?? 0) + (dt * b.power!) / cur.time;
+    if (b.prog >= 1) {
+      b.prog = 0;
+      if (this.research.cur !== cur.id) return;
+      this.research.units++;
+      if (this.research.units >= cur.units) {
+        this.research.done.add(cur.id);
+        this.research.cur = null;
+        this.research.units = 0;
+        for (const p of this.players.values()) this.toast(`🔬 Research done: ${cur.name}! ${cur.what}`, p);
+        this.sfx('arrive', b.x + 1, this.groundY(b.dim, b.x + 1, b.z + 1) + 1, b.z + 1, b.dim);
+      }
+      this.resEvent();
+    }
+  }
   private tickTurret(b: Building, dt: number) {
     b.prog = Math.max(0, (b.prog ?? 0) - dt);
-    const ammo = b.inv?.[0];
-    if (!ammo) { b.on = false; return; }
+    const laser = b.type === 'laser_turret';
+    const ammo = laser ? null : b.inv?.[0];
+    if (laser ? (b.power ?? 0) <= 0 : !ammo) { b.on = false; return; }
     const R = 20;
     let tx = 0, tz = 0, ty = 0;
     let target: Mob | Rock | null = null;
@@ -1586,11 +1655,11 @@ export class Game {
     if (!target) return;
     b.aim = Math.atan2(wd(tx, b.x + 0.5), wd(tz, b.z + 0.5));
     if (b.prog! > 0) return;
-    b.prog = 0.25;
-    const dmg = 9 * (AMMO_BONUS[ammo.id] ?? 1);
-    if (Math.random() < 0.25) { ammo.n--; if (ammo.n <= 0) b.inv![0] = null; }
+    b.prog = laser ? 0.4 / b.power! : 0.25;
+    const dmg = laser ? 16 : 9 * (AMMO_BONUS[ammo!.id] ?? 1);
+    if (ammo && Math.random() < 0.25) { ammo.n--; if (ammo.n <= 0) b.inv![0] = null; }
     const by = this.groundY(b.dim, b.x + 0.5, b.z + 0.5) + 1.3;
-    this.fx.push({ k: 'tracer', x: b.x + 0.5, y: by, z: b.z + 0.5, tx, ty, tz, dim: b.dim, c: '#ffe066' });
+    this.fx.push({ k: 'tracer', x: b.x + 0.5, y: by, z: b.z + 0.5, tx, ty, tz, dim: b.dim, c: laser ? '#ff3060' : '#ffe066' });
     this.sfx('turret', b.x + 0.5, by, b.z + 0.5, b.dim);
     if ('kind' in target) this.hurtRock(target, dmg);
     else this.hurtMob(target, dmg, { k: 'b', id: b.id });
@@ -1958,23 +2027,21 @@ export class Game {
       }
       // bugs around their nests
       const tx = Math.floor(p.x), tz = Math.floor(p.z);
-      for (let i = 0; i < 6; i++) {
-        const x = tx + Math.floor((Math.random() - 0.5) * 140), z = tz + Math.floor((Math.random() - 0.5) * 140);
-        // look in the nest cell
-        const nx = Math.floor(wrap(x) / 200), nz = Math.floor(wrap(z) / 200);
-        for (let ox = 0; ox < 1; ox++) {
-          const cx = nx * 200, cz = nz * 200;
-          void cx; void cz;
-        }
-        const f = this.w.feature(x, z);
-        if (f?.kind !== 'nest') continue;
-        const k = key(wrap(x), wrap(z));
+      // bug spawners send out a new bug every little while, up to 5 each
+      void tx; void tz;
+      for (const [x, z] of this.w.nestsNear(p.x, p.z, 110)) {
+        const k = key(x, z);
         const have = this.nestBugs.get(k) ?? 0;
-        if (have < 3) {
-          const m = this.spawnMob(Math.random() < 0.2 ? 'big_bug' : 'bug', 'earth', x + 0.5 + (Math.random() - 0.5) * 4, z + 0.5 + (Math.random() - 0.5) * 4);
-          m.home = k; m.hx = x + 0.5; m.hz = z + 0.5;
-          this.nestBugs.set(k, have + 1);
-        }
+        const t = (this.nestT.get(k) ?? 0) - 1;
+        if (have >= 5 || t > 0) { this.nestT.set(k, t); continue; }
+        this.nestT.set(k, 6 + Math.floor(Math.random() * 6)); // spawn checks run about once a second
+        const big = Math.random() < (this.day > 3 ? 0.3 : 0.15);
+        const m = this.spawnMob(big ? 'big_bug' : 'bug', 'earth', x + 0.5, z + 1.6);
+        m.home = k; m.hx = x + 0.5; m.hz = z + 0.5;
+        this.nestBugs.set(k, have + 1);
+        const y = this.w.tileHeight(x, z);
+        this.fx.push({ k: 'puff', x: x + 0.5, y: y + 0.6, z: z + 1.2, dim: 'earth', c: '#b070e0', n: 10 });
+        this.sfx('chitter', x + 0.5, y, z + 0.5, 'earth');
       }
       // villagers and cops
       for (const v of this.w.villagesNear(p.x, p.z)) {
@@ -2168,6 +2235,7 @@ export class Game {
       cars: [...this.cars.values()].filter((c) => c.owner === 0).map((c) => ({ ...c, driver: null })),
       pets: [...this.mobs.values()].filter((m) => m.owner === 0).map((m) => m.type),
       ghosts: [...this.ghosts.values()],
+      research: { done: [...this.research.done], cur: this.research.cur, units: this.research.units },
       // robots out flying go back in their roboport when the world loads
       botsOut: this.bots.map((r) => [r.home, r.carry] as [number, ItemId | null]),
     };
@@ -2194,6 +2262,7 @@ export class Game {
     for (const [k, o] of s.owned ?? []) g.owned.set(k, o);
     for (const c of s.cars ?? []) g.cars.set(c.id, c);
     for (const gh of s.ghosts ?? []) g.addGhost(gh);
+    if (s.research) { for (const d of s.research.done) g.research.done.add(d); g.research.cur = s.research.cur; g.research.units = s.research.units; }
     for (const [home, carry] of s.botsOut ?? []) { const b = g.buildings.get(home); if (b?.inv) { add(b.inv, 'robot', 1); if (carry) add(b.inv, carry, 1); } }
     g.nextId = Math.max(s.nextId, ...[...g.buildings.keys()].map((n) => n + 1), ...[...g.ghosts.keys()].map((n) => n + 1), 1);
     for (const t of s.pets ?? []) { const m = g.spawnMob(t, p.dim === 'space' ? 'space' : p.dim, p.x + 1, p.z + 1); m.owner = 0; }
