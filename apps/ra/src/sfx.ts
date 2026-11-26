@@ -95,7 +95,7 @@ const MAX_AT_ONCE = 5;
 const MIN_GAP_S = 0.03;
 
 const base = import.meta.env.BASE_URL;
-const url = (name: string) => `${base}sfx/${name}.mp3`;
+const url = (name: string) => `${base}sfx/${name}.mp3?v=${__AUDIO_V__}`;
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null; // everything; the Sounds volume

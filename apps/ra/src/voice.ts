@@ -32,7 +32,7 @@ export type Announce =
 // each may play are in src/audio-config.ts.
 
 const base = import.meta.env.BASE_URL;
-const url = (voice: string, line: string, n: number) => `${base}voice/${voice}/${voice}_${line}_${n}.mp3`;
+const url = (voice: string, line: string, n: number) => `${base}voice/${voice}/${voice}_${line}_${n}.mp3?v=${__AUDIO_V__}`;
 
 let ctx: AudioContext | null = null;
 let out: GainNode | null = null;

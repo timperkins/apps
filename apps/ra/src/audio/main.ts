@@ -11,6 +11,8 @@ import { ROOT, picture } from './pics';
 import { load, play, stopAll, type PlayOpts, type Playing } from './player';
 
 const base = ROOT;
+// The URL of a clip, versioned so a new clip isn't hidden by a cached old one.
+const src = (path: string) => `${base}${path}?v=${__AUDIO_V__}`;
 const LOOPS: Loop[] = ['tracks_loop', 'engine_loop', 'rotor_loop', 'boat_loop', 'footsteps', 'ore_dig', 'surf_loop', 'fire_loop'];
 const isLoop = (n: string): n is Loop => (LOOPS as string[]).includes(n);
 
@@ -75,12 +77,12 @@ function choiceGroup(key: string, labels: string[], titles: string[] = []): HTML
 function fileMeta(path: string): HTMLElement {
   const m = el('span', 'file');
   const a = el('a', '', path.split('/').pop());
-  a.href = base + path;
+  a.href = src(path);
   a.title = path;
   a.target = '_blank';
   const len = el('span', 'len', '…');
   m.append(a, len);
-  void load(base + path).then((b) => (len.textContent = b ? secs(b.duration) : 'missing'));
+  void load(src(path)).then((b) => (len.textContent = b ? secs(b.duration) : 'missing'));
   return m;
 }
 
@@ -105,7 +107,7 @@ function playBtn(path: string | (() => string), label: string, o: PlayOpts = {},
       stopAll();
       return;
     }
-    const url = base + (typeof path === 'function' ? path() : path);
+    const url = src(typeof path === 'function' ? path() : path);
     playingBtn?.classList.remove('on');
     playingBtn = b;
     b.classList.add('on');
