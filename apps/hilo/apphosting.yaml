@@ -1,0 +1,35 @@
+# Firebase App Hosting settings for HILO.
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  minInstances: 0
+  maxInstances: 4
+  # Gemini (with Google Search) can take a while to answer a question.
+  timeoutSeconds: 120
+
+env:
+  # Answers players' questions. The secret already exists in the project (Tim News uses it);
+  # create-app grants this app's backends access.
+  - variable: GEMINI_API_KEY
+    secret: GEMINI_API_KEY
+    availability: [RUNTIME]
+  - variable: GEMINI_MODEL
+    value: gemini-flash-latest
+    availability: [RUNTIME]
+
+  # Web app config from Firebase console > Project settings > Your apps. These are public values.
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyDqgldIcbiEGPtlDoVVohbwuyKBiWZq3Qc
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: apps-97595.firebaseapp.com
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: apps-97595
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: '1:769532990756:web:db61ccd442333d635c8fb1'
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIRESTORE_DATABASE_ID
+    value: hilo
+    availability: [BUILD, RUNTIME]

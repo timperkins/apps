@@ -1,0 +1,12 @@
+{
+  "name": "hilo",
+  "type": "apphosting",
+  "domain": "hilo.trom.dev",
+  "backend": "hilo",
+  "previewBackend": "hilo-preview",
+  "firestore": {
+    "prod": "hilo",
+    "preview": "hilo-preview"
+  },
+  "ttlCollections": ["games", "players", "rounds", "secrets"]
+}
