@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#07080e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Hold the dungeon with a laser and lightning against zombies, spiders and skeletons." />
+    <title>Laser defender</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%2307080e'/><rect x='2' y='7' width='12' height='2' fill='%23ff3355'/><rect x='6' y='2' width='3' height='12' fill='%2344f4ff'/></svg>" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hurt"></div>
+
+    <div id="hud" hidden>
+      <div class="bars">
+        <div class="bar hp"><i id="hpFill"></i><span id="hpText"></span></div>
+        <div class="bar heat"><i id="heatFill"></i><span id="heatText">LASER</span></div>
+      </div>
+      <div class="top">
+        <div id="waveText">Wave 1</div>
+        <div id="scoreText">0</div>
+        <div id="leftText"></div>
+      </div>
+      <div class="right-top">
+        <button id="muteBtn" class="icon" aria-label="Mute">🔊</button>
+        <button id="pauseBtn" class="icon" aria-label="Pause">⏸</button>
+      </div>
+      <div id="banner"><b id="bannerText"></b><span id="bannerSub"></span></div>
+      <div class="abilities">
+        <div class="ability" id="boltAbility"><span>⚡</span><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" id="boltRing" /></svg><em class="key">Q / right click</em></div>
+        <div class="ability small" id="dashAbility"><span>💨</span><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" id="dashRing" /></svg><em class="key">Space</em></div>
+      </div>
+    </div>
+
+    <div id="touchUi">
+      <div class="stick" id="stickL"><i></i></div>
+      <div class="stick aim" id="stickR"><i></i></div>
+      <button class="tbtn bolt" id="tBolt">⚡</button>
+      <button class="tbtn dash" id="tDash">💨</button>
+    </div>
+
+    <section class="screen show" id="title">
+      <h1>LASER<br /><span>DEFENDER</span></h1>
+      <p class="lead">Lasers. Lightning. The dead don't stay down.</p>
+      <button class="primary" id="playBtn">Play</button>
+      <p class="best" id="bestText"></p>
+      <div class="controls">
+        <div class="desk">
+          <p><b>WASD</b> move · <b>Mouse</b> aim · <b>Hold left click</b> laser</p>
+          <p><b>Q</b> or <b>right click</b> lightning · <b>Space</b> dash · <b>P</b> pause</p>
+        </div>
+        <div class="mob">
+          <p><b>Left thumb</b> move · <b>Right thumb</b> aim and fire the laser</p>
+          <p><b>⚡</b> lightning · <b>💨</b> dash · Turn your phone sideways</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen" id="pick">
+      <h2>Wave cleared</h2>
+      <p class="lead">Pick an upgrade</p>
+      <div class="cards" id="cards"></div>
+    </section>
+
+    <section class="screen" id="paused">
+      <h2>Paused</h2>
+      <button class="primary" id="resumeBtn">Resume</button>
+      <button class="ghost" id="quitBtn">Quit</button>
+    </section>
+
+    <section class="screen" id="over">
+      <h2>You fell</h2>
+      <div class="big" id="finalScore">0</div>
+      <p class="lead" id="finalStats"></p>
+      <p class="best" id="finalBest"></p>
+      <button class="primary" id="againBtn">Play again</button>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
