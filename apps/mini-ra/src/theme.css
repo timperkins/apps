@@ -1,0 +1,705 @@
+/* Soft Pixel in the Night ops colors: the look Tim picked on the UI kit page
+   (/ui/). style.css lays the interface out; this file, loaded after it, gives
+   everything its look: rounded pixel frames (border-images made in theme.ts
+   from the eight colors, as --fr-*), Jersey 15 for headings and Handjet
+   for all other text, and the colors as variables. */
+
+:root {
+  --f-text: 'Handjet', ui-sans-serif, sans-serif;
+  --f-head: 'Jersey 15', 'Handjet', ui-sans-serif, sans-serif;
+  --gold: #ffd98a;
+  --panel: var(--panel-solid);
+  --edge: var(--line);
+  font-synthesis: none;
+}
+
+/* Size the text font (Handjet) so its small letters are as tall as the
+   old Silkscreen's were, and every size in style.css
+   still reads the same. Headings opt out and set their own sizes. */
+html {
+  font-size-adjust: ex-height 0.63;
+}
+
+html,
+body {
+  background: var(--page);
+}
+
+/* ---------- Frames ---------- */
+
+/* Panels */
+#hud,
+#menu,
+#toolbar,
+#build,
+#picker .box,
+#lobby .box,
+#banner .card,
+#pauseScreen .card {
+  background: none;
+  border: 12px solid transparent;
+  border-image: var(--fr-panel) 6 fill / 12px stretch;
+  box-shadow: none;
+  filter: drop-shadow(0 4px 0 rgba(0, 0, 0, 0.45));
+  image-rendering: pixelated;
+}
+#hud {
+  padding: 0;
+  gap: 4px;
+}
+#menu {
+  top: calc(64px + env(safe-area-inset-top));
+  padding: 4px;
+}
+#toolbar {
+  padding: 0;
+}
+#build {
+  padding: 2px 2px 4px;
+}
+#picker .box {
+  padding: 6px;
+}
+#lobby .box {
+  padding: 8px;
+}
+#banner .card,
+#pauseScreen .card {
+  padding: 10px 16px;
+}
+#toolbar .sep {
+  background: var(--line);
+}
+/* Buttons */
+#menuBtn,
+#pauseBtn,
+#regen,
+#leaveBtn,
+#lobbyBtn,
+#settingsBtn,
+#setReset,
+#unitsLink,
+#uiLink,
+#audioLink,
+#toolbar button,
+#selBar button,
+#build .close,
+#build .tabs button,
+#build .tool,
+#build .item,
+#picker .head button,
+#picker .head a,
+#picker .map,
+#picker .stages .seg button,
+#lobby button.small,
+#lobby .map,
+#lobby .botCtl .rm,
+#playGate .testMode,
+#banner button,
+#pauseScreen button {
+  color: var(--ink);
+  background-color: transparent;
+  border: 6px solid transparent;
+  border-image: var(--fr-btn) 6 fill / 6px stretch;
+  box-shadow: none;
+  image-rendering: pixelated;
+}
+@media (hover: hover) {
+  #menuBtn:hover,
+  #pauseBtn:hover,
+  #regen:hover,
+  #leaveBtn:hover,
+  #lobbyBtn:hover,
+  #settingsBtn:hover,
+  #setReset:hover,
+  #unitsLink:hover,
+  #uiLink:hover,
+  #audioLink:hover,
+  #toolbar button:hover,
+  #selBar button:hover:not(:disabled),
+  #build .close:hover,
+  #build .tabs button:hover:not(:disabled),
+  #build .tool:hover,
+  #build .item:hover,
+  #picker .head button:hover,
+  #picker .head a:hover,
+  #picker .map:hover,
+  #picker .stages .seg button:hover,
+  #lobby button.small:hover,
+  #lobby .map:hover:not(:disabled),
+  #banner button:hover,
+  #pauseScreen button:hover {
+    border-color: transparent;
+    border-image-source: var(--fr-hover);
+  }
+}
+#picker .map:focus-visible {
+  border-color: transparent;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Switched on: pressed tools, the open menu, the picked tab, unit or map */
+#menuBtn[aria-expanded='true'],
+#toolbar button.on,
+#toolbar button[aria-pressed='true'],
+#build .tabs button[aria-selected='true'],
+#build .tool[aria-pressed='true'],
+#build .item.aiming,
+#picker .stages .seg button[aria-checked='true'],
+#lobby .map[aria-pressed='true'] {
+  color: var(--on-ink);
+  background: none;
+  border-color: transparent;
+  border-image-source: var(--fr-on);
+  box-shadow: none;
+}
+#build .tabs button[aria-selected='true'],
+#build .tool[aria-pressed='true'] {
+  transform: none;
+}
+#build .item.aiming {
+  animation: none;
+}
+#build .item.aiming .state {
+  color: var(--ok);
+}
+
+/* Main actions */
+#deployBtn,
+#selBar button.act,
+#lobby button.big,
+#playGate .play {
+  color: var(--accent-ink);
+  background: none;
+  border: 6px solid transparent;
+  border-image: var(--fr-primary) 6 fill / 6px stretch;
+  box-shadow: none;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45));
+  image-rendering: pixelated;
+}
+#deployBtn:disabled,
+#selBar button.act:disabled {
+  color: var(--ink);
+  border-color: transparent;
+  border-image-source: var(--fr-btn);
+}
+#leaveBtn {
+  color: #fff;
+  border-image-source: var(--fr-danger);
+}
+
+/* Wells: credits, fields, the power track */
+#credits,
+#build .credits,
+#lobby input,
+#lobby .botCtl select,
+#build .pwr .track,
+#loading .ld-bar {
+  background-color: transparent;
+  border: 6px solid transparent;
+  border-image: var(--fr-well) 6 fill / 6px stretch;
+  box-shadow: none;
+  image-rendering: pixelated;
+}
+#lobby input:focus {
+  border-color: transparent;
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* ---------- Text ---------- */
+
+#loading .ld-title,
+#picker .title,
+#banner .t,
+#pauseScreen .t,
+#playGate .play {
+  font-family: var(--f-head);
+  font-size-adjust: none;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+#loading .ld-title {
+  font-size: 84px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  text-shadow: 0 4px 0 var(--line);
+}
+#picker .title {
+  font-size: 30px;
+  line-height: 1;
+}
+#banner .t,
+#pauseScreen .t {
+  font-size: 64px;
+  line-height: 0.9;
+  color: var(--gold);
+  text-shadow: 0 4px 0 var(--line);
+}
+#playGate .play {
+  font-size: clamp(44px, 13vw, 68px);
+  line-height: 1;
+  padding: 14px 40px 16px 32px;
+  text-transform: none;
+}
+#lobby .lab {
+  text-transform: none;
+  color: var(--dim);
+  opacity: 1;
+}
+
+/* ---------- The HUD ---------- */
+
+#menuBtn {
+  width: 42px;
+  height: 40px;
+}
+#menuBtn svg {
+  width: 24px;
+  height: 24px;
+}
+#menuBtn svg,
+#toolbar button svg {
+  fill: none;
+}
+#credits {
+  color: var(--gold);
+  text-shadow: none;
+  padding: 2px 8px 2px 4px;
+  margin-right: 0;
+}
+#mini {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--line), 0 0 0 6px var(--panel-solid), 0 0 0 8px var(--line), 0 4px 0 6px rgba(0, 0, 0, 0.45);
+  inset-block-start: calc(12px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+}
+
+#toolbar button {
+  min-width: 60px;
+  height: 60px;
+  padding: 0 4px;
+  gap: 1px;
+  line-height: 1.1;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+#toolbar button svg {
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+/* Icon-only square tools, the names in their tooltips. */
+#toolbar button {
+  position: relative;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  padding: 0;
+}
+#toolbar button[hidden] {
+  display: none;
+}
+/* With a mouse you drag a box to select, so no Select button */
+@media (hover: hover) and (pointer: fine) {
+  #toolbar #selectBtn {
+    display: none;
+  }
+}
+#buildBtn.alert:not([aria-pressed='true'])::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* ---------- Selection ---------- */
+
+#selBar {
+  bottom: calc(94px + env(safe-area-inset-bottom));
+}
+#selBar button {
+  font-size: 12px;
+}
+#selBar button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+}
+/* The order check: in the order's color, round like the rings round it */
+#okBtn {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 2px solid var(--line);
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.45), inset -2px -2px 0 rgba(0, 0, 0, 0.25), 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+#okBtn svg {
+  fill: none;
+  width: 20px;
+  height: 20px;
+}
+
+#deployBtn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+}
+
+/* ---------- Menu and settings ---------- */
+
+#pauseBtn,
+#regen,
+#leaveBtn,
+#lobbyBtn,
+#settingsBtn,
+#setReset,
+#unitsLink,
+#uiLink,
+#audioLink {
+  padding: 4px 22px 4px 6px;
+}
+#setBack {
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-image: none;
+}
+.set output {
+  color: var(--accent);
+}
+.set input[type='range']::-webkit-slider-runnable-track {
+  height: 8px;
+  background: var(--track);
+  border: 0;
+  box-shadow: var(--track-shadow), inset 0 0 0 3px var(--card-line);
+}
+.set input[type='range']::-moz-range-track {
+  height: 8px;
+  background: var(--track);
+  border: 0;
+  box-shadow: var(--track-shadow), inset 0 0 0 3px var(--card-line);
+}
+.set input[type='range']::-webkit-slider-thumb {
+  margin-top: -5px;
+  background: var(--thumb);
+  border: 2px solid var(--line);
+  border-radius: 3px;
+}
+.set input[type='range']::-moz-range-thumb {
+  background: var(--thumb);
+  border: 2px solid var(--line);
+  border-radius: 3px;
+}
+.set input[type='range']:focus-visible {
+  outline-color: var(--accent);
+}
+
+/* ---------- Build menu ---------- */
+
+#build {
+  --cream: var(--ink);
+  --well: var(--track);
+  color: var(--ink);
+}
+#build .credits {
+  color: var(--gold);
+  text-shadow: none;
+  padding: 2px 8px 2px 4px;
+}
+#build .credits.full {
+  color: var(--danger);
+}
+#build .close {
+  width: 36px;
+  height: 34px;
+}
+#build .close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  filter: none;
+}
+#build .tools {
+  gap: 4px;
+}
+#build .tool {
+  height: 34px;
+  font-size: 12px;
+  text-shadow: none;
+}
+#build .tool[aria-pressed='true'] {
+  color: var(--on-ink);
+}
+#build .tabs {
+  gap: 4px;
+}
+#build .tabs button {
+  height: 42px;
+}
+#build .tabs button:active,
+#build .tabs button:disabled:active {
+  border-color: transparent;
+}
+#build .tabs button.alert::after {
+  top: 0;
+  right: 0;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--line);
+}
+#build .pwr {
+  width: 22px;
+}
+#build .pwr .track {
+  width: 10px;
+  padding: 0;
+  background-image: none;
+}
+#build .pwr .fill {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 100%;
+}
+#build .pwr .use {
+  left: -9px;
+  right: -9px;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+#build .pwr .bolt {
+  width: 16px;
+  height: 18px;
+}
+#build .grid {
+  gap: 4px;
+  scrollbar-color: var(--on) transparent;
+}
+#build .item:active {
+  transform: translateY(1px);
+}
+#build .item .pic {
+  background: var(--track);
+  border-radius: 2px;
+}
+#build .item .label {
+  background: none;
+  border-top: 0;
+  padding: 3px 2px 2px;
+}
+#build .item .cost {
+  color: var(--gold);
+  text-shadow: none;
+}
+#build .item .new {
+  color: var(--new-ink);
+  background: var(--ok);
+  box-shadow: 0 0 0 1px var(--line);
+  border-radius: 2px;
+}
+#build .item .count {
+  color: var(--gold);
+}
+#build .item[data-state='ready'] {
+  border-color: transparent;
+  border-image-source: var(--fr-on);
+  animation: ready 0.8s steps(2) infinite;
+}
+@keyframes ready {
+  50% {
+    border-image-source: var(--fr-btn);
+  }
+}
+#build .item[data-state='ready'] .state {
+  color: var(--ok);
+}
+
+/* ---------- Messages ---------- */
+
+#toast {
+  top: calc(64px + env(safe-area-inset-top));
+  color: var(--toast-ink);
+  background: none;
+  border: 6px solid transparent;
+  border-image: var(--fr-toast) 6 fill / 6px stretch;
+  box-shadow: none;
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.4));
+  image-rendering: pixelated;
+  padding: 2px 10px;
+}
+#banner,
+#pauseScreen {
+  background: rgba(4, 7, 7, 0.55);
+}
+#banner .s,
+#pauseScreen .s {
+  color: var(--dim);
+  opacity: 1;
+}
+
+/* ---------- Map picker and lobby ---------- */
+
+#picker {
+  background: rgba(4, 7, 7, 0.8);
+}
+#picker .head svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+}
+#picker .map canvas,
+#lobby .map canvas {
+  border: 2px solid var(--line);
+  border-radius: 2px;
+}
+#picker .map .first,
+#lobby .tag {
+  color: var(--new-ink);
+  background: var(--ok);
+  border-radius: 2px;
+}
+#picker .map .players,
+#lobby .map .pcount {
+  border-color: var(--card-line);
+  border-radius: 2px;
+}
+#picker .stages .seg {
+  gap: 2px;
+}
+#picker .stages .seg button + button {
+  margin-left: 0;
+}
+#picker .hint i,
+#lobby .dot {
+  border-color: var(--line);
+}
+#lobby {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 4px),
+    radial-gradient(ellipse at 50% 45%, rgba(4, 7, 7, 0.15) 0%, rgba(4, 7, 7, 0.65) 80%);
+}
+#lobby .code {
+  color: var(--gold);
+  text-shadow: 0 3px 0 var(--line);
+}
+#lobby .players li {
+  background: none;
+  border: 6px solid transparent;
+  border-image: var(--fr-well) 6 fill / 6px stretch;
+  image-rendering: pixelated;
+  padding: 2px 4px;
+}
+#lobby .swatch {
+  border: 2px solid var(--line);
+  border-radius: 6px;
+}
+#lobby .swatch[aria-checked='true'] {
+  outline-color: var(--ink);
+}
+#lobby .err {
+  color: var(--danger);
+}
+#playGate .testMode {
+  opacity: 0.75;
+}
+#playGate {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 4px),
+    radial-gradient(ellipse at 50% 50%, rgba(4, 7, 7, 0.1) 0%, rgba(4, 7, 7, 0.6) 80%);
+}
+#playGate .play svg {
+  fill: none;
+  stroke-width: 2.4;
+}
+#playGate .play:active {
+  box-shadow: none;
+}
+#playGate .play:focus-visible {
+  outline-color: var(--ink);
+}
+
+/* ---------- Loading ---------- */
+
+#loading {
+  background: var(--page);
+}
+#loading .ld-road {
+  border-bottom-color: var(--line);
+}
+#loading .ld-bar {
+  height: 22px;
+  padding: 0;
+}
+#loading .ld-bar i {
+  background: repeating-linear-gradient(90deg, var(--accent) 0 10px, transparent 10px 12px);
+}
+#loading .ld-text {
+  color: var(--dim);
+  opacity: 1;
+}
+@media (max-width: 400px) {
+  #picker .title {
+    font-size: 26px;
+  }
+}
+
+/* ---------- Bare home and menu buttons ---------- */
+
+/* Back to your base: just its icon, with no frame or circle round it. */
+#toolbar #homeBtn {
+  align-self: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  margin: 0 6px;
+  border: 0;
+  border-image: none;
+  background: none;
+  box-shadow: none;
+}
+#toolbar #homeBtn svg {
+  width: 22px;
+  height: 22px;
+}
+@media (hover: hover) {
+  #toolbar #homeBtn:hover {
+    color: var(--accent);
+  }
+}
+
+/* The menu button is just its icon over the map, still a full-size tap target.
+   The HUD drops its panel too; the credits keep their own well. */
+#hud {
+  padding: 4px;
+  border: 0;
+  border-image: none;
+  background: none;
+  filter: none;
+}
+#hud #credits {
+  filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.45));
+}
+#menuBtn,
+#menuBtn[aria-expanded='true'] {
+  width: 44px;
+  height: 44px;
+  background: none;
+  border: 0;
+  border-image: none;
+  box-shadow: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.7));
+}
+#menuBtn {
+  color: var(--ink);
+}
+#menuBtn[aria-expanded='true'] {
+  color: var(--accent);
+}
+#menuBtn svg {
+  width: 28px;
+  height: 28px;
+}
+@media (hover: hover) {
+  #menuBtn:hover {
+    color: var(--accent);
+    border-image: none;
+  }
+}
