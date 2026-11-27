@@ -9,7 +9,7 @@ export const WILD = 5;
 export const COLORS = ['blue', 'red', 'yellow', 'purple', 'black'] as const;
 export const COLOR_NAMES = ['Blue', 'Red', 'Yellow', 'Purple', 'Black'];
 
-export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter' | 'tiny';
+export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter' | 'tiny' | 'giant';
 export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2' | 'tinyhouse' | 'sheepfarm' | 'sheepfarm2';
 export type Res = 'gold' | 'wood' | 'meat';
 export type Cost = Partial<Record<Res, number>>;
@@ -17,7 +17,7 @@ export type Order = 'follow' | 'defend' | 'attack';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Anim = 'idle' | 'run' | 'attack' | 'attack2' | 'shoot' | 'heal' | 'chop' | 'mine' | 'stab' | 'guard' | 'graze';
 
-export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter', 'tiny'];
+export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter', 'tiny', 'giant'];
 export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2', 'tinyhouse', 'sheepfarm', 'sheepfarm2'];
 export const ANIMS: Anim[] = ['idle', 'run', 'attack', 'attack2', 'shoot', 'heal', 'chop', 'mine', 'stab', 'guard', 'graze'];
 
@@ -31,6 +31,7 @@ export const UNIT: Record<UnitKind, UnitStat> = {
   monk: { name: 'Monk', hp: 80, speed: 135, dmg: 0, range: 240, cd: 2, aggro: 320, pop: 1, cost: { gold: 25, wood: 20 }, r: 15, desc: 'Heals hurt friends nearby, heroes too.' },
   fighter: { name: 'Fighter', hp: 50, speed: 145, dmg: 4, range: 56, cd: 0.9, aggro: 280, pop: 1, cost: {}, r: 14, desc: 'Costs just 1 wood, 1 meat or 1 gold (whatever you have most of). Weak, but cheap!' },
   tiny: { name: 'Tiny Warriors', hp: 14, speed: 150, dmg: 1, range: 48, cd: 1, aggro: 260, pop: 0, cost: {}, r: 9, desc: 'A crowd of 1,000,000 tiny warriors for just 1 wood, meat or gold. They do almost no damage.' },
+  giant: { name: 'Giant', hp: 140000, speed: 95, dmg: 0.015, range: 80, cd: 0.9, aggro: 300, pop: 3, cost: { gold: 40, meat: 40 }, r: 26, desc: '1000 times a warrior’s health, but only 0.1% of its damage. Soaks up hits forever. Takes 3 room.' },
   sheep: { name: 'Sheep', hp: 24, speed: 70, dmg: 0, range: 0, cd: 1, aggro: 0, pop: 0, r: 13, desc: '' },
 };
 
@@ -38,7 +39,7 @@ interface BuildStat { name: string; hp: number; w: number; h: number; cost: Cost
 export const BUILD: Record<BuildKind, BuildStat> = {
   castle: { name: 'Castle', hp: 2600, w: 5, h: 2, cost: {}, trains: ['pawn'], pop: 10, desc: 'Your home. Shoots arrows at enemies close by. Keep it standing!' },
   house: { name: 'House', hp: 450, w: 2, h: 1, cost: { wood: 30 }, trains: [], pop: 5, desc: 'Room for 5 more units.' },
-  barracks: { name: 'Barracks', hp: 900, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['fighter', 'warrior', 'lancer'], desc: 'Trains fighters, warriors and lancers.' },
+  barracks: { name: 'Barracks', hp: 900, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['fighter', 'warrior', 'lancer', 'giant'], desc: 'Trains fighters, warriors, lancers and giants.' },
   archery: { name: 'Archery Range', hp: 750, w: 3, h: 2, cost: { wood: 60, gold: 10 }, trains: ['archer'], desc: 'Trains archers.' },
   monastery: { name: 'Monastery', hp: 750, w: 3, h: 2, cost: { wood: 80, gold: 30 }, trains: ['monk'], desc: 'Trains monks, who heal.' },
   tower: { name: 'Tower', hp: 1000, w: 2, h: 2, cost: { wood: 60, gold: 20 }, trains: [], desc: 'Shoots arrows at enemies that come close.' },
@@ -852,11 +853,13 @@ export class Game {
     const s = UNIT.monk;
     if (u.anim === 'heal' && u.animT < 1.1) return;
     // heal the most hurt friend in range
-    let best: Unit | null = null, bestLack = 15;
+    // most hurt by share of health, so a giant's huge health doesn't keep every monk busy
+    let best: Unit | null = null, bestLack = 0;
     for (const v of this.units) {
       if (v.dead || v.kind === 'sheep' || enemies(u.team, v.team) || v.team === WILD) continue;
       if ((u.team === BLACK) !== (v.team === BLACK)) continue;
-      const lack = v.maxHp - v.hp;
+      if (v.maxHp - v.hp <= 15) continue;
+      const lack = (v.maxHp - v.hp) / v.maxHp;
       if (lack > bestLack && dist(u.x, u.y, v.x, v.y) < s.range) { best = v; bestLack = lack; }
     }
     if (best && u.cd <= 0) {
