@@ -237,4 +237,20 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./tiny-kingdoms/index'),
   },
+  {
+    id: '2p-games',
+    title: '2p Games',
+    tagline: 'Mini games for up to 8 players: Factory and Knight Battle.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <defs><linearGradient id="pg-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffcf6b"/><stop offset=".5" stop-color="#ff8fa3"/><stop offset="1" stop-color="#8a7dff"/></linearGradient></defs>
+      <rect width="120" height="80" fill="url(#pg-bg)"/>
+      <g transform="rotate(-8 30 22)"><rect x="12" y="10" width="36" height="24" rx="7" fill="#fff"/><text x="30" y="29" font-size="17" font-weight="900" text-anchor="middle" fill="#ff5d73" font-family="sans-serif">2p</text></g>
+      <rect x="10" y="44" width="44" height="28" rx="6" fill="#2a8f73" stroke="#175c49" stroke-width="2"/>
+      <text x="22" y="64" font-size="15" text-anchor="middle">🍌</text><text x="42" y="64" font-size="15" text-anchor="middle">🐱</text>
+      <path d="M86 66c-12-8-20-14-20-23a8 8 0 0 1 14-5l6 5 6-5a8 8 0 0 1 14 5c0 9-8 15-20 23z" fill="#e8304d" stroke="#6e0f1f" stroke-width="2.5"/>
+      <path d="M96 14l-14 20M90 12l12 4" stroke="#e9eef7" stroke-width="3.5" stroke-linecap="round"/>
+      <circle cx="82" cy="34" r="3" fill="#8a5a2b"/>
+    </svg>`,
+    load: () => import('./2p-games/index'),
+  },
 ];
