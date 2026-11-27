@@ -166,9 +166,9 @@ export const CHALLENGES: { name: string; kinds: number[] }[] = [
 
 // ---------- Long Edition ----------
 
-/** The Sword of Light: 30 damage to enemies, twice that to bosses. You need 10 full hearts to pull it out. */
+/** The Sword of Light: 30 damage to enemies, twice that to bosses. You need 12 full hearts to pull it out. */
 export const LIGHT_DMG = 30;
-export const LIGHT_HEARTS = 40;
+export const LIGHT_HEARTS = 48;
 export const SPEAR_DMG = 8;
 
 export type Weapon = 'sword' | 'bow' | 'spear' | 'light';

@@ -834,7 +834,7 @@ export class Long {
       if (s.kind === S.Tower && this.near1(g, s.x, s.y, 1.6) && p.z >= tH(g.world.tile(s.x, s.y)) - 0.5) return this.towers.has(s.key) ? null : 'Look out from the tower';
       if (s.kind === S.Spring && this.near1(g, s.x, s.y, 2.4)) return this.springCd.has(s.key) ? null : 'Drink from the healing spring';
     }
-    if (!this.light && this.near1(g, GROVE.x, GROVE.y, 2)) return p.hp >= LIGHT_HEARTS ? 'Pull out the Sword of Light' : 'The Sword of Light (needs 10 full hearts)';
+    if (!this.light && this.near1(g, GROVE.x, GROVE.y, 2)) return p.hp >= LIGHT_HEARTS ? 'Pull out the Sword of Light' : 'The Sword of Light (needs 12 full hearts)';
     const vv = this.village(g);
     if (vv) {
       if (this.near1(g, vv.v.x + SMITH.x, vv.v.y + SMITH.y, 2.2)) return 'Blacksmith';
@@ -929,8 +929,8 @@ export class Long {
     }
     if (!this.light && this.near1(g, GROVE.x, GROVE.y, 2)) {
       if (p.hp < LIGHT_HEARTS) {
-        g.toast(`It won't budge. You need 10 full hearts to pull it out (you have ${Math.floor(p.hp / 4)}).`);
-        g.say('nolight', 'The Sword of Light needs a hero with ten full hearts.', 30);
+        g.toast(`It won't budge. You need 12 full hearts to pull it out (you have ${Math.floor(p.hp / 4)}).`);
+        g.say('nolight', 'The Sword of Light needs a hero with twelve full hearts.', 30);
         return true;
       }
       g.startWork('Pulling the Sword of Light', 3, () => {
