@@ -17,6 +17,12 @@ export interface Look {
   noFuel?: boolean;
   /** underground belt: this one is the exit */
   ugOut?: boolean;
+  /** pipes: which sides join something (1 up, 2 right, 4 down, 8 left) */
+  links?: number;
+  /** pipes: colour of the liquid inside */
+  liquid?: string;
+  /** rocket silo: a rocket is standing ready */
+  ready?: boolean;
 }
 
 function rr(c: Ctx, x: number, y: number, w: number, h: number, r: number) {
@@ -70,6 +76,7 @@ const BELT_COLORS: Record<string, [string, string, string]> = {
   'belt': ['#2c3138', '#4b5561', '#3fc1b0'],
   'fast-belt': ['#2c2a30', '#5a4d55', '#f08a3c'],
   'express-belt': ['#262833', '#4d5a72', '#4fa3ff'],
+  'fast-underground': ['#2c2a30', '#5a4d55', '#f08a3c'],
 };
 
 export function drawBelt(c: Ctx, type: EntityType, x: number, y: number, l: Look) {
@@ -299,6 +306,7 @@ const ART_SIZE: Partial<Record<EntityType, number>> = {
   'burner-drill': 2, 'electric-drill': 3, 'stone-furnace': 2, 'steel-furnace': 2, 'electric-furnace': 3,
   'assembler': 3, 'assembler-2': 3, 'lab': 3, 'generator': 3, 'solar-panel': 3, 'owen-monument': 5,
   'gun-turret': 2, 'rail-turret': 3, 'battery-bank': 2,
+  'crafter': 3, 'big-lab': 3,
 };
 export function artSize(type: EntityType): number {
   return ART_SIZE[type] ?? 1;
@@ -311,15 +319,73 @@ export function drawBuilding(c: Ctx, type: EntityType, x: number, y: number, l: 
     drawBuildingAt(c, type, x, y, l, w, h);
     return;
   }
+  const [w, h] = footprint(type, l.dir);
   c.save();
   c.translate(x, y);
-  c.scale(1 / s, 1 / s);
+  c.scale(w / s, h / s);
   drawBuildingAt(c, type, 0, 0, l, s, s);
   c.restore();
 }
 
+/** Liquid colours, for pipes and tanks. */
+export const LIQUID_COLOR: Record<string, string> = {
+  water: '#4fa3ff', 'crude-oil': '#2a2420', 'heavy-oil': '#c0661f', 'light-oil': '#e8c13a', lubricant: '#4fb36a', 'sulfuric-acid': '#d4e04a',
+};
+
+function pipeArt(c: Ctx, x: number, y: number, l: Look, ug: boolean) {
+  const links = l.links ?? 0;
+  const cx = x + 0.5, cy = y + 0.5;
+  const tube = (dx: number, dy: number) => {
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(Math.atan2(dy, dx));
+    c.fillStyle = 'rgba(0,0,0,.25)';
+    c.fillRect(0, -0.16, 0.5, 0.36);
+    c.fillStyle = '#6d7684';
+    c.fillRect(0, -0.2, 0.5, 0.36);
+    c.fillStyle = '#9aa3b0';
+    c.fillRect(0, -0.17, 0.5, 0.1);
+    c.fillStyle = '#4b525d';
+    c.fillRect(0.36, -0.22, 0.08, 0.4);
+    c.restore();
+  };
+  for (let d = 0; d < 4; d++) if (links & (1 << d)) tube(DX[d], DY[d]);
+  if (ug) tube(DX[(l.dir + 2) % 4], DY[(l.dir + 2) % 4]);
+  // the joint in the middle
+  c.fillStyle = 'rgba(0,0,0,.25)';
+  c.beginPath();
+  c.arc(cx + 0.03, cy + 0.06, 0.26, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#7b8492';
+  c.beginPath();
+  c.arc(cx, cy, 0.26, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = l.liquid ?? '#4b525d';
+  c.globalAlpha = l.liquid ? 0.85 : 0.5;
+  c.beginPath();
+  c.arc(cx, cy, 0.12, 0, Math.PI * 2);
+  c.fill();
+  c.globalAlpha = 1;
+  if (ug) {
+    // the end that dives under the ground
+    c.save();
+    c.translate(cx, cy);
+    c.rotate((l.dir * Math.PI) / 2);
+    c.fillStyle = '#4b525d';
+    rr(c, -0.32, -0.5, 0.64, 0.36, 0.08);
+    c.fill();
+    c.fillStyle = '#1b1f25';
+    c.fillRect(-0.22, -0.5, 0.44, 0.1);
+    c.restore();
+  }
+}
+
 function drawBuildingAt(c: Ctx, type: EntityType, x: number, y: number, l: Look, w: number, h: number) {
   const d = ENTITIES[type];
+  if (drawAdvanced(c, type, x, y, l, w, h)) {
+    statusBadge(c, x, y, w, l);
+    return;
+  }
   switch (d.kind) {
     case 'chest': {
       const [body, top, edge] = type === 'wooden-chest'
@@ -548,7 +614,7 @@ function drawBuildingAt(c: Ctx, type: EntityType, x: number, y: number, l: Look,
       c.fillStyle = '#33404d';
       rr(c, x + 0.05, y + 0.05, w - 0.1, h - 0.1, 0.12);
       c.fill();
-      c.fillStyle = '#e3b341';
+      c.fillStyle = type === 'fast-splitter' ? '#f08a3c' : '#e3b341';
       rr(c, x + 0.15, y + 0.15, w - 0.3, h - 0.3, 0.1);
       c.fill();
       // an arrow out the front of each tile
@@ -642,10 +708,246 @@ function drawBuildingAt(c: Ctx, type: EntityType, x: number, y: number, l: Look,
   statusBadge(c, x, y, w, l);
 }
 
+/** Advanced-mode buildings. Returns false for everything else. */
+function drawAdvanced(c: Ctx, type: EntityType, x: number, y: number, l: Look, w: number, h: number): boolean {
+  const d = ENTITIES[type];
+  if (d.kind === 'pipe' && w === 1) {
+    pipeArt(c, x, y, l, !!d.ugPipe);
+    return true;
+  }
+  switch (type) {
+    case 'storage-tank': {
+      shadow(c, x, y, w, h);
+      c.fillStyle = '#5c6270';
+      c.beginPath();
+      c.arc(x + 1, y + 1, 0.92, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#8d939e';
+      c.beginPath();
+      c.arc(x + 1, y + 0.94, 0.8, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = l.liquid ?? '#3a3f48';
+      c.globalAlpha = 0.8;
+      c.beginPath();
+      c.arc(x + 1, y + 0.94, 0.42, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
+      c.strokeStyle = '#4b525d';
+      c.lineWidth = 0.08;
+      c.beginPath();
+      c.arc(x + 1, y + 0.94, 0.62, 0, Math.PI * 2);
+      c.stroke();
+      return true;
+    }
+    case 'offshore-pump': {
+      box(c, x, y, w, h, '#3d6fa8', '#5a8fd0', '#22436b');
+      c.fillStyle = '#9aa3b0';
+      c.fillRect(x + 0.38, y + 0.15, 0.24, 0.5);
+      c.fillStyle = '#e3b341';
+      c.beginPath();
+      c.arc(x + 0.5, y + 0.4, 0.14 + (l.working ? Math.sin(l.time * 10) * 0.03 : 0), 0, Math.PI * 2);
+      c.fill();
+      return true;
+    }
+    case 'steam-engine': {
+      box(c, x, y, w, h, '#6b5a4b', '#8b7865', '#3e3329');
+      // boiler drum and piston
+      c.fillStyle = '#9aa3b0';
+      rr(c, x + 0.25, y + 0.35, 1.5, 0.55, 0.25);
+      c.fill();
+      c.fillStyle = '#c9ced8';
+      c.fillRect(x + 0.35, y + 0.42, 1.3, 0.1);
+      const pist = l.working ? Math.sin(l.time * 9) * 0.18 : 0;
+      c.fillStyle = '#4b525d';
+      c.fillRect(x + 0.55 + pist, y + 1.05, 0.5, 0.3);
+      gear(c, x + 1.4, y + 1.2, 0.28, 8, l.working ? l.time * 4 : 0, '#c9b79c', '#3e3329');
+      if (l.working) {
+        const t = (l.time * 0.8) % 1;
+        c.fillStyle = `rgba(235,235,240,${0.55 * (1 - t)})`;
+        c.beginPath();
+        c.arc(x + 0.45, y + 0.2 - t * 0.7, 0.16 + t * 0.25, 0, Math.PI * 2);
+        c.fill();
+      }
+      return true;
+    }
+    case 'pumpjack': {
+      box(c, x, y, w, h, '#5b4d3f', '#7a6a58', '#33291f');
+      c.fillStyle = '#2a2420';
+      c.beginPath();
+      c.arc(x + 1, y + 1.3, 0.28, 0, Math.PI * 2);
+      c.fill();
+      // the nodding beam
+      const a = l.working ? Math.sin(l.anim * 0.06) * 0.3 : 0;
+      c.fillStyle = '#4b525d';
+      c.fillRect(x + 0.9, y + 0.55, 0.2, 0.8);
+      c.save();
+      c.translate(x + 1, y + 0.6);
+      c.rotate(a);
+      c.fillStyle = '#e3b341';
+      c.fillRect(-0.75, -0.08, 1.5, 0.16);
+      c.fillStyle = '#c9822a';
+      c.beginPath();
+      c.moveTo(-0.85, -0.18);
+      c.lineTo(-0.6, -0.18);
+      c.lineTo(-0.6, 0.25);
+      c.lineTo(-0.85, 0.12);
+      c.closePath();
+      c.fill();
+      c.restore();
+      return true;
+    }
+    case 'refinery': {
+      box(c, x, y, w, h, '#6d5a4a', '#8e7a66', '#3f3328');
+      const towers: [number, number, number, string][] = [[0.8, 0.6, 0.38, '#c9ced8'], [1.6, 0.9, 0.3, '#b9bec8'], [2.25, 0.55, 0.26, '#d8dde6']];
+      for (const [tx, ty, tr, col] of towers) {
+        c.fillStyle = col;
+        rr(c, x + tx - tr, y + ty - 0.2, tr * 2, 1.4, 0.12);
+        c.fill();
+        c.fillStyle = '#5c6270';
+        c.fillRect(x + tx - tr, y + ty + 0.3, tr * 2, 0.08);
+        c.fillRect(x + tx - tr, y + ty + 0.7, tr * 2, 0.08);
+      }
+      c.fillStyle = '#e3b341';
+      c.fillRect(x + 0.3, y + 2.45, 2.4, 0.12);
+      if (l.working) {
+        const f = 0.6 + Math.sin(l.time * 12) * 0.25;
+        c.fillStyle = `rgba(255,170,60,${f})`;
+        c.beginPath();
+        c.moveTo(x + 2.25, y + 0.15);
+        c.quadraticCurveTo(x + 2.4, y - 0.2, x + 2.25, y - 0.45);
+        c.quadraticCurveTo(x + 2.1, y - 0.2, x + 2.25, y + 0.15);
+        c.fill();
+      }
+      return true;
+    }
+    case 'rocket-silo': {
+      shadow(c, x, y, w, h);
+      c.fillStyle = '#4b525d';
+      rr(c, x + 0.1, y + 0.1, w - 0.2, h - 0.2, 0.4);
+      c.fill();
+      c.fillStyle = '#6d7684';
+      rr(c, x + 0.3, y + 0.25, w - 0.6, h - 0.6, 0.35);
+      c.fill();
+      // the hatch
+      c.fillStyle = '#1b1f25';
+      c.beginPath();
+      c.arc(x + w / 2, y + h / 2, 1.55, 0, Math.PI * 2);
+      c.fill();
+      if (!l.ready) {
+        c.fillStyle = '#3a3f48';
+        c.beginPath();
+        c.arc(x + w / 2, y + h / 2, 1.45, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#e3b341';
+        c.lineWidth = 0.12;
+        c.beginPath();
+        c.moveTo(x + w / 2 - 1.4, y + h / 2);
+        c.lineTo(x + w / 2 + 1.4, y + h / 2);
+        c.stroke();
+      }
+      // corner lights
+      c.fillStyle = l.working ? '#57d38c' : '#e3b341';
+      for (const [cx, cy] of [[0.5, 0.5], [w - 0.5, 0.5], [0.5, h - 0.7], [w - 0.5, h - 0.7]]) {
+        c.beginPath();
+        c.arc(x + cx, y + cy, 0.12, 0, Math.PI * 2);
+        c.fill();
+      }
+      owenO(c, x + w / 2, y + h - 0.45, 0.16, '#c9ced8');
+      return true;
+    }
+    case 'roboport': {
+      box(c, x, y, w, h, '#3a4250', '#566174', '#20262f');
+      c.fillStyle = '#2b3440';
+      rr(c, x + 0.45, y + 0.4, 1.1, 1, 0.2);
+      c.fill();
+      c.fillStyle = l.working ? '#57d38c' : '#e3b341';
+      c.beginPath();
+      c.arc(x + 1, y + 0.9, 0.22 + (l.working ? Math.sin(l.time * 6) * 0.04 : 0), 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#c9ced8';
+      c.lineWidth = 0.06;
+      c.beginPath();
+      c.moveTo(x + 1.6, y + 0.4);
+      c.lineTo(x + 1.75, y - 0.1);
+      c.stroke();
+      c.fillStyle = '#ff5b4b';
+      c.beginPath();
+      c.arc(x + 1.75, y - 0.12, 0.06, 0, Math.PI * 2);
+      c.fill();
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A little flying robot. */
+export function drawRobot(c: Ctx, x: number, y: number, time: number) {
+  c.fillStyle = 'rgba(0,0,0,.25)';
+  c.beginPath();
+  c.ellipse(x + 0.1, y + 0.7, 0.16, 0.06, 0, 0, Math.PI * 2);
+  c.fill();
+  const bob = Math.sin(time * 8 + x) * 0.04;
+  c.fillStyle = '#c9ced8';
+  rr(c, x - 0.16, y - 0.1 + bob, 0.32, 0.2, 0.06);
+  c.fill();
+  c.fillStyle = '#57d38c';
+  c.fillRect(x - 0.06, y - 0.05 + bob, 0.12, 0.06);
+  c.strokeStyle = '#8d939e';
+  c.lineWidth = 0.03;
+  c.beginPath();
+  c.moveTo(x - 0.24, y - 0.14 + bob);
+  c.lineTo(x + 0.24, y - 0.14 + bob);
+  c.stroke();
+}
+
+/** A rocket: standing in the silo, or flying up. */
+export function drawRocket(c: Ctx, x: number, y: number, flame: number) {
+  if (flame > 0) {
+    const grd = c.createLinearGradient(0, y + 1.1, 0, y + 1.1 + 2.2 * flame);
+    grd.addColorStop(0, '#fff3b0');
+    grd.addColorStop(0.35, '#ff9a3c');
+    grd.addColorStop(1, 'rgba(255,60,20,0)');
+    c.fillStyle = grd;
+    c.beginPath();
+    c.moveTo(x - 0.3, y + 1.1);
+    c.lineTo(x + 0.3, y + 1.1);
+    c.lineTo(x, y + 1.1 + 2.2 * flame);
+    c.closePath();
+    c.fill();
+  }
+  c.fillStyle = '#e8eef7';
+  c.beginPath();
+  c.moveTo(x, y - 1.4);
+  c.quadraticCurveTo(x + 0.38, y - 0.8, x + 0.34, y + 1.0);
+  c.lineTo(x - 0.34, y + 1.0);
+  c.quadraticCurveTo(x - 0.38, y - 0.8, x, y - 1.4);
+  c.fill();
+  c.fillStyle = '#d6455d';
+  c.beginPath();
+  c.moveTo(x, y - 1.4);
+  c.quadraticCurveTo(x + 0.2, y - 1.15, x + 0.26, y - 0.85);
+  c.lineTo(x - 0.26, y - 0.85);
+  c.quadraticCurveTo(x - 0.2, y - 1.15, x, y - 1.4);
+  c.fill();
+  c.fillStyle = '#5466a8';
+  c.beginPath();
+  c.arc(x, y - 0.3, 0.13, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#8d939e';
+  for (const s of [-1, 1]) {
+    c.beginPath();
+    c.moveTo(x + s * 0.32, y + 0.4);
+    c.lineTo(x + s * 0.62, y + 1.15);
+    c.lineTo(x + s * 0.3, y + 1.0);
+    c.closePath();
+    c.fill();
+  }
+}
+
 export function drawEntityIcon(c: Ctx, type: EntityType) {
   const d = ENTITIES[type];
   const s = Math.max(d.w, d.h, 1);
-  const look: Look = { dir: 1, working: false, anim: 2, time: 0, t: 0.25 };
+  const look: Look = { dir: 1, working: false, anim: 2, time: 0, t: 0.25, links: 10 };
   c.save();
   if (d.kind === 'belt') {
     c.translate(0.05, 0.05);

@@ -74,5 +74,9 @@ export const sfx = {
   hurt: () => tone(200, 0.12, 'sawtooth', 0.06, -80),
   boom: () => { noise(0.5, 0.5, 180); tone(90, 0.4, 'sine', 0.12, -50); },
   alarm: () => [0, 1, 2].forEach((i) => tone(660, 0.18, 'square', 0.04, -200, i * 0.25)),
+  launch: () => { noise(2.5, 0.35, 160); tone(70, 2.5, 'sawtooth', 0.06, 120); },
+  flame: () => noise(0.08, 0.1, 700),
+  rocket: () => { noise(0.25, 0.2, 900); tone(300, 0.25, 'sawtooth', 0.03, 400); },
+  catch: () => tone(760, 0.08, 'triangle', 0.04, -200),
   win: () => [392, 523, 659, 784, 659, 784, 1046].forEach((f, i) => tone(f, 0.35, 'triangle', 0.08, 0, i * 0.15)),
 };

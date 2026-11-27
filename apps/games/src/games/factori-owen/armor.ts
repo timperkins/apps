@@ -9,6 +9,7 @@ const TPS = 60;
 
 export interface ArmorDef { reduce: number; w: number; h: number }
 export const ARMORS: Partial<Record<ItemId, ArmorDef>> = {
+  'armor-0': { reduce: 0.1, w: 1, h: 1 },
   'armor-1': { reduce: 0.15, w: 2, h: 2 },
   'armor-2': { reduce: 0.3, w: 3, h: 3 },
   'armor-3': { reduce: 0.45, w: 4, h: 4 },
@@ -35,6 +36,7 @@ export const EQUIP: Partial<Record<ItemId, EquipDef>> = {
   'eq-shield': { w: 2, h: 2, uses: 120e3, color: '#5aa9ff' },
   'eq-legs': { w: 2, h: 3, uses: 200e3, color: '#7d8a9b' },
   'eq-night': { w: 2, h: 2, uses: 10e3, color: '#57d38c' },
+  'eq-goggles': { w: 1, h: 1, color: '#2f8f5a' },
 };
 
 export const SHIELD_HP = 60;
@@ -161,7 +163,7 @@ export function updateSuit(g: Game) {
   const max = shieldMax(s);
   if (s.shield < max && use(EQUIP['eq-shield']!.uses! * has(s, 'eq-shield'))) s.shield = Math.min(max, s.shield + 0.15 * has(s, 'eq-shield'));
   s.legsOn = has(s, 'eq-legs') > 0 && (!g.pmoving || use(EQUIP['eq-legs']!.uses!));
-  s.nightOn = has(s, 'eq-night') > 0 && use(EQUIP['eq-night']!.uses!);
+  s.nightOn = has(s, 'eq-goggles') > 0 || (has(s, 'eq-night') > 0 && use(EQUIP['eq-night']!.uses!));
 }
 
 /** Damage after the shield and armor; also drains the shield. */

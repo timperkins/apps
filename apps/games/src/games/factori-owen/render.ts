@@ -1,7 +1,11 @@
 // Draws the world, buildings and overlays onto the main canvas.
 import { ENTITIES, footprint, maxHp, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
 import { BUG_KINDS, NEST_HP, playerWeapon, RELOAD_TICKS } from './combat';
-import { beltItemPos, DEFAULT_LOOK, DIR_ANGLE, drawBelt, drawBug, drawBuilding, drawEngineer, drawNest, type GunKind, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, type Look, type PlayerLook } from './art';
+import { beltItemPos, DEFAULT_LOOK, DIR_ANGLE, drawBelt, drawBug, drawBuilding, drawEngineer, drawNest, type GunKind, drawRobot, drawRocket, drawTree, drawTurretHead, inserterArm, inserterBase, inserterHand, LIQUID_COLOR, type Look, type PlayerLook } from './art';
+import { AN, APC, POLLUTION_SEEN } from './combat';
+import { isPipe, usesFluid } from './fluids';
+import { ROBO_RANGE } from './robots';
+import { LAUNCH_TICKS } from './space';
 import { iconCanvas } from './icons';
 import { DX, DY, drillOut, TPS, type Dir, type Entity, type Game } from './sim';
 import { Ground, Res, WORLD } from './world';
@@ -147,6 +151,27 @@ export class Renderer {
     cv.width = cv.height = 48;
     const c = cv.getContext('2d')!;
     c.scale(48, 48);
+    if (kind === Res.Oil) {
+      // a glossy black puddle
+      c.fillStyle = 'rgba(0,0,0,.35)';
+      c.beginPath();
+      c.ellipse(0.52, 0.56, 0.42, 0.3, 0.2, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#141216';
+      c.beginPath();
+      c.ellipse(0.5, 0.5, 0.4, 0.28, 0.2 + variant, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = 'rgba(140,90,200,.35)';
+      c.beginPath();
+      c.ellipse(0.4, 0.42, 0.16, 0.06, 0.3, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = 'rgba(90,200,220,.25)';
+      c.beginPath();
+      c.ellipse(0.6, 0.55, 0.1, 0.04, 0.3, 0, Math.PI * 2);
+      c.fill();
+      this.oreSprites.set(key, cv);
+      return cv;
+    }
     const [base, light, fleck] = RES_COLORS[kind];
     let s = kind * 31 + variant * 7 + (dense ? 3 : 0);
     const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
@@ -213,7 +238,8 @@ export class Renderer {
         const r = w.res[i];
         if (!r) continue;
         const v = Math.floor(w.rand(x, y, 9) * 4);
-        c.drawImage(this.ore(r, v, w.amount[i] > 400), x - 0.1, y - 0.1, 1.2, 1.2);
+        if (r === Res.Oil) c.drawImage(this.ore(r, v, false), x - 0.6, y - 0.6, 2.2, 2.2);
+        else c.drawImage(this.ore(r, v, w.amount[i] > 400), x - 0.1, y - 0.1, 1.2, 1.2);
       }
 
     // power areas
@@ -243,6 +269,9 @@ export class Renderer {
       noPower: !!e.def.electric && e.def.kind !== 'inserter' && (e.net < 0 || e.sat <= 0) && e.def.kind !== 'pole',
       noFuel: e.status === 'No fuel',
       ugOut: e.recipe === 'out',
+      links: isPipe(e) ? this.pipeLinks(g, e) : undefined,
+      liquid: isPipe(e) ? LIQUID_COLOR[g.fnets[e.fnet]?.fluid ?? ''] : undefined,
+      ready: e.recipe === 'ready',
     });
 
     // paths and mines lie flat on the ground
@@ -263,6 +292,17 @@ export class Renderer {
         if (e.items[0]) c.drawImage(iconCanvas(e.items[0].item, 32), e.x + e.w / 2 - 0.21, e.y + e.h / 2 - 0.21, 0.42, 0.42);
       }
 
+    // pipes lie low too
+    for (const e of vis) if (e.def.kind === 'pipe' && e.w === 1) drawBuilding(c, e.type, e.x, e.y, look(e));
+
+    // buildings robots will rebuild
+    if (g.ghosts.length) {
+      c.globalAlpha = 0.35;
+      for (const h of g.ghosts)
+        if (h.x + 3 > x0 && h.x < x1 && h.y + 3 > y0 && h.y < y1) drawBuilding(c, h.type, h.x, h.y, { dir: h.dir, working: false, anim: 0, time });
+      c.globalAlpha = 1;
+    }
+
     // inserter bases sit under everything tall
     for (const e of vis) if (e.def.kind === 'inserter') inserterBase(c, e.type, e.x, e.y, look(e));
 
@@ -271,7 +311,7 @@ export class Renderer {
     const tall: Item[] = [];
     for (const e of vis) {
       const k = e.def.kind;
-      if (k === 'belt' || k === 'inserter' || k === 'floor' || k === 'mine' || k === 'splitter') continue;
+      if (k === 'belt' || k === 'inserter' || k === 'floor' || k === 'mine' || k === 'splitter' || (k === 'pipe' && e.w === 1)) continue;
       tall.push({ y: e.y + e.h, f: () => this.building(e, look(e)) });
     }
     for (let y = y0; y <= y1; y++)
@@ -295,6 +335,7 @@ export class Renderer {
         } });
       }
     }
+    for (const b of g.bots) tall.push({ y: b.y + 1.5, f: () => drawRobot(c, b.x, b.y, time) });
     const dr = g.cs.drone;
     if (dr && !g.playerDead) tall.push({ y: dr.y + 1.2, f: () => this.drone(dr.x, dr.y, time) });
     for (const o of this.others) tall.push({ y: o.y + 0.3, f: () => drawEngineer(c, o.x, o.y, o.dir, o.moving, time, false, o.look, 'pistol', DIR_ANGLE[o.dir], 0, 0) });
@@ -353,7 +394,27 @@ export class Renderer {
           }
         }
 
+    // rockets standing in a silo, or taking off
+    for (const e of vis) {
+      if (e.def.kind !== 'silo') continue;
+      if (e.t > 0) {
+        const p = e.t / LAUNCH_TICKS;
+        const rise = p < 0.25 ? 0 : ((p - 0.25) / 0.75) ** 2 * 60;
+        const shake = p < 0.25 ? Math.sin(time * 60) * 0.03 : 0;
+        drawRocket(c, e.cx + shake, e.cy - 0.2 - rise, p < 0.25 ? p * 2 : 1);
+        if (p < 0.6) {
+          c.fillStyle = `rgba(230,230,235,${0.5 * (1 - p)})`;
+          for (let i = 0; i < 6; i++) {
+            c.beginPath();
+            c.arc(e.cx + Math.cos(i) * (1 + p * 3), e.cy + 1.2 + Math.sin(i * 2) * 0.4, 0.5 + p * 1.5, 0, Math.PI * 2);
+            c.fill();
+          }
+        }
+      } else if (e.recipe === 'ready') drawRocket(c, e.cx, e.cy - 0.2, 0);
+    }
+
     this.effects(g);
+    if (g.advanced) this.pollution(g, x0, y0, x1, y1);
     this.night(g, vis, W, H, x0, y0);
     this.labels(g, vis, inView);
     this.overlays(g, ov);
@@ -426,6 +487,32 @@ export class Renderer {
         c.beginPath();
         c.arc(f.x0 + 0.3, f.y0 - (1 - a), r * 0.7, 0, Math.PI * 2);
         c.fill();
+      } else if (f.kind === 'rocket') {
+        const p = 1 - a;
+        const rx = f.x0 + (f.x1 - f.x0) * p, ry = f.y0 + (f.y1 - f.y0) * p;
+        c.strokeStyle = `rgba(220,220,225,${0.5})`;
+        c.lineWidth = 0.12;
+        c.beginPath();
+        c.moveTo(f.x0 + (f.x1 - f.x0) * Math.max(0, p - 0.25), f.y0 + (f.y1 - f.y0) * Math.max(0, p - 0.25));
+        c.lineTo(rx, ry);
+        c.stroke();
+        c.fillStyle = '#ffb84d';
+        c.beginPath();
+        c.arc(rx, ry, 0.13, 0, Math.PI * 2);
+        c.fill();
+      } else if (f.kind === 'flame') {
+        const ang = Math.atan2(f.y1 - f.y0, f.x1 - f.x0);
+        const len = Math.hypot(f.x1 - f.x0, f.y1 - f.y0) * (1 - a * 0.6);
+        for (let i = 0; i < 7; i++) {
+          const d = len * ((i + 1) / 7);
+          const sp = 0.4 * (i / 7);
+          const off = Math.sin(f.t * 1.7 + i * 2.1) * sp;
+          const fx = f.x0 + Math.cos(ang + off) * d, fy = f.y0 + Math.sin(ang + off) * d;
+          c.fillStyle = `rgba(255,${200 - i * 20},${60 - i * 6},${a * 0.7})`;
+          c.beginPath();
+          c.arc(fx, fy, 0.18 + i * 0.09, 0, Math.PI * 2);
+          c.fill();
+        }
       } else if (f.kind === 'bite') {
         c.strokeStyle = `rgba(255,80,60,${a})`;
         c.lineWidth = 0.06;
@@ -481,6 +568,29 @@ export class Renderer {
         c.fillText(o.name, o.x, o.y - 0.55);
       }
     }
+  }
+
+  /** Which sides of a pipe join another pipe or a machine that uses liquids. */
+  private pipeLinks(g: Game, e: Entity): number {
+    let m = 0;
+    for (let d = 0; d < 4; d++) {
+      const o = g.entAt(e.x + DX[d], e.y + DY[d]);
+      if (o && o !== e && (isPipe(o) || usesFluid(o))) m |= 1 << d;
+    }
+    return m;
+  }
+
+  /** Advanced mode's pollution: a brown haze over the polluted ground. */
+  private pollution(g: Game, x0: number, y0: number, x1: number, y1: number) {
+    const c = this.c;
+    const p = g.cs.apol;
+    for (let cy = Math.floor(y0 / APC); cy <= Math.floor(y1 / APC) && cy < AN; cy++)
+      for (let cx = Math.floor(x0 / APC); cx <= Math.floor(x1 / APC) && cx < AN; cx++) {
+        const v = p[cy * AN + cx];
+        if (v <= POLLUTION_SEEN) continue;
+        c.fillStyle = `rgba(110,80,40,${Math.min(0.3, 0.04 + v * 0.012)})`;
+        c.fillRect(cx * APC, cy * APC, APC, APC);
+      }
   }
 
   private building(e: Entity, l: Look) {
@@ -557,6 +667,7 @@ export class Renderer {
       c.setLineDash([]);
       if (e.def.kind === 'inserter') this.inserterMarks(e.x, e.y, e.dir, e.def.reach ?? 1);
       if (e.def.kind === 'drill') this.drillArea(e.type, e.x, e.y, e.dir);
+      if (e.def.kind === 'roboport') this.roboArea(e.cx, e.cy);
     } else if (ov.hoverTile && !ov.ghost) {
       const [x, y] = ov.hoverTile;
       c.strokeStyle = 'rgba(255,255,255,.35)';
@@ -578,6 +689,7 @@ export class Renderer {
       c.fillRect(gh.x, gh.y, ...footprint(gh.type, d.rotatable ? gh.dir : 0));
       if (d.kind === 'inserter') this.inserterMarks(gh.x, gh.y, gh.dir, d.reach ?? 1);
       if (d.kind === 'drill') this.drillArea(gh.type, gh.x, gh.y, gh.dir);
+      if (d.kind === 'roboport') this.roboArea(gh.x + d.w / 2, gh.y + d.h / 2);
       if (d.kind === 'pole') {
         const r = d.supply ?? POLE_SUPPLY_RADIUS;
         c.strokeStyle = 'rgba(120,190,255,.9)';
@@ -600,6 +712,15 @@ export class Renderer {
       c.fillStyle = '#f2b632';
       c.fillRect(m.x + m.w / 2 - 0.48, m.y - 0.28, 0.96 * m.p, 0.12);
     }
+  }
+
+  private roboArea(cx: number, cy: number) {
+    const c = this.c;
+    c.fillStyle = 'rgba(87,211,140,.08)';
+    c.fillRect(cx - ROBO_RANGE, cy - ROBO_RANGE, ROBO_RANGE * 2, ROBO_RANGE * 2);
+    c.strokeStyle = 'rgba(87,211,140,.6)';
+    c.lineWidth = 0.08;
+    c.strokeRect(cx - ROBO_RANGE, cy - ROBO_RANGE, ROBO_RANGE * 2, ROBO_RANGE * 2);
   }
 
   private inserterMarks(x: number, y: number, dir: number, reach: number) {

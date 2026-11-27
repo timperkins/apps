@@ -1,6 +1,6 @@
 // Procedural item icons, drawn in a 1x1 unit space and cached as canvases / data URLs.
 import { ITEMS, type ItemId } from './data';
-import { drawEntityIcon } from './art';
+import { drawEntityIcon, LIQUID_COLOR } from './art';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -311,9 +311,9 @@ export function drawItem(c: Ctx, item: ItemId) {
       c.fill();
       break;
     }
-    case 'armor-1': case 'armor-2': case 'armor-3': case 'armor-4': case 'armor-5': {
+    case 'armor-0': case 'armor-1': case 'armor-2': case 'armor-3': case 'armor-4': case 'armor-5': {
       const tier = Number(item.slice(-1));
-      const [body, trim] = [['#9a6a3c', '#5f3e20'], ['#6f82c8', '#3b4a85'], ['#a4acb8', '#4e535c'], ['#3b4a6b', '#e3b341'], ['#1f2a3a', '#5adcff']][tier - 1];
+      const [body, trim] = [['#8a8f99', '#4b525d'], ['#9a6a3c', '#5f3e20'], ['#6f82c8', '#3b4a85'], ['#a4acb8', '#4e535c'], ['#3b4a6b', '#e3b341'], ['#1f2a3a', '#5adcff']][tier];
       c.fillStyle = body;
       c.beginPath();
       c.moveTo(0.3, 0.14);
@@ -409,7 +409,270 @@ export function drawItem(c: Ctx, item: ItemId) {
       break;
     }
     default:
-      if (ITEMS[item].place) drawEntityIcon(c, ITEMS[item].place!);
+      if (ITEMS[item].fluid) droplet(c, LIQUID_COLOR[item] ?? '#4fa3ff');
+      else if (ITEMS[item].place) drawEntityIcon(c, ITEMS[item].place!);
+      else drawAdvancedItem(c, item);
+  }
+}
+
+function droplet(c: Ctx, col: string) {
+  c.fillStyle = 'rgba(0,0,0,.3)';
+  c.beginPath();
+  c.ellipse(0.52, 0.86, 0.22, 0.06, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = col;
+  c.beginPath();
+  c.moveTo(0.5, 0.1);
+  c.bezierCurveTo(0.6, 0.3, 0.8, 0.45, 0.8, 0.62);
+  c.arc(0.5, 0.62, 0.3, 0, Math.PI);
+  c.bezierCurveTo(0.2, 0.45, 0.4, 0.3, 0.5, 0.1);
+  c.fill();
+  c.fillStyle = 'rgba(255,255,255,.45)';
+  c.beginPath();
+  c.ellipse(0.4, 0.58, 0.06, 0.12, 0.4, 0, Math.PI * 2);
+  c.fill();
+}
+
+function canister(c: Ctx, body: string, band: string) {
+  c.fillStyle = 'rgba(0,0,0,.3)';
+  roundRect(c, 0.27, 0.22, 0.5, 0.68, 0.08);
+  c.fill();
+  c.fillStyle = body;
+  roundRect(c, 0.25, 0.18, 0.5, 0.68, 0.08);
+  c.fill();
+  c.fillStyle = band;
+  c.fillRect(0.25, 0.42, 0.5, 0.16);
+  c.fillStyle = '#4b525d';
+  c.fillRect(0.4, 0.1, 0.2, 0.1);
+}
+
+function gunShape(c: Ctx, body: string, barrel: string, len: number, thick: number) {
+  c.save();
+  c.translate(0.5, 0.55);
+  c.rotate(-0.5);
+  c.fillStyle = body;
+  c.fillRect(-0.42, -thick / 2, 0.84 * len, thick);
+  c.fillStyle = barrel;
+  c.fillRect(0.1, -thick / 4, 0.5 * len, thick / 2);
+  c.fillStyle = '#6b4126';
+  c.fillRect(-0.34, thick / 2 - 0.02, 0.12, 0.2);
+  c.restore();
+}
+
+/** Icons for advanced-mode items that aren't buildings. */
+function drawAdvancedItem(c: Ctx, item: ItemId) {
+  switch (item) {
+    case 'plastic':
+      c.fillStyle = '#c9ced8';
+      roundRect(c, 0.16, 0.36, 0.68, 0.32, 0.08);
+      c.fill();
+      c.fillStyle = '#f4f6fa';
+      roundRect(c, 0.16, 0.32, 0.68, 0.28, 0.08);
+      c.fill();
+      break;
+    case 'sulfur':
+      rocks(c, '#d9c227', '#f5e66a', '#a8941a', 13);
+      break;
+    case 'solid-fuel':
+      c.fillStyle = '#3a3f48';
+      roundRect(c, 0.18, 0.3, 0.64, 0.46, 0.08);
+      c.fill();
+      c.fillStyle = '#f08a3c';
+      c.fillRect(0.24, 0.42, 0.52, 0.1);
+      c.fillStyle = '#5c6270';
+      c.fillRect(0.24, 0.6, 0.52, 0.06);
+      break;
+    case 'rocket-fuel':
+      canister(c, '#d6455d', '#f2c14e');
+      break;
+    case 'flame-ammo':
+      canister(c, '#c0661f', '#2a2420');
+      c.fillStyle = '#ffd23f';
+      c.beginPath();
+      c.moveTo(0.5, 0.42);
+      c.quadraticCurveTo(0.6, 0.5, 0.5, 0.58);
+      c.quadraticCurveTo(0.4, 0.5, 0.5, 0.42);
+      c.fill();
+      break;
+    case 'adv-circuit':
+      c.fillStyle = '#5a1a1a';
+      roundRect(c, 0.14, 0.2, 0.72, 0.6, 0.06);
+      c.fill();
+      c.fillStyle = '#c2373f';
+      roundRect(c, 0.14, 0.17, 0.72, 0.58, 0.06);
+      c.fill();
+      c.strokeStyle = '#f2c14e';
+      c.lineWidth = 0.035;
+      c.beginPath();
+      c.moveTo(0.2, 0.3); c.lineTo(0.4, 0.3);
+      c.moveTo(0.2, 0.6); c.lineTo(0.4, 0.6);
+      c.moveTo(0.8, 0.3); c.lineTo(0.6, 0.3);
+      c.moveTo(0.8, 0.6); c.lineTo(0.6, 0.6);
+      c.stroke();
+      c.fillStyle = '#1b1f2a';
+      c.fillRect(0.38, 0.3, 0.24, 0.32);
+      break;
+    case 'rocket-part':
+      c.fillStyle = '#c9ced8';
+      roundRect(c, 0.25, 0.14, 0.5, 0.72, 0.1);
+      c.fill();
+      c.fillStyle = '#8d939e';
+      c.fillRect(0.25, 0.3, 0.5, 0.06);
+      c.fillRect(0.25, 0.62, 0.5, 0.06);
+      c.fillStyle = '#d6455d';
+      c.fillRect(0.25, 0.44, 0.5, 0.1);
+      break;
+    case 'rocket':
+      c.save();
+      c.translate(0.5, 0.5);
+      c.rotate(-0.78);
+      c.fillStyle = '#8d939e';
+      c.fillRect(-0.32, -0.08, 0.5, 0.16);
+      c.fillStyle = '#d6455d';
+      c.beginPath();
+      c.moveTo(0.18, -0.08);
+      c.lineTo(0.38, 0);
+      c.lineTo(0.18, 0.08);
+      c.fill();
+      c.fillStyle = '#4b525d';
+      c.fillRect(-0.4, -0.14, 0.12, 0.28);
+      c.restore();
+      break;
+    case 'rocket-launcher':
+      gunShape(c, '#4b5a3a', '#2f3a24', 1, 0.2);
+      break;
+    case 'flamethrower':
+      gunShape(c, '#7b5a3a', '#c0661f', 0.9, 0.16);
+      c.fillStyle = '#ff9a3c';
+      c.beginPath();
+      c.arc(0.8, 0.24, 0.07, 0, Math.PI * 2);
+      c.fill();
+      break;
+    case 'sniper':
+      gunShape(c, '#39424f', '#1b1f25', 1.1, 0.1);
+      c.fillStyle = '#5adcff';
+      c.fillRect(0.42, 0.34, 0.14, 0.05);
+      break;
+    case 'piercing-ammo':
+      c.fillStyle = '#7a1f25';
+      roundRect(c, 0.2, 0.3, 0.6, 0.5, 0.06);
+      c.fill();
+      c.fillStyle = '#d6455d';
+      roundRect(c, 0.2, 0.26, 0.6, 0.46, 0.06);
+      c.fill();
+      for (let i = 0; i < 3; i++) {
+        c.fillStyle = '#c9ced8';
+        c.fillRect(0.28 + i * 0.16, 0.12, 0.1, 0.2);
+        c.beginPath();
+        c.arc(0.33 + i * 0.16, 0.12, 0.05, Math.PI, 0);
+        c.fill();
+      }
+      owenO(c, 0.5, 0.5, 0.1, '#4a1015');
+      break;
+    case 'robot':
+      c.fillStyle = '#c9ced8';
+      roundRect(c, 0.24, 0.4, 0.52, 0.3, 0.08);
+      c.fill();
+      c.fillStyle = '#57d38c';
+      c.fillRect(0.4, 0.48, 0.2, 0.08);
+      c.strokeStyle = '#8d939e';
+      c.lineWidth = 0.05;
+      c.beginPath();
+      c.moveTo(0.1, 0.34);
+      c.lineTo(0.9, 0.34);
+      c.stroke();
+      break;
+    case 'eq-goggles':
+      c.fillStyle = '#2b3440';
+      roundRect(c, 0.08, 0.08, 0.84, 0.84, 0.1);
+      c.fill();
+      c.fillStyle = '#1b2433';
+      c.fillRect(0.14, 0.42, 0.72, 0.18);
+      c.fillStyle = '#57d38c';
+      c.beginPath();
+      c.arc(0.33, 0.51, 0.11, 0, Math.PI * 2);
+      c.arc(0.67, 0.51, 0.11, 0, Math.PI * 2);
+      c.fill();
+      break;
+    case 'platform-kit':
+      c.fillStyle = '#4b525d';
+      roundRect(c, 0.14, 0.24, 0.72, 0.6, 0.08);
+      c.fill();
+      c.fillStyle = '#8d939e';
+      roundRect(c, 0.14, 0.2, 0.72, 0.56, 0.08);
+      c.fill();
+      c.fillStyle = '#fff3b0';
+      c.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 0.08 : 0.2;
+        c.lineTo(0.5 + Math.cos(a) * r, 0.48 + Math.sin(a) * r);
+      }
+      c.fill();
+      break;
+    case 'catcher':
+      c.strokeStyle = '#e3b341';
+      c.lineWidth = 0.09;
+      c.beginPath();
+      c.moveTo(0.5, 0.85);
+      c.lineTo(0.5, 0.45);
+      c.lineTo(0.25, 0.18);
+      c.moveTo(0.5, 0.45);
+      c.lineTo(0.75, 0.18);
+      c.stroke();
+      c.fillStyle = '#4b525d';
+      c.fillRect(0.34, 0.78, 0.32, 0.12);
+      break;
+    case 'crusher':
+      c.fillStyle = '#7b6a58';
+      roundRect(c, 0.16, 0.22, 0.68, 0.6, 0.08);
+      c.fill();
+      gear(c, 0.38, 0.52, 0.15, 6, 0, '#c9b79c', '#2b2f36');
+      gear(c, 0.62, 0.52, 0.15, 6, 0.4, '#c9b79c', '#2b2f36');
+      break;
+    case 'thruster':
+      c.fillStyle = '#8d939e';
+      c.beginPath();
+      c.moveTo(0.32, 0.2);
+      c.lineTo(0.68, 0.2);
+      c.lineTo(0.8, 0.62);
+      c.lineTo(0.2, 0.62);
+      c.closePath();
+      c.fill();
+      c.fillStyle = '#ff9a3c';
+      c.beginPath();
+      c.moveTo(0.28, 0.62);
+      c.lineTo(0.72, 0.62);
+      c.lineTo(0.5, 0.94);
+      c.closePath();
+      c.fill();
+      break;
+    case 'ice':
+      c.fillStyle = '#bfe6ff';
+      roundRect(c, 0.2, 0.24, 0.6, 0.56, 0.1);
+      c.fill();
+      c.fillStyle = 'rgba(255,255,255,.7)';
+      c.fillRect(0.28, 0.3, 0.2, 0.08);
+      c.strokeStyle = '#7fc8ef';
+      c.lineWidth = 0.04;
+      c.stroke();
+      break;
+    case 'cryser-crystal':
+      c.fillStyle = '#7fc8ef';
+      c.beginPath();
+      c.moveTo(0.5, 0.1);
+      c.lineTo(0.75, 0.45);
+      c.lineTo(0.5, 0.9);
+      c.lineTo(0.25, 0.45);
+      c.closePath();
+      c.fill();
+      c.fillStyle = '#d2f0ff';
+      c.beginPath();
+      c.moveTo(0.5, 0.1);
+      c.lineTo(0.6, 0.45);
+      c.lineTo(0.5, 0.9);
+      c.closePath();
+      c.fill();
+      break;
   }
 }
 

@@ -1,6 +1,7 @@
 // Multiplayer sessions on top of net.ts. The host's game is the real one; guests mirror it.
-import { ENTITIES, ITEMS, type EntityType, type ItemId } from './data';
-import { BUG_NAMES, hurtPlayer, playerFireFrom, PLAYER_HP, type Fx } from './combat';
+import { ENTITIES, ITEMS, PLAYER_START, type EntityType, type ItemId } from './data';
+import { BUG_NAMES, hurtPlayer, packPollution, playerFireFrom, PLAYER_HP, unpackPollution, type Fx } from './combat';
+import { doSpace, spaceFromJSON, spaceToJSON } from './space';
 import { doMine, doSetRecipe, doTake, type Actions, type Items, type TakeWhat } from './actions';
 import { DEFAULT_LOOK, type PlayerLook } from './art';
 import { Host, joinHost, type Pipe } from './net';
@@ -136,6 +137,11 @@ export class HostSession {
       case 'mine':
         doMine(g, m.x, m.y);
         break;
+      case 'space': {
+        const msg = doSpace(g, String(m.op), at());
+        if (msg) this.guests.get(id)?.pipe.send({ t: 'toast', text: msg });
+        break;
+      }
       case 'fire': {
         const o = g.others.get(id);
         if (o) playerFireFrom(g, o.x, o.y, m.weapon, m.aim);
@@ -174,6 +180,7 @@ export class HostSession {
       const full = {
         t: 'full', tick: g.tick, ents: g.serializeEnts(), researched: [...g.researched], research: g.research,
         units: g.researchUnits, evo: g.cs.evolution, won: g.won,
+        ...(g.advanced ? { lv: g.levels, space: spaceToJSON(g.space), ghosts: g.ghosts, apol: packPollution(g.cs.apol), bots: g.bots.map((b) => [+b.x.toFixed(2), +b.y.toFixed(2)]) } : {}),
       };
       for (const gst of this.guests.values()) gst.pipe.send(full);
     }
@@ -221,7 +228,7 @@ export class GuestSession {
       g.px = g.spawnX = m.x;
       g.py = g.spawnY = m.y;
       g.inv.slots.fill(null);
-      for (const [it, n] of [['owen-plate', 8], ['wood', 4], ['burner-drill', 1], ['stone-furnace', 1], ['owen-ammo', 10]] as Items) g.inv.add(it, n);
+      for (const [it, n] of PLAYER_START) g.inv.add(it, n);
       g.craftQueue = [];
       g.onFire = (weapon, aim) => this.fire(weapon, aim);
       this.game = g;
@@ -237,6 +244,18 @@ export class GuestSession {
         g.research = m.research;
         g.researchUnits = m.units;
         g.cs.evolution = m.evo;
+        if (m.lv) g.levels = m.lv;
+        if (m.space) {
+          const rocks = g.space.rocks;
+          g.space = spaceFromJSON(m.space);
+          g.space.rocks = rocks;
+        }
+        if (m.ghosts) g.ghosts = m.ghosts;
+        if (m.apol) {
+          g.cs.apol.fill(0);
+          unpackPollution(m.apol, g.cs.apol);
+        }
+        if (m.bots) g.bots = m.bots.map(([x, y]: number[]) => ({ port: 0, x, y, fix: 0, ghost: null, carry: null, from: 0, phase: 'go', t: 0 }));
         if (m.won && !g.won) {
           g.won = true;
           g.events.push('win');
@@ -270,6 +289,9 @@ export class GuestSession {
       }
       case 'hurt':
         hurtPlayer(g, m.dmg, m.by);
+        break;
+      case 'toast':
+        g.toast(String(m.text));
         break;
       case 'reply': {
         const cb = this.pending.get(m.rid);
@@ -360,6 +382,9 @@ export class GuestSession {
         const items = doMine(this.game!, x, y);
         for (const [it, n] of items) this.game!.inv.add(it, n);
         this.cmd('mine', { x, y });
+      },
+      space: (op, e) => {
+        this.cmd('space', { op, x: e?.x ?? -1, y: e?.y ?? -1 });
       },
     };
   }

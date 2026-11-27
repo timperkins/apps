@@ -6,10 +6,10 @@ export const WORLD = 896;
 const SCALE = (WORLD * WORLD) / (256 * 256);
 
 export const enum Ground { Grass = 0, Dry = 1, Dirt = 2, Sand = 3, Water = 4 }
-export const enum Res { None = 0, Owen = 1, Copper = 2, Coal = 3, Stone = 4 }
+export const enum Res { None = 0, Owen = 1, Copper = 2, Coal = 3, Stone = 4, Oil = 5 }
 
-export const RES_ITEM = ['', 'owen-ore', 'copper-ore', 'coal', 'stone'] as const;
-export const RES_NAME = ['', 'Owen ore', 'Copper ore', 'Coal', 'Stone'];
+export const RES_ITEM = ['', 'owen-ore', 'copper-ore', 'coal', 'stone', 'crude-oil'] as const;
+export const RES_NAME = ['', 'Owen ore', 'Copper ore', 'Coal', 'Stone', 'Oil patch'];
 
 function hash(x: number, y: number, seed: number): number {
   let h = (x * 374761393 + y * 668265263 + seed * 2147483647) | 0;
@@ -41,10 +41,12 @@ export function fbm(x: number, y: number, seed: number, oct = 4): number {
   return v / total;
 }
 
-const GEN_CACHE = new Map<number, { ground: Uint8Array; res: Uint8Array; amount: Uint32Array; tree: Uint8Array }>();
+const GEN_CACHE = new Map<string, { ground: Uint8Array; res: Uint8Array; amount: Uint32Array; tree: Uint8Array }>();
 
 export class World {
   seed: number;
+  /** Advanced mode: everything you need starts close by, with oil and a pond. */
+  advanced: boolean;
   ground = new Uint8Array(WORLD * WORLD);
   res = new Uint8Array(WORLD * WORLD);
   amount = new Uint32Array(WORLD * WORLD);
@@ -54,9 +56,11 @@ export class World {
   /** Set by multiplayer hosts to learn which tiles were mined. */
   changed: Set<number> | null = null;
 
-  constructor(seed: number) {
+  constructor(seed: number, advanced = false) {
     this.seed = seed;
-    const hit = GEN_CACHE.get(seed);
+    this.advanced = advanced;
+    const key = `${seed}${advanced ? 'a' : ''}`;
+    const hit = GEN_CACHE.get(key);
     if (hit) {
       this.ground.set(hit.ground);
       this.res.set(hit.res);
@@ -67,7 +71,7 @@ export class World {
     this.generate();
     // the big world takes a moment to generate, so remember the last few (title scenes reuse theirs)
     if (GEN_CACHE.size >= 3) GEN_CACHE.delete(GEN_CACHE.keys().next().value!);
-    GEN_CACHE.set(seed, { ground: this.ground.slice(), res: this.res.slice(), amount: this.amount.slice(), tree: this.tree.slice() });
+    GEN_CACHE.set(key, { ground: this.ground.slice(), res: this.res.slice(), amount: this.amount.slice(), tree: this.tree.slice() });
   }
 
   idx(x: number, y: number) {
@@ -109,13 +113,15 @@ export class World {
       }
     }
     // Starting patches, then more scattered further out.
-    const start: [Res, number, number, number][] = [
-      [Res.Owen, 14, -5, 7],
-      [Res.Copper, -14, -3, 6],
-      [Res.Coal, 3, 13, 5.5],
-      [Res.Stone, -10, 12, 4.5],
-    ];
-    for (const [r, dx, dy, rad] of start) this.patch(r, c + dx, c + dy, rad, 900);
+    const start: [Res, number, number, number][] = this.advanced
+      ? [[Res.Owen, 9, -5, 5.5], [Res.Copper, -9, -4, 5], [Res.Coal, 3, 9, 4.5], [Res.Stone, -7, 8, 4]]
+      : [[Res.Owen, 14, -5, 7], [Res.Copper, -14, -3, 6], [Res.Coal, 3, 13, 5.5], [Res.Stone, -10, 12, 4.5]];
+    for (const [r, dx, dy, rad] of start) this.patch(r, c + dx, c + dy, rad, this.advanced ? 1500 : 900);
+    if (this.advanced) {
+      // a pond for offshore pumps, and an oil field, both a short walk away
+      this.pond(c - 20, c + 13, 4.2);
+      this.oilField(c + 19, c + 12, 5);
+    }
     const kinds = [Res.Owen, Res.Copper, Res.Coal, Res.Stone, Res.Owen, Res.Copper];
     let k = 0;
     const patches = Math.round(26 * SCALE);
@@ -128,6 +134,57 @@ export class World {
       const kind = kinds[k % kinds.length];
       this.patch(kind, px, py, 5 + hash(tries, 3, s + 91) * 6, 900 + d * 25);
       k++;
+    }
+    if (this.advanced) {
+      // more oil out in the wilds
+      const fields = Math.round(10 * SCALE);
+      for (let tries = 0, made = 0; tries < fields * 15 && made < fields; tries++) {
+        const px = 10 + Math.floor(hash(tries, 4, s + 93) * (WORLD - 20));
+        const py = 10 + Math.floor(hash(tries, 5, s + 93) * (WORLD - 20));
+        if (Math.hypot(px - c, py - c) < 50 || this.ground[this.idx(px, py)] === Ground.Water) continue;
+        this.oilField(px, py, 3 + Math.floor(hash(tries, 6, s + 93) * 4));
+        made++;
+      }
+    }
+  }
+
+  private pond(cx: number, cy: number, rad: number) {
+    for (let y = Math.floor(cy - rad - 2); y <= cy + rad + 2; y++)
+      for (let x = Math.floor(cx - rad - 2); x <= cx + rad + 2; x++) {
+        if (!this.inside(x, y)) continue;
+        const i = this.idx(x, y);
+        const d = Math.hypot(x - cx, (y - cy) * 1.3) + (fbm(x / 3, y / 3, this.seed + 61) - 0.5) * 2;
+        if (d < rad) {
+          this.ground[i] = Ground.Water;
+          this.res[i] = Res.None;
+          this.amount[i] = 0;
+          this.tree[i] = 0;
+        } else if (d < rad + 1.2) {
+          this.ground[i] = Ground.Sand;
+          this.tree[i] = 0;
+        }
+      }
+  }
+
+  /** A few oil spots, spaced out so pump jacks fit. The amount is how fast it pumps, in %. */
+  private oilField(cx: number, cy: number, n: number) {
+    let placed = 0;
+    for (let k = 0; k < n * 8 && placed < n; k++) {
+      const x = Math.round(cx + (hash(k, cx, this.seed + 71) - 0.5) * 12);
+      const y = Math.round(cy + (hash(k, cy, this.seed + 73) - 0.5) * 10);
+      if (!this.inside(x - 1, y - 1) || !this.inside(x + 2, y + 2)) continue;
+      let ok = true;
+      for (let j = -2; j <= 3 && ok; j++)
+        for (let i = -2; i <= 3 && ok; i++) {
+          const t = this.idx(x + i, y + j);
+          if (this.res[t] === Res.Oil || this.ground[t] === Ground.Water) ok = false;
+        }
+      if (!ok) continue;
+      const t = this.idx(x, y);
+      this.res[t] = Res.Oil;
+      this.amount[t] = 60 + Math.floor(hash(x, y, this.seed + 79) * 90);
+      for (let j = -1; j <= 2; j++) for (let i = -1; i <= 2; i++) this.tree[this.idx(x + i, y + j)] = 0;
+      placed++;
     }
   }
 
@@ -152,7 +209,7 @@ export class World {
   /** Removes one unit of resource; returns true if any was there. */
   mineRes(x: number, y: number): boolean {
     const i = this.idx(x, y);
-    if (!this.res[i] || !this.amount[i]) return false;
+    if (!this.res[i] || !this.amount[i] || this.res[i] === Res.Oil) return false;
     this.amount[i]--;
     this.changed?.add(i);
     if (this.amount[i] === 0) {
@@ -174,7 +231,7 @@ export class World {
 
   /** Saves only the tiles that differ from a fresh world with the same seed (mined ore, cut trees). */
   serialize() {
-    const base = baseline(this.seed);
+    const base = baseline(this.seed, this.advanced);
     const idx: number[] = [];
     for (let i = 0; i < WORLD * WORLD; i++) {
       if (this.res[i] !== base.res[i] || this.amount[i] !== base.amount[i] || this.tree[i] !== base.tree[i]) idx.push(i);
@@ -187,11 +244,11 @@ export class World {
       buf.setUint8(k * 10 + 8, this.res[i]);
       buf.setUint8(k * 10 + 9, this.tree[i]);
     });
-    return { seed: this.seed, size: WORLD, diff: b64(new Uint8Array(buf.buffer)) };
+    return { seed: this.seed, size: WORLD, diff: b64(new Uint8Array(buf.buffer)), adv: this.advanced };
   }
 
-  static load(data: { seed: number; size?: number; diff?: string; res?: string; amount?: string; tree?: string }): World {
-    const w = new World(data.seed);
+  static load(data: { seed: number; size?: number; diff?: string; res?: string; amount?: string; tree?: string; adv?: boolean }): World {
+    const w = new World(data.seed, !!data.adv);
     if (data.diff && data.size === WORLD) {
       const bytes = unb64(data.diff);
       const v = new DataView(bytes.buffer);
@@ -235,7 +292,7 @@ export function unb64(s: string): Uint8Array {
 
 let base: World | null = null;
 /** A fresh world for a seed, kept so saving doesn't have to regenerate it every time. */
-function baseline(seed: number): World {
-  if (!base || base.seed !== seed) base = new World(seed);
+function baseline(seed: number, advanced: boolean): World {
+  if (!base || base.seed !== seed || base.advanced !== advanced) base = new World(seed, advanced);
   return base;
 }

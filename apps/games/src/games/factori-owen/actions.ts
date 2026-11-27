@@ -2,10 +2,11 @@
 // guests send them to the host (see mp.ts).
 import { ITEMS, RECIPE_BY_ID, type EntityType, type ItemId } from './data';
 import { RES_ITEM } from './world';
+import { doSpace } from './space';
 import type { Dir, Entity, Game } from './sim';
 
 export type Items = [ItemId, number][];
-export type TakeWhat = 'fuel' | 'output' | 'input' | 'chest' | 'belt';
+export type TakeWhat = 'fuel' | 'output' | 'input' | 'chest' | 'belt' | 'landing';
 
 export interface Actions {
   place(type: EntityType, x: number, y: number, dir: Dir, item: ItemId): boolean;
@@ -18,6 +19,8 @@ export interface Actions {
   research(id: string): void;
   /** Finish hand-mining a tile (ore or tree). */
   mine(x: number, y: number): void;
+  /** Rocket silo and space platform commands (see space.ts). */
+  space(op: string, e: Entity | null): void;
 }
 
 // ---------- the real effects, returning what the player gets back ----------
@@ -57,13 +60,14 @@ export function doTake(g: Game, e: Entity, what: TakeWhat, key?: string | number
       e.input[item]! -= k;
       if (!e.input[item]) delete e.input[item];
     }
-  } else if (what === 'chest' && e.inv) {
-    const s = e.inv.slots[Number(key)];
+  } else if ((what === 'chest' && e.inv) || (what === 'landing' && e.inv2)) {
+    const inv = what === 'chest' ? e.inv! : e.inv2!;
+    const s = inv.slots[Number(key)];
     if (s) {
       const k = room(s.item, s.n);
       out.push([s.item, k]);
       s.n -= k;
-      if (s.n <= 0) e.inv.slots[Number(key)] = null;
+      if (s.n <= 0) inv.slots[Number(key)] = null;
     }
   }
   return out.filter(([, n]) => n > 0);
@@ -164,6 +168,10 @@ export function localActions(g: () => Game): Actions {
         return;
       }
       addAll(game, doMine(game, x, y));
+    },
+    space(op, e) {
+      const msg = doSpace(g(), op, e);
+      if (msg) g().toast(msg);
     },
   };
 }
