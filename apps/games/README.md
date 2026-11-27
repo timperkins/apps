@@ -133,6 +133,13 @@ A small real-time castle battle made with the [Tiny Swords](https://pixelfrog-as
 - No saves (a game is 15–25 minutes); best winning times per difficulty are kept in localStorage (`tiny-kingdoms-best-<difficulty>`).
 - Asset license: free for personal and commercial use, credit welcome (shown on the title and help screens). The pack may not be redistributed or resold on its own, so only the pictures the game uses are here, not the whole pack.
 
+## 2p Games
+
+A little collection of party games designed by Tim on a handwritten page (code in `src/games/2p-games/`). Up to 8 players, hosted the Factori-owen way (`2p-games/net.ts`, a copy of the Explorer one with 8 slots): **Host a game** lists it in the `hosts` collection with `game: '2p-games'` and the mini game's name in `world`; friends pick it under **Join a game**, wait in the lobby, and the host presses Start. People who join a Knight Battle after it started watch as ghosts.
+
+- **Factory** (`factory.ts`): makers make gold (a banana 1 gold every 2 seconds, an apple 2 every 3, a cat, a dragon…, 19 in five rarities). Buy a Wooden, Silver, Golden or Diamond crate, open it and pick 1 of 3 makers. Each maker upgrades 8 times. 12 slots; sell a maker to make room. First to buy the 100,000-gold Golden Trophy wins. Everyone runs their own factory; the host keeps the scoreboard and calls the winner.
+- **Knight Battle** (`knights/`): blue team at the bottom against red team at the top (red players see the field flipped, so their own heart is always at the bottom of the screen). Every player has a big heart with 1000 health at the back of their side; break all of the other team's hearts to win. You're a knight (72 damage, knockback) like the Tiny Kingdoms hero, and use its Tiny Swords art. At your castle, pay 10 gold to switch class (knight, archer, monk, lancer), buy armor (stone 15% less damage, iron 40%, gold 55%, diamond 70%) and meat. Build on your side: walls, the Infinite Gold Block (10 gold, never breaks unless you sell it, everyone walks through it, stops enemy arrows), houses, barracks, archery range, monastery and towers. No sheep farm here: hit wild sheep in the middle for meat, and eat it to heal. Warriors attack, guard your heart or follow you. Every 5 minutes a mystery box falls in the middle and gives a random weapon enchantment (freezing, burning, zapping or poisoning) until you're knocked out. T taunts. Knocked out, you're back in 5 seconds while your heart stands, otherwise you become a ghost who watches. Bots can fill empty spots. The host runs `knights/sim.ts` and sends snapshots 20 times a second.
+
 ## Musitions
 
 A music-making sled game designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/musitions/`.
