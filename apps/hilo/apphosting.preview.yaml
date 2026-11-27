@@ -1,0 +1,9 @@
+# Overrides for the preview backend (environment name: preview).
+# Previews use their own database, so testing never touches real games.
+runConfig:
+  maxInstances: 2
+
+env:
+  - variable: NEXT_PUBLIC_FIRESTORE_DATABASE_ID
+    value: hilo-preview
+    availability: [BUILD, RUNTIME]

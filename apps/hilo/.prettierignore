@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+.next-turbo
+.vercel
+.DS_Store
+coverage
+
+node_modules
+.next
+.out
+.next-turbo
+.vercel
+.DS_Store
+coverage
