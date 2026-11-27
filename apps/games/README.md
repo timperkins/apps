@@ -133,6 +133,17 @@ A small real-time castle battle made with the [Tiny Swords](https://pixelfrog-as
 - No saves (a game is 15–25 minutes); best winning times per difficulty are kept in localStorage (`tiny-kingdoms-best-<difficulty>`).
 - Asset license: free for personal and commercial use, credit welcome (shown on the title and help screens). The pack may not be redistributed or resold on its own, so only the pictures the game uses are here, not the whole pack.
 
+## Musitions
+
+A music-making sled game designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/musitions/`.
+
+- Draw lines by dragging, or tap to put down dots that join into a line (🧲 snap, on by default, puts taps right on a note and a beat). Lines only run left to right.
+- A kid on a sled rides the lines at a steady speed. Each time the sled crosses a beat line while riding, it plays the note it's on: 15 colored note lines labeled C D E F G A B, from middle C up two octaves. In the air it's quiet, so jumps and gaps are rests.
+- A line that climbs steeply (steeper than 2.4 up per 1 across, or straight up) gets a spring: it jumps the sled up onto the high part. Steep drops are cliffs the sled falls off. Falling off the bottom ends the ride.
+- Score: "the more like a normal song, the more points". Each note scores against the one before (steps +10, skips +8, leaps +5, repeats +4 but three-plus in a row −3, huge jumps −5, a short rest +5), plus end bonuses: ending on C, a tune shape that comes back (even higher or lower), using 5+ notes, mostly smooth steps, and length. 1–5 stars from Noisy to Hit song!
+- Tools: Draw, Move (or two fingers, mouse wheel, arrow keys), Erase, Undo, Clear, four instruments (bells, piano, flute, robot, all Web Audio), three speeds, and 🎼 to load the starter song.
+- The song and settings are kept in localStorage (`musitions-song-v1`, `musitions-settings-v1`), with the best score in `musitions-best`.
+
 ## Develop
 
 ```

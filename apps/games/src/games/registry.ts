@@ -237,4 +237,21 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./tiny-kingdoms/index'),
   },
+  {
+    id: 'musitions',
+    title: 'Musitions',
+    tagline: 'Draw lines for a kid on a sled to ride: the higher the line, the higher the note. Make a real song for big points.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#2a2f6a"/>
+      <g stroke-width="1.6" opacity=".7"><path d="M0 18H120" stroke="#a66bff"/><path d="M0 28H120" stroke="#4d8dff"/><path d="M0 38H120" stroke="#3ec7c2"/><path d="M0 48H120" stroke="#6bd66b"/><path d="M0 58H120" stroke="#ffd93d"/><path d="M0 68H120" stroke="#ff5a5f"/></g>
+      <path d="M8 66L30 58L46 58L50 30L78 28L100 18L116 18" fill="none" stroke="#2b2f63" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M8 66L30 58L46 58L50 30L78 28L100 18L116 18" fill="none" stroke="#f7fbff" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M44 58l6-2-6-2 6-2-6-2" fill="none" stroke="#c9ced8" stroke-width="1.5"/><rect x="42" y="47" width="10" height="2.5" fill="#ff5a5f"/>
+      <g transform="translate(26 58) rotate(-20)"><rect x="-10" y="-5" width="18" height="3" rx="1" fill="#d6453d"/><path d="M-10-1H8q4 0 3-4" stroke="#3b2a1a" stroke-width="1.2" fill="none"/>
+        <rect x="-6" y="-14" width="6" height="9" rx="2" fill="#2bb39a"/><circle cx="-3" cy="-17" r="3.4" fill="#f1c9a0"/><path d="M-6.5-17.5a3.5 3.5 0 0 1 7 0z" fill="#e04f8a"/></g>
+      <g fill="#ffe066" font-family="sans-serif" font-weight="900"><text x="62" y="20" font-size="12">♪</text><text x="86" y="12" font-size="10">♫</text><text x="34" y="46" font-size="10">♪</text></g>
+      <text x="60" y="78" font-size="10" font-weight="900" text-anchor="middle" fill="#ffe066" font-family="sans-serif" letter-spacing="1.5">MUSITIONS</text>
+    </svg>`,
+    load: () => import('./musitions/index'),
+  },
 ];
