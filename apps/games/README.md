@@ -147,6 +147,17 @@ An archer tower climb designed by Tim on a handwritten page (original code, art 
 - Keyboard and mouse (WASD, aim with the mouse, hold click or Space to shoot, Esc menu) or touch (stick on the left, shoot button aims at the closest monster).
 - Best stage reached is kept in localStorage (`archenimys-best`).
 
+## Antpoculeps
+
+An ant evolution game designed by Tim on a handwritten page (original code and art, all drawn in code). Code in `src/games/antpoculeps/`.
+
+- You start as an egg in a big back yard (4,200 × 4,200, made from a seed in `world.ts`): big trees whose canopies go see-through when you walk under them, plants, little beaches around water puddles, big leaves, flowers and grass. Tree trunks block you; water slows you down (bigger ants wade better).
+- Roll over food (crumbs, seeds, berries, sugar cubes, cookies, apple slices) to fill your food bar. The egg hatches by itself into a Baby Ant; after that a glowing Evolve button (or E) upgrades you through 20 ants: Baby, Worker, Black, Red, Fire, Sugar, Carpenter, Leafcutter, Weaver, Bullet, Army, Soldier, Bulldog, Trap-Jaw, Crystal, Thunder, Lava, Shadow, Galaxy and the huge Cosmic Ant at level 20 (`STAGES` in `data.ts`). Each is bigger, tougher and bites harder, with its own look (flames, a leaf, crystal, lightning, glowing lava, stars).
+- Bite any ant at any stage (Space, click, or the BITE button on phones). Destroyed ants drop meat, more for bigger ants. Wild ants wander and eat; about a third pick on players their size or smaller, and the rest only fight back. You heal a little every second. Dying drops you 3 levels.
+- At level 20, fill the food bar once more to rebirth: back to an egg with 1.25x power, then 1.5x, 1.75x and so on forever (gold stars circle reborn ants).
+- Up to 6 players, hosted the Factori-owen way (`net.ts`, a copy of Explorer's with `game: 'antpoculeps'`): Host a game on the title screen (or Esc → Open to join) lists your yard in the `hosts` collection; friends pick it under Join a game and connect over WebRTC. The host's game runs the yard and sends it out 15 times a second; friends move their own ant and send where it is. Each player keeps their own progress.
+- Progress (level, food, rebirths) is saved in localStorage under `antpoculeps-save-v1`, solo or in someone else's yard.
+
 ## Develop
 
 ```
