@@ -392,6 +392,8 @@ export class Renderer {
     if (kind === 'mansion') {
       const im = img(`buildings/${col}/house3`);
       if (im) { const w = im.width * 1.6, h = im.height * 1.6; c.drawImage(im, x - w / 2, y - h + 12, w, h); out = { w, h }; }
+    } else if (kind === 'sheepfarm' || kind === 'sheepfarm2') {
+      this.drawFarm(x, y, team, kind === 'sheepfarm2'); out = { w: 192, h: 130 };
     } else if (kind === 'tinyhouse') {
       const im = img(`buildings/${col}/house2`);
       if (im) { const w = im.width * 0.75, h = im.height * 0.75; c.drawImage(im, x - w / 2, y - h + 6, w, h); out = { w, h }; }
@@ -406,6 +408,35 @@ export class Renderer {
     }
     c.restore();
     return out;
+  }
+
+  /** A fenced sheep pen with a little hut and a flag in the kingdom's color. The super farm has a golden fence and more sheep. */
+  private drawFarm(x: number, y: number, team: number, sup: boolean) {
+    const c = this.ctx, t = performance.now() / 1000;
+    const x0 = x - 90, x1 = x + 90, y0 = y - 108, y1 = y - 8;
+    c.fillStyle = sup ? '#b9d77a' : '#a6c76a';
+    c.fillRect(x0, y0, x1 - x0, y1 - y0);
+    const hut = img(`buildings/${COLORS[team]}/house1`);
+    if (hut) { const w = hut.width * 0.55, h = hut.height * 0.55; c.drawImage(hut, x0 - 6, y0 + 40 - h, w, h); }
+    const sheep = SHEETS['sheep.graze'];
+    const spots = sup ? [[10, -70], [55, -40], [-25, -30], [40, -82]] : [[20, -60], [-20, -30]];
+    spots.forEach(([dx, dy], i) => this.drawSheet(sheep, `terrain/${sheep.file}`, x + dx, y + dy, t + i * 0.7, i % 2 === 1, 0.7));
+    // fence: rails then posts
+    const rail = sup ? '#e8b923' : '#8a5a2b', post = sup ? '#b8860b' : '#6b4220';
+    c.strokeStyle = rail; c.lineWidth = 4;
+    for (const dy of [-14, -6]) {
+      c.beginPath(); c.moveTo(x0, y0 + dy + 14); c.lineTo(x1, y0 + dy + 14); c.moveTo(x0, y1 + dy); c.lineTo(x1, y1 + dy);
+      c.moveTo(x0, y0 + 10); c.lineTo(x0, y1 - 6); c.moveTo(x1, y0 + 10); c.lineTo(x1, y1 - 6); c.stroke();
+    }
+    c.fillStyle = post;
+    for (let px = x0; px <= x1 + 1; px += 30) { c.fillRect(px - 3, y0 - 6, 6, 22); c.fillRect(px - 3, y1 - 20, 6, 22); }
+    // flag
+    c.fillStyle = '#5a3a1a'; c.fillRect(x1 - 12, y0 - 46, 4, 46);
+    c.fillStyle = PLAYER_RING[team] ?? '#888'; c.beginPath(); c.moveTo(x1 - 8, y0 - 46); c.lineTo(x1 + 16, y0 - 39); c.lineTo(x1 - 8, y0 - 32); c.fill();
+    if (sup) for (let i = 0; i < 4; i++) {
+      const a = t * 2 + i * 1.6, sx = x + Math.cos(a) * 70, sy = y - 60 + Math.sin(a * 1.3) * 40;
+      c.fillStyle = `rgba(255,240,140,${0.5 + 0.5 * Math.sin(t * 6 + i)})`; c.fillRect(sx - 2, sy - 2, 4, 4);
+    }
   }
 
   /** A little stone wall block in the castle colors, with the kingdom's color on top. */

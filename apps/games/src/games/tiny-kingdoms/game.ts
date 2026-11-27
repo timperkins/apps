@@ -10,7 +10,7 @@ export const COLORS = ['blue', 'red', 'yellow', 'purple', 'black'] as const;
 export const COLOR_NAMES = ['Blue', 'Red', 'Yellow', 'Purple', 'Black'];
 
 export type UnitKind = 'hero' | 'pawn' | 'warrior' | 'archer' | 'lancer' | 'monk' | 'sheep' | 'fighter' | 'tiny';
-export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2' | 'tinyhouse';
+export type BuildKind = 'castle' | 'house' | 'barracks' | 'archery' | 'monastery' | 'tower' | 'wall' | 'mansion' | 'tower2' | 'tinyhouse' | 'sheepfarm' | 'sheepfarm2';
 export type Res = 'gold' | 'wood' | 'meat';
 export type Cost = Partial<Record<Res, number>>;
 export type Order = 'follow' | 'defend' | 'attack';
@@ -18,7 +18,7 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 export type Anim = 'idle' | 'run' | 'attack' | 'attack2' | 'shoot' | 'heal' | 'chop' | 'mine' | 'stab' | 'guard' | 'graze';
 
 export const UNIT_KINDS: UnitKind[] = ['hero', 'pawn', 'warrior', 'archer', 'lancer', 'monk', 'sheep', 'fighter', 'tiny'];
-export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2', 'tinyhouse'];
+export const BUILD_KINDS: BuildKind[] = ['castle', 'house', 'barracks', 'archery', 'monastery', 'tower', 'wall', 'mansion', 'tower2', 'tinyhouse', 'sheepfarm', 'sheepfarm2'];
 export const ANIMS: Anim[] = ['idle', 'run', 'attack', 'attack2', 'shoot', 'heal', 'chop', 'mine', 'stab', 'guard', 'graze'];
 
 interface UnitStat { name: string; hp: number; speed: number; dmg: number; range: number; cd: number; aggro: number; pop: number; cost?: Cost; r: number; desc: string }
@@ -45,9 +45,11 @@ export const BUILD: Record<BuildKind, BuildStat> = {
   wall: { name: 'Wall', hp: 600, w: 1, h: 1, cost: { wood: 6 }, trains: [], desc: 'Stops enemies until they break it. Your own army walks right through. Keep placing to make a long wall.' },
   mansion: { name: 'Mansion', hp: 1100, w: 3, h: 2, cost: { wood: 90, gold: 40 }, trains: [], pop: 15, desc: 'A big fancy house: room for 15 more units.' },
   tinyhouse: { name: 'Tiny House', hp: 400, w: 2, h: 1, cost: { wood: 25 }, trains: ['tiny'], desc: 'Holds 1,000,000,000,000,000 tiny warriors. Trains them a million at a time.' },
+  sheepfarm: { name: 'Sheep Farm', hp: 500, w: 3, h: 2, cost: { meat: 2 }, trains: [], desc: 'Makes a sheep every second, forever (up to 12 around it at a time). Your pawns herd them for meat.' },
+  sheepfarm2: { name: 'Super Sheep Farm', hp: 800, w: 3, h: 2, cost: { meat: 2, gold: 30, wood: 30 }, trains: [], desc: 'Makes a sheep every 0.0001 seconds! Keeps 30 sheep around it.' },
   tower2: { name: 'Double Arrow Tower', hp: 1600, w: 3, h: 2, cost: { wood: 110, gold: 70 }, trains: [], desc: 'Two towers that shoot two arrows at once, farther than a tower.' },
 };
-export const BUILDABLE: BuildKind[] = ['wall', 'house', 'mansion', 'tinyhouse', 'barracks', 'archery', 'tower', 'tower2', 'monastery'];
+export const BUILDABLE: BuildKind[] = ['wall', 'house', 'mansion', 'tinyhouse', 'sheepfarm', 'barracks', 'archery', 'tower', 'tower2', 'monastery'];
 
 const DIFF: Record<Difficulty, { grace: number; gap: number; mult: number; hp: number }> = {
   easy: { grace: 240, gap: 85, mult: 0.6, hp: 0.8 },
@@ -67,6 +69,7 @@ export interface Unit {
   carry?: Res; carryN: number; job?: Res; node: number; // pawns
   path: number[]; pathGoal: number; pathT: number; stuck: number;
   homeX: number; homeY: number; // sheep and black guards
+  farm?: number; // sheep: the farm that made it
   hitT: number; garrison?: boolean; dead?: boolean;
   dmgMul: number; wx: number; wy: number; aimY: number; eatT: number;
 }
@@ -155,6 +158,10 @@ export const ANY_COST: UnitKind[] = ['fighter', 'tiny'];
 /** Each tiny warrior you see on the map is a crowd of this many. */
 export const TINY_CROWD = 1_000_000;
 /** How many tiny crowds fit on the map per Tiny House, and in all (more would slow the game down). */
+/** Sheep farms: seconds between sheep, how many sheep each keeps around it, and the most sheep on the whole map. */
+export const FARM = { sheepfarm: { every: 1, keep: 12 }, sheepfarm2: { every: 0.0001, keep: 30 } } as const;
+export const FARM_UPGRADE: Cost = { gold: 30, wood: 30 };
+const SHEEP_MAX = 300;
 export const TINY_PER_HOUSE = 30, TINY_MAX = 90;
 /** What a unit costs right now. */
 export function unitCost(kind: UnitKind, stock: Record<Res, number>): Cost {
@@ -638,6 +645,7 @@ export class Game {
       }
     }
     this.separate();
+    this.farmTick(dt);
     for (const b of this.buildings) if (!b.dead) this.buildingTick(b, dt);
     this.arrowTick(dt);
     this.natureTick(dt);
@@ -1028,6 +1036,56 @@ export class Game {
     this.arrows = this.arrows.filter(a => a.speed > 0);
   }
 
+  /** Sheep farms make sheep, up to how many each keeps around it. */
+  private farmTick(dt: number) {
+    let farms: Building[] | null = null;
+    for (const b of this.buildings) if (!b.dead && (b.kind === 'sheepfarm' || b.kind === 'sheepfarm2')) (farms ??= []).push(b);
+    if (!farms) return;
+    const have = new Map<number, number>();
+    let all = 0;
+    for (const u of this.units) if (u.kind === 'sheep' && !u.dead) { all++; if (u.farm) have.set(u.farm, (have.get(u.farm) ?? 0) + 1); }
+    for (const b of farms) {
+      const f = FARM[b.kind as 'sheepfarm'];
+      b.cd -= dt;
+      let n = have.get(b.id) ?? 0;
+      // a super farm makes them every 0.0001 s, so it fills right up straight away
+      while (b.cd <= 0 && n < f.keep && all < SHEEP_MAX) {
+        b.cd += f.every;
+        const s = this.farmSheep(b);
+        if (!s) break;
+        n++; all++;
+      }
+      if (b.cd < 0) b.cd = 0;
+    }
+  }
+
+  private farmSheep(b: Building): Unit | null {
+    for (let i = 0; i < 8; i++) {
+      const x = b.x + (this.r() - 0.5) * 260, y = b.y + 30 + this.r() * 110;
+      if (!this.walkable(x, y)) continue;
+      const s = this.addUnit('sheep', WILD, x, y);
+      s.homeX = b.x; s.homeY = b.y + 90; s.farm = b.id;
+      if (this.r() < 0.15) this.sound('baa', x, y);
+      return s;
+    }
+    return null;
+  }
+
+  /** Upgrade a sheep farm into a super sheep farm. */
+  upgrade(slot: number, bid: number): string | null {
+    const k = this.kingdom(slot), b = this.get(bid) as Building | undefined, h = this.hero(slot);
+    if (!k || !b || !('variant' in b) || b.team !== slot || b.dead || b.kind !== 'sheepfarm') return 'Can’t upgrade that.';
+    if (!h || this.distToRect(h.x, h.y, b) > 220) return 'Walk over to it first.';
+    if (!this.afford(k, FARM_UPGRADE)) return `You need ${costText(FARM_UPGRADE)}.`;
+    this.pay(k, FARM_UPGRADE);
+    b.kind = 'sheepfarm2';
+    const grow = BUILD.sheepfarm2.hp - BUILD.sheepfarm.hp;
+    b.maxHp += grow; b.hp += grow;
+    this.fx.push([1, b.x - 50, b.y - 40], [1, b.x + 50, b.y - 40], [1, b.x, b.y - 80]);
+    this.sound('build', b.x, b.y);
+    return null;
+  }
+
   private buildingTick(b: Building, dt: number) {
     if (b.kind !== 'tower' && b.kind !== 'tower2' && b.kind !== 'castle') return;
     b.cd -= dt;
@@ -1093,7 +1151,7 @@ export class Game {
     this.sheepT -= dt;
     if (this.sheepT <= 0) {
       this.sheepT = 12;
-      const n = this.units.filter(u => u.kind === 'sheep').length;
+      const n = this.units.filter(u => u.kind === 'sheep' && !u.farm).length;
       if (n < this.herdSpots.length * 4) { const [hx, hy] = this.herdSpots[Math.floor(this.r() * this.herdSpots.length)]; this.spawnSheep(hx, hy); }
     }
   }

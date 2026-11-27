@@ -5,7 +5,7 @@ import { coopBadge, coopMenu, every } from '../coop/ui';
 import type { FriendSession, HostSession, Session } from '../coop/session';
 import { isMuted, play, setMuted, unlockAudio } from './audio';
 import {
-  ANY_COST, TINY_CROWD, BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, UNIT_KINDS, canPlace, costText, ghostSpot,
+  ANY_COST, FARM_UPGRADE, TINY_CROWD, BUILD, BUILDABLE, BUILD_KINDS, CASTLE_AT, COLOR_NAMES, Game, TILE, UNIT, UNIT_KINDS, canPlace, costText, ghostSpot,
   type BuildKind, type Cost, type Difficulty, type Input, type Order, type Res, type Snap, type UnitKind,
 } from './game';
 import { Renderer, artUrl, loadArt, type Overlay } from './render';
@@ -20,6 +20,7 @@ type ToHost =
   | { t: 'build'; kind: BuildKind; tx: number; ty: number }
   | { t: 'train'; bid: number; kind: UnitKind }
   | { t: 'sell'; bid: number }
+  | { t: 'upgrade'; bid: number }
   | { t: 'sellUnit'; bid: number; kind: UnitKind }
   | { t: 'order'; o: Order }
   | { t: 'eat' };
@@ -35,6 +36,7 @@ const COLOR_FILES = ['blue', 'red', 'yellow', 'purple'];
 function buildPic(b: BuildKind, slot = 0) {
   const col = COLOR_FILES[slot] ?? 'blue';
   if (b === 'wall') return `<span class="tk-wallpic tk-wall-${col}"><i></i><i></i><i></i></span>`;
+  if (b === 'sheepfarm' || b === 'sheepfarm2') return `<span class="tk-face tk-sheep${b === 'sheepfarm2' ? ' tk-gold' : ''}" style="background-image:url(${artUrl('terrain/sheep_idle')})"></span>`;
   if (b === 'tower2') return `<span class="tk-twin"><img src="${artUrl(`buildings/${col}/tower`)}" alt=""><img src="${artUrl(`buildings/${col}/tower`)}" alt=""></span>`;
   return `<img src="${artUrl(`buildings/${col}/${b === 'house' ? 'house1' : b === 'mansion' ? 'house3' : b === 'tinyhouse' ? 'house2' : b}`)}" alt="">`;
 }
@@ -45,7 +47,7 @@ const HELP = `
   <p>You are the hero of a little kingdom. The <b>Black kingdom</b> in the middle of the island sends bigger and bigger attacks at your castle. Grow strong, then march in and knock down the Black castle to win.</p>
   <ul>
     <li>${icon('wood')} ${icon('gold')} ${icon('meat')} Your <b>pawns</b> chop trees, mine gold and catch sheep by themselves. You can chop, mine and catch sheep with your sword too.</li>
-    <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
+    <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), a sheep farm (2 meat; makes a sheep every second for your pawns to herd, and upgrades to one every 0.0001 seconds), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
     <li>${icon('gold')} Walk up to any of your buildings and press <kbd>E</kbd> to <b>sell</b> it, or sell the units it trains, for half the price back.</li>
     <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, fighters (cost just 1 of anything, but weak), warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery. A Tiny House trains a crowd of a million tiny warriors for 1 of anything; they barely hurt anyone.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
@@ -135,8 +137,8 @@ const game: GameModule = {
       if (k === 'escape') { e.preventDefault(); if (panelOpen()) closePanel(); else if (placing) cancelPlace(); else openPause(); return; }
       if (panelOpen()) {
         // number keys pick from the open menu
-        const n = Number(k);
-        if (n >= 1 && n <= 9) panel.querySelectorAll<HTMLButtonElement>('[data-pick]')[n - 1]?.click();
+        const n = k === '0' ? 10 : Number(k);
+        if (n >= 1 && n <= 10) panel.querySelectorAll<HTMLButtonElement>('[data-pick]')[n - 1]?.click();
         if (k === 'e') closePanel();
         return;
       }
@@ -252,6 +254,7 @@ const game: GameModule = {
     const fail = (m: string | null) => { if (m) { toast(m); play('no'); } };
     const doBuild = (kind: BuildKind, tx: number, ty: number) => { if (net?.role === 'friend') sendHost({ t: 'build', kind, tx, ty }); else if (g) fail(g.build(me, kind, tx, ty)); };
     const eat = () => { if (!playing) return; if (net?.role === 'friend') sendHost({ t: 'eat' }); else if (g) fail(g.eat(me)); };
+    const doUpgrade = (bid: number) => { if (net?.role === 'friend') sendHost({ t: 'upgrade', bid }); else if (g) fail(g.upgrade(me, bid)); };
     const doSell = (bid: number) => { if (net?.role === 'friend') sendHost({ t: 'sell', bid }); else if (g) fail(g.sell(me, bid)); };
     const doSellUnit = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'sellUnit', bid, kind }); else if (g) fail(g.sellUnit(me, bid, kind)); };
     const doTrain = (bid: number, kind: UnitKind) => { if (net?.role === 'friend') sendHost({ t: 'train', bid, kind }); else if (g) fail(g.train(me, bid, kind)); };
@@ -286,7 +289,7 @@ const game: GameModule = {
         const s = BUILD[b];
         return `<button class="tk-item" data-pick="${b}" ${stockOk(s.cost) ? '' : 'data-poor'}>
           ${buildPic(b, me)}
-          <b>${i + 1}. ${s.name}</b><small>${s.desc}</small><span class="tk-costs">${costHtml(s.cost)}</span></button>`;
+          <b>${(i + 1) % 10}. ${s.name}</b><small>${s.desc}</small><span class="tk-costs">${costHtml(s.cost)}</span></button>`;
       }).join('')}</div><button class="tk-btn ghost" data-close>Close</button>`, 'build');
     };
     const openTrain = (bid: number) => {
@@ -308,11 +311,12 @@ const game: GameModule = {
             <span class="tk-face${ANY_COST.includes(u) ? ' tk-small' : ''}" style="background-image:url(${artUrl(`units/${color}/${file}`)})"></span>
             <b>${i + 1}. ${st.name}</b><small>${st.desc}</small><span class="tk-costs">${ANY_COST.includes(u) ? `<span class="tk-cost tk-any">1 ${icon('wood')}${icon('meat')}${icon('gold')}</span>` : costHtml(st.cost ?? {})}</span></button>`;
         }).join('')}</div>${s.trains.length ? '<p class="tk-sub">Tap again to train more. Selling gives back half the price.</p>' : ''}
-        ${sellUnits ? `<div class="tk-sells">${sellUnits}</div>` : ''}${sellMe}<button class="tk-btn ghost" data-close>Close</button>`, 'train');
+        ${sellUnits ? `<div class="tk-sells">${sellUnits}</div>` : ''}${bk === 'sheepfarm' ? `<button class="tk-btn" data-upgrade ${stockOk(FARM_UPGRADE) ? '' : 'data-poor'}>Upgrade: a sheep every 0.0001 seconds! <small>${costText(FARM_UPGRADE)}</small></button>` : ''}${sellMe}<button class="tk-btn ghost" data-close>Close</button>`, 'train');
     };
     panel.addEventListener('click', e => {
       const t = e.target as HTMLElement;
       if (t.closest('[data-close]')) { closePanel(); return; }
+      if (t.closest('[data-upgrade]') && panelKind === 'train') { doUpgrade(panelFor); closePanel(); return; }
       if (t.closest('[data-sell-bldg]') && panelKind === 'train') { doSell(panelFor); closePanel(); return; }
       const su = t.closest<HTMLElement>('[data-sell-unit]')?.dataset.sellUnit;
       if (su && panelKind === 'train') { doSellUnit(panelFor, su as UnitKind); setTimeout(() => panelKind === 'train' && openTrain(panelFor), 150); return; }
@@ -406,6 +410,7 @@ const game: GameModule = {
         if (!g || !m || net !== s) return;
         if (m.t === 'in') g.inputs.set(slot, { mx: Math.max(-1, Math.min(1, +m.mx || 0)), my: Math.max(-1, Math.min(1, +m.my || 0)), atk: !!m.atk, guard: !!m.guard });
         else if (m.t === 'build' && BUILDABLE.includes(m.kind)) { const err = g.build(slot, m.kind, m.tx | 0, m.ty | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
+        else if (m.t === 'upgrade') { const err = g.upgrade(slot, m.bid | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'sell') { const err = g.sell(slot, m.bid | 0); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'sellUnit' && m.kind in UNIT) { const err = g.sellUnit(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
         else if (m.t === 'train' && m.kind in UNIT) { const err = g.train(slot, m.bid | 0, m.kind); if (err) s.send(slot, { t: 'err', m: err } satisfies ToFriend); }
@@ -563,7 +568,7 @@ const game: GameModule = {
         const key = touchMode ? '✋' : 'E';
         const nbKind = nb ? ren.ent(nb) : undefined;
         const trains = !!nbKind && BUILD[BUILD_KINDS[nbKind.kind - 100]].trains.length > 0;
-        hintEl.textContent = gh ? (gh.ok ? `${key}: put the ${BUILD[gh.kind].name.toLowerCase()} here` : 'No room here') : trains ? `${key}: train or sell` : `${key}: sell`;
+        hintEl.textContent = gh ? (gh.ok ? `${key}: put the ${BUILD[gh.kind].name.toLowerCase()} here` : 'No room here') : trains ? `${key}: train or sell` : nbKind?.kind === 100 + BUILD_KINDS.indexOf('sheepfarm') ? `${key}: upgrade or sell` : `${key}: sell`;
         hintEl.classList.toggle('bad', !!gh && !gh.ok);
       } else hintEl.hidden = true;
       // the HUD, only when it changes
