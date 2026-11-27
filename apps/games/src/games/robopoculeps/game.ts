@@ -470,16 +470,11 @@ export class Game {
   private mineOne(i: number, x: number, y: number, toBag: boolean): OreId | null {
     const rock = this.rocks.get(i);
     if (!rock) return null;
-    rock.amt--;
+    // rocks never run out, so any number of miners can keep digging the same one
     for (let n = 0; n < 4; n++) this.burst(x, y, n % 2 ? ORES[rock.ore].fleck : ORES[rock.ore].rock, 2.5, 0.07);
     if (toBag) {
       this.bag[rock.ore]++;
       this.floaters.push({ x, y: y - 0.4, text: `+1 ${ORES[rock.ore].name}`, color: '#ffffff', t: 0 });
-    }
-    if (rock.amt <= 0) {
-      this.rocks.delete(i);
-      for (let n = 0; n < 10; n++) this.burst(rock.x + 0.5, rock.y + 0.5, ORES[rock.ore].rock, 4, 0.12);
-      this.onSound('crumble');
     }
     return rock.ore;
   }
@@ -617,8 +612,8 @@ export class Game {
         for (const [i, rock] of this.rocks) {
           if (r.kind !== 'king' && rock.ore !== r.kind) continue;
           if (zoneOf(rock.x) > this.unlocked) continue;
-          const d = Math.hypot(rock.x + 0.5 - r.x, rock.y + 0.5 - r.y) + rock.claims * 6;
-          if (rock.claims < 3 && d < bd) {
+          const d = Math.hypot(rock.x + 0.5 - r.x, rock.y + 0.5 - r.y);
+          if (d < bd) {
             bd = d;
             best = i;
           }
@@ -641,7 +636,10 @@ export class Game {
           r.state = r.carry.length ? 'home' : 'seek';
           break;
         }
-        if (flyTo(rock.x + 0.5, rock.y + 0.1)) {
+        // robots sharing a rock hover in a ring around it so you can see them all
+        const k = Math.max(0, this.robots.indexOf(r));
+        const a = k * 2.4, ring = k ? 0.25 + Math.min(0.35, k * 0.02) : 0;
+        if (flyTo(rock.x + 0.5 + Math.cos(a) * ring, rock.y + 0.1 + Math.sin(a) * ring * 0.6)) {
           r.state = 'mine';
           r.t = 0;
         }
