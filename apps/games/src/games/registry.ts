@@ -289,4 +289,26 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./archenimys/index'),
   },
+  {
+    id: 'antpoculeps',
+    title: 'Antpoculeps',
+    tagline: 'Hatch from an egg, eat and bite your way up 20 ants to the Cosmic Ant. Up to 6 players.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#4c8a34"/>
+      <ellipse cx="96" cy="62" rx="22" ry="14" fill="#e6d39a"/><ellipse cx="96" cy="62" rx="15" ry="9" fill="#3f8fd0"/>
+      <path d="M4 14q22-16 44 0q-22 16-44 0z" fill="#5aa846"/><path d="M4 14h44" stroke="#3e7c30" stroke-width="1.5"/>
+      <g fill="#ffd23f"><circle cx="20" cy="62" r="4"/><circle cx="26" cy="66" r="4"/><circle cx="20" cy="70" r="4"/><circle cx="14" cy="66" r="4"/></g><circle cx="20" cy="66" r="2.5" fill="#7a4a1a"/>
+      <ellipse cx="38" cy="40" rx="6" ry="8" fill="#fbf6e9"/><ellipse cx="36" cy="37" rx="1.6" ry="2.4" fill="#fff"/>
+      <g transform="translate(76 34)">
+        <g stroke="#0a0518" stroke-width="2" stroke-linecap="round"><path d="M-2 0l-6-10M-2 0l-6 10M2 0l0-11M2 0l0 11M6 0l7-9M6 0l7 9"/></g>
+        <ellipse cx="-10" cy="0" rx="11" ry="8" fill="#2a1460"/><circle cx="-13" cy="-2" r="1" fill="#ffe9a8"/><circle cx="-8" cy="3" r="1" fill="#a8d8ff"/><circle cx="-6" cy="-3" r=".8" fill="#fff"/>
+        <ellipse cx="3" cy="0" rx="6" ry="4" fill="#140a2e"/><circle cx="13" cy="0" r="5.5" fill="#140a2e"/>
+        <circle cx="15" cy="-2.5" r="1.3" fill="#7ff0ff"/><circle cx="15" cy="2.5" r="1.3" fill="#7ff0ff"/>
+        <path d="M16-4l5-6 4 1M16 4l5 6 4-1" stroke="#0a0518" stroke-width="1.5" fill="none"/>
+        <ellipse cx="-3" cy="0" rx="22" ry="7" fill="none" stroke="#9fe8ff" stroke-width="1.2" opacity=".8"/>
+      </g>
+      <circle cx="58" cy="54" r="3" fill="#c0204a"/><rect x="62" y="20" width="5" height="5" fill="#fff"/><circle cx="52" cy="24" r="2" fill="#e0b46a"/>
+    </svg>`,
+    load: () => import('./antpoculeps/index'),
+  },
 ];
