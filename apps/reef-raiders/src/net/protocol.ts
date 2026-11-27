@@ -3,7 +3,7 @@ import type { FishKind, Role } from '../game/looks';
 import type { Levels, UpgradeId } from '../game/upgrades';
 
 // Controller to display. Stick input goes over the unreliable channel, the rest over the reliable one.
-export type Action = 'cast' | 'tap' | 'heave' | 'pull' | 'thrash' | 'dash' | 'egg' | 'taunt' | 'sell' | 'find';
+export type Action = 'cast' | 'reelin' | 'tap' | 'heave' | 'pull' | 'thrash' | 'dash' | 'egg' | 'taunt' | 'sell' | 'find';
 
 export type ControllerMessage =
   | { t: 'in'; x: number; y: number; hold: boolean }

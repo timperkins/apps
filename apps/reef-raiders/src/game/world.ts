@@ -40,6 +40,8 @@ export interface Fish {
   nextSurviveCoin: number;
   // Babies follow their parent and feed it.
   baby: boolean;
+  // What a baby is swimming after.
+  snack?: { x: number; y: number } | null;
   owner: string | null;
   diesAt: number;
   nextFeed: number;
@@ -59,6 +61,8 @@ export interface Hook {
   knot: number;
   fightStart: number;
   fightY0: number;
+  // Reeling in by itself after a tap on Reel in.
+  auto?: boolean;
 }
 
 export interface Boat {
@@ -152,6 +156,8 @@ export class World {
   eggs: Egg[] = [];
   coins: Coin[] = [];
   npcTarget = K.NPC_TARGET;
+  // Off by default: School players are teammates and can't eat each other.
+  schoolEats = false;
   peteHere = false;
   peteSince = 0;
   peteNext = K.PETE_FIRST_S;
@@ -312,6 +318,12 @@ export class World {
     return true;
   }
 
+  // Reels the line all the way in by itself, so the Raider can cast again.
+  reelIn(id: string): void {
+    const b = this.boat(id);
+    if (b && b.hook.state === 'down') b.hook.auto = true;
+  }
+
   // A Raider's tap during a tug-of-war. Heave taps land in the gold window and pull harder.
   reelTap(id: string, heave: boolean): void {
     const b = this.boat(id);
@@ -403,7 +415,8 @@ export class World {
       if (b.hook.state === 'ready' && Math.abs(input.x) > 0.2) b.dir = input.x > 0 ? 1 : -1;
       // Holding Reel raises the hook.
       if (b.hook.state === 'down') {
-        if (input.reel) b.hook.y -= K.HOOK_REEL * boost(b.ups, 'reel') * dt;
+        if (b.hook.auto) b.hook.y -= K.HOOK_REEL * K.AUTO_REEL_MULT * boost(b.ups, 'reel') * dt;
+        else if (input.reel) b.hook.y -= K.HOOK_REEL * boost(b.ups, 'reel') * dt;
         else b.hook.y = Math.min(this.lineDepth(), b.hook.y + K.HOOK_SINK * boost(b.ups, 'line') * dt);
         if (b.hook.y <= K.SURF) b.hook.state = 'ready';
       }
@@ -462,11 +475,45 @@ export class World {
     }
   }
 
+  // The boat a fish has rammed in the last few seconds, if it is still afloat.
+  private boatUnderAttack(parent: Fish): Boat | undefined {
+    if (!parent.alive) return undefined;
+    return this.boats.find((b) => !b.sunk && this.time - (b.hits.get(parent.id) ?? -Infinity) < K.BABY_ATTACK_S);
+  }
+
+  // The nearest coin or minnow anywhere in the sea that a sibling isn't already going for.
+  private nearestSnack(f: Fish): { x: number; y: number } | null {
+    const claimed = new Set<{ x: number; y: number }>();
+    for (const o of this.fish) {
+      if (o !== f && o.baby && o.owner === f.owner && o.snack) claimed.add(o.snack);
+    }
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    const consider = (t: { x: number; y: number }) => {
+      if (claimed.has(t)) return;
+      const d = Math.hypot(t.x - f.x, t.y - f.y);
+      if (d < bestD) [best, bestD] = [t, d];
+    };
+    for (const c of this.coins) consider(c);
+    for (const v of this.fish) if (!v.player && !v.baby && v.level === 0 && v.alive && !v.hookedBy) consider(v);
+    f.snack = best;
+    return best;
+  }
+
   // Computer fish wander, flee big player fish, and sometimes go for a hook. Babies follow their parent.
   private npcSteer(f: Fish): { x: number; y: number } {
     if (f.baby) {
       const parent = f.owner ? this.get(f.owner) : undefined;
-      if (parent?.alive) {
+      const target = parent ? this.boatUnderAttack(parent) : undefined;
+      const snack = target ? null : this.nearestSnack(f);
+      if (target) {
+        // Join in: ram the boat the parent is ramming.
+        f.tx = target.x + ((Number(f.id.split('-').pop()) % 5) - 2) * 12;
+        f.ty = K.SURF + 4;
+      } else if (snack) {
+        f.tx = snack.x;
+        f.ty = snack.y;
+      } else if (parent?.alive) {
         const i = Number(f.id.split('-').pop()) % 3;
         f.tx = parent.x - parent.dir * (fishLen(parent) * 0.6 + 6 + i * 6);
         f.ty = parent.y + (i - 1) * 7;
@@ -609,21 +656,31 @@ export class World {
 
   private eating(): void {
     for (const a of this.fish) {
-      if (!a.player || !a.alive || a.hookedBy) continue;
+      if (!(a.player || a.baby) || !a.alive || a.hookedBy) continue;
+      // A baby gathers for its parent: what it eats and picks up goes to the parent.
+      const parent = a.baby ? (a.owner ? this.get(a.owner) : undefined) : a;
+      if (!parent) continue;
       const la = fishLen(a);
       const m = mouthOf(a);
       for (const v of this.fish) {
         if (v === a || !v.alive || v.hookedBy || this.time < v.safeUntil) continue;
-        if (v.owner === a.id) continue;
+        // Babies are safe from being eaten; only a hook can take them.
+        if (v.baby || v.owner === parent.id) continue;
         const lv = fishLen(v);
-        if (la < lv * K.EAT_RATIO) continue;
-        if (Math.hypot(m.x - v.x, m.y - v.y) > la * 0.25 + lv * 0.3) continue;
-        const food = v.baby ? 1 : v.player ? 2 + v.level * 2 : Math.max(1, v.level);
-        a.eats += 1;
-        a.score += v.player ? K.EAT_PLAYER_SCORE * v.level : K.EAT_SCORE * Math.max(1, v.level);
-        this.events.push({ type: 'eat', by: a.id, victim: v.id, player: v.player, x: v.x, y: v.y, color: v.color });
-        this.feed(a, food);
-        this.kill(v, a.id, 'eaten');
+        // Babies are tiny, so they can only manage minnows.
+        if (a.baby ? v.player || v.level > 0 : la < lv * K.EAT_RATIO) continue;
+        if (v.player && !this.schoolEats) continue;
+        if (Math.hypot(m.x - v.x, m.y - v.y) > la * 0.25 + lv * 0.3 + (a.baby ? 3 : 0)) continue;
+        const food = v.player ? 2 + v.level * 2 : Math.max(1, v.level);
+        parent.eats += 1;
+        parent.score += v.player ? K.EAT_PLAYER_SCORE * v.level : K.EAT_SCORE * Math.max(1, v.level);
+        this.events.push({ type: 'eat', by: parent.id, victim: v.id, player: v.player, x: v.x, y: v.y, color: v.color });
+        this.feed(parent, food);
+        this.kill(v, parent.id, 'eaten');
+      }
+      if (a.baby) {
+        this.pickCoins(a, parent);
+        continue;
       }
       // Other fish's eggs are a snack too.
       for (const e of this.eggs) {
@@ -635,16 +692,23 @@ export class World {
         }
       }
       this.eggs = this.eggs.filter((e) => e.hatchAt !== -1);
-      for (const c of this.coins) {
-        if (Math.hypot(m.x - c.x, m.y - c.y) < la * 0.3 + 4) {
-          c.restUntil = -1;
-          a.coins += 1;
-          a.score += K.COIN_SCORE;
-          this.events.push({ type: 'coin', by: a.id, x: c.x, y: c.y });
-        }
-      }
-      this.coins = this.coins.filter((c) => c.restUntil !== -1);
+      this.pickCoins(a, a);
     }
+  }
+
+  // `picker` touches the coin; `owner` gets it.
+  private pickCoins(picker: Fish, owner: Fish): void {
+    const m = mouthOf(picker);
+    const r = fishLen(picker) * 0.3 + (picker.baby ? 6 : 4);
+    for (const c of this.coins) {
+      if (Math.hypot(m.x - c.x, m.y - c.y) < r) {
+        c.restUntil = -1;
+        owner.coins += 1;
+        owner.score += K.COIN_SCORE;
+        this.events.push({ type: 'coin', by: owner.id, x: c.x, y: c.y });
+      }
+    }
+    this.coins = this.coins.filter((c) => c.restUntil !== -1);
   }
 
   feed(f: Fish, food: number): void {
@@ -659,16 +723,19 @@ export class World {
 
   private ramming(): void {
     for (const f of this.fish) {
-      if (!f.player || !f.alive || f.hookedBy || f.y > K.SURF + K.SURFACE_BAND) continue;
+      if (!(f.player || f.baby) || !f.alive || f.hookedBy || f.y > K.SURF + K.SURFACE_BAND) continue;
       if (this.time < f.ramReadyAt) continue;
+      // A baby's ram counts for its parent.
+      const by = f.baby ? (f.owner ? this.get(f.owner) : undefined) : f;
+      if (!by) continue;
       for (const b of this.boats) {
         if (b.sunk || Math.abs(f.x - b.x) > K.BOAT_HALF_W + fishLen(f) * 0.3) continue;
         f.ramReadyAt = this.time + K.RAM_COOLDOWN_S;
         f.vy = 70;
-        b.health -= K.ramDamage(f.level) * boost(f.ups, 'ram');
-        b.hits.set(f.id, this.time);
-        this.events.push({ type: 'ram', boat: b.id, by: f.id, x: f.x });
-        if (b.health <= 0) this.sink(b, f);
+        b.health -= f.baby ? K.BABY_RAM_DAMAGE * boost(by.ups, 'ram') : K.ramDamage(f.level) * boost(f.ups, 'ram');
+        if (!f.baby) b.hits.set(f.id, this.time);
+        this.events.push({ type: 'ram', boat: b.id, by: by.id, x: f.x });
+        if (b.health <= 0) this.sink(b, by);
         break;
       }
     }
@@ -692,7 +759,8 @@ export class World {
     for (const e of this.eggs) {
       e.y = Math.min(K.SEABED - 2, e.y + 22 * dt);
       if (this.time >= e.hatchAt) {
-        for (let i = 0; i < K.BABIES_PER_EGG; i++) {
+        const have = this.fish.filter((f) => f.baby && f.owner === e.owner).length;
+        for (let i = 0; i < Math.min(K.BABIES_PER_EGG, K.MAX_BABIES - have); i++) {
           const parent = this.get(e.owner);
           const baby = this.newFish(`baby-${this.serial++}`, false, 'npc', 0, '', e.color, 1);
           Object.assign(baby, {
@@ -700,8 +768,6 @@ export class World {
             owner: e.owner,
             x: e.x + i * 4,
             y: e.y - 4,
-            diesAt: this.time + K.BABY_LIFE_S,
-            nextFeed: this.time + K.BABY_FEED_S,
             kind: parent?.kind === 'clown' ? 'clown' : 'npc',
           });
           this.fish.push(baby);
@@ -710,15 +776,6 @@ export class World {
       }
     }
     this.eggs = this.eggs.filter((e) => this.time < e.hatchAt);
-    for (const f of this.fish) {
-      if (!f.baby || !f.alive) continue;
-      const parent = f.owner ? this.get(f.owner) : undefined;
-      if (parent?.alive && this.time >= f.nextFeed) {
-        f.nextFeed = this.time + K.BABY_FEED_S;
-        this.feed(parent, 1);
-      }
-    }
-    this.fish = this.fish.filter((f) => !f.baby || this.time < f.diesAt || f.hookedBy);
   }
 
   private coinsStep(dt: number): void {

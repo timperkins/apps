@@ -38,6 +38,7 @@ export interface HostView {
   school: number;
   winner: 'crew' | 'school' | 'tie' | null;
   botsOn: boolean;
+  schoolEats: boolean;
 }
 
 interface Player {
@@ -96,6 +97,11 @@ export class HostSession {
       this.connect(LOCAL_ID);
     }
     this.handleMessage(LOCAL_ID, msg);
+  }
+
+  setSchoolEats(on: boolean): void {
+    this.world.schoolEats = on;
+    this.emit(true);
   }
 
   setBots(on: boolean): void {
@@ -396,6 +402,9 @@ export class HostSession {
       case 'cast':
         w.cast(uid);
         break;
+      case 'reelin':
+        w.reelIn(uid);
+        break;
       case 'tap':
         w.reelTap(uid, false);
         break;
@@ -554,6 +563,7 @@ export class HostSession {
       school: totals.school,
       winner: this.winner,
       botsOn: this.botsOn,
+      schoolEats: this.world.schoolEats,
     };
     const key = JSON.stringify(view);
     if (!force && key === this.lastView) return;

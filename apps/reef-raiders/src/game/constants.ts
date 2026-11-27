@@ -45,9 +45,11 @@ export const TAUNT_LINE = "You can't catch me, I'm the gingerbread man!";
 export const EGG_COOLDOWN_S = 25;
 export const EGG_HATCH_S = 10;
 export const BABIES_PER_EGG = 2;
-export const BABY_LIFE_S = 40;
-// Every this many seconds each living baby brings its parent one food.
-export const BABY_FEED_S = 5;
+// Babies stay until they are caught; a parent can have at most this many.
+export const MAX_BABIES = 6;
+// Babies join in on a boat their parent rammed within this many seconds.
+export const BABY_ATTACK_S = 4;
+export const BABY_RAM_DAMAGE = 2;
 
 // ---- Computer fish ----
 export const NPC_TARGET = 26;
@@ -80,6 +82,8 @@ export const ROD_DX = 47;
 export const ROD_DY = -32;
 export const HOOK_SINK = 70;
 export const HOOK_REEL = 95;
+// A tap on Reel in brings the line up this much faster than holding.
+export const AUTO_REEL_MULT = 2.5;
 export const HOOK_FOLLOW = 3;
 export const HOOK_RADIUS = 5;
 // The hook can't catch anything in the top this-many pixels of water.

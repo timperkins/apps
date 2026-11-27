@@ -122,7 +122,7 @@ export class Bot {
 
     // Run from anything that could eat us, and from hooks.
     for (const o of w.fish) {
-      if (o === f || !o.alive || o.hookedBy) continue;
+      if (o === f || !o.alive || o.hookedBy || (o.player && !w.schoolEats)) continue;
       if (fishLen(o) >= len * K.EAT_RATIO && Math.hypot(o.x - f.x, o.y - f.y) < 60) {
         tx = f.x - (o.x - f.x) * 2;
         ty = f.y - (o.y - f.y) * 2;
@@ -153,7 +153,7 @@ export class Bot {
           this.retargetAt = t + 3;
         } else {
           for (const o of w.fish) {
-            if (o === f || !o.alive || o.hookedBy || len < fishLen(o) * K.EAT_RATIO) continue;
+            if (o === f || !o.alive || o.hookedBy || o.baby || (o.player && !w.schoolEats) || len < fishLen(o) * K.EAT_RATIO) continue;
             const d = Math.hypot(o.x - f.x, o.y - f.y);
             if (d < best && d < 200) {
               best = d;

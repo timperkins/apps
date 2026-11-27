@@ -2,7 +2,7 @@ import { cleanName, isColor, isKind, isRole } from '../game/looks';
 import { isUpgrade } from '../game/upgrades';
 import type { Action, ControllerMessage } from './protocol';
 
-const ACTIONS: Action[] = ['cast', 'tap', 'heave', 'pull', 'thrash', 'dash', 'egg', 'taunt', 'sell', 'find'];
+const ACTIONS: Action[] = ['cast', 'reelin', 'tap', 'heave', 'pull', 'thrash', 'dash', 'egg', 'taunt', 'sell', 'find'];
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0);
 
 // Phones are untrusted: anything malformed is dropped and every value is clamped or checked.

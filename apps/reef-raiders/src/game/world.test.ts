@@ -12,8 +12,25 @@ function quietWorld(): World {
 }
 
 describe('swimmers', () => {
+  it('School players are teammates unless the host turns on fish-eat-fish', () => {
+    const w = quietWorld();
+    const big = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    const small = w.addSwimmer('b', 'B', '#ffd23f', 'fish');
+    big.level = 5;
+    big.safeUntil = small.safeUntil = 0;
+    big.dir = 1;
+    big.x = 200;
+    big.y = 200;
+    const m = mouthOf(big);
+    small.x = m.x;
+    small.y = m.y;
+    expect(w.step(K.STEP, none, none).some((e) => e.type === 'eat')).toBe(false);
+    expect(small.alive).toBe(true);
+  });
+
   it('a bigger fish eats a smaller one and grows', () => {
     const w = quietWorld();
+    w.schoolEats = true;
     const big = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
     const small = w.addSwimmer('b', 'B', '#ffd23f', 'fish');
     big.level = 5;
@@ -61,15 +78,73 @@ describe('swimmers', () => {
     expect(clown.tauntUntil).toBeGreaterThan(w.time);
   });
 
-  it('eggs hatch into babies that feed their parent', () => {
+  it('eggs hatch into babies that stay, and what they gather goes to the parent', () => {
     const w = quietWorld();
     const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
     f.safeUntil = Infinity;
     w.layEgg('a');
     expect(w.eggs.length).toBe(1);
-    for (let t = 0; t < K.EGG_HATCH_S + K.BABY_FEED_S + 0.5; t += K.STEP) w.step(K.STEP, none, none);
+    for (let t = 0; t < K.EGG_HATCH_S + 0.5; t += K.STEP) w.step(K.STEP, none, none);
+    const babies = w.fish.filter((x) => x.baby);
+    expect(babies.length).toBe(K.BABIES_PER_EGG);
+    // A coin right at a baby's mouth goes to the parent.
+    const coinsBefore = f.coins;
+    const m = mouthOf(babies[0]);
+    w.coins.push({ id: 'c', x: m.x, y: m.y, restUntil: Infinity, phase: 0 } as (typeof w.coins)[number]);
+    w.step(K.STEP, none, none);
+    expect(f.coins).toBe(coinsBefore + 1);
+    // Babies don't age out, and a big fish can't eat them.
+    const shark = w.addSwimmer('s', 'S', '#45e3ff', 'fish');
+    shark.level = 10;
+    for (let t = 0; t < 90; t += K.STEP) {
+      shark.x = babies[0].x;
+      shark.y = babies[0].y;
+      w.step(K.STEP, none, none);
+    }
     expect(w.fish.filter((x) => x.baby).length).toBe(K.BABIES_PER_EGG);
-    expect(f.food + f.level).toBeGreaterThan(1);
+  });
+
+  it('babies swim across the map for a coin', () => {
+    const w = quietWorld();
+    const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    f.x = 40;
+    f.y = 200;
+    w.layEgg('a');
+    for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, new Map([['a', { x: 0, y: 0 }]]), none);
+    w.coins = [];
+    w.coins.push({ id: 'far', x: 600, y: 250, restUntil: Infinity, phase: 0 } as (typeof w.coins)[number]);
+    const coins = f.coins;
+    for (let t = 0; t < 20 && f.coins === coins; t += K.STEP) w.step(K.STEP, new Map([['a', { x: 0, y: 0 }]]), none);
+    expect(f.coins).toBe(coins + 1);
+  });
+
+  it("babies help ram the boat their parent is ramming, and it counts for the parent", () => {
+    const w = quietWorld();
+    const f = w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    const b = w.addRaider('r', 'R', '#45e3ff');
+    w.layEgg('a');
+    for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, none, none);
+    b.hits.set('a', w.time);
+    const rams: string[] = [];
+    for (let t = 0; t < 10; t += K.STEP) {
+      b.hits.set('a', w.time);
+      f.x = 20;
+      f.y = 300;
+      for (const e of w.step(K.STEP, none, none)) if (e.type === 'ram') rams.push(e.by);
+    }
+    expect(rams.length).toBeGreaterThan(0);
+    expect(rams.every((id) => id === 'a')).toBe(true);
+  });
+
+  it('a parent has at most MAX_BABIES', () => {
+    const w = quietWorld();
+    w.addSwimmer('a', 'A', '#ff4f4f', 'fish');
+    for (let i = 0; i < 6; i++) {
+      w.get('a')!.eggReadyAt = 0;
+      w.layEgg('a');
+      for (let t = 0; t < K.EGG_HATCH_S + 0.1; t += K.STEP) w.step(K.STEP, none, none);
+    }
+    expect(w.fish.filter((x) => x.baby).length).toBe(K.MAX_BABIES);
   });
 });
 
@@ -249,5 +324,21 @@ describe('casting', () => {
       w.step(K.STEP, new Map([['s', { x: 0, y: 0 }]]), none);
     }
     expect(b.hook.state).toBe('fight');
+  });
+
+  it('one tap of reel in brings the hook all the way up so you can cast again', () => {
+    const w = new World(() => 0.5);
+    w.reset();
+    w.fish = [];
+    const b = w.addRaider('r', 'R', '#ff4f4f');
+    w.cast('r');
+    for (let i = 0; i < 120; i++) w.step(K.STEP, new Map(), none);
+    expect(b.hook.state).toBe('down');
+    w.reelIn('r');
+    for (let i = 0; i < 60 * 8 && b.hook.state === 'down'; i++) w.step(K.STEP, new Map(), none);
+    expect(b.hook.state).toBe('ready');
+    w.cast('r');
+    expect(b.hook.state).toBe('down');
+    expect(b.hook.auto).toBeFalsy();
   });
 });
