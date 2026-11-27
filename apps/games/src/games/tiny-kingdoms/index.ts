@@ -49,7 +49,7 @@ const HELP = `
     <li>${icon('wood')} ${icon('gold')} ${icon('meat')} Your <b>pawns</b> chop trees, mine gold and catch sheep by themselves. You can chop, mine and catch sheep with your sword too.</li>
     <li>${icon('hammer')} Press <kbd>B</kbd> (or 🔨) to <b>build</b> anywhere there's open grass: houses (room for more units), a sheep farm (2 meat; makes a sheep every second for your pawns to herd, and upgrades to one every 0.0001 seconds), barracks, an archery range, towers and a monastery. Pick one, walk to where you want it (it goes right behind you, green means it fits) and press <kbd>E</kbd> or <kbd>Space</kbd> to put it down. <kbd>Esc</kbd> cancels.</li>
     <li>${icon('gold')} Walk up to any of your buildings and press <kbd>E</kbd> to <b>sell</b> it, or sell the units it trains, for half the price back.</li>
-    <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, fighters (cost just 1 of anything, but weak), warriors and lancers at the barracks, archers at the archery range, monks (healers) at the monastery. A Tiny House trains a crowd of a million tiny warriors for 1 of anything; they barely hurt anyone.</li>
+    <li>${icon('sword')} Walk up to a building and press <kbd>E</kbd> to <b>train</b>: pawns at the castle, fighters (cost just 1 of anything, but weak), warriors, lancers and giants (1000 times the health, almost no damage) at the barracks, archers at the archery range, monks (healers) at the monastery. A Tiny House trains a crowd of a million tiny warriors for 1 of anything; they barely hurt anyone.</li>
     <li>🚩 Tell your army what to do with <kbd>Q</kbd>: <b>Follow me</b>, <b>Guard castle</b> or <b>Attack!</b> (march on the Black castle).</li>
     <li>${icon('shield')} Hold <kbd>Shift</kbd> to block with your shield: you take a quarter of the damage.</li>
     <li>${icon('meat')} Press <kbd>1</kbd> to eat: 5 meat heals your hero a lot.</li>
@@ -306,7 +306,7 @@ const game: GameModule = {
       showPanel(`<h2>${s.name}</h2>${tinyNote ? tinyNote : s.trains.length ? `<p class="tk-sub">Room: ${k?.pop ?? 0} / ${k?.cap ?? 0}${(k?.pop ?? 0) >= (k?.cap ?? 0) ? ' · build a house for more' : ''}</p>` : `<p class="tk-sub">${s.desc}</p>`}
         <div class="tk-list">${s.trains.map((u, i) => {
           const st = UNIT[u];
-          const file = u === 'monk' ? 'monk_idle' : u === 'fighter' || u === 'tiny' ? 'warrior_idle' : `${u}_idle`;
+          const file = u === 'monk' ? 'monk_idle' : u === 'fighter' || u === 'tiny' || u === 'giant' ? 'warrior_idle' : `${u}_idle`;
           return `<button class="tk-item" data-pick="${u}" ${(ANY_COST.includes(u) ? (k?.g ?? 0) + (k?.w ?? 0) + (k?.m ?? 0) > 0 : stockOk(st.cost ?? {})) ? '' : 'data-poor'}>
             <span class="tk-face${ANY_COST.includes(u) ? ' tk-small' : ''}" style="background-image:url(${artUrl(`units/${color}/${file}`)})"></span>
             <b>${i + 1}. ${st.name}</b><small>${st.desc}</small><span class="tk-costs">${ANY_COST.includes(u) ? `<span class="tk-cost tk-any">1 ${icon('wood')}${icon('meat')}${icon('gold')}</span>` : costHtml(st.cost ?? {})}</span></button>`;
