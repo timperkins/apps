@@ -111,3 +111,5 @@
 .tk-sell small { font-weight: 500; font-size: 11px; opacity: .8; }
 .tk-face.tk-small { background-size: auto 84px; background-position: -27px -12px; }
 .tk-any { white-space: nowrap; gap: 1px; } .tk-any .tk-ico { width: 18px; height: 18px; }
+.tk-face.tk-sheep { background-size: auto 64px; background-position: 0 0; }
+.tk-face.tk-gold { filter: drop-shadow(0 0 4px #f5c542) sepia(.3); }
