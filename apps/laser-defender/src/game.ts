@@ -384,7 +384,8 @@ export class Game {
     }
 
     this.firing = inp.firing() && !this.overheated;
-    const wantFace = this.firing || (inp.mouseSeen && !inp.touch) ? Math.atan2(this.aimX, this.aimZ) : ml > 0.1 ? Math.atan2(mx, mz) : this.facing;
+    // Face where you're walking; turn to the aim only while the laser is firing.
+    const wantFace = this.firing ? Math.atan2(this.aimX, this.aimZ) : ml > 0.1 ? Math.atan2(mx, mz) : this.facing;
     this.facing = turn(this.facing, wantFace, dt * (this.firing ? 30 : 14));
 
     this.animatePlayer(dt, this.dashT > 0 ? 1.6 : ml, this.firing);
