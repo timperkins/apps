@@ -1,12 +1,14 @@
 // HTML panels: inventory + crafting, building windows, research, hotbar and HUD.
-import { ENTITIES, ITEMS, RECIPES, RECIPE_BY_ID, SCIENCE_PACKS, TECH_ICON, TECHS, TECH_BY_ID, type Category, type ItemId, type Recipe } from './data';
+import { ENTITIES, ITEMS, RECIPES, RECIPE_BY_ID, RULES, SCIENCE_PACKS, TECH_ICON, TECHS, TECH_BY_ID, type Category, type ItemId, type Recipe } from './data';
+import { fluidAround } from './fluids';
+import { deepSpace, DEEP_KM, MODULE_MAX, ROCK_COLOR, ROCK_NAMES, ROCKET_FUEL, ROCKET_PARTS } from './space';
 import { iconURL } from './icons';
 import { sfx } from './audio';
 import type { Entity, Game } from './sim';
 import type { Actions } from './actions';
 import { ARMORS, capacity, equip, EQUIP, gridSize, isArmor, isEquip, shieldMax, takeOff, unequip, wear } from './armor';
 
-export type PanelMode = null | 'inventory' | 'entity' | 'research' | 'menu' | 'help' | 'load';
+export type PanelMode = null | 'inventory' | 'entity' | 'research' | 'menu' | 'help' | 'load' | 'space';
 
 export interface UIState {
   game: Game;
@@ -20,6 +22,8 @@ export interface UIState {
   techSel?: string | null;
   /** scroll the tree to the picked technology on the next draw */
   techJump?: boolean;
+  /** the silo the space panel was opened from, for bringing cargo down */
+  silo?: Entity | null;
   act: Actions;
   setCursor: (item: ItemId | null) => void;
   /** Esc menu and load screen live in index.ts */
@@ -52,8 +56,11 @@ export function recipeTip(g: Game, r: Recipe): string {
       return `<div class="fo-ing ${have >= n ? '' : 'short'}">${icon(it)}<span>${n} × ${esc(ITEMS[it].name)}</span><i>${have}</i></div>`;
     })
     .join('');
-  const where = r.smelt ? 'Made in a furnace' : r.hand ? `${r.time}s by hand` : 'Made in an assembler';
-  return `<h4>${esc(ITEMS[r.out].name)}${r.count > 1 ? ` ×${r.count}` : ''}</h4><div class="fo-sub">${where}</div>${ings}`;
+  const liquid = r.ing.some(([it]) => ITEMS[it].fluid);
+  const where = r.smelt ? 'Made in a furnace' : r.machine === 'refinery' ? 'Made in an oil refinery'
+    : r.hand ? `${r.time}s by hand` : RULES.advanced ? `Made in a crafter${liquid ? ', with liquid from a pipe' : ''}` : 'Made in an assembler';
+  const makes = r.extra?.length ? `<div class="fo-sub">Also makes ${r.extra.map(([it, n]) => `${n} ${esc(ITEMS[it].name.toLowerCase())}`).join(', ')}</div>` : '';
+  return `<h4>${esc(ITEMS[r.out].name)}${r.count > 1 ? ` ×${r.count}` : ''}</h4><div class="fo-sub">${where}</div>${makes}${ings}`;
 }
 
 export function itemTip(g: Game, item: ItemId): string {
@@ -149,19 +156,22 @@ function entityPanel(ui: UIState): string {
     case 'assembler': {
       const r = e.recipe ? RECIPE_BY_ID[e.recipe] : null;
       if (!r || ui.pickRecipe) {
-        const opts = RECIPES.filter((x) => !x.smelt && g.unlocked(x))
+        const opts = RECIPES.filter((x) => g.machineCan(d, x) && g.unlocked(x))
           .map((x) => `<div class="fo-slot recipe" data-act="set-recipe" data-id="${x.id}" data-tip="recipe:${x.id}">${icon(x.out)}</div>`)
           .join('');
         body += `<h4>Choose what to make</h4><div class="fo-grid recipes">${opts}</div>`;
       } else {
-        const ins = r.ing.map(([it, n]) => slot(it, e.input[it] ?? 0, `data-act="take-input" data-id="${it}"`, (e.input[it] ?? 0) >= n ? '' : 'want')).join('');
-        body += `<div class="fo-row machine"><div class="fo-ins">${ins}</div><div class="fo-arrow">${bar(e.progress)}</div>${slot(
-          e.output?.item ?? r.out,
-          e.output?.n ?? 0,
-          'data-act="take-output"',
-          e.output ? '' : 'ghosty',
-        )}</div>
-        <button class="fo-btn" data-act="change-recipe">Change recipe</button>
+        const ins = r.ing.map(([it, n]) => ITEMS[it].fluid
+          ? slot(it, Math.floor(fluidAround(g, e, it)), '', fluidAround(g, e, it) >= n ? 'liquid' : 'want liquid')
+          : slot(it, e.input[it] ?? 0, `data-act="take-input" data-id="${it}"`, (e.input[it] ?? 0) >= n ? '' : 'want')).join('');
+        const outs = [[r.out, r.count], ...(r.extra ?? [])].map(([it]) => ITEMS[it as ItemId].fluid
+          ? slot(it as ItemId, Math.floor(e.fbox[it as ItemId] ?? 0), '', 'liquid')
+          : slot(e.output?.item ?? (it as ItemId), e.output?.n ?? 0, 'data-act="take-output"', e.output ? '' : 'ghosty')).join('');
+        body += `<div class="fo-row machine"><div class="fo-ins">${ins}</div><div class="fo-arrow">${bar(e.progress)}</div><div class="fo-ins">${outs}</div></div>`;
+        if ([...r.ing, [r.out, 0], ...(r.extra ?? [])].some(([it]) => ITEMS[it as ItemId].fluid))
+          body += `<p class="fo-note">Liquids go in and out through pipes touching the machine. Use a separate pipe for each liquid.</p>`;
+        body += `
+<button class="fo-btn" data-act="change-recipe">Change recipe</button>
         <p class="fo-note">Making ${esc(ITEMS[r.out].name)}: ${r.ing.map(([it, n]) => `${n} ${esc(ITEMS[it].name)}`).join(', ')}, ${(r.time / (d.speed ?? 1)).toFixed(1)}s each.</p>`;
       }
       break;
@@ -170,7 +180,7 @@ function entityPanel(ui: UIState): string {
       const t = g.research ? TECH_BY_ID[g.research] : null;
       body += `<div class="fo-row">${SCIENCE_PACKS.map((p) => slot(p, e.input[p] ?? 0, `data-act="take-input" data-id="${p}"`)).join('')}</div>`;
       body += t
-        ? `<div class="fo-sub">Researching ${esc(t.name)}: ${g.researchUnits[t.id] ?? 0} / ${t.units}</div>${bar((g.researchUnits[t.id] ?? 0) / t.units)}`
+        ? `<div class="fo-sub">Researching ${esc(t.name)}: ${g.researchUnits[t.id] ?? 0} / ${g.techUnits(t.id)}</div>${bar((g.researchUnits[t.id] ?? 0) / g.techUnits(t.id))}`
         : `<button class="fo-btn" data-act="open-research">Choose research</button>`;
       break;
     }
@@ -178,7 +188,9 @@ function entityPanel(ui: UIState): string {
       body += `<div class="fo-row"><label>Mining</label>${bar(e.progress)}${slot(e.output?.item ?? null, e.output?.n ?? 0, 'data-act="take-output"')}</div><p class="fo-note">Drops ore into whatever is in front of the yellow arrow (a furnace, chest or belt). With nothing there it keeps up to 50 inside: click the slot to collect them. Press R while hovering to turn it.</p>`;
       break;
     case 'generator':
-      body += `<p class="fo-note">Burns fuel to power everything on its pole network. Up to ${(d.output ?? 0) / 1000} kW.</p>`;
+      body += d.steam
+        ? `<p class="fo-note">Boils water to power everything on its pole network. Up to ${(d.output ?? 0) / 1000} kW, using half the fuel of a coal generator. Water: ${Math.floor(fluidAround(g, e, 'water'))} in the pipes next to it.</p>`
+        : `<p class="fo-note">Burns fuel to power everything on its pole network. Up to ${(d.output ?? 0) / 1000} kW.</p>`;
       if (e.net >= 0) body += `<div class="fo-sub">Network: using ${Math.round(g.netDemand[e.net] / 1000)} kW of ${Math.round(g.netSupply[e.net] / 1000)} kW</div>`;
       break;
     case 'solar':
@@ -228,9 +240,29 @@ function entityPanel(ui: UIState): string {
     case 'mine':
       body += `<p class="fo-note">Blows up when a bug walks over it.</p>`;
       break;
+    case 'pipe': {
+      const f = g.fnets[e.fnet];
+      body += f && f.fluid
+        ? `<div class="fo-row"><label>${esc(ITEMS[f.fluid].name)}</label>${bar(f.amt / f.cap, 'liquidbar')}<span class="fo-sub">${Math.floor(f.amt)} / ${f.cap}</span></div>`
+        : `<p class="fo-note">Empty. ${f ? `This pipe network holds up to ${f.cap}.` : ''}</p>`;
+      body += `<p class="fo-note">${d.ugPipe ? 'Place another underground pipe in a line, up to 10 tiles ahead, and the liquid goes under everything in between. ' : ''}Pipes that touch join up into one network that holds one liquid.</p>`;
+      break;
+    }
+    case 'pump':
+      body += `<p class="fo-note">Pumps 600 water a second into the pipes next to it. No power or fuel needed.</p>`;
+      break;
+    case 'pumpjack':
+      body += `<p class="fo-note">Pumps crude oil into the pipes next to it. Oil patches pump at different speeds: this one is at ${Math.round(g.oilUnder(e.x, e.y, e.w, e.h) * 100)}%.</p>`;
+      break;
+    case 'roboport':
+      body += `<div class="fo-row"><label>Robots</label>${slot('robot', e.input.robot ?? 0, 'data-act="take-input" data-id="robot"', e.input.robot ? '' : 'want')}</div><p class="fo-note">Robots fix damaged buildings within 25 tiles, and rebuild ones the bugs destroy if a crate in range has the building in it. Needs power.</p>`;
+      break;
+    case 'silo':
+      body += siloPanel(g, e);
+      break;
   }
   if (d.ug) body += `<p class="fo-note">${e.recipe === 'out' ? 'Exit: items come up here.' : g.ugExit(e) ? 'Entrance: items go under and come up at the exit.' : 'Entrance with no exit yet: place another underground belt facing the same way, up to 4 tiles ahead.'} Press R while hovering to swap entrance and exit.</p>`;
-  const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall', 'battery', 'lamp', 'splitter', 'floor', 'mine'].includes(d.kind);
+  const accepts = !['belt', 'inserter', 'pole', 'solar', 'monument', 'wall', 'battery', 'lamp', 'splitter', 'floor', 'mine', 'pipe', 'pump', 'pumpjack'].includes(d.kind);
   return `<div class="fo-cols">
     <section><h3>${icon(d.item)} ${esc(name)}</h3>${body}</section>
     ${accepts ? `<section><h3>Inventory</h3>${inventoryGrid(g, 'give')}<p class="fo-note">Click an item to put it all in, right-click for half. Same for taking items out.</p></section>` : ''}
@@ -242,7 +274,18 @@ interface TreeNode { id: string; depth: number; x: number; y: number }
 const NODE_W = 132, NODE_H = 92, COL = 156, ROW = 128, PAD = 16;
 
 /** Lays the technologies out as a tree: each one sits a row below its deepest prerequisite. */
-const TREE: { nodes: Record<string, TreeNode>; width: number; height: number } = (() => {
+type Tree = { nodes: Record<string, TreeNode>; width: number; height: number };
+let treeCache: Tree | null = null, treeVersion = -1;
+/** The layout for the rules in play (classic or advanced). */
+function tree(): Tree {
+  if (!treeCache || treeVersion !== RULES.version) {
+    treeCache = layoutTree();
+    treeVersion = RULES.version;
+  }
+  return treeCache;
+}
+
+function layoutTree(): Tree {
   const depth: Record<string, number> = {};
   const d = (id: string): number =>
     (depth[id] ??= TECH_BY_ID[id].requires.reduce((m, r) => Math.max(m, d(r) + 1), 0));
@@ -278,10 +321,18 @@ const TREE: { nodes: Record<string, TreeNode>; width: number; height: number } =
     }),
   );
   return { nodes, width, height: PAD * 2 + (lines.length - 1) * ROW + NODE_H };
-})();
+}
 
 function techState(g: Game, id: string) {
-  return g.researched.has(id) ? 'done' : g.research === id ? 'cur' : g.canResearch(id) ? 'can' : 'locked';
+  if (g.research === id) return 'cur';
+  if (TECH_BY_ID[id]?.infinite && g.canResearch(id)) return 'can';
+  return g.researched.has(id) ? 'done' : g.canResearch(id) ? 'can' : 'locked';
+}
+
+/** "Faster mining 3" for technologies you can research again and again. */
+function techName(g: Game, id: string) {
+  const t = TECH_BY_ID[id];
+  return t.infinite ? `${t.name} ${g.level(id) + 1}` : t.name;
 }
 
 function armorPanel(g: Game) {
@@ -313,6 +364,7 @@ function armorPanel(g: Game) {
 
 function researchPanel(ui: UIState) {
   const g = ui.game;
+  const TREE = tree();
   const sel = TECH_BY_ID[ui.techSel ?? ''] ?? TECH_BY_ID[g.research ?? ''] ?? TECHS.find((t) => g.canResearch(t.id)) ?? TECHS[TECHS.length - 1];
   // prerequisite lines
   const lines = TECHS.flatMap((t) =>
@@ -331,29 +383,31 @@ function researchPanel(ui: UIState) {
     const n = TREE.nodes[t.id];
     const st = techState(g, t.id);
     const u = g.researchUnits[t.id] ?? 0;
+    const units = g.techUnits(t.id);
     return `<div class="fo-tnode ${st} ${t.id === sel.id ? 'sel' : ''}" data-act="tech-sel" data-id="${t.id}" style="left:${n.x}px;top:${n.y}px">
       <div class="fo-tnode-ic">${icon(TECH_ICON[t.id] ?? 'red-pack')}</div>
-      <div class="fo-tnode-name">${esc(t.name)}</div>
-      <div class="fo-tnode-cost">${t.packs.map((p) => icon(p, 'xs')).join('')}<span>${t.units}</span></div>
-      ${st === 'done' ? '<b class="fo-tnode-tick">✓</b>' : u > 0 ? bar(u / t.units) : ''}
+      <div class="fo-tnode-name">${esc(techName(g, t.id))}${t.infinite ? ' <i class="fo-inf">∞</i>' : ''}</div>
+      <div class="fo-tnode-cost">${t.packs.map((p) => icon(p, 'xs')).join('')}<span>${units}</span></div>
+      ${st === 'done' ? '<b class="fo-tnode-tick">✓</b>' : u > 0 ? bar(u / units) : ''}
     </div>`;
   }).join('');
 
   const st = techState(g, sel.id);
   const u = g.researchUnits[sel.id] ?? 0;
-  const unlocks = RECIPES.filter((r) => r.unlock === sel.id);
+  const selUnits = g.techUnits(sel.id);
+  const unlocks = RECIPES.filter((r) => r.unlock === sel.id).filter((r, i, a) => a.findIndex((x) => x.out === r.out) === i);
   const leadsTo = TECHS.filter((t) => t.requires.includes(sel.id));
   const chip = (id: string) =>
-    `<button class="fo-tchip ${techState(g, id)}" data-act="tech-sel" data-id="${id}">${icon(TECH_ICON[id] ?? 'red-pack', 'xs')}${esc(TECH_BY_ID[id].name)}</button>`;
+    `<button class="fo-tchip ${techState(g, id)}" data-act="tech-sel" data-id="${id}">${icon(TECH_ICON[id] ?? 'red-pack', 'xs')}${esc(techName(g, id))}</button>`;
   const detail = `<div class="fo-tdetail ${st}">
-    <div class="fo-tdetail-head">${icon(TECH_ICON[sel.id] ?? 'red-pack', 'lg')}<div><h4>${esc(sel.name)}</h4><span class="fo-tstatus">${
+    <div class="fo-tdetail-head">${icon(TECH_ICON[sel.id] ?? 'red-pack', 'lg')}<div><h4>${esc(techName(g, sel.id))}</h4><span class="fo-tstatus">${
       st === 'done' ? 'Researched' : st === 'cur' ? 'Researching' : st === 'can' ? 'Ready to research' : 'Locked'
     }</span></div></div>
-    <p>${esc(sel.desc)}</p>
+    <p>${esc(sel.desc)}${sel.infinite && g.level(sel.id) ? ` Done ${g.level(sel.id)} time${g.level(sel.id) > 1 ? 's' : ''} so far.` : ''}</p>
     <h5>Cost</h5>
     <div class="fo-tcost">${sel.packs.map((p) => `<span>${icon(p, 'sm')}${esc(ITEMS[p].name.replace(' science pack', ''))}</span>`).join('')}</div>
-    <div class="fo-sub">${sel.units} of each · ${sel.time}s per unit in a lab</div>
-    ${st !== 'done' && u > 0 ? `<div class="fo-tprog">${bar(u / sel.units)}<span>${u}/${sel.units}</span></div>` : ''}
+    <div class="fo-sub">${selUnits} of each · ${sel.time}s per unit in a lab</div>
+    ${st !== 'done' && u > 0 ? `<div class="fo-tprog">${bar(u / selUnits)}<span>${u}/${selUnits}</span></div>` : ''}
     ${unlocks.length ? `<h5>Unlocks</h5><div class="fo-tunl">${unlocks.map((r) => `<span data-tip="item:${r.out}">${icon(r.out, 'sm')}</span>`).join('')}</div>` : ''}
     ${sel.requires.length ? `<h5>Needs</h5><div class="fo-tchips">${sel.requires.map(chip).join('')}</div>` : ''}
     ${leadsTo.length ? `<h5>Leads to</h5><div class="fo-tchips">${leadsTo.map((t) => chip(t.id)).join('')}</div>` : ''}
@@ -367,6 +421,49 @@ function researchPanel(ui: UIState) {
       <svg width="${TREE.width}" height="${TREE.height}">${lines}</svg>${nodes}
     </div></div>
     ${detail}
+  </div>`;
+}
+
+function siloPanel(g: Game, e: Entity): string {
+  const parts = e.input['rocket-part'] ?? 0, fuel = e.input['rocket-fuel'] ?? 0;
+  const pay = e.inv!.slots.map((s, i) => slot(s?.item ?? null, s?.n ?? null, `data-act="take-chest" data-i="${i}"`)).join('');
+  const land = e.inv2!.slots.map((s, i) => slot(s?.item ?? null, s?.n ?? null, `data-act="take-landing" data-i="${i}"`)).join('');
+  const ready = e.recipe === 'ready';
+  return `<div class="fo-row"><label>Rocket</label>${slot('rocket-part', parts, 'data-act="take-input" data-id="rocket-part"', parts >= ROCKET_PARTS ? '' : 'want')}${slot('rocket-fuel', fuel, 'data-act="take-input" data-id="rocket-fuel"', fuel >= ROCKET_FUEL ? '' : 'want')}${bar(ready ? 1 : e.progress)}</div>
+  <p class="fo-note">A rocket takes ${ROCKET_PARTS} rocket parts and ${ROCKET_FUEL} rocket fuel. Robo arms can load them.</p>
+  <h4>Payload</h4><div class="fo-grid chest">${pay}</div>
+  <p class="fo-note">${g.space.built ? 'Everything in the payload goes up to your space platform.' : 'The first rocket must carry a space platform starter pack.'} Click items in your inventory to load them.</p>
+  <div class="fo-row"><button class="fo-btn" data-act="space" data-id="launch" ${ready && e.t <= 0 ? '' : 'disabled'}>Launch</button>${g.space.built ? '<button class="fo-btn alt" data-act="open-space">Space platform</button>' : ''}</div>
+  <h4>Landing bay</h4><div class="fo-grid chest">${land}</div>
+  <p class="fo-note">Things you bring down from the space platform land here. Robo arms can take them out.</p>`;
+}
+
+function spacePanel(ui: UIState): string {
+  const g = ui.game;
+  const s = g.space;
+  if (!s.built) return `<h3>Space</h3><p class="fo-note">You have no space platform yet. Research Space platform, build a rocket silo and launch a space platform starter pack.</p>`;
+  const mod = (item: ItemId, n: number, what: string) => `<div class="fo-mod">${icon(item, 'sm')}<span><b>${n}</b>/${MODULE_MAX} ${what}</span>
+    <button class="fo-mini" data-act="space" data-id="add:${item}" ${s.cargo.count(item) && n < MODULE_MAX ? '' : 'disabled'}>+</button>
+    <button class="fo-mini" data-act="space" data-id="remove:${item}" ${n ? '' : 'disabled'}>−</button></div>`;
+  const cargo = s.cargo.slots.map((st) => slot(st?.item ?? null, st?.n ?? null)).join('');
+  const zone = deepSpace(s) ? 'Deep space: lots of cryser asteroids' : `Near orbit · deep space starts at ${DEEP_KM.toLocaleString()} km`;
+  const silo = ui.silo && g.ents.has(ui.silo.id) ? ui.silo : null;
+  return `<h3>Space platform</h3>
+  <div class="fo-cols">
+    <section class="fo-spacebox">
+      <div class="fo-sub">${Math.floor(s.dist).toLocaleString()} km · ${s.speed ? `${s.speed} km/s` : 'drifting'} · ${zone}</div>
+      <div class="fo-sub">Caught: ${s.chunks.map((n, i) => `<i class="fo-dot" style="background:${ROCK_COLOR[i]}"></i>${n} ${ROCK_NAMES[i].toLowerCase()}`).join(' · ')}${s.last ? ` · crushers just made ${esc(s.last)}` : ''}</div>
+    </section>
+    <section>
+      ${mod('catcher', s.catchers, 'catchers')}
+      ${mod('crusher', s.crushers, 'crushers')}
+      ${mod('thruster', s.thrusters, 'thrusters')}
+      <div class="fo-row"><button class="fo-btn" data-act="space" data-id="fly" ${s.thrusters ? '' : 'disabled'}>${s.flying ? 'Stop thrusters' : 'Fly'}</button>
+      <button class="fo-btn alt" data-act="space" data-id="drop" ${silo ? '' : 'disabled'}>Bring cargo down</button></div>
+      <p class="fo-note">${silo ? 'Cargo lands in the landing bay of the silo you came from.' : 'Open the space platform from a rocket silo to bring cargo down.'} Thrusters burn ice. Catchers catch little asteroids, and crushers turn them into ore, coal, stone, ice and cryser crystals.</p>
+      <h4>Cargo bay</h4><div class="fo-grid chest">${cargo}</div>
+      <p class="fo-note">Send catchers, crushers and thrusters up in a rocket, then press + to install them.</p>
+    </section>
   </div>`;
 }
 
@@ -390,6 +487,7 @@ function helpPanel() {
   <p><b>Armor:</b> research and craft armor, then click it in your inventory to put it on. There are 5 kinds, each blocking more damage with a bigger personal grid. Fill the grid with equipment: solar panels, batteries and a power core make suit power; the personal laser, energy shield, exo legs and night vision use it. Press <kbd>G</kbd> to throw a grenade at the mouse.</p>
   <p><b>Map:</b> the map in the top right fills in as you explore. Click it or press <kbd>N</kbd> for the whole map.</p>
   <p><b>On a phone:</b> use the stick to walk, tap to build or open, press and hold to mine, and hold Shoot to fire.</p>
+  <p><b>Advanced mode:</b> recipes cost what they do in the big factory games, and you start next to coal, copper, Owen ore and stone, with a pond and an oil field a short walk away. Pipes carry water and oil: an offshore pump on the shore fills them with water for steam engines, and pump jacks on oil patches feed oil refineries, which make heavy and light oil, plastic, sulfur, sulfuric acid and lubricant. Crafters and science labs are 2×2. Your pollution shows as a brown haze, and on the map. Bug nests are twice as far away and only attack when your pollution reaches them, at most once every 3 minutes, unless you raid them. Press <kbd>X</kbd> to switch weapons (gun, sniper, rocket launcher, flamethrower, rail gun). At the end of the research tree: a rocket silo, a space platform with asteroid catchers, crushers and thrusters, and the Great Owen Monument, which needs cryser crystals from deep space.</p>
   </div><button class="fo-btn" data-act="close">Got it</button>`;
 }
 
@@ -420,7 +518,13 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
     case 'help':
       html = helpPanel();
       break;
+    case 'space':
+      html = spacePanel(ui);
+      break;
   }
+  // the space view's canvas stays put so its animation doesn't flicker
+  const spaceCv = el.querySelector<HTMLCanvasElement>('.fo-spacecv');
+  spaceCv?.remove();
   // keep scroll positions when the panel redraws itself
   const scrolls = [...el.querySelectorAll<HTMLElement>('.fo-tree-wrap, .fo-tdetail')].map((x) => [x.scrollLeft, x.scrollTop]);
   const keep = el.scrollTop;
@@ -429,6 +533,8 @@ export function renderPanel(el: HTMLElement, ui: UIState) {
     if (scrolls[i]) [x.scrollLeft, x.scrollTop] = scrolls[i];
   });
   el.scrollTop = keep;
+  const holder = el.querySelector('.fo-spacebox');
+  if (holder) holder.prepend(spaceCv ?? Object.assign(document.createElement('canvas'), { className: 'fo-spacecv' }));
   el.hidden = !ui.panel;
   el.className = `fo-panel p-${ui.panel}`;
   const wrap = el.querySelector<HTMLElement>('.fo-tree-wrap');
@@ -506,6 +612,17 @@ export function panelAction(ui: UIState, t: HTMLElement, button: number, shift: 
     case 'take-output': if (e) ui.act.take(e, 'output', undefined, button === 2); break;
     case 'take-input': if (e) ui.act.take(e, 'input', id || undefined, button === 2); break;
     case 'take-chest': if (e) ui.act.take(e, 'chest', i, button === 2); break;
+    case 'take-landing': if (e) ui.act.take(e, 'landing', i, button === 2); break;
+    case 'space': {
+      const silo = e && e.def.kind === 'silo' ? e : ui.silo ?? null;
+      ui.act.space(id, silo && g.ents.has(silo.id) ? silo : null);
+      sfx.click();
+      break;
+    }
+    case 'open-space':
+      if (e?.def.kind === 'silo') ui.silo = e;
+      ui.panel = 'space';
+      break;
     case 'set-recipe':
       if (e) {
         ui.act.setRecipe(e, id);
@@ -560,5 +677,5 @@ export function renderResearchMini(el: HTMLElement, g: Game) {
     return;
   }
   const u = g.researchUnits[t.id] ?? 0;
-  el.innerHTML = `<span>${esc(t.name)} ${u}/${t.units}</span>${bar(u / t.units)}`;
+  el.innerHTML = `<span>${esc(techName(g, t.id))} ${u}/${g.techUnits(t.id)}</span>${bar(u / g.techUnits(t.id))}`;
 }

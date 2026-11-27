@@ -261,3 +261,16 @@
 .fo-hp[hidden] { display: none; }
 .fo-tbtns button[hidden] { display: none; }
 .fo-bar.shieldbar i { background: #5aa9ff; }
+
+/* advanced mode */
+.fo-slot.liquid { border-style: dashed; border-color: #4fa3ff; }
+.fo-slot.liquid.want { border-color: var(--bad); }
+.fo-bar.liquidbar i { background: #4fa3ff; }
+.fo-inf { font-style: normal; opacity: .7; }
+.fo-panel.p-space { width: min(900px, calc(100% - 20px)); }
+.fo-cols section.fo-spacebox { flex: 1 1 480px; min-width: 0; }
+.fo-spacecv { display: block; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; background: #060b18; margin-bottom: 6px; }
+.fo-mod { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.fo-mod span { flex: 1; }
+.fo-mod .fo-mini[disabled], .fo-btn[disabled] { opacity: .4; cursor: default; }
+.fo-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 3px 0 2px; vertical-align: -1px; }

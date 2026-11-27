@@ -3,6 +3,7 @@
 
 import { Ground, Res, WORLD, type World } from './world';
 import type { Game } from './sim';
+import { AN, POLLUTION_SEEN } from './combat';
 
 /** Tiles you can see around you while walking. */
 export const REVEAL_RADIUS = 18;
@@ -19,6 +20,7 @@ const RES: Record<number, [number, number, number]> = {
   [Res.Copper]: [214, 120, 64],
   [Res.Coal]: [26, 26, 30],
   [Res.Stone]: [176, 160, 136],
+  [Res.Oil]: [70, 40, 90],
 };
 const TREE: [number, number, number] = [36, 66, 34];
 const BUILDING: [number, number, number] = [196, 200, 208];
@@ -68,6 +70,9 @@ export class Minimap {
   private lastGame: Game | null = null;
   /** Explored area: centre and size in tiles, for the big map. */
   private box = { x: WORLD / 2, y: WORLD / 2, span: WORLD };
+  /** Advanced mode: pollution, one pixel per cell. */
+  private pol = document.createElement('canvas');
+  private pimg: ImageData | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private big: HTMLCanvasElement) {
     this.full.width = this.full.height = WORLD;
@@ -119,6 +124,22 @@ export class Minimap {
       }
     }
     this.fctx.putImageData(this.img, 0, 0);
+    if (g.advanced) {
+      if (!this.pimg) {
+        this.pol.width = this.pol.height = AN;
+        this.pimg = this.pol.getContext('2d')!.createImageData(AN, AN);
+      }
+      const pd = this.pimg.data;
+      const p = g.cs.apol;
+      for (let i = 0; i < AN * AN; i++) {
+        const v = p[i];
+        pd[i * 4] = 200;
+        pd[i * 4 + 1] = 90;
+        pd[i * 4 + 2] = 40;
+        pd[i * 4 + 3] = v > POLLUTION_SEEN ? Math.min(170, 50 + v * 6) : 0;
+      }
+      this.pol.getContext('2d')!.putImageData(this.pimg, 0, 0);
+    }
     this.box = x1 < x0
       ? { x: g.px, y: g.py, span: 64 }
       : { x: (x0 + x1 + 1) / 2, y: (y0 + y1 + 1) / 2, span: Math.min(WORLD, Math.max(64, x1 - x0 + 17, y1 - y0 + 17)) };
@@ -150,6 +171,11 @@ export class Minimap {
     const scale = Math.min(W, H) / span;
     const ox = W / 2 - cx * scale, oy = H / 2 - cy * scale;
     c.drawImage(this.full, ox, oy, WORLD * scale, WORLD * scale);
+    if (g.advanced && this.pimg) {
+      c.imageSmoothingEnabled = true;
+      c.drawImage(this.pol, ox, oy, WORLD * scale, WORLD * scale);
+      c.imageSmoothingEnabled = false;
+    }
     const dot = (x: number, y: number, col: string, r: number) => {
       c.fillStyle = '#000';
       c.beginPath();

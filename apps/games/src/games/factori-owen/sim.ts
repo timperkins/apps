@@ -1,15 +1,18 @@
 // The simulation: entities, power, research, hand crafting and the player.
 import {
   ENTITIES, footprint, INPUT_BUFFER_CRAFTS, maxHp, SCIENCE_PACKS, ITEMS, PLAYER_START, POLE_SUPPLY_RADIUS, POLE_WIRE_REACH, RECIPES,
-  RECIPE_BY_ID, SMELT_BY_INPUT, TECHS, TECH_BY_ID,
-  type EntityType, type ItemId, type Recipe,
+  RECIPE_BY_ID, SMELT_BY_INPUT, TECHS, TECH_BY_ID, techUnits, useRules,
+  type EntityDef, type EntityType, type ItemId, type Recipe,
 } from './data';
+import { drawFluid, fluidAround, nextToWater, pipeClash, pushFluid, rebuildFluids, spreadBack, type FluidNet } from './fluids';
+import { newSpace, spaceFromJSON, spaceToJSON, updateSilo, updateSpace, type Space } from './space';
+import { clearGhosts, updateBots, updateRoboport, type Bot, type Ghost } from './robots';
 import { Inventory, type Stack } from './inventory';
 import { b64, RES_ITEM, Res, unb64, World, WORLD } from './world';
 import { packExplored, unpackExplored } from './minimap';
-import { asmProd, bootsMult, craftSpeed, genMult, hpMult, invSize, labSpeed, miningProd } from './bonus';
+import { asmProd, bootsMult, craftSpeed, drillSpeed, genMult, hpMult, invSize, labSpeed, miningProd } from './bonus';
 import { legsMult, newSuit, suitFromJSON, suitToJSON, updateSuit } from './armor';
-import { newCombatState, nestBlocks, playerFire, PLAYER_HP, PLAYER_SPEED, spawnNests, updateCombat, type CombatState } from './combat';
+import { newCombatState, nestBlocks, packPollution, type WeaponId, playerFire, PLAYER_HP, PLAYER_SPEED, spawnNests, unpackPollution, updateCombat, type CombatState } from './combat';
 
 export interface RemotePlayer {
   x: number;
@@ -71,6 +74,18 @@ export class Entity {
   status = '';
   anim = 0;
   hp: number;
+  // liquids (advanced mode)
+  /** pipes: the network it belongs to */
+  fnet = -1;
+  /** pipes: liquid held, kept for saving */
+  fluid: ItemId | null = null;
+  famt = 0;
+  /** machines: liquid made and waiting to go into a pipe */
+  fbox: Partial<Record<ItemId, number>> = {};
+  /** machines: the liquid networks next to it */
+  ports: number[] = [];
+  /** rocket silo: where things sent down from space land */
+  inv2: Inventory | null = null;
 
   constructor(id: number, type: EntityType, x: number, y: number, dir: Dir) {
     this.id = id;
@@ -81,6 +96,10 @@ export class Entity {
     const def = ENTITIES[type];
     this.hp = maxHp(type);
     if (def.kind === 'chest') this.inv = new Inventory(def.slots ?? 16);
+    if (def.kind === 'silo') {
+      this.inv = new Inventory(4); // payload
+      this.inv2 = new Inventory(12); // landing bay
+    }
   }
 
   get def() {
@@ -153,7 +172,7 @@ export class Game {
   /** Guest copy of a hosted game: the host runs bugs, turrets and research. */
   remote = false;
   /** Guests send shots to the host instead of resolving them. */
-  onFire: ((weapon: 'pistol' | 'rail' | 'grenade', aim?: { x: number; y: number }) => void) | null = null;
+  onFire: ((weapon: WeaponId | 'grenade', aim?: { x: number; y: number }) => void) | null = null;
   /** Other players in a multiplayer game (host side), by id. */
   others = new Map<string, RemotePlayer>();
   /** Damage dealt to other players this tick, for the host to send out. */
@@ -167,13 +186,27 @@ export class Game {
   exploredAt = -1;
   spawnX = WORLD / 2 + 0.5;
   spawnY = WORLD / 2 + 0.5;
+  /** Advanced mode: real recipes, liquids, rockets, space and Tim's research tree. */
+  advanced = false;
+  fnets: FluidNet[] = [];
+  /** levels done of technologies you can research again and again */
+  levels: Record<string, number> = {};
+  space: Space = newSpace();
+  /** buildings the bugs destroyed, for robots to rebuild */
+  ghosts: Ghost[] = [];
+  /** robots flying about (not saved) */
+  bots: Bot[] = [];
+  /** why the last canPlace said no, for a hint */
+  placeWhy = '';
 
   constructor(world: World) {
     this.world = world;
+    this.advanced = world.advanced;
   }
 
-  static fresh(seed: number, enemies = true): Game {
-    const g = new Game(new World(seed));
+  static fresh(seed: number, enemies = true, advanced = false): Game {
+    useRules(advanced);
+    const g = new Game(new World(seed, advanced));
     g.enemies = enemies;
     for (const [item, n] of PLAYER_START) g.inv.add(item, n);
     if (enemies) spawnNests(g);
@@ -224,6 +257,22 @@ export class Game {
     return !r.unlock || this.researched.has(r.unlock);
   }
 
+  /** Can this machine make this recipe? */
+  machineCan(d: EntityDef, r: Recipe): boolean {
+    if (r.smelt) return false;
+    return d.refinery ? r.machine === 'refinery' : !r.machine;
+  }
+
+  level(id: string) {
+    return this.levels[id] ?? 0;
+  }
+
+  /** Units the current level of a technology needs. */
+  techUnits(id: string) {
+    const t = TECH_BY_ID[id];
+    return t ? techUnits(t, this.level(id)) : 1;
+  }
+
   daylight(): number {
     const t = (this.tick / TPS / DAY_LENGTH) % 1; // 0 = noon
     const c = Math.cos(t * Math.PI * 2); // 1 noon, -1 midnight
@@ -235,6 +284,7 @@ export class Game {
   canPlace(type: EntityType, x: number, y: number, dir = 0, ignore = 0): boolean {
     const d = ENTITIES[type];
     const [w, h] = footprint(type, dir);
+    this.placeWhy = '';
     for (let j = 0; j < h; j++)
       for (let i = 0; i < w; i++) {
         const tx = x + i, ty = y + j;
@@ -247,7 +297,31 @@ export class Game {
     if (d.kind === 'drill') {
       if (!this.drillHasOre(x, y, w, d.area ?? w)) return false;
     }
+    if (d.kind === 'pumpjack' && !this.oilUnder(x, y, w, h)) {
+      this.placeWhy = 'A pump jack goes on an oil patch (the dark puddles)';
+      return false;
+    }
+    if (d.kind === 'pump' && !nextToWater(this, x, y)) {
+      this.placeWhy = 'An offshore pump goes on the shore, right next to water';
+      return false;
+    }
+    const clash = pipeClash(this, type, x, y, dir);
+    if (clash) {
+      this.placeWhy = `That would mix ${clash}`;
+      return false;
+    }
     return true;
+  }
+
+  /** Oil under a footprint, as pumping speed (1 = 100%). */
+  oilUnder(x: number, y: number, w: number, h: number): number {
+    let n = 0;
+    for (let j = 0; j < h; j++)
+      for (let i = 0; i < w; i++) {
+        const t = (y + j) * WORLD + x + i;
+        if (this.world.inside(x + i, y + j) && this.world.res[t] === Res.Oil) n += this.world.amount[t] / 100;
+      }
+    return n;
   }
 
   private playerOverlaps(tx: number, ty: number) {
@@ -260,7 +334,7 @@ export class Game {
     for (let j = 0; j < area; j++)
       for (let i = 0; i < area; i++) {
         const tx = x - o + i, ty = y - o + j;
-        if (this.world.inside(tx, ty) && this.world.res[ty * WORLD + tx]) return true;
+        if (this.world.inside(tx, ty) && this.world.res[ty * WORLD + tx] && this.world.res[ty * WORLD + tx] !== Res.Oil) return true;
       }
     return false;
   }
@@ -281,6 +355,7 @@ export class Game {
     if (d.kind === 'pole') this.connectPole(e);
     if (d.kind === 'belt') this.updateCurves(e.x, e.y);
     this.netsDirty = true;
+    clearGhosts(this, e);
     if (d.kind === 'monument' && !this.won) {
       this.won = true;
       this.events.push('win');
@@ -302,6 +377,7 @@ export class Game {
       if (r) for (const [it, n] of r.ing) add(it, n);
     }
     if (e.inv) for (const s of e.inv.slots) if (s) add(s.item, s.n);
+    if (e.inv2) for (const s of e.inv2.slots) if (s) add(s.item, s.n);
     for (const b of e.items) add(b.item);
     add(e.held);
     add(e.pending);
@@ -532,7 +608,7 @@ export class Game {
       return Math.max(0, cap - have);
     }
     if (d.kind === 'turret') {
-      if (item !== d.ammo) return 0;
+      if (item !== d.ammo && !(item === 'piercing-ammo' && d.ammo === 'owen-ammo')) return 0;
       return Math.max(0, (hand ? stack : 10) - (e.input[item] ?? 0));
     }
     if (d.kind === 'lab') {
@@ -540,6 +616,11 @@ export class Game {
       const have = e.input[item] ?? 0;
       return Math.max(0, (hand ? stack : 4) - have);
     }
+    if (d.kind === 'silo') {
+      if (item === 'rocket-part' || item === 'rocket-fuel') return Math.max(0, (hand ? 20 : 11) - (e.input[item] ?? 0));
+      return hand ? e.inv!.space(item) : 0;
+    }
+    if (d.kind === 'roboport') return item === 'robot' ? Math.max(0, 50 - (e.input.robot ?? 0)) : 0;
     return 0;
   }
 
@@ -555,6 +636,7 @@ export class Game {
       else e.fuel = { item, n: k };
       return k;
     }
+    if (d.kind === 'silo' && item !== 'rocket-part' && item !== 'rocket-fuel') return e.inv!.add(item, k);
     e.input[item] = (e.input[item] ?? 0) + k;
     return k;
   }
@@ -576,6 +658,11 @@ export class Game {
         }
       }
       return null;
+    }
+    if (d.kind === 'silo') {
+      const it = e.inv2!.firstItem(want);
+      if (it) e.inv2!.remove(it, 1);
+      return it;
     }
     if ((d.kind === 'furnace' || d.kind === 'assembler' || d.kind === 'drill') && e.output && want(e.output.item)) {
       const it = e.output.item;
@@ -617,6 +704,7 @@ export class Game {
 
   private rebuildNets() {
     this.netsDirty = false;
+    rebuildFluids(this);
     const poles = [...this.ents.values()].filter((e) => e.def.kind === 'pole');
     for (const p of poles) p.net = -1;
     let n = 0;
@@ -662,6 +750,9 @@ export class Game {
       case 'lab': return e.crafting ? d.power : d.power * 0.03;
       case 'turret': return e.progress < 1 ? d.power : d.power * 0.01;
       case 'lamp': return this.daylight() < 0.6 ? d.power : 0;
+      case 'pumpjack': return e.working || e.status === '' ? d.power : d.power * 0.03;
+      case 'silo': return e.crafting ? d.power : d.power * 0.02;
+      case 'roboport': return d.power;
     }
     return d.power;
   }
@@ -680,7 +771,7 @@ export class Game {
       if (e.net < 0) continue;
       const d = e.def;
       if (d.kind === 'generator') {
-        if (e.burn > 0 || e.fuel) supply[e.net] += d.output! * gm;
+        if ((e.burn > 0 || e.fuel) && (!d.steam || fluidAround(this, e, 'water') > 0)) supply[e.net] += d.output! * gm;
       } else if (d.kind === 'solar') {
         supply[e.net] += d.output! * light;
       } else if (d.kind === 'battery') {
@@ -718,8 +809,16 @@ export class Game {
       if (d.electric) e.sat = e.net >= 0 && supply[e.net] > 0 ? sat[e.net] : 0;
       if (d.kind === 'generator' && e.net >= 0) {
         const want = load[e.net] * d.output! * gm / TPS;
-        e.working = want > 0 && this.burnerDraw(e, want) > 0;
-        e.status = !e.fuel && e.burn <= 0 ? 'No fuel' : load[e.net] > 0 ? `Supplying ${Math.round(load[e.net] * 100)}%` : 'Idle';
+        if (d.steam) {
+          // a steam engine burns half the fuel, but boils water to do it
+          const water = fluidAround(this, e, 'water');
+          e.working = want > 0 && water > 0 && this.burnerDraw(e, want / 2) > 0;
+          if (e.working) drawFluid(this, e, 'water', (30 * load[e.net]) / TPS);
+          e.status = !e.fuel && e.burn <= 0 ? 'No fuel' : water <= 0 ? 'No water: connect a pipe from an offshore pump' : load[e.net] > 0 ? `Supplying ${Math.round(load[e.net] * 100)}%` : 'Idle';
+        } else {
+          e.working = want > 0 && this.burnerDraw(e, want) > 0;
+          e.status = !e.fuel && e.burn <= 0 ? 'No fuel' : load[e.net] > 0 ? `Supplying ${Math.round(load[e.net] * 100)}%` : 'Idle';
+        }
       } else if (d.kind === 'generator') {
         e.status = 'Not connected to a power pole';
       }
@@ -780,7 +879,7 @@ export class Game {
     e.working = true;
     e.status = 'Mining';
     e.anim += en;
-    e.progress += (en * (d.speed ?? 0.25)) / TPS;
+    e.progress += (en * (d.speed ?? 0.25) * drillSpeed(this)) / TPS;
     if (e.progress >= 1) {
       e.progress -= 1;
       const kind = this.world.res[ty * WORLD + tx] as Res;
@@ -839,24 +938,46 @@ export class Game {
   private updateAssembler(e: Entity) {
     const d = e.def;
     const r = e.recipe ? RECIPE_BY_ID[e.recipe] : null;
+    // liquids it made go out into the pipes next to it
+    for (const k of Object.keys(e.fbox) as ItemId[]) {
+      const left = e.fbox[k]!;
+      if (left > 0) e.fbox[k] = left - pushFluid(this, e, k, left);
+      if (!(e.fbox[k]! > 0.001)) delete e.fbox[k];
+    }
     if (!r) {
       e.working = false;
       e.status = 'Choose a recipe';
       return;
     }
     if (!e.crafting) {
-      if (e.output && e.output.n >= Math.max(r.count * 4, 10)) {
+      const stuck = (Object.keys(e.fbox) as ItemId[])[0];
+      if (stuck) {
+        e.working = false;
+        e.status = `${ITEMS[stuck].name} has nowhere to go: connect an empty pipe or a pipe container`;
+        return;
+      }
+      if (!ITEMS[r.out].fluid && e.output && e.output.n >= Math.max(r.count * 4, 10)) {
         e.working = false;
         e.status = 'Output full';
         return;
       }
-      const missing = r.ing.find(([it, n]) => (e.input[it] ?? 0) < n);
+      const missing = r.ing.find(([it, n]) => !ITEMS[it].fluid && (e.input[it] ?? 0) < n);
       if (missing) {
         e.working = false;
         e.status = 'Needs ' + ITEMS[missing[0]].name.toLowerCase();
         return;
       }
+      const dry = r.ing.find(([it, n]) => ITEMS[it].fluid && fluidAround(this, e, it) < n);
+      if (dry) {
+        e.working = false;
+        e.status = `Needs ${dry[1]} ${ITEMS[dry[0]].name.toLowerCase()} from a pipe`;
+        return;
+      }
       for (const [it, n] of r.ing) {
+        if (ITEMS[it].fluid) {
+          drawFluid(this, e, it, n);
+          continue;
+        }
         e.input[it]! -= n;
         if (!e.input[it]) delete e.input[it];
       }
@@ -880,10 +1001,43 @@ export class Game {
         e.extra -= 1;
         bonus = r.count;
       }
-      this.addOutput(e, r.out, r.count + bonus);
+      for (const [it, n] of [[r.out, r.count + bonus], ...(r.extra ?? [])] as [ItemId, number][]) {
+        if (ITEMS[it].fluid) {
+          e.fbox[it] = (e.fbox[it] ?? 0) + n;
+          this.produced[it] = (this.produced[it] ?? 0) + n;
+        } else this.addOutput(e, it, n);
+      }
       e.crafting = null;
       e.progress = 0;
     }
+  }
+
+  /** Offshore pump: water into the pipes beside it. */
+  private updatePump(e: Entity) {
+    const put = pushFluid(this, e, 'water', (e.def.speed ?? 600) / TPS);
+    e.working = put > 0;
+    e.status = e.ports.length ? (put > 0 ? 'Pumping water' : 'Pipes are full') : 'Connect a pipe to it';
+    if (e.working) e.anim++;
+  }
+
+  /** Pump jack: crude oil into the pipes beside it. */
+  private updatePumpjack(e: Entity) {
+    const oil = this.oilUnder(e.x, e.y, e.w, e.h);
+    if (!e.ports.length) {
+      e.working = false;
+      e.status = 'Connect a pipe to it';
+      return;
+    }
+    if (e.net < 0 || e.sat <= 0) {
+      e.working = false;
+      e.status = e.net < 0 ? 'Not connected to power' : 'No power';
+      return;
+    }
+    const put = pushFluid(this, e, 'crude-oil', ((e.def.speed ?? 10) * oil * e.sat * drillSpeed(this)) / TPS);
+    e.working = put > 0;
+    if (put > 0) this.produced['crude-oil'] = (this.produced['crude-oil'] ?? 0) + put;
+    e.status = put > 0 ? `Pumping ${Math.round(oil * 100)}% speed` : 'Pipes are full';
+    if (e.working) e.anim += e.sat;
   }
 
   private updateLab(e: Entity) {
@@ -921,15 +1075,22 @@ export class Game {
       e.crafting = null;
       e.progress = 0;
       this.researchUnits[tech.id] = (this.researchUnits[tech.id] ?? 0) + 1;
-      if (this.researchUnits[tech.id] >= tech.units) this.finishResearch(tech.id);
+      if (this.researchUnits[tech.id] >= this.techUnits(tech.id)) this.finishResearch(tech.id);
     }
   }
 
   private finishResearch(id: string) {
+    const t = TECH_BY_ID[id];
     this.researched.add(id);
     this.research = null;
+    if (t.infinite) {
+      // done one level: the next one costs more, and the labs keep going on it
+      this.levels[id] = this.level(id) + 1;
+      this.researchUnits[id] = 0;
+      this.research = id;
+    }
     this.applyBonuses();
-    this.toast(`Research complete: ${TECH_BY_ID[id].name}`, 5);
+    this.toast(`Research complete: ${t.name}${t.infinite ? ` ${this.level(id)}` : ''}`, 5);
     this.events.push('research');
     for (const e of this.ents.values()) if (e.def.kind === 'lab' && e.crafting === id) e.crafting = null;
   }
@@ -1184,8 +1345,14 @@ export class Game {
         case 'lab': if (!this.remote) this.updateLab(e); break;
         case 'splitter': this.updateSplitter(e); break;
         case 'lamp': e.working = e.sat > 0 && this.daylight() < 0.6; break;
+        case 'pump': this.updatePump(e); break;
+        case 'pumpjack': this.updatePumpjack(e); break;
+        case 'silo': updateSilo(this, e); break;
+        case 'roboport': if (!this.remote) updateRoboport(this, e); break;
       }
     }
+    updateSpace(this);
+    if (!this.remote && this.bots.length) updateBots(this);
     this.updateCrafting();
     updateSuit(this);
     if (this.shooting && !this.playerDead) playerFire(this, this.aim ?? undefined);
@@ -1198,7 +1365,7 @@ export class Game {
 
   canResearch(id: string): boolean {
     const t = TECH_BY_ID[id];
-    return !!t && !this.researched.has(id) && t.requires.every((r) => this.researched.has(r));
+    return !!t && (!this.researched.has(id) || !!t.infinite) && t.requires.every((r) => this.researched.has(r));
   }
 
   allResearched() {
@@ -1217,7 +1384,11 @@ export class Game {
   // ---------- save ----------
 
   serializeEnts() {
+    spreadBack(this);
     return [...this.ents.values()].map((e) => ({
+      ...(e.fluid ? { fl: e.fluid, fa: Math.round(e.famt * 10) / 10 } : {}),
+      ...(Object.keys(e.fbox).length ? { fb: e.fbox } : {}),
+      ...(e.inv2 ? { inv2: e.inv2.toJSON() } : {}),
       i: e.id, t: e.type, x: e.x, y: e.y, d: e.dir,
       f: e.fuel, b: e.burn, in: e.input, o: e.output, r: e.recipe, c: e.crafting, p: e.progress,
       inv: e.inv?.toJSON(), it: e.items, hp: e.hp, h: e.held, ph: e.phase, tt: e.t, pe: e.pending, cu: e.cursor, w: e.wire,
@@ -1249,6 +1420,10 @@ export class Game {
       e.pending = d.pe ?? null;
       e.cursor = d.cu ?? 0;
       e.wire = d.w ?? [];
+      e.fluid = d.fl ?? null;
+      e.famt = d.fa ?? 0;
+      e.fbox = d.fb ?? {};
+      if (e.inv2 && d.inv2) e.inv2.load(d.inv2);
       if (typeof d.hp === 'number') e.hp = d.hp;
       if (e.w * e.h > 1 && !this.fitsOnLoad(e)) {
         // a save from before the splitter was two tiles wide, with no room beside it now
@@ -1282,12 +1457,22 @@ export class Game {
       kills: this.kills, nd: this.nestsDestroyed, pr: this.pistolRounds,
       exp: b64(packExplored(this.explored)),
       suit: suitToJSON(this.suit),
+      adv: this.advanced,
+      lv: this.levels,
+      space: spaceToJSON(this.space),
+      ghosts: this.ghosts,
+      ...(this.advanced ? { apol: packPollution(this.cs.apol) } : {}),
     };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   static load(s: any): Game {
-    const g = new Game(World.load(s.world));
+    useRules(!!s.adv);
+    const g = new Game(World.load({ ...s.world, adv: !!s.adv }));
+    g.levels = s.lv ?? {};
+    g.space = spaceFromJSON(s.space);
+    g.ghosts = Array.isArray(s.ghosts) ? s.ghosts.filter((x: Ghost) => ENTITIES[x.type]) : [];
+    if (s.apol) unpackPollution(s.apol, g.cs.apol);
     g.tick = s.tick ?? 0;
     g.px = s.px;
     g.py = s.py;

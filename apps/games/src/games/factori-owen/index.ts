@@ -1,6 +1,6 @@
 // Factori-owen: mount the game into a container. Title screen, input, the loop, saving and the HUD.
 import './style.css';
-import { ENTITIES, footprint, ITEMS, RECIPE_BY_ID, type ItemId } from './data';
+import { ENTITIES, footprint, ITEMS, RECIPE_BY_ID, useRules, type ItemId } from './data';
 import { isMuted, setMuted, sfx } from './audio';
 import { Renderer, type Ghost, type Overlay } from './render';
 import { Game, TPS, type Dir, type Entity } from './sim';
@@ -9,8 +9,10 @@ import { RES_NAME, WORLD } from './world';
 import { iconURL } from './icons';
 import { localActions, type Actions } from './actions';
 import { DEFAULT_LOOK, drawPlayer, LOOK_OPTIONS, type PlayerLook } from './art';
-import { MAG_SIZE, playerWeapon, throwGrenade, WEAPONS } from './combat';
-import { reachBonus } from './bonus';
+import { cycleWeapon, MAG_SIZE, playerWeapon, throwGrenade, WEAPONS } from './combat';
+import { drawSpace } from './space';
+import { Res } from './world';
+import { drillSpeed, reachBonus } from './bonus';
 import { shieldMax } from './armor';
 import { explore, Minimap } from './minimap';
 import { buildScene, pickScene, SCENE_SECONDS, type Scene } from './scenes';
@@ -30,6 +32,7 @@ interface SaveMeta {
   saved: number;
   enemies: boolean;
   hotbar?: (ItemId | null)[];
+  advanced?: boolean;
 }
 
 interface Profile {
@@ -55,6 +58,20 @@ const GOALS: Goal[] = [
   { text: 'Research everything', done: (g) => g.allResearched() },
   { text: 'Build the Great Owen Monument', done: (g) => g.won },
 ];
+
+const has = (g: Game, t: string, ok: (e: Entity) => boolean = () => true) => [...g.ents.values()].some((e) => e.type === t && ok(e));
+const ADV_GOALS: Goal[] = [
+  { text: 'Put the burner drill on Owen ore and fuel it', done: (g) => has(g, 'burner-drill', (e) => !!e.fuel || e.burn > 0) },
+  { text: 'Smelt 10 Owen plates in a stone furnace', done: (g) => (g.produced['owen-plate'] ?? 0) >= 10 },
+  { text: 'Pump water from the pond into a steam engine', done: (g) => has(g, 'steam-engine', (e) => e.working) },
+  { text: 'Research Green science in a 2×2 science lab', done: (g) => g.researched.has('green-science') },
+  { text: 'Pump crude oil with a pump jack', done: (g) => (g.produced['crude-oil'] ?? 0) >= 100 || has(g, 'pumpjack', (e) => e.working) },
+  { text: 'Make plastic in an oil refinery', done: (g) => (g.produced['plastic'] ?? 0) > 0 },
+  { text: 'Research Rocket silo and launch a rocket', done: (g) => g.space.launches > 0 },
+  { text: 'Catch an asteroid and crush it in space', done: (g) => g.space.built && (g.space.cargo.count('cryser-crystal') > 0 || (g.produced['cryser-crystal'] ?? 0) > 0 || g.space.crushers > 0 && g.space.catchers > 0) },
+  { text: 'Build the Great Owen Monument', done: (g) => g.won },
+];
+const goalsFor = (g: Game) => (g.advanced ? ADV_GOALS : GOALS);
 
 function readJSON<T>(key: string, fallback: T): T {
   try {
@@ -114,6 +131,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       <div class="fo-topright">
         <div class="fo-research"></div>
         <div class="fo-buttons">
+          <button class="fo-mini" data-btn="space" title="Space platform" hidden>Space</button>
           <button class="fo-mini" data-btn="inventory" title="Inventory (E)">Bag</button>
           <button class="fo-mini" data-btn="research" title="Research (T)">Tech</button>
           <button class="fo-mini" data-btn="mute" title="Sound (M)">Sound</button>
@@ -141,7 +159,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       <div class="fo-dead" hidden></div>
       <div class="fo-win" hidden><h2>Owen is proud of you!</h2><p>You built the Great Owen Monument. Your factory lives on: keep building, or quit to the title screen.</p><button class="fo-btn" data-win="ok">Keep building</button></div>
     </div>
-    <div class="fo-bigmap" hidden><div class="fo-bigmap-box"><h3>Map <span class="fo-sub">yellow is you · red is a bug nest</span></h3><canvas></canvas><button class="fo-btn" data-bigmap="close">Close (N)</button></div></div>
+    <div class="fo-bigmap" hidden><div class="fo-bigmap-box"><h3>Map <span class="fo-sub">yellow is you · red is a bug nest · brown haze is pollution (advanced)</span></h3><canvas></canvas><button class="fo-btn" data-bigmap="close">Close (N)</button></div></div>
     <div class="fo-title"></div>
     <div class="fo-fade"></div>
     <div class="fo-tip" hidden></div>
@@ -166,6 +184,8 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   const shEl = $('.fo-shield i');
   const gBtn = $('[data-t="grenade"]');
   const weaponEl = $('.fo-weapon');
+  weaponEl.addEventListener('click', () => switchWeapon());
+  const spaceBtn = $('[data-btn="space"]');
   const mpEl = $('.fo-mpstatus');
   const bigMapEl = $('.fo-bigmap');
   const minimap = new Minimap($<HTMLCanvasElement>('.fo-minimap'), $<HTMLCanvasElement>('.fo-bigmap canvas'));
@@ -214,6 +234,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   let menuView: 'menu' | 'load' | 'look' = 'menu';
 
   function setGame(g: Game) {
+    useRules(g.advanced);
     game = g;
     ui.game = g;
     ui.cursor = null;
@@ -348,15 +369,18 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       case 'new':
         body = `<h2>New factory</h2>
         <div class="fo-swrow"><label>Name</label><input class="fo-world" maxlength="30" value="Factory ${saves.length + 1}"></div>
+        <div class="fo-swrow"><label>Mode</label>
+          <button class="fo-chip ${newAdvanced ? '' : 'on'}" data-mode="0">Normal</button><button class="fo-chip ${newAdvanced ? 'on' : ''}" data-mode="1">Advanced</button></div>
+        <p class="fo-note fo-modenote">${modeNote()}</p>
         <div class="fo-swrow"><label>Bugs</label>
-          <button class="fo-chip on" data-bugs="1">On</button><button class="fo-chip" data-bugs="0">Peaceful</button></div>
+          <button class="fo-chip ${newBugs ? 'on' : ''}" data-bugs="1">On</button><button class="fo-chip ${newBugs ? '' : 'on'}" data-bugs="0">Peaceful</button></div>
         <p class="fo-note">With bugs on, Calvin, Archie, Mom, Dad and Roger attack once your factory starts polluting.</p>
         <div class="fo-row"><button class="fo-btn" data-title="start">Start</button><button class="fo-btn alt" data-title="main">Back</button></div>`;
         break;
       case 'load':
         body = `<h2>Load a factory</h2><div class="fo-saves">${
           saves.length
-            ? saves.map((s) => `<div class="fo-save"><div><b>${esc(s.name)}</b><span>${ago(s.saved)} · ${s.enemies ? 'bugs on' : 'peaceful'}</span></div>
+            ? saves.map((s) => `<div class="fo-save"><div><b>${esc(s.name)}</b><span>${ago(s.saved)} · ${s.advanced ? 'advanced · ' : ''}${s.enemies ? 'bugs on' : 'peaceful'}</span></div>
               <button class="fo-btn" data-load="${s.id}">Load</button><button class="fo-btn alt" data-del="${s.id}">Delete</button></div>`).join('')
             : '<p class="fo-note">No saved factories yet.</p>'
         }</div><button class="fo-btn alt" data-title="main">Back</button>`;
@@ -385,6 +409,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
   }
 
   let newBugs = true;
+  let newAdvanced = false;
+  const modeNote = () => newAdvanced
+    ? 'Advanced: real recipe costs, pipes, oil, steam power, rockets and a space platform. You start next to every ore. Bugs live twice as far away and only come when your pollution reaches them.'
+    : 'Normal: the classic Factori-owen.';
   titleEl.addEventListener('input', (e) => {
     const t = e.target as HTMLInputElement;
     if (t.classList.contains('fo-name')) {
@@ -401,6 +429,12 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     if (t.dataset.bugs) {
       newBugs = t.dataset.bugs === '1';
       titleEl.querySelectorAll('[data-bugs]').forEach((b) => b.classList.toggle('on', b === t));
+      return;
+    }
+    if (t.dataset.mode) {
+      newAdvanced = t.dataset.mode === '1';
+      titleEl.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', b === t));
+      titleEl.querySelector('.fo-modenote')!.textContent = modeNote();
       return;
     }
     if (t.dataset.load) {
@@ -433,8 +467,8 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     if (v === 'exit') return exit();
     if (v === 'start') {
       const name = (titleEl.querySelector<HTMLInputElement>('.fo-world')?.value || 'My factory').trim();
-      const meta: SaveMeta = { id: Date.now().toString(36), name, saved: Date.now(), enemies: newBugs };
-      startGame(Game.fresh(Math.floor(Math.random() * 1e9), newBugs), meta);
+      const meta: SaveMeta = { id: Date.now().toString(36), name, saved: Date.now(), enemies: newBugs, advanced: newAdvanced };
+      startGame(Game.fresh(Math.floor(Math.random() * 1e9), newBugs, newAdvanced), meta);
       ui.panel = 'help';
       return;
     }
@@ -618,6 +652,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     return { type, x, y, dir: cursorDir, ok: inReach && game.inv.count(item) > 0 && game.canPlace(type, x, y, dir) };
   };
 
+  let lastWhy = 0;
   function tryPlace() {
     const item = ui.cursor;
     const gh = ghostFor(item);
@@ -633,6 +668,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     }
     if (!gh.ok) {
       if (game.inv.count(item) <= 0) ui.cursor = null;
+      else if (game.placeWhy && performance.now() - lastWhy > 1500) {
+        lastWhy = performance.now();
+        game.toast(game.placeWhy);
+      }
       return;
     }
     if (act.place(gh.type, gh.x, gh.y, gh.dir, item)) {
@@ -749,6 +788,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       else if (k === 'n') toggleBigMap();
       else if (k === 'p') pickKey = true;
       else if (k === 'g') throwG();
+      else if (k === 'x') switchWeapon();
       else if (/^[0-9]$/.test(k)) selectHot((Number(k) + 9) % 10);
     }
     if (k === 'p' && !down) pickKey = false;
@@ -771,6 +811,13 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     leftDown = rightDown = shootKey = false;
   };
   window.addEventListener('blur', blur);
+
+  function switchWeapon() {
+    const w = cycleWeapon(game);
+    game.toast(w ? `${WEAPONS[w].name}` : 'No weapons with ammo');
+    sfx.click();
+    lastHud = '';
+  }
 
   function selectHot(i: number) {
     const it = ui.hotbar[i];
@@ -943,6 +990,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (k === 'inventory') togglePanel('inventory');
       if (k === 'research') togglePanel('research');
       if (k === 'menu') togglePanel('menu');
+      if (k === 'space') {
+        ui.silo = null;
+        togglePanel('space');
+      }
       if (k === 'mute') toggleMute();
     }),
   );
@@ -1023,10 +1074,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
                 sfx.pickup();
               },
             };
-        } else if (Math.hypot(tx + 0.5 - game.px, ty + 0.5 - game.py) <= MINE_REACH && (w.tree[i] || w.res[i])) {
+        } else if (Math.hypot(tx + 0.5 - game.px, ty + 0.5 - game.py) <= MINE_REACH && (w.tree[i] || (w.res[i] && w.res[i] !== Res.Oil))) {
           const tree = !!w.tree[i];
           target = {
-            key: (tree ? 't' : 'r') + i, time: tree ? 1.2 : 1, x: tx, y: ty, w: 1, h: 1,
+            key: (tree ? 't' : 'r') + i, time: tree ? 1.2 : 1 / drillSpeed(game), x: tx, y: ty, w: 1, h: 1,
             done: () => {
               act.mine(tx, ty);
               sfx.pickup();
@@ -1064,7 +1115,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       for (let x = px - 3; x <= px + 3; x++) {
         if (!w.inside(x, y)) continue;
         const i = w.idx(x, y);
-        if (game.entAt(x, y) || !(w.res[i] || w.tree[i])) continue;
+        if (game.entAt(x, y) || !((w.res[i] && w.res[i] !== Res.Oil) || w.tree[i])) continue;
         const d = Math.hypot(x + 0.5 - game.px, y + 0.5 - game.py);
         if (d < bd && d <= MINE_REACH) {
           bd = d;
@@ -1115,6 +1166,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
       if (ev === 'nest') sfx.boom();
       if (ev === 'destroyed') sfx.boom();
       if (ev === 'died') sfx.error();
+      if (ev === 'launch') sfx.launch();
+      if (ev === 'flame' && frame % 4 === 0) sfx.flame();
+      if (ev === 'rocket') sfx.rocket();
+      if (ev === 'catch') sfx.catch();
       if (ev === 'win') {
         sfx.win();
         winEl.hidden = false;
@@ -1165,6 +1220,10 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     }
     handleEvents();
     renderer.others = guest ? guest.others : host ? host.views() : [];
+    if (ui.panel === 'space') {
+      const cv = panelEl.querySelector<HTMLCanvasElement>('.fo-spacecv');
+      if (cv) drawSpace(cv, game, now / 1000);
+    }
     if (pickKey && frame % 3 === 0) pickFromBelt();
     explore(game, game.px, game.py);
     minimap.draw(game, renderer.others, frame, !bigMapEl.hidden);
@@ -1230,23 +1289,31 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     shEl.parentElement!.hidden = !smax;
     if (smax) shEl.style.width = `${(game.suit.shield / smax) * 100}%`;
     gBtn.hidden = !game.inv.count('grenade');
+    spaceBtn.hidden = !game.space.built;
     const wk = playerWeapon(game);
+    const mag = game.cs.pierce ? 'piercing-ammo' : 'owen-ammo';
+    const mags = game.inv.count('owen-ammo') + game.inv.count('piercing-ammo');
     weaponEl.innerHTML = wk === 'rail'
       ? `<img src="${iconURL('rail-gun')}" alt="">${game.inv.count('rail-ammo')}`
-      : wk === 'pistol'
-        ? `<img src="${iconURL('owen-ammo')}" alt="">${game.cs.reload > 0 ? '<em>Reloading…</em>' : `${game.pistolRounds}/${MAG_SIZE}`}<span class="fo-sub">+${game.inv.count('owen-ammo')}</span>`
-        : `<span class="fo-sub">No ammo</span>`;
-    weaponEl.title = wk ? `${WEAPONS[wk].name}: hold Space to shoot` : 'Craft Owen bullets';
+      : wk === 'rocket'
+        ? `<img src="${iconURL('rocket-launcher')}" alt="">${game.inv.count('rocket')}`
+        : wk === 'flame'
+          ? `<img src="${iconURL('flamethrower')}" alt="">${game.cs.flameShots}<span class="fo-sub">+${game.inv.count('flame-ammo')}</span>`
+          : wk === 'pistol' || wk === 'sniper'
+            ? `<img src="${iconURL(wk === 'sniper' ? 'sniper' : mag)}" alt="">${game.cs.reload > 0 ? '<em>Reloading…</em>' : `${game.pistolRounds}/${MAG_SIZE}`}<span class="fo-sub">+${mags}</span>`
+            : `<span class="fo-sub">No ammo</span>`;
+    weaponEl.title = wk ? `${WEAPONS[wk].name}: hold Space to shoot${game.advanced ? ' · X or click to switch' : ''}` : 'Craft Owen bullets';
     deadEl.hidden = !game.playerDead;
     if (game.playerDead) deadEl.innerHTML = `<h2>${esc(game.killedBy || 'A bug')} got you!</h2><p>Waking up back at the start…</p>`;
     mpEl.hidden = !host && !guest;
     if (host) mpEl.textContent = `Open to join · ${host.guests.size + 1} playing`;
     if (guest) mpEl.textContent = `Playing online`;
-    const gk = GOALS.map((g) => (g.done(game) ? 1 : 0)).join('');
+    const goals = goalsFor(game);
+    const gk = (game.advanced ? 'a' : '') + goals.map((g) => (g.done(game) ? 1 : 0)).join('');
     if (gk !== lastGoals) {
       lastGoals = gk;
-      const next = GOALS.findIndex((g) => !g.done(game));
-      goalsEl.innerHTML = `<h4>Goals</h4>${GOALS.map(
+      const next = goals.findIndex((g) => !g.done(game));
+      goalsEl.innerHTML = `<h4>Goals</h4>${goals.map(
         (g, i) => `<div class="${g.done(game) ? 'done' : i === next ? 'next' : ''}">${g.done(game) ? '✓' : '○'} ${g.text}</div>`,
       ).join('')}`;
     }
@@ -1259,6 +1326,7 @@ const mount: GameModule['mount'] = (root, { onExit }) => {
     const w = game.world;
     const i = w.idx(ht[0], ht[1]);
     const far = Math.hypot(ht[0] + 0.5 - game.px, ht[1] + 0.5 - game.py) > MINE_REACH ? ' (walk closer)' : '';
+    if (w.res[i] === Res.Oil) return `<span>Oil patch: ${w.amount[i]}%</span><em>build a pump jack on it</em>`;
     if (w.res[i]) return `<span>${RES_NAME[w.res[i]]}: ${w.amount[i]}</span><em>hold right-click to mine${far}</em>`;
     if (w.tree[i]) return `<span>Tree</span><em>hold right-click to chop${far}</em>`;
     return '';

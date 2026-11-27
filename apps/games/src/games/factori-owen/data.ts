@@ -1,4 +1,5 @@
 // Static game data: items, recipes, buildings and research for Factori-owen.
+import { ADV_RECIPES, ADV_START, ADV_TECH_ICON, ADV_TECHS } from './advanced';
 
 export type ItemId =
   | 'wood' | 'coal' | 'stone' | 'owen-ore' | 'copper-ore'
@@ -17,7 +18,14 @@ export type ItemId =
   | 'express-belt' | 'assembler-2' | 'big-pole' | 'battery-bank' | 'filter-inserter' | 'steel-wall'
   | 'grenade' | 'land-mine' | 'helper-drone'
   | 'armor-1' | 'armor-2' | 'armor-3' | 'armor-4' | 'armor-5'
-  | 'eq-solar' | 'eq-battery' | 'eq-core' | 'eq-laser' | 'eq-shield' | 'eq-legs' | 'eq-night';
+  | 'eq-solar' | 'eq-battery' | 'eq-core' | 'eq-laser' | 'eq-shield' | 'eq-legs' | 'eq-night'
+  // advanced mode
+  | 'water' | 'crude-oil' | 'heavy-oil' | 'light-oil' | 'lubricant' | 'sulfuric-acid'
+  | 'pipe' | 'underground-pipe' | 'offshore-pump' | 'steam-engine' | 'pumpjack' | 'refinery' | 'storage-tank'
+  | 'crafter' | 'big-lab' | 'plastic' | 'sulfur' | 'solid-fuel' | 'rocket-fuel' | 'adv-circuit'
+  | 'rocket-part' | 'rocket-silo' | 'rocket' | 'rocket-launcher' | 'flamethrower' | 'flame-ammo' | 'sniper' | 'piercing-ammo'
+  | 'fast-underground' | 'fast-splitter' | 'roboport' | 'robot' | 'armor-0' | 'eq-goggles'
+  | 'platform-kit' | 'catcher' | 'crusher' | 'thruster' | 'ice' | 'cryser-crystal';
 
 export type Category = 'logistics' | 'production' | 'intermediate' | 'science' | 'military' | 'armor';
 
@@ -29,6 +37,8 @@ export interface ItemDef {
   place?: EntityType;
   category: Category;
   desc?: string;
+  /** Lives only in pipes and machines, never in your hands. */
+  fluid?: boolean;
 }
 
 export const ITEMS: Record<ItemId, ItemDef> = {
@@ -100,6 +110,47 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   'eq-shield': { id: 'eq-shield', name: 'Energy shield', stack: 20, category: 'armor', desc: 'Grid 2×2. Soaks up 60 damage before it reaches you, and recharges from suit power.' },
   'eq-legs': { id: 'eq-legs', name: 'Exo legs', stack: 20, category: 'armor', desc: 'Grid 2×3. Walk 30% faster while your suit has power.' },
   'eq-night': { id: 'eq-night', name: 'Night vision', stack: 20, category: 'armor', desc: 'Grid 2×2. See clearly at night while your suit has power.' },
+  // ---------- advanced mode ----------
+  'water': { id: 'water', name: 'Water', stack: 1, category: 'intermediate', fluid: true, desc: 'Pumped out of a lake by an offshore pump. Flows through pipes.' },
+  'crude-oil': { id: 'crude-oil', name: 'Crude oil', stack: 1, category: 'intermediate', fluid: true, desc: 'Pumped out of an oil patch by a pump jack. An oil refinery turns it into heavy and light oil.' },
+  'heavy-oil': { id: 'heavy-oil', name: 'Heavy oil', stack: 1, category: 'intermediate', fluid: true, desc: 'Made from crude oil in an oil refinery.' },
+  'light-oil': { id: 'light-oil', name: 'Light oil', stack: 1, category: 'intermediate', fluid: true, desc: 'Made from crude oil in an oil refinery.' },
+  'lubricant': { id: 'lubricant', name: 'Lubricant', stack: 1, category: 'intermediate', fluid: true, desc: 'Slippery! Express belts need it.' },
+  'sulfuric-acid': { id: 'sulfuric-acid', name: 'Sulfuric acid', stack: 1, category: 'intermediate', fluid: true, desc: 'Robots need it.' },
+  'pipe': { id: 'pipe', name: 'Pipe', stack: 100, place: 'pipe', category: 'logistics', desc: 'Carries water and oil. Pipes next to each other join up, so keep different liquids apart.' },
+  'underground-pipe': { id: 'underground-pipe', name: 'Underground pipe', stack: 50, place: 'underground-pipe', category: 'logistics', desc: 'Place two in a line, up to 10 tiles apart: the liquid goes under everything between them.' },
+  'offshore-pump': { id: 'offshore-pump', name: 'Offshore pump', stack: 20, place: 'offshore-pump', category: 'production', desc: 'Build it on the shore, next to water. It pumps water into the pipes beside it. No power needed.' },
+  'steam-engine': { id: 'steam-engine', name: 'Steam engine', stack: 10, place: 'steam-engine', category: 'production', desc: 'Makes power from water and fuel. Uses half the coal a coal generator does. Connect a water pipe to it.' },
+  'pumpjack': { id: 'pumpjack', name: 'Pump jack', stack: 20, place: 'pumpjack', category: 'production', desc: 'Build it on an oil patch. Pumps crude oil into the pipes beside it. Needs power.' },
+  'refinery': { id: 'refinery', name: 'Oil refinery', stack: 10, place: 'refinery', category: 'production', desc: 'Turns crude oil into heavy and light oil, then into plastic, sulfur, sulfuric acid, lubricant and solid fuel. Liquids go in and out through pipes beside it.' },
+  'storage-tank': { id: 'storage-tank', name: 'Pipe container', stack: 20, place: 'storage-tank', category: 'logistics', desc: 'A big tank that holds 2,500 of one liquid. It joins the pipes beside it.' },
+  'crafter': { id: 'crafter', name: 'Crafter', stack: 50, place: 'crafter', category: 'production', desc: 'A 2×2 machine that crafts things for you. Pick a recipe and feed it with robo arms. It can take liquids from pipes too.' },
+  'big-lab': { id: 'big-lab', name: 'Science lab', stack: 10, place: 'big-lab', category: 'production', desc: 'A 2×2 lab. Feed it science packs to research.' },
+  'plastic': { id: 'plastic', name: 'Plastic bar', stack: 100, category: 'intermediate', desc: 'Made in an oil refinery from light oil and coal.' },
+  'sulfur': { id: 'sulfur', name: 'Sulfur', stack: 50, category: 'intermediate', desc: 'Made in an oil refinery from heavy oil and water.' },
+  'solid-fuel': { id: 'solid-fuel', name: 'Solid fuel', stack: 50, fuel: 12e6, category: 'intermediate', desc: 'Burns three times as long as coal.' },
+  'rocket-fuel': { id: 'rocket-fuel', name: 'Rocket fuel', stack: 10, fuel: 100e6, category: 'intermediate', desc: 'A rocket needs 10 to fly. It also burns for a very long time.' },
+  'adv-circuit': { id: 'adv-circuit', name: 'Advanced circuit', stack: 200, category: 'intermediate', desc: 'The red chip.' },
+  'rocket-part': { id: 'rocket-part', name: 'Rocket part', stack: 10, category: 'intermediate', desc: 'Put 10 in a rocket silo, with 10 rocket fuel, to build a rocket.' },
+  'rocket-silo': { id: 'rocket-silo', name: 'Rocket silo', stack: 1, place: 'rocket-silo', category: 'production', desc: 'Builds rockets from 10 rocket parts and 10 rocket fuel, and launches them with whatever you put in the payload.' },
+  'rocket': { id: 'rocket', name: 'Rocket', stack: 100, category: 'military', desc: 'Ammo for the rocket launcher. Blows up everything where it lands.' },
+  'rocket-launcher': { id: 'rocket-launcher', name: 'Rocket launcher', stack: 1, category: 'military', desc: 'Carry it with rockets and pick it with X. Hold Space to fire.' },
+  'flamethrower': { id: 'flamethrower', name: 'Flamethrower', stack: 1, category: 'military', desc: 'Short range, but it burns every bug in front of you. Carry flame ammo and pick it with X.' },
+  'flame-ammo': { id: 'flame-ammo', name: 'Flame ammo', stack: 100, category: 'military', desc: 'Fuel for the flamethrower. Made in a crafter from crude oil.' },
+  'sniper': { id: 'sniper', name: 'Sniper rifle', stack: 1, category: 'military', desc: 'Very long range and hits hard, but slow. Uses the bullets in your gun. Pick it with X.' },
+  'piercing-ammo': { id: 'piercing-ammo', name: 'Red bullets', stack: 200, category: 'military', desc: 'A magazine of 10 bullets that do twice the damage. Your gun and gun turrets use them first.' },
+  'fast-underground': { id: 'fast-underground', name: 'Fast underground belt', stack: 50, place: 'fast-underground', category: 'logistics', desc: 'A twice-as-fast underground belt. Place two facing the same way, up to 4 tiles apart.' },
+  'fast-splitter': { id: 'fast-splitter', name: 'Fast splitter', stack: 50, place: 'fast-splitter', category: 'logistics', desc: 'A splitter for fast belts.' },
+  'roboport': { id: 'roboport', name: 'Roboport', stack: 10, place: 'roboport', category: 'logistics', desc: 'Put robots in it. They fix damaged buildings within 25 tiles, and rebuild ones the bugs destroy using items from crates nearby.' },
+  'robot': { id: 'robot', name: 'Robot', stack: 50, category: 'logistics', desc: 'A little flying helper. Put it in a roboport.' },
+  'armor-0': { id: 'armor-0', name: 'Owen armor', stack: 1, category: 'armor', desc: 'Armor: blocks 10% of damage. Room for one tile of equipment, like night vision goggles.' },
+  'eq-goggles': { id: 'eq-goggles', name: 'Night vision goggles', stack: 20, category: 'armor', desc: 'Grid 1×1. See clearly at night. No power needed.' },
+  'platform-kit': { id: 'platform-kit', name: 'Space platform starter pack', stack: 1, category: 'production', desc: 'Put it in a rocket silo payload and launch it to start a space platform.' },
+  'catcher': { id: 'catcher', name: 'Asteroid catcher', stack: 20, category: 'production', desc: 'Goes on the space platform and catches little asteroids that fly past.' },
+  'crusher': { id: 'crusher', name: 'Crusher', stack: 20, category: 'production', desc: 'Goes on the space platform and turns caught asteroids into ore, ice and crystals.' },
+  'thruster': { id: 'thruster', name: 'Thruster', stack: 20, category: 'production', desc: 'Goes on the space platform and burns ice to fly it into deep space, where cryser asteroids are common.' },
+  'ice': { id: 'ice', name: 'Ice', stack: 50, category: 'intermediate', desc: 'Crushed out of cryser asteroids. Thrusters burn it.' },
+  'cryser-crystal': { id: 'cryser-crystal', name: 'Cryser crystal', stack: 50, category: 'intermediate', desc: 'A glowing crystal from cryser asteroids. Only found in space.' },
 };
 
 export type EntityType =
@@ -111,10 +162,12 @@ export type EntityType =
   | 'pole' | 'generator' | 'solar-panel' | 'owen-monument'
   | 'gun-turret' | 'rail-turret' | 'wall'
   | 'stone-path' | 'steel-furnace' | 'electric-furnace' | 'splitter' | 'underground-belt' | 'lamp'
-  | 'express-belt' | 'assembler-2' | 'big-pole' | 'battery-bank' | 'filter-inserter' | 'steel-wall' | 'land-mine';
+  | 'express-belt' | 'assembler-2' | 'big-pole' | 'battery-bank' | 'filter-inserter' | 'steel-wall' | 'land-mine'
+  | 'pipe' | 'underground-pipe' | 'offshore-pump' | 'steam-engine' | 'pumpjack' | 'refinery' | 'storage-tank'
+  | 'crafter' | 'big-lab' | 'rocket-silo' | 'fast-underground' | 'fast-splitter' | 'roboport';
 
 export type Kind = 'chest' | 'belt' | 'inserter' | 'drill' | 'furnace' | 'assembler' | 'lab' | 'pole' | 'generator' | 'solar' | 'monument' | 'turret' | 'wall'
-  | 'floor' | 'splitter' | 'lamp' | 'battery' | 'mine';
+  | 'floor' | 'splitter' | 'lamp' | 'battery' | 'mine' | 'pipe' | 'pump' | 'pumpjack' | 'silo' | 'roboport';
 
 export interface EntityDef {
   type: EntityType;
@@ -147,6 +200,14 @@ export interface EntityDef {
   rate?: number;
   /** filter arm */
   filter?: boolean;
+  /** pipes and tanks: how much liquid one holds */
+  fcap?: number;
+  /** underground pipe */
+  ugPipe?: boolean;
+  /** steam engine: a generator that also needs water */
+  steam?: boolean;
+  /** oil refinery: only refinery recipes */
+  refinery?: boolean;
 }
 
 export const ENTITIES: Record<EntityType, EntityDef> = {
@@ -184,12 +245,26 @@ export const ENTITIES: Record<EntityType, EntityDef> = {
   'filter-inserter': { type: 'filter-inserter', kind: 'inserter', w: 1, h: 1, item: 'filter-inserter', rotatable: true, power: 46e3, electric: true, speed: 2.3, reach: 1, mineTime: 0.1, filter: true },
   'steel-wall': { type: 'steel-wall', kind: 'wall', w: 1, h: 1, item: 'steel-wall', mineTime: 0.2, hp: 1050 },
   'land-mine': { type: 'land-mine', kind: 'mine', w: 1, h: 1, item: 'land-mine', mineTime: 0.1, hp: 50 },
+  'pipe': { type: 'pipe', kind: 'pipe', w: 1, h: 1, item: 'pipe', mineTime: 0.1, fcap: 100 },
+  'underground-pipe': { type: 'underground-pipe', kind: 'pipe', w: 1, h: 1, item: 'underground-pipe', rotatable: true, mineTime: 0.1, fcap: 100, ugPipe: true },
+  'storage-tank': { type: 'storage-tank', kind: 'pipe', w: 2, h: 2, item: 'storage-tank', mineTime: 0.4, fcap: 2500, hp: 500 },
+  'offshore-pump': { type: 'offshore-pump', kind: 'pump', w: 1, h: 1, item: 'offshore-pump', mineTime: 0.2, speed: 600 },
+  'steam-engine': { type: 'steam-engine', kind: 'generator', w: 2, h: 2, item: 'steam-engine', output: 900e3, mineTime: 0.4, steam: true, hp: 400 },
+  'pumpjack': { type: 'pumpjack', kind: 'pumpjack', w: 2, h: 2, item: 'pumpjack', power: 90e3, electric: true, speed: 10, mineTime: 0.4, hp: 300 },
+  'refinery': { type: 'refinery', kind: 'assembler', w: 3, h: 3, item: 'refinery', power: 420e3, electric: true, speed: 1, mineTime: 0.5, hp: 500, refinery: true },
+  'crafter': { type: 'crafter', kind: 'assembler', w: 2, h: 2, item: 'crafter', power: 75e3, electric: true, speed: 0.75, mineTime: 0.3, hp: 300 },
+  'big-lab': { type: 'big-lab', kind: 'lab', w: 2, h: 2, item: 'big-lab', power: 60e3, electric: true, speed: 1, mineTime: 0.3 },
+  'rocket-silo': { type: 'rocket-silo', kind: 'silo', w: 5, h: 5, item: 'rocket-silo', power: 1e6, electric: true, mineTime: 1, hp: 3000 },
+  'fast-underground': { type: 'fast-underground', kind: 'belt', w: 1, h: 1, item: 'fast-underground', rotatable: true, speed: 3.75, mineTime: 0.1, ug: true },
+  'fast-splitter': { type: 'fast-splitter', kind: 'splitter', w: 2, h: 1, item: 'fast-splitter', rotatable: true, speed: 15, mineTime: 0.1 },
+  'roboport': { type: 'roboport', kind: 'roboport', w: 2, h: 2, item: 'roboport', power: 50e3, electric: true, mineTime: 0.4, hp: 500 },
 };
 
 const DEFAULT_HP: Record<Kind, number> = {
   chest: 150, belt: 80, inserter: 100, drill: 250, furnace: 200, assembler: 300, lab: 200,
   pole: 100, generator: 400, solar: 200, monument: 5000, turret: 400, wall: 350,
   floor: 200, splitter: 100, lamp: 80, battery: 250, mine: 50,
+  pipe: 100, pump: 150, pumpjack: 300, silo: 3000, roboport: 500,
 };
 export function maxHp(t: EntityType): number {
   return ENTITIES[t].hp ?? DEFAULT_HP[ENTITIES[t].kind];
@@ -217,12 +292,16 @@ export interface Recipe {
   smelt?: boolean;
   hand?: boolean;
   unlock?: string; // tech id
+  /** only an oil refinery makes it */
+  machine?: 'refinery';
+  /** more things it makes besides `out` */
+  extra?: [ItemId, number][];
 }
 
 const r = (out: ItemId, count: number, time: number, ing: [ItemId, number][], extra: Partial<Recipe> = {}): Recipe =>
   ({ id: out, out, count, time, ing, hand: true, ...extra });
 
-export const RECIPES: Recipe[] = [
+const CLASSIC_RECIPES: Recipe[] = [
   // smelting
   r('owen-plate', 1, 3.2, [['owen-ore', 1]], { smelt: true, hand: false }),
   r('copper-plate', 1, 3.2, [['copper-ore', 1]], { smelt: true, hand: false }),
@@ -296,9 +375,6 @@ export const RECIPES: Recipe[] = [
   r('eq-core', 1, 20, [['circuit', 80], ['steel-plate', 60], ['copper-plate', 60]], { unlock: 'eq-core' }),
 ];
 
-export const RECIPE_BY_ID: Record<string, Recipe> = Object.fromEntries(RECIPES.map((x) => [x.id, x]));
-export const SMELT_BY_INPUT: Partial<Record<ItemId, Recipe>> = {};
-for (const x of RECIPES) if (x.smelt) SMELT_BY_INPUT[x.ing[0][0]] = x;
 
 export interface Tech {
   id: string;
@@ -308,9 +384,11 @@ export interface Tech {
   units: number;
   time: number; // seconds per unit
   requires: string[];
+  /** can be researched again and again, costing more each time */
+  infinite?: boolean;
 }
 
-export const TECHS: Tech[] = [
+const CLASSIC_TECHS: Tech[] = [
   { id: 'automation', name: 'Automation', desc: 'Assemblers craft things for you. Also unlocks the long robo arm.', packs: ['red-pack'], units: 10, time: 10, requires: [] },
   { id: 'logistics', name: 'Logistics', desc: 'Fast conveyor belts move items twice as quickly.', packs: ['red-pack'], units: 20, time: 10, requires: [] },
   { id: 'military', name: 'Military', desc: 'Stone walls to slow the bugs down.', packs: ['red-pack'], units: 10, time: 15, requires: [] },
@@ -367,7 +445,7 @@ export const TECHS: Tech[] = [
   { id: 'monument', name: 'The Great Owen', desc: 'Build a monument to Owen to finish the game.', packs: ['red-pack', 'green-pack', 'military-pack', 'advanced-pack'], units: 200, time: 15, requires: ['rail-guns', 'solar', 'weapon-damage'] },
 ];
 /** Icon shown on each research card. */
-export const TECH_ICON: Record<string, ItemId> = {
+const CLASSIC_TECH_ICON: Record<string, ItemId> = {
   automation: 'assembler', logistics: 'fast-belt', military: 'wall', steel: 'steel-plate', 'green-science': 'green-pack',
   'fast-inserter': 'fast-inserter', solar: 'solar-panel', 'military-science': 'military-pack', 'weapon-damage': 'owen-ammo',
   'advanced-science': 'advanced-pack', 'rail-guns': 'rail-gun', monument: 'owen-monument',
@@ -415,9 +493,7 @@ export const TECH_ICON: Record<string, ItemId> = {
   'eq-core': 'eq-core',
 };
 export const SCIENCE_PACKS: ItemId[] = ['red-pack', 'green-pack', 'military-pack', 'advanced-pack'];
-export const TECH_BY_ID: Record<string, Tech> = Object.fromEntries(TECHS.map((t) => [t.id, t]));
-
-export const PLAYER_START: [ItemId, number][] = [
+const CLASSIC_START: [ItemId, number][] = [
   ['owen-plate', 8],
   ['wood', 4],
   ['burner-drill', 1],
@@ -425,5 +501,46 @@ export const PLAYER_START: [ItemId, number][] = [
   ['owen-ammo', 10],
 ];
 
+// ---------- rules: the classic game or advanced mode ----------
+// Everything reads these shared tables; useRules swaps what is in them when a game starts.
+
+export const RECIPES: Recipe[] = [];
+export const RECIPE_BY_ID: Record<string, Recipe> = {};
+export const SMELT_BY_INPUT: Partial<Record<ItemId, Recipe>> = {};
+export const TECHS: Tech[] = [];
+export const TECH_BY_ID: Record<string, Tech> = {};
+export const TECH_ICON: Record<string, ItemId> = {};
+export const PLAYER_START: [ItemId, number][] = [];
+export const RULES = { advanced: false, version: 0 };
+
+function fill<T>(into: Record<string, T>, from: Record<string, T>) {
+  for (const k of Object.keys(into)) delete into[k];
+  Object.assign(into, from);
+}
+
+export function useRules(advanced: boolean) {
+  if (RULES.version && RULES.advanced === advanced) return;
+  RULES.advanced = advanced;
+  RULES.version++;
+  const recipes = advanced ? ADV_RECIPES : CLASSIC_RECIPES;
+  const techs = advanced ? ADV_TECHS : CLASSIC_TECHS;
+  RECIPES.splice(0, RECIPES.length, ...recipes);
+  TECHS.splice(0, TECHS.length, ...techs);
+  PLAYER_START.splice(0, PLAYER_START.length, ...(advanced ? ADV_START : CLASSIC_START));
+  fill(RECIPE_BY_ID, Object.fromEntries(recipes.map((x) => [x.id, x])));
+  const smelt: Partial<Record<ItemId, Recipe>> = {};
+  for (const x of recipes) if (x.smelt) smelt[x.ing[0][0]] = x;
+  fill(SMELT_BY_INPUT as Record<string, Recipe>, smelt as Record<string, Recipe>);
+  fill(TECH_BY_ID, Object.fromEntries(techs.map((t) => [t.id, t])));
+  fill(TECH_ICON, advanced ? ADV_TECH_ICON : CLASSIC_TECH_ICON);
+}
+
+/** Units of research a technology needs now (infinite ones cost more each level). */
+export function techUnits(t: Tech, level: number) {
+  return t.infinite ? t.units * (level + 1) : t.units;
+}
+
 /** How many ingredient crafts an assembler/furnace buffers before inserters stop feeding it. */
 export const INPUT_BUFFER_CRAFTS = 2;
+
+useRules(false);

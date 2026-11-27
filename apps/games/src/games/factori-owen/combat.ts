@@ -4,6 +4,7 @@ import type { Entity, Game } from './sim';
 import { WORLD } from './world';
 import { bulletMult, fireRate, healing, railMult, turretRange } from './bonus';
 import { absorb, lasersReady, LASER_DAMAGE, LASER_RANGE, LASER_SHOT_J } from './armor';
+import { addGhost } from './robots';
 
 export const BUG_NAMES = ['Calvin', 'Archie', 'Mom', 'Dad', 'Roger'];
 /** The player walks 6 tiles/s; bugs run at 95% of that. */
@@ -61,7 +62,7 @@ export interface Nest {
 }
 
 export interface Fx {
-  kind: 'bullet' | 'rail' | 'splat' | 'boom' | 'bite' | 'laser' | 'grenade' | 'drone';
+  kind: 'bullet' | 'rail' | 'splat' | 'boom' | 'bite' | 'laser' | 'grenade' | 'drone' | 'rocket' | 'flame';
   x0: number;
   y0: number;
   x1: number;
@@ -81,16 +82,40 @@ const WAVE_GAP_TICKS = 60 * 60 * 3;
 const ANGER_PER_WAVE = 60;
 const CELL = 32;
 const CELLS = WORLD / CELL;
+/** Advanced mode's finer pollution: 4 by 4 tile cells that spread one cell each cycle. */
+export const APC = 4;
+export const AN = WORLD / APC;
+const CYCLE_TICKS = 120;
+/** Pollution you can see on the map. */
+export const POLLUTION_SEEN = 0.1;
+/** Nests only get angry when this much pollution reaches them. */
+const NEST_SMELLS = 0.5;
+/** At least this long between a raid on a nest and the next wave. */
+const RAID_GAP_TICKS = 60 * 60;
+/** Bugs answer a raid on their nest this many ticks later. */
+const RAID_DELAY = 60 * 15;
 
-export const WEAPONS = {
-  pistol: { name: 'Gun', range: 16, cooldown: 12, damage: 6, ammo: 'owen-ammo' as ItemId },
-  rail: { name: 'Rail gun', range: 34, cooldown: 100, damage: 600, ammo: 'rail-ammo' as ItemId },
+export type WeaponId = 'pistol' | 'rail' | 'sniper' | 'rocket' | 'flame';
+export const WEAPONS: Record<WeaponId, { name: string; range: number; cooldown: number; damage: number; ammo: ItemId; gun?: ItemId }> = {
+  pistol: { name: 'Gun', range: 16, cooldown: 12, damage: 6, ammo: 'owen-ammo' },
+  rail: { name: 'Rail gun', range: 34, cooldown: 100, damage: 600, ammo: 'rail-ammo', gun: 'rail-gun' },
+  sniper: { name: 'Sniper rifle', range: 32, cooldown: 75, damage: 90, ammo: 'owen-ammo', gun: 'sniper' },
+  rocket: { name: 'Rocket launcher', range: 22, cooldown: 60, damage: 140, ammo: 'rocket', gun: 'rocket-launcher' },
+  flame: { name: 'Flamethrower', range: 9, cooldown: 5, damage: 6, ammo: 'flame-ammo', gun: 'flamethrower' },
 };
+/** Shots in one flame ammo. */
+export const FLAME_SHOTS = 40;
 
 /** Pollution each working machine gives off per second. */
 const POLLUTION: Partial<Record<string, number>> = {
   drill: 0.18, furnace: 0.04, generator: 0.5, assembler: 0.06, lab: 0.02,
 };
+/** Advanced mode: pollution each working machine gives off per second. */
+const ADV_POLLUTION: Partial<Record<string, number>> = {
+  'burner-drill': 3, 'electric-drill': 2, 'stone-furnace': 1, 'steel-furnace': 0.8, 'electric-furnace': 0.6,
+  generator: 5, 'steam-engine': 3, crafter: 0.6, refinery: 2, pumpjack: 1, 'big-lab': 0.2, 'rocket-silo': 1,
+};
+const pollutes = (g: Game, e: Entity) => (g.advanced ? ADV_POLLUTION[e.type] : POLLUTION[e.def.kind]) ?? 0;
 
 export function newCombatState() {
   return {
@@ -98,6 +123,16 @@ export function newCombatState() {
     nests: [] as Nest[],
     fx: [] as Fx[],
     pollution: new Float32Array(CELLS * CELLS),
+    /** advanced mode's pollution */
+    apol: new Float32Array(AN * AN),
+    absorb: null as Float32Array | null,
+    raidAt: 0,
+    raidNest: 0,
+    /** the weapon you picked with X */
+    weapon: null as WeaponId | null,
+    flameShots: 0,
+    /** the magazine in your gun is red bullets */
+    pierce: false,
     evolution: 0,
     nextBug: 1,
     playerHp: PLAYER_HP,
@@ -110,7 +145,7 @@ export function newCombatState() {
     aimAngle: Math.PI / 2,
     railShots: 0,
     /** grenades in the air */
-    grenades: [] as { x: number; y: number; t: number }[],
+    grenades: [] as { x: number; y: number; t: number; r?: number; dmg?: number }[],
     /** the helper drone, when you carry one */
     drone: null as null | { x: number; y: number; cd: number; angle: number },
   };
@@ -124,7 +159,7 @@ export function spawnNests(g: Game, clusters = Math.round((14 * WORLD * WORLD) /
   for (let tries = 0; tries < clusters * 40 && clusters > 0; tries++) {
     const x = 8 + Math.floor(w.rand(tries, 77, 3) * (WORLD - 16));
     const y = 8 + Math.floor(w.rand(tries, 78, 3) * (WORLD - 16));
-    if (Math.hypot(x - c, y - c) < 62) continue;
+    if (Math.hypot(x - c, y - c) < (g.advanced ? 124 : 62)) continue;
     const n = 2 + Math.floor(w.rand(tries, 79, 3) * 3);
     let placed = 0;
     for (let k = 0; k < n * 4 && placed < n; k++) {
@@ -178,6 +213,7 @@ function damageEntity(g: Game, e: Entity, dmg: number) {
   e.hp -= dmg;
   if (e.hp <= 0) {
     g.cs.fx.push({ kind: 'boom', x0: e.cx, y0: e.cy, x1: e.cx, y1: e.cy, t: 30, life: 30 });
+    addGhost(g, e);
     g.remove(e);
     g.events.push('destroyed');
     g.toast(`A ${ENTITIES[e.type].item.replace(/-/g, ' ')} was destroyed!`, 3);
@@ -199,6 +235,11 @@ function killBug(g: Game, b: Bug) {
 
 export function damageNest(g: Game, n: Nest, dmg: number) {
   n.hp -= dmg;
+  // advanced mode: raiding a nest is the only thing that makes the bugs come sooner
+  if (g.advanced && g.enemies && !g.cs.raidAt) {
+    g.cs.raidAt = g.tick + RAID_DELAY;
+    g.cs.raidNest = n.id;
+  }
   // the nest calls for help
   for (const b of g.cs.bugs) if (b.nest === n.id && b.mode === 'idle') b.mode = 'chase';
   if (n.hp <= 0) {
@@ -259,14 +300,53 @@ function shoot(g: Game, x: number, y: number, t: Target, dmg: number) {
 
 // ---------- player guns ----------
 
-export function playerWeapon(g: Game): keyof typeof WEAPONS | null {
-  if (g.inv.count('rail-gun') > 0 && g.inv.count('rail-ammo') > 0) return 'rail';
-  if (g.inv.count('owen-ammo') > 0 || g.pistolRounds > 0 || g.cs.reload > 0) return 'pistol';
-  return null;
+const hasBullets = (g: Game) => g.inv.count('owen-ammo') > 0 || g.inv.count('piercing-ammo') > 0 || g.pistolRounds > 0 || g.cs.reload > 0;
+
+/** Weapons you could fire right now. */
+export function readyWeapons(g: Game): WeaponId[] {
+  const out: WeaponId[] = [];
+  const has = (it: ItemId) => g.inv.count(it) > 0;
+  if (has('rail-gun') && has('rail-ammo')) out.push('rail');
+  if (has('rocket-launcher') && has('rocket')) out.push('rocket');
+  if (has('flamethrower') && (has('flame-ammo') || g.cs.flameShots > 0)) out.push('flame');
+  if (has('sniper') && hasBullets(g)) out.push('sniper');
+  if (hasBullets(g)) out.push('pistol');
+  return out;
+}
+
+export function playerWeapon(g: Game): WeaponId | null {
+  const ready = readyWeapons(g);
+  if (g.cs.weapon && ready.includes(g.cs.weapon)) return g.cs.weapon;
+  return ready.find((w) => w === 'rail' || w === 'pistol') ?? ready[0] ?? null;
+}
+
+/** X: switch to the next weapon you can fire. */
+export function cycleWeapon(g: Game): WeaponId | null {
+  const ready = readyWeapons(g);
+  if (!ready.length) return null;
+  const cur = playerWeapon(g);
+  g.cs.weapon = ready[(ready.indexOf(cur!) + 1) % ready.length];
+  return g.cs.weapon;
+}
+
+/** A cone of fire: burns every bug and nest in front. */
+function flameShot(g: Game, x: number, y: number, tx: number, ty: number, dmg: number) {
+  const a = Math.atan2(ty - y, tx - x);
+  const R = WEAPONS.flame.range;
+  const inCone = (px: number, py: number, pad: number) => {
+    const d = Math.hypot(px - x, py - y);
+    if (d > R + pad) return false;
+    let da = Math.abs(Math.atan2(py - y, px - x) - a);
+    if (da > Math.PI) da = Math.PI * 2 - da;
+    return da < 0.4 || d < 1 + pad;
+  };
+  for (const b of [...g.cs.bugs]) if (inCone(b.x, b.y, 0.3)) damageBug(g, b, dmg);
+  for (const n of [...g.cs.nests]) if (inCone(n.x, n.y, NEST_R)) damageNest(g, n, dmg);
+  g.cs.fx.push({ kind: 'flame', x0: x, y0: y - 0.1, x1: x + Math.cos(a) * R, y1: y + Math.sin(a) * R, t: 14, life: 14 });
 }
 
 /** Fires a weapon from (x, y) at the nearest target (or at `aim`). Returns false if nothing to shoot. */
-export function playerFireFrom(g: Game, x: number, y: number, wk: keyof typeof WEAPONS | 'grenade', aim?: { x: number; y: number }): boolean {
+export function playerFireFrom(g: Game, x: number, y: number, wk: WeaponId | 'grenade', aim?: { x: number; y: number }, pierce = false): boolean {
   if (wk === 'grenade') {
     if (aim) throwGrenade(g, x, y, aim.x, aim.y);
     return !!aim;
@@ -278,8 +358,15 @@ export function playerFireFrom(g: Game, x: number, y: number, wk: keyof typeof W
   if (!t && !aim) return false;
   if (!t && aim) t = { x: aim.x, y: aim.y };
   if (wk === 'rail') railShot(g, x, y - 0.1, t!.x, t!.y, wpn.range, wpn.damage * railMult(g));
+  else if (wk === 'rocket') {
+    const d = Math.hypot(t!.x - x, t!.y - y);
+    const flight = Math.max(6, Math.round(d * 1.6));
+    g.cs.grenades.push({ x: t!.x, y: t!.y, t: flight, r: 2.6, dmg: wpn.damage });
+    g.cs.fx.push({ kind: 'rocket', x0: x, y0: y - 0.2, x1: t!.x, y1: t!.y, t: flight, life: flight });
+  } else if (wk === 'flame') flameShot(g, x, y, t!.x, t!.y, wpn.damage * damageMult(g));
   else {
-    if (t!.bug || t!.nest) shoot(g, x, y - 0.1, t!, wpn.damage * damageMult(g));
+    const dmg = wpn.damage * damageMult(g) * (pierce ? 2 : 1);
+    if (t!.bug || t!.nest) shoot(g, x, y - 0.1, t!, dmg);
     else g.cs.fx.push({ kind: 'bullet', x0: x, y0: y - 0.1, x1: t!.x, y1: t!.y, t: 4, life: 4 });
     g.events.push('shot');
   }
@@ -299,18 +386,26 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
   let t = nearestTarget(g, aim?.x ?? g.px, aim?.y ?? g.py, aim ? 4 : wpn.range);
   if (t && Math.hypot(t.x - g.px, t.y - g.py) > wpn.range + NEST_R) t = null;
   if (!t && !aim) return;
+  const mags = () => g.inv.count('owen-ammo') + g.inv.count('piercing-ammo');
   if (wk === 'rail') g.inv.remove('rail-ammo', 1);
-  else {
+  else if (wk === 'rocket') g.inv.remove('rocket', 1);
+  else if (wk === 'flame') {
+    if (cs.flameShots <= 0) {
+      if (g.inv.remove('flame-ammo', 1) < 1) return;
+      cs.flameShots = FLAME_SHOTS;
+    }
+    cs.flameShots--;
+  } else {
     if (g.pistolRounds <= 0) {
       // empty: put a new magazine in (takes 1.45 s)
-      if (cs.reload === 0 && g.inv.count('owen-ammo') > 0) {
+      if (cs.reload === 0 && mags() > 0) {
         cs.reload = RELOAD_TICKS;
         g.events.push('reload');
       }
       return;
     }
     g.pistolRounds--;
-    if (g.pistolRounds === 0 && g.inv.count('owen-ammo') > 0) {
+    if (g.pistolRounds === 0 && mags() > 0) {
       cs.reload = RELOAD_TICKS;
       g.events.push('reload');
     }
@@ -324,11 +419,17 @@ export function playerFire(g: Game, aim?: { x: number; y: number }) {
       const a = Math.atan2(ty - g.py, tx - g.px);
       cs.fx.push({ kind: 'rail', x0: g.px, y0: g.py - 0.1, x1: g.px + Math.cos(a) * wpn.range, y1: g.py + Math.sin(a) * wpn.range, t: 26, life: 26 });
       g.events.push('rail');
+    } else if (wk === 'flame') {
+      cs.fx.push({ kind: 'flame', x0: g.px, y0: g.py - 0.1, x1: tx, y1: ty, t: 14, life: 14 });
+    } else if (wk === 'rocket') {
+      cs.fx.push({ kind: 'rocket', x0: g.px, y0: g.py - 0.2, x1: tx, y1: ty, t: 20, life: 20 });
     } else {
       cs.fx.push({ kind: 'bullet', x0: g.px, y0: g.py - 0.1, x1: tx, y1: ty, t: 4, life: 4 });
       g.events.push('shot');
     }
-  } else playerFireFrom(g, g.px, g.py, wk, aim);
+  } else playerFireFrom(g, g.px, g.py, wk, aim, cs.pierce);
+  if (wk === 'flame') g.events.push('flame');
+  if (wk === 'rocket') g.events.push('rocket');
   cs.gunCd = Math.round(wpn.cooldown / fireRate(g));
   const tx = t?.x ?? aim?.x, ty = t?.y ?? aim?.y;
   if (tx !== undefined && ty !== undefined) {
@@ -344,14 +445,23 @@ export function updateCombat(g: Game) {
   if (cs.gunCd > 0) cs.gunCd--;
   if (cs.shootStop > 0) cs.shootStop--;
   if (cs.muzzle > 0) cs.muzzle--;
-  if (cs.reload === 0 && g.pistolRounds === 0 && !g.playerDead && g.inv.count('owen-ammo') > 0) {
+  if (cs.reload === 0 && g.pistolRounds === 0 && !g.playerDead && (g.inv.count('owen-ammo') > 0 || g.inv.count('piercing-ammo') > 0)) {
     // an empty gun loads itself as soon as you have bullets
     cs.reload = RELOAD_TICKS;
     g.events.push('reload');
   }
   if (cs.reload > 0) {
     cs.reload--;
-    if (cs.reload === 0 && g.inv.remove('owen-ammo', 1) === 1) g.pistolRounds = MAG_SIZE;
+    if (cs.reload === 0) {
+      // red bullets go in first
+      if (g.inv.remove('piercing-ammo', 1) === 1) {
+        g.pistolRounds = MAG_SIZE;
+        cs.pierce = true;
+      } else if (g.inv.remove('owen-ammo', 1) === 1) {
+        g.pistolRounds = MAG_SIZE;
+        cs.pierce = false;
+      }
+    }
   }
   // player regenerates after a while
   const heal = healing(g);
@@ -366,8 +476,117 @@ export function updateCombat(g: Game) {
   updateHelpers(g);
   if (!g.enemies) return;
 
-  if (g.tick % 60 === 0) secondly(g);
+  if (g.advanced) {
+    if (g.tick % CYCLE_TICKS === 0) advancedCycle(g);
+  } else if (g.tick % 60 === 0) secondly(g);
   for (const b of [...cs.bugs]) updateBug(g, b);
+}
+
+/** How much each pollution cell soaks up per cycle: trees soak up a lot, water a little. */
+function absorbMap(g: Game): Float32Array {
+  const a = new Float32Array(AN * AN);
+  const w = g.world;
+  for (let cy = 0; cy < AN; cy++)
+    for (let cx = 0; cx < AN; cx++) {
+      let trees = 0, water = 0;
+      for (let j = 0; j < APC; j++)
+        for (let i = 0; i < APC; i++) {
+          const t = (cy * APC + j) * WORLD + cx * APC + i;
+          if (w.tree[t]) trees++;
+          if (w.ground[t] === 4) water++;
+        }
+      a[cy * AN + cx] = 0.012 + trees * 0.004 - water * 0.0004;
+    }
+  return a;
+}
+
+/**
+ * Advanced mode, every 2 seconds: machines pollute, pollution spreads one cell (4 tiles) further,
+ * and nests it reaches get angry. Bugs only attack when your pollution reaches their nest, at most
+ * once every 3 minutes, unless you raid them.
+ */
+function advancedCycle(g: Game) {
+  const cs = g.cs;
+  const p = cs.apol;
+  const secs = CYCLE_TICKS / 60;
+  if (!cs.absorb || g.tick % (CYCLE_TICKS * 30) === 0) cs.absorb = absorbMap(g);
+  const ab = cs.absorb;
+  for (const e of g.ents.values()) {
+    if (!e.working) continue;
+    const k = pollutes(g, e);
+    if (k) p[Math.floor(e.cy / APC) * AN + Math.floor(e.cx / APC)] += k * secs;
+  }
+  const next = new Float32Array(p.length);
+  for (let y = 0; y < AN; y++)
+    for (let x = 0; x < AN; x++) {
+      const i = y * AN + x;
+      const v = p[i];
+      if (v <= 0) continue;
+      let kept = v;
+      if (v > POLLUTION_SEEN) {
+        const share = v * 0.18;
+        if (x > 0) { next[i - 1] += share; kept -= share; }
+        if (x < AN - 1) { next[i + 1] += share; kept -= share; }
+        if (y > 0) { next[i - AN] += share; kept -= share; }
+        if (y < AN - 1) { next[i + AN] += share; kept -= share; }
+      }
+      next[i] += kept;
+    }
+  for (let i = 0; i < next.length; i++) next[i] = Math.max(0, next[i] * 0.997 - ab[i]);
+  p.set(next);
+  cs.evolution = Math.min(1, cs.evolution + secs / (60 * 60 * 4));
+
+  for (const n of cs.nests) {
+    const i = Math.floor(n.y / APC) * AN + Math.floor(n.x / APC);
+    if (p[i] > NEST_SMELLS) {
+      const take = Math.min(p[i], 3);
+      p[i] -= take;
+      n.anger += take;
+      cs.evolution = Math.min(1, cs.evolution + take * 0.00002);
+    }
+    n.spawnCd -= secs;
+    const guards = cs.bugs.filter((b) => b.nest === n.id && b.mode === 'idle').length;
+    if (n.spawnCd <= 0 && guards < 3 && cs.bugs.length < 220) {
+      spawnBug(g, n.x + (Math.random() - 0.5) * 3, n.y + 1.6, pickKind(cs.evolution), n.id, 'idle');
+      n.spawnCd = 25;
+    }
+    if (n.anger >= ANGER_PER_WAVE * 2) {
+      if (g.tick > GRACE_TICKS && g.tick - cs.lastWave >= WAVE_GAP_TICKS) {
+        n.anger = 0;
+        if (sendAttack(g, n)) cs.lastWave = g.tick;
+      } else n.anger = ANGER_PER_WAVE * 2;
+    }
+  }
+  // a raided nest answers back
+  if (cs.raidAt && g.tick >= cs.raidAt) {
+    const n = cs.nests.find((q) => q.id === cs.raidNest) ?? nearestNest(g, g.px, g.py);
+    cs.raidAt = 0;
+    if (n && g.tick - cs.lastWave >= RAID_GAP_TICKS && sendAttack(g, n, true)) cs.lastWave = g.tick;
+  }
+}
+
+function nearestNest(g: Game, x: number, y: number): Nest | null {
+  let best: Nest | null = null, bd = 1e9;
+  for (const n of g.cs.nests) {
+    const d = Math.hypot(n.x - x, n.y - y);
+    if (d < bd) {
+      bd = d;
+      best = n;
+    }
+  }
+  return best;
+}
+
+/** Saves only the polluted cells: [cell, amount ×100, …]. */
+export function packPollution(p: Float32Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < p.length; i++) if (p[i] > 0.02) out.push(i, Math.round(p[i] * 100));
+  return out;
+}
+
+export function unpackPollution(d: number[], into: Float32Array) {
+  if (!Array.isArray(d)) return;
+  for (let k = 0; k + 1 < d.length; k += 2) if (d[k] < into.length) into[d[k]] = d[k + 1] / 100;
 }
 
 function secondly(g: Game) {
@@ -419,24 +638,25 @@ function secondly(g: Game) {
   }
 }
 
-function sendAttack(g: Game, n: Nest): boolean {
-  // go for the dirtiest machine within reach
-  let best: Entity | null = null, bd = 150;
+function sendAttack(g: Game, n: Nest, raid = false): boolean {
+  // go for the dirtiest machine within reach (advanced: anywhere your pollution came from)
+  let best: Entity | null = null, bd = g.advanced ? 1e9 : 150;
   for (const e of g.ents.values()) {
-    if (!POLLUTION[e.def.kind] || !e.working) continue;
+    if (!pollutes(g, e) || (!e.working && !raid)) continue;
     const d = Math.hypot(e.cx - n.x, e.cy - n.y);
     if (d < bd) {
       bd = d;
       best = e;
     }
   }
-  if (!best) return false;
+  const tx = best ? best.cx : g.px, ty = best ? best.cy : g.py;
+  if (!best && !raid) return false;
   const size = Math.min(14, 2 + Math.round(g.cs.evolution * 10 + Math.random() * 3));
   for (let i = 0; i < size; i++) {
-    spawnBug(g, n.x + (Math.random() - 0.5) * 3, n.y + (Math.random() - 0.5) * 3, pickKind(g.cs.evolution), n.id, 'attack', best.cx, best.cy);
+    spawnBug(g, n.x + (Math.random() - 0.5) * 3, n.y + (Math.random() - 0.5) * 3, pickKind(g.cs.evolution), n.id, 'attack', tx, ty);
   }
   g.events.push('attack');
-  g.toast('The bugs are coming!', 4);
+  g.toast(raid ? 'You raided their nest: the bugs are coming for you!' : 'The bugs are coming!', 4);
   return true;
 }
 
@@ -475,7 +695,7 @@ function updateBug(g: Game, b: Bug) {
     ty = py;
     if (pd < 0.7 + k.size * 0.5) {
       if (b.cd <= 0) {
-        b.cd = 40;
+        b.cd = g.advanced ? 60 : 40;
         cs.fx.push({ kind: 'bite', x0: px, y0: py, x1: px, y1: py, t: 10, life: 10 });
         if (who) g.hurtOthers.push([who, k.damage, b.name]);
         else hurtPlayer(g, k.damage, b.name);
@@ -516,7 +736,7 @@ function updateBug(g: Game, b: Bug) {
         if (Math.hypot(ex - b.x, ey - b.y) < 0.35 + k.size * 0.5) {
           if (b.cd <= 0) {
             damageEntity(g, best, k.damage);
-            b.cd = 40;
+            b.cd = g.advanced ? 60 : 40;
             cs.fx.push({ kind: 'bite', x0: ex, y0: ey, x1: ex, y1: ey, t: 10, life: 10 });
           }
           b.angle = Math.atan2(best.cy - b.y, best.cx - b.x);
@@ -541,7 +761,7 @@ function updateBug(g: Game, b: Bug) {
       // something in the way: bite it
       if (b.cd <= 0) {
         damageEntity(g, e, k.damage);
-        b.cd = 40;
+        b.cd = g.advanced ? 60 : 40;
         cs.fx.push({ kind: 'bite', x0: nx, y0: ny, x1: nx, y1: ny, t: 10, life: 10 });
       }
       b.angle = aa;
@@ -570,7 +790,8 @@ function updateTurrets(g: Game) {
       if (e.progress < 1) e.progress = Math.min(1, e.progress + (e.sat * d.fireRate!) / 60);
       e.working = e.progress < 1 && e.sat > 0;
     }
-    const have = (e.input[ammo] ?? 0) + (rail ? 0 : e.burn);
+    const pierceIn = !rail && ammo === 'owen-ammo' ? e.input['piercing-ammo'] ?? 0 : 0;
+    const have = (e.input[ammo] ?? 0) + pierceIn + (rail ? 0 : e.burn);
     if (have <= 0) {
       e.status = 'Out of ammo';
       continue;
@@ -592,12 +813,15 @@ function updateTurrets(g: Game) {
       railShot(g, e.cx, e.cy - 0.3, t.x, t.y, d.range! * turretRange(g), d.damage! * railMult(g));
     } else {
       if (e.burn <= 0) {
-        e.input[ammo]! -= 1;
-        if (!e.input[ammo]) delete e.input[ammo];
+        // red bullets first; e.cursor remembers which kind is loaded
+        const use: ItemId = pierceIn > 0 ? 'piercing-ammo' : ammo;
+        e.input[use]! -= 1;
+        if (!e.input[use]) delete e.input[use];
         e.burn = 10; // rounds in the loaded magazine
+        e.cursor = use === 'piercing-ammo' ? 1 : 0;
       }
       e.burn--;
-      shoot(g, e.cx, e.cy - 0.3, t, d.damage! * damageMult(g));
+      shoot(g, e.cx, e.cy - 0.3, t, d.damage! * damageMult(g) * (e.cursor === 1 ? 2 : 1));
       e.anim = Math.round(60 / d.fireRate! / fireRate(g));
       e.status = 'Firing';
       g.events.push('turret');
@@ -654,7 +878,7 @@ function explode(g: Game, x: number, y: number, r: number, dmg: number) {
 function updateGrenades(g: Game) {
   const cs = g.cs;
   if (!cs.grenades.length) return;
-  for (const gr of cs.grenades) if (--gr.t <= 0) explode(g, gr.x, gr.y, GRENADE_RADIUS, GRENADE_DAMAGE);
+  for (const gr of cs.grenades) if (--gr.t <= 0) explode(g, gr.x, gr.y, gr.r ?? GRENADE_RADIUS, gr.dmg ?? GRENADE_DAMAGE);
   cs.grenades = cs.grenades.filter((gr) => gr.t > 0);
 }
 

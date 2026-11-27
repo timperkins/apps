@@ -6,7 +6,9 @@ const R = (g: Game, id: string) => g.researched.has(id);
 export const craftSpeed = (g: Game) => (R(g, 'fast-hands') ? 1.5 : 1);
 export const invSize = (g: Game) => 80 + (R(g, 'backpack') ? 20 : 0);
 export const reachBonus = (g: Game) => (R(g, 'long-arms') ? 5 : 0);
-export const miningProd = (g: Game) => (R(g, 'mining-prod-1') ? 0.1 : 0) + (R(g, 'mining-prod-2') ? 0.1 : 0);
+export const miningProd = (g: Game) => (R(g, 'mining-prod-1') ? 0.1 : 0) + (R(g, 'mining-prod-2') ? 0.1 : 0) + 0.1 * g.level('mining-prod');
+/** Advanced mode's Faster mining: 20% a level, for drills, pump jacks and your hands. */
+export const drillSpeed = (g: Game) => 1 + 0.2 * g.level('mining-speed');
 export const labSpeed = (g: Game) => (R(g, 'lab-speed') ? 1.5 : 1);
 export const genMult = (g: Game) => (R(g, 'better-gen') ? 1.5 : 1);
 export const bulletMult = (g: Game) => 1 + (R(g, 'weapon-damage') ? 0.5 : 0) + (R(g, 'bullet-damage-2') ? 0.5 : 0);
