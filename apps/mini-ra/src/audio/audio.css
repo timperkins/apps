@@ -1,0 +1,400 @@
+/* The Audio page: the units page's header and colors (showcase.css), with
+   cards of play buttons. */
+@import '../showcase.css';
+
+#top .tools {
+  display: flex;
+  gap: 6px;
+}
+#top .tools button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink);
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+h3 {
+  margin: 14px 0 2px;
+  font-size: 13px;
+  font-weight: normal;
+}
+
+.blurb,
+.card p,
+.vcard p,
+.file,
+.meta {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.blurb {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--dim);
+  max-width: 70ch;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 10px;
+}
+
+.card,
+.vcard {
+  scroll-margin-top: 80px;
+  padding: 10px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.08), 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+.card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.card .body {
+  flex: 1;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+h5 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: normal;
+  color: #9dff9d;
+}
+
+.tag {
+  font-size: 10px;
+  padding: 0 5px;
+  color: #10170d;
+  background: #e8dc72;
+}
+
+.card p,
+.vcard p {
+  margin: 3px 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.what {
+  color: var(--ink);
+}
+
+.when {
+  color: var(--dim);
+}
+
+.when b,
+.vcard p b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* pictures: units drawn with the game's sprites, or a build-menu picture */
+.pic {
+  flex: none;
+  image-rendering: pixelated;
+  background: #22391b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.pic.unit {
+  /* the canvas is in map pixels times ART: fit it in a 64-pixel-high box */
+  height: 64px;
+  width: calc(64px * var(--w, 1) / var(--h, 1));
+  max-width: 96px;
+  object-fit: contain;
+}
+.pic.cameo {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+}
+.pic.none {
+  width: 0;
+  border: 0;
+}
+
+/* play buttons: a triangle (or a square while playing) and a progress bar */
+.plays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 4px;
+}
+
+button.play {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: left;
+  padding: 4px 8px 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  overflow: hidden;
+}
+button.play:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+button.play .ico {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent #9dff9d;
+}
+button.play.on {
+  border-color: #9dff9d;
+}
+button.play.on .ico {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: #9dff9d;
+}
+button.play .bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0;
+  background: #9dff9d;
+}
+button.play.main {
+  background: rgba(157, 255, 157, 0.12);
+}
+button.play .rate {
+  font-size: 10px;
+  color: var(--dim);
+}
+button.play.rnd {
+  font-size: 11px;
+  padding: 2px 7px 3px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.file {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.file a {
+  color: var(--dim);
+}
+.file .len {
+  color: var(--ink);
+}
+
+/* a voice: who, then each kind of line with its takes */
+.vcard {
+  margin: 0 0 12px;
+}
+
+.vhead {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+.vhead .pics {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.vtxt {
+  min-width: 0;
+}
+.voice .id {
+  font-size: 10px;
+  color: var(--dim);
+  margin-left: 4px;
+}
+.style,
+.used,
+.note {
+  color: var(--dim);
+}
+
+.lines {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+
+.line {
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vcard#voice-announcer .lines {
+  grid-template-columns: 1fr;
+}
+
+.lhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.opts {
+  font-size: 11px;
+  color: #e8dc72;
+}
+
+ol.takes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+ol.takes li {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  align-items: center;
+  gap: 2px 8px;
+}
+ol.takes li > button {
+  justify-self: start;
+}
+ol.takes li > .file {
+  grid-column: 2;
+}
+ol.takes .num {
+  width: 14px;
+  font-size: 11px;
+  color: var(--dim);
+  text-align: right;
+}
+ol.takes.ann {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px 14px;
+}
+ol.takes.ann li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.atxt p {
+  margin: 0 0 2px;
+}
+.atxt .file {
+  flex-wrap: wrap;
+}
+
+.group {
+  margin-bottom: 8px;
+}
+
+/* on a phone the header scrolls away (it is four rows tall there) and Stop
+   floats in the corner */
+@media (max-width: 520px) {
+  #top {
+    position: static;
+  }
+  #top .tools {
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 3;
+  }
+  #top .tools button {
+    padding: 9px 14px;
+    font-size: 13px;
+    background: #24331d;
+    border-color: #9dff9d;
+  }
+  .card,
+  .vcard {
+    scroll-margin-top: 8px;
+  }
+}
+
+/* the options: Current, New 1, New 2, New 3 */
+.choices {
+  display: inline-flex;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+}
+button.choice {
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  padding: 3px 8px 4px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  margin-right: -1px;
+  cursor: pointer;
+}
+button.choice:hover {
+  color: var(--ink);
+}
+button.choice[aria-checked='true'] {
+  position: relative;
+  color: #10170d;
+  background: #9dff9d;
+  border-color: #10170d;
+}
+.card.changed,
+.vopts.changed {
+  border-color: #9dff9d;
+}
+.card.changed .head h4::after {
+  content: ' · new pick';
+  color: #9dff9d;
+  font-size: 11px;
+}
+
+.vopts {
+  margin: 0 0 8px;
+  padding: 8px;
+  background: rgba(157, 255, 157, 0.06);
+  border: 1px dashed rgba(157, 255, 157, 0.4);
+}
+.vopts .voice {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.vopts .note {
+  margin: 4px 0 0;
+  font-size: 11px;
+}

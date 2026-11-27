@@ -1,0 +1,14 @@
+{
+  "name": "mini-ra",
+  "type": "hosting",
+  "domain": "mini-ra.trom.dev",
+  "hostingSite": "trom-mini-ra",
+  "firestore": {
+    "prod": "mini-ra",
+    "preview": "mini-ra-preview"
+  },
+  "ttlCollections": [
+    "rooms",
+    "rtc"
+  ]
+}

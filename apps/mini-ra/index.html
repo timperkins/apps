@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>RA</title>
+    <meta name="description" content="A pixel-art real-time strategy game for up to eight players on the same network." />
+    <meta name="theme-color" content="#080b0b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="RA" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%23345427'/%3E%3Crect x='3' y='5' width='10' height='7' fill='%234f74a8'/%3E%3Crect x='3' y='5' width='10' height='2' fill='%2324231f'/%3E%3Crect x='3' y='10' width='10' height='2' fill='%2324231f'/%3E%3Crect x='6' y='7' width='4' height='3' fill='%238fb2dc'/%3E%3Crect x='10' y='8' width='5' height='1' fill='%232a2c2e'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Handjet:wght@400;500;600;700&family=Jersey+15&display=swap" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="hud">
+      <button type="button" id="menuBtn" aria-label="Menu" aria-expanded="false" aria-controls="menu" title="Menu"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <span id="credits" hidden><i class="coinIco"></i><span class="num"></span></span>
+    </div>
+    <div id="menu" hidden>
+      <button id="pauseBtn" type="button" title="Pause the game (P)">Pause</button>
+      <button id="regen" type="button">New map</button>
+      <button id="leaveBtn" type="button" hidden>Leave game</button>
+      <button id="lobbyBtn" type="button" title="Back to the multiplayer lobby">Multiplayer</button>
+      <button id="settingsBtn" type="button" aria-controls="settings" aria-expanded="false">Settings</button>
+      <button id="keysBtn" type="button" aria-controls="keys" aria-expanded="false">Hotkeys</button>
+      <a id="unitsLink" href="/units/">Units &amp; buildings</a>
+      <a id="uiLink" href="/ui/">UI kit</a>
+      <a id="audioLink" href="/audio/">Audio</a>
+      <div id="settings" role="group" aria-label="Settings">
+        <button id="setBack" type="button" title="Back to the menu (Esc)"><span aria-hidden="true">&lsaquo;</span> Settings</button>
+        <label class="set"><span>Music <output></output></span><input type="range" data-k="music" min="0" max="100" step="5" /></label>
+        <label class="set"><span>Sounds <output></output></span><input type="range" data-k="sfx" min="0" max="100" step="5" /></label>
+        <label class="set"><span>Voices <output></output></span><input type="range" data-k="voice" min="0" max="100" step="5" /></label>
+        <label class="set" title="How fast WASD and the arrow keys move the view"><span>Scroll speed <output></output></span><input type="range" data-k="scroll" min="25" max="300" step="25" /></label>
+        <label class="set" title="How fast the mouse wheel or a trackpad pinch zooms"><span>Zoom speed <output></output></span><input type="range" data-k="zoom" min="25" max="300" step="25" /></label>
+        <button id="setReset" type="button">Reset to defaults</button>
+      </div>
+      <div id="keys" role="group" aria-label="Hotkeys">
+        <button id="keysBack" type="button" title="Back to the menu (Esc)"><span aria-hidden="true">&lsaquo;</span> Hotkeys</button>
+        <h3>Camera</h3>
+        <dl>
+          <dt><kbd>WASD</kbd> <span>/</span> <kbd>Arrows</kbd></dt><dd>Scroll the view</dd>
+          <dt><kbd>Wheel</kbd> <span>/</span> <kbd>+</kbd> <kbd>&minus;</kbd></dt><dd>Zoom in and out</dd>
+          <dt><kbd>0</kbd></dt><dd>Reset the zoom</dd>
+          <dt><kbd>H</kbd></dt><dd>Back to your base</dd>
+        </dl>
+        <h3>Units</h3>
+        <dl>
+          <dt><kbd>Drag</kbd></dt><dd>Select units in a box</dd>
+          <dt><kbd>Shift+Click</kbd></dt><dd>Add to or take from the selection</dd>
+          <dt><kbd>Ctrl+Click</kbd> <span>/</span> <kbd>⌘+Click</kbd></dt><dd>Fire on a bridge</dd>
+          <dt><kbd>Ctrl+A</kbd></dt><dd>Select everything on screen</dd>
+          <dt><kbd>1</kbd> <span>/</span> <kbd>2</kbd></dt><dd>Select a group (again: go to it)</dd>
+          <dt><kbd>Shift+1</kbd> <span>/</span> <kbd>2</kbd></dt><dd>Put the selection in a group</dd>
+          <dt><kbd>F</kbd> <span>/</span> <kbd>Space</kbd></dt><dd>Deploy: unfold, dig in, unload</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Clear the selection</dd>
+        </dl>
+        <h3>Game</h3>
+        <dl>
+          <dt><kbd>B</kbd></dt><dd>Build menu</dd>
+          <dt><kbd>P</kbd></dt><dd>Pause</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Close the menu</dd>
+        </dl>
+      </div>
+    </div>
+    <canvas id="mini" aria-label="Minimap: drag to spin the world, tap to jump there"></canvas>
+    <div id="selBar" hidden>
+      <div id="acts"></div>
+    </div>
+    <button type="button" id="deployBtn" hidden>Deploy</button>
+    <div id="confirm" hidden>
+      <div id="okRing"></div>
+      <button type="button" id="okBtn" aria-label="Send them here (clear the selection to call it off)" title="Send them here"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5L19.5 7"/></svg></button>
+    </div>
+    <nav id="toolbar" aria-label="Controls">
+      <button type="button" id="selectBtn" aria-label="Select units" aria-pressed="false" title="Select units: then drag a box (Q)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l12 9-5.5 1.2L15.5 20l-2.6 1.1-3-6.6L6 18z"/></svg></button>
+      <button type="button" id="homeBtn" aria-label="Back to your base" title="Back to your base (H)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h4.5v-5h3v5H18V9.5"/></svg></button>
+      <i class="sep" id="buildSep" hidden></i>
+      <button type="button" id="buildBtn" aria-label="Build" aria-pressed="false" title="Build (B)" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21V3.5M3.5 7h17M8 3.5L3.5 7M8 3.5L18 7M4.5 21h7M17 7v4"/><rect x="14.5" y="11" width="5" height="4.5" rx=".6"/></svg></button>
+    </nav>
+    <div id="build" hidden>
+      <div class="head"><span class="credits" title="Credits"><i class="coinIco"></i><span class="num"></span></span><button type="button" class="close" aria-label="Close" title="Close (B)"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></div>
+      <div class="body">
+        <div class="pwr" role="meter" aria-label="Power"><i class="boltIco"></i><div class="track"><div class="fill"></div><div class="use"></div></div></div>
+        <div class="main">
+          <div class="tools"><button type="button" class="tool" data-mode="repair" aria-pressed="false" title="Repair: then pick a damaged building of yours (it costs credits as it mends)"><i class="wrenchIco"></i><span>Repair</span></button><button type="button" class="tool" data-mode="sell" aria-pressed="false" title="Sell: then pick a building of yours to get some of its credits back"><i class="dollarIco"></i><span>Sell</span></button></div>
+          <div class="tabs" role="tablist" aria-label="Build menu"></div>
+          <div class="grid"></div>
+        </div>
+      </div>
+    </div>
+    <div id="picker" hidden>
+      <div class="box" role="dialog" aria-modal="true" aria-labelledby="pickTitle">
+        <div class="head">
+          <span class="title" id="pickTitle">Choose a map</span>
+          <a id="unitsBtn" href="./units/" title="See every unit and building"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1"/></svg>Units</a>
+          <a id="uiBtn" href="./ui/" title="See every part of the interface"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M3.5 9h17M9 9v10.5"/></svg>UI</a>
+          <a id="audioBtn" href="./audio/" title="Hear every sound, spoken line and music loop"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>Audio</a>
+          <button type="button" id="reroll" title="Show other versions of these maps"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3.5c4 0 6.5 10 11 10H21M3 17h3.5c1.6 0 2.8-1.5 4-3.4M13.5 9.6c1.1-1.5 2.3-2.6 4-2.6H21"/><path d="M18 4l3 3-3 3M18 14l3 3-3 3"/></svg>Shuffle</button>
+          <button type="button" class="close" id="pickClose" aria-label="Close" title="Close" hidden><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+        </div>
+        <div class="stages" role="radiogroup" aria-label="Stage"><span class="label">Stage</span><span class="seg"></span><span class="blurb"></span></div>
+        <div class="maps"></div>
+        <div class="hint"><i class="you"></i> You start here · <i class="foe"></i> Enemy base</div>
+      </div>
+    </div>
+    <div id="build-no" aria-hidden="true" hidden></div>
+    <div id="toast" hidden></div>
+    <div id="pauseScreen" hidden role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+      <div class="card">
+        <div class="t" id="pauseTitle">Paused</div>
+        <div class="s">The battle waits until you come back.</div>
+        <button type="button" id="resumeBtn" title="Resume (P or Esc)">Resume</button>
+      </div>
+    </div>
+    <div id="banner" hidden role="status" aria-live="polite"></div>
+    <div id="loading" hidden role="status" aria-live="polite">
+      <div class="ld">
+        <div class="ld-title">RA</div>
+        <div class="ld-road">
+          <svg class="ld-tank" viewBox="0 0 20 11" shape-rendering="crispEdges" aria-hidden="true"><rect x="7" y="1" width="6" height="1" class="d"/><rect x="6" y="2" width="8" height="3" class="m"/><rect x="7" y="2" width="5" height="1" class="l"/><rect x="14" y="3" width="6" height="1" class="d"/><rect x="2" y="5" width="16" height="1" class="l"/><rect x="1" y="6" width="18" height="2" class="m"/><rect x="1" y="7" width="18" height="1" class="d"/><rect x="0" y="8" width="20" height="3" class="t"/><g class="ld-wheels"><rect x="2" y="9" width="2" height="1"/><rect x="7" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="17" y="9" width="2" height="1"/></g></svg>
+        </div>
+        <div class="ld-bar"><i></i></div>
+        <div class="ld-text">Loading</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

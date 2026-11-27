@@ -1,0 +1,23 @@
+{
+  "hosting": {
+    "site": "trom-mini-ra",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  },
+  "firestore": [
+    {
+      "database": "mini-ra",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "mini-ra-preview",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ]
+}
