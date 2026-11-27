@@ -132,6 +132,7 @@ const game: GameModule = {
         <div class="md-bar"></div>
       </div>
       <div class="md-touch" hidden>
+        <div class="md-tzone"></div>
         <div class="md-stick"><div class="md-knob"></div></div>
         <div class="md-tbtns">
           <button data-t="use" class="md-tuse">✋</button>
@@ -154,7 +155,7 @@ const game: GameModule = {
     const toastEl = $('.md-toast'), bannerEl = $('.md-banner'), ui = $('.md-ui'), touchEl = $('.md-touch');
     const muteBtn = $<HTMLButtonElement>('[data-a="mute"]');
     const R = new Renderer(cv);
-    const touchMode = !!window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+    let touchMode = !!window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
 
     try {
       setMuted(localStorage.getItem(MUTE_KEY) === '1');
@@ -325,50 +326,113 @@ const game: GameModule = {
       if (e.button === 0) mouseL = false;
     });
 
-    // touch stick and buttons
-    const stickEl = $('.md-stick'), knob = $('.md-knob');
-    stickEl.addEventListener('pointerdown', (e) => {
-      stick.id = e.pointerId;
-      stickEl.setPointerCapture(e.pointerId);
-      moveStick(e);
-    });
-    const moveStick = (e: PointerEvent) => {
-      if (e.pointerId !== stick.id) return;
-      const r = stickEl.getBoundingClientRect();
-      let dx = (e.clientX - r.left - r.width / 2) / (r.width / 2), dy = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+    // touch stick and buttons. The stick floats: touch anywhere on the left
+    // side of the screen and drag. Touch events are used first (iOS Safari
+    // is reliable with them), pointer events only for pens and mice.
+    const zoneEl = $('.md-tzone'), stickEl = $('.md-stick'), knob = $('.md-knob');
+    const R0 = 65;
+    let base = { x: 0, y: 0 };
+    const stickAt = (x: number, y: number) => {
+      const r = el.getBoundingClientRect();
+      base = { x, y };
+      stickEl.style.left = x - r.left - R0 + 'px';
+      stickEl.style.top = y - r.top - R0 + 'px';
+      stickEl.style.bottom = 'auto';
+      stickEl.classList.add('on');
+    };
+    const stickMove = (x: number, y: number) => {
+      let dx = (x - base.x) / R0, dy = (y - base.y) / R0;
       const l = Math.hypot(dx, dy);
       if (l > 1) {
         dx /= l;
         dy /= l;
       }
-      stick.x = dx;
-      stick.y = dy;
+      stick.x = Math.abs(dx) < 0.12 ? 0 : dx;
+      stick.y = Math.abs(dy) < 0.12 ? 0 : dy;
       knob.style.transform = `translate(${dx * 34}px, ${dy * 34}px)`;
     };
-    stickEl.addEventListener('pointermove', moveStick);
-    const stickUp = (e: PointerEvent) => {
-      if (e.pointerId !== stick.id) return;
+    const stickEnd = () => {
       stick.id = -1;
       stick.x = stick.y = 0;
       knob.style.transform = '';
+      stickEl.style.left = stickEl.style.top = stickEl.style.bottom = '';
+      stickEl.classList.remove('on');
     };
-    stickEl.addEventListener('pointerup', stickUp);
-    stickEl.addEventListener('pointercancel', stickUp);
+    const stickStart = (id: number, x: number, y: number) => {
+      stick.id = id;
+      stickAt(x, y);
+      stickMove(x, y);
+    };
+    let touchStick = false;
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      if (stick.id >= 0 && touchStick) return;
+      const t = e.changedTouches[0];
+      touchStick = true;
+      stickStart(t.identifier, t.clientX, t.clientY);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!touchStick) return;
+      for (const t of Array.from(e.changedTouches)) if (t.identifier === stick.id) {
+        e.preventDefault();
+        stickMove(t.clientX, t.clientY);
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!touchStick) return;
+      for (const t of Array.from(e.changedTouches)) if (t.identifier === stick.id) {
+        touchStick = false;
+        stickEnd();
+      }
+    };
+    for (const z of [zoneEl, stickEl]) {
+      z.addEventListener('touchstart', onTouchStart, { passive: false });
+      z.addEventListener('touchmove', onTouchMove, { passive: false });
+      z.addEventListener('touchend', onTouchEnd);
+      z.addEventListener('touchcancel', onTouchEnd);
+      z.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'touch' || stick.id >= 0) return;
+        z.setPointerCapture(e.pointerId);
+        stickStart(e.pointerId, e.clientX, e.clientY);
+      });
+      z.addEventListener('pointermove', (e) => {
+        if (!touchStick && e.pointerId === stick.id) stickMove(e.clientX, e.clientY);
+      });
+      const pUp = (e: PointerEvent) => {
+        if (!touchStick && e.pointerId === stick.id) stickEnd();
+      };
+      z.addEventListener('pointerup', pUp);
+      z.addEventListener('pointercancel', pUp);
+    }
+    // any touch on the page means this is a touch device, even if the
+    // media query said otherwise
+    window.addEventListener('touchstart', () => {
+      touchMode = true;
+    }, { passive: true, capture: true });
     el.querySelectorAll<HTMLButtonElement>('.md-tbtns button').forEach((b) => {
       const t = b.dataset.t!;
-      b.addEventListener('pointerdown', (e) => {
+      const down = (e: Event) => {
         e.preventDefault();
+        if (held.has(t)) return;
         held.add(t);
         pressed.add('t:' + t);
         b.classList.add('on');
-      });
+      };
       const up = () => {
         held.delete(t);
         b.classList.remove('on');
       };
+      b.addEventListener('touchstart', down, { passive: false });
+      b.addEventListener('touchend', up);
+      b.addEventListener('touchcancel', up);
+      b.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch') down(e);
+      });
       b.addEventListener('pointerup', up);
       b.addEventListener('pointercancel', up);
-      b.addEventListener('pointerleave', up);
+      b.addEventListener('pointerleave', (e) => {
+        if (e.pointerType !== 'touch') up();
+      });
     });
 
     function readInput(): Input {

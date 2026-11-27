@@ -42,9 +42,11 @@
 
 /* touch */
 .md-touch { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-.md-stick { position: absolute; left: 24px; bottom: 100px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,.1); border: 3px solid rgba(255,230,190,.3); pointer-events: auto; touch-action: none; }
+.md-tzone { position: absolute; left: 0; top: 70px; bottom: 0; width: 50%; pointer-events: auto; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.md-stick { position: absolute; left: 24px; bottom: 100px; width: 130px; height: 130px; box-sizing: border-box; border-radius: 50%; background: rgba(255,255,255,.1); border: 3px solid rgba(255,230,190,.3); pointer-events: auto; touch-action: none; opacity: .7; }
+.md-stick.on { opacity: 1; pointer-events: none; }
 .md-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px; border-radius: 50%; background: rgba(255,230,190,.5); }
-.md-tbtns { position: absolute; right: 14px; bottom: 96px; display: grid; grid-template-columns: repeat(3, 62px); gap: 8px; pointer-events: auto; }
+.md-tbtns { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none; position: absolute; right: 14px; bottom: 96px; display: grid; grid-template-columns: repeat(3, 62px); gap: 8px; pointer-events: auto; }
 .md-tbtns button { width: 62px; height: 62px; border-radius: 50%; border: 3px solid rgba(255,220,160,.5); background: rgba(30,20,10,.7); font-size: 26px; touch-action: none; }
 .md-tbtns button.on { background: rgba(200,140,60,.8); }
 .md-tbtns .md-tbig { background: rgba(120,40,30,.75); }
