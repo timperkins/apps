@@ -144,6 +144,20 @@ A music-making sled game designed by Tim on a handwritten page (original code, a
 - Tools: Draw, Move (or two fingers, mouse wheel, arrow keys), Erase, Undo, Clear, four instruments (bells, piano, flute, robot, all Web Audio), three speeds, and 🎼 to load the starter song.
 - The song and settings are kept in localStorage (`musitions-song-v1`, `musitions-settings-v1`), with the best score in `musitions-best`.
 
+## Archenimys
+
+An archer tower climb designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/archenimys/`.
+
+- Climb 50 stages of a tower. Beat every monster on a stage and the stairs at the top open; walk onto them to go up (with friends, a 5-second countdown starts once one archer is on the stairs).
+- Monsters: **Boom Pot** (a teapot with a fuse that blows up when it gets near you, or when it gets destroyed), **Sharp Cactus** (shoots a fan of thorns), **Acid Stew** (a mostly black, a little gray pot of bubbling green goo with acid drizzling down; it spits globs that leave a splotch for 5 seconds that hurts if you step in it) and **Snapping Crab** (scuttles sideways, then dashes in and pinches).
+- A boss every 5 stages: the Crab King, Thornlord, Teapot Titan and the Witch Cauldron take turns, and the Archenemy waits at stage 50.
+- The stage before each boss has a loot chest (a lucky upgrade pick, never Common) and a health chest (Heal to full, or +½ full health and +25 max health).
+- Levelling up shows 3 upgrade cards. Each card's quality word counts up Common → Uncommon → Rare → Epic → Legendary → Mythical until it lands. There are 18 permanent upgrades (`UPGRADES` in `data.ts`); every quality has at least 8, and higher qualities give bigger numbers (Life Steal: Rare gains 3 health per monster destroyed, Epic gains 5). Picking one again stacks. You can't be hurt while choosing; when playing alone the tower waits.
+- Up to 4 players, each an archer or a monster (Boom Pot, Sharp Cactus, Acid Stew or Snapping Crab). Monster players attack archers with click or Space, switch monster with Q or 1–4, and when knocked out wait 5 seconds and come back as a different monster. Archers who go down come back on the next stage if another archer makes it.
+- Hosting works like M.D. (`archenimys/net.ts` is a copy with `game: 'archenimys'`): Host a game (or Shift+Esc, from the title or during a game) lists you in the `hosts` collection; Join a game searches that list every 3 seconds and connects over WebRTC. The host's game runs the tower and sends it out about 15 times a second; each player moves their own body.
+- Keyboard and mouse (WASD, aim with the mouse, hold click or Space to shoot, Esc menu) or touch (stick on the left, shoot button aims at the closest monster).
+- Best stage reached is kept in localStorage (`archenimys-best`).
+
 ## Develop
 
 ```
