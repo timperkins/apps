@@ -1,5 +1,5 @@
 // Archenimys drawing: everything is drawn with canvas shapes (original art, no image files).
-import { BOSSES, DMG, H, MONSTERS, PLAYER_COLORS, Q_COLORS, W, isBossStage, type MonsterKind } from './data';
+import { BOSSES, DMG, ENCHANTS, H, MONSTERS, PLAYER_COLORS, Q_COLORS, W, isBossStage, type MonsterKind } from './data';
 import { STAIRS, WALL, choosing, orbPos, up, type Enemy, type Fx, type Player, type Shot, type State } from './game';
 
 type C = CanvasRenderingContext2D;
@@ -8,6 +8,14 @@ const TAU = Math.PI * 2;
 interface Particle { x: number; y: number; vx: number; vy: number; t: number; life: number; c: string; r: number; kind: 'dot' | 'ring' | 'text'; text?: string; grow?: number }
 
 // floor colors change every 10 stages as you climb
+// World 2 is a dark, glowing new map
+const FLOORS2 = [
+  { a: '#3a2a3a', b: '#322432', wall: '#1a1018', top: '#6a3a50' },
+  { a: '#2a3440', b: '#242c37', wall: '#10161e', top: '#3a6a80' },
+  { a: '#40302a', b: '#382a24', wall: '#1e1410', top: '#8a4a2a' },
+  { a: '#2c3a2c', b: '#263226', wall: '#121a12', top: '#4a7a3a' },
+  { a: '#3a2a4a', b: '#322441', wall: '#180f22', top: '#7a4aa0' },
+];
 const FLOORS = [
   { a: '#6d6457', b: '#5f574b', wall: '#3b342c', top: '#8a7f6e' },
   { a: '#5d6670', b: '#515962', wall: '#2f343b', top: '#7d8894' },
@@ -259,9 +267,9 @@ export function drawStew(c: C, r: number, t: number) {
 }
 
 /** Snapping Crab: claws snap open and shut */
-export function drawCrab(c: C, r: number, t: number, snapping: boolean, moving: boolean) {
+export function drawCrab(c: C, r: number, t: number, snapping: boolean, moving: boolean, green = false) {
   c.save();
-  const shell = '#e2532f', dark = '#9c2e17';
+  const shell = green ? '#3fbf4a' : '#e2532f', dark = green ? '#1f7a2a' : '#9c2e17';
   c.lineWidth = r * 0.08;
   c.strokeStyle = '#3d1208';
   // legs
@@ -413,7 +421,154 @@ function crown(c: C, r: number, y: number) {
   c.fill();
 }
 
+/** Sharp Crab: a green crab with thorns on its back */
+export function drawSharpCrab(c: C, r: number, t: number, winding: boolean, moving: boolean) {
+  drawCrab(c, r, t, winding, moving, true);
+  c.save();
+  c.strokeStyle = '#fff6c9';
+  c.lineWidth = Math.max(1, r * 0.07);
+  for (let i = 0; i < 7; i++) {
+    const a = Math.PI + (i / 6) * Math.PI;
+    const x = Math.cos(a) * r * 0.62, y = r * 0.15 + Math.sin(a) * r * 0.45;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + Math.cos(a) * r * 0.3, y + Math.sin(a) * r * 0.3);
+    c.stroke();
+  }
+  if (winding) {
+    c.fillStyle = 'rgba(255,246,201,.8)';
+    c.beginPath();
+    c.arc(0, r * 0.15, r * 0.18 + Math.sin(t * 30) * r * 0.05, 0, TAU);
+    c.fill();
+  }
+  c.restore();
+}
+
+/** Enchanter: a little robed spellcaster with a pointy hat and a glowing staff */
+export function drawEnchanter(c: C, r: number, t: number, casting: boolean) {
+  c.save();
+  const float = Math.sin(t * 3) * r * 0.08;
+  c.translate(0, float);
+  c.lineWidth = r * 0.08;
+  c.strokeStyle = '#1c0f2e';
+  // robe
+  c.fillStyle = '#6b3fb8';
+  c.beginPath();
+  c.moveTo(-r * 0.7, r * 0.85);
+  c.quadraticCurveTo(-r * 0.6, -r * 0.1, 0, -r * 0.25);
+  c.quadraticCurveTo(r * 0.6, -r * 0.1, r * 0.7, r * 0.85);
+  c.closePath();
+  c.fill();
+  c.stroke();
+  c.fillStyle = '#ffd23f';
+  for (const [x, y] of [[-0.3, 0.4], [0.25, 0.15], [0.1, 0.6]]) {
+    c.beginPath();
+    c.arc(x * r, y * r, r * 0.06, 0, TAU);
+    c.fill();
+  }
+  // face in the shadow of the hat
+  c.fillStyle = '#2a1a40';
+  c.beginPath();
+  c.arc(0, -r * 0.35, r * 0.32, 0, TAU);
+  c.fill();
+  c.fillStyle = '#9fffe0';
+  c.beginPath();
+  c.arc(-r * 0.11, -r * 0.33, r * 0.06, 0, TAU);
+  c.arc(r * 0.11, -r * 0.33, r * 0.06, 0, TAU);
+  c.fill();
+  // pointy hat
+  c.fillStyle = '#4b2a8a';
+  c.beginPath();
+  c.moveTo(-r * 0.5, -r * 0.5);
+  c.lineTo(r * 0.5, -r * 0.5);
+  c.lineTo(r * 0.15, -r * 1.35);
+  c.closePath();
+  c.fill();
+  c.stroke();
+  // staff with a glowing gem
+  c.strokeStyle = '#8a5a2b';
+  c.lineWidth = r * 0.12;
+  c.beginPath();
+  c.moveTo(r * 0.75, r * 0.85);
+  c.lineTo(r * 0.75, -r * 0.7);
+  c.stroke();
+  const glow = casting ? 1.6 : 1 + Math.sin(t * 5) * 0.15;
+  const g = c.createRadialGradient(r * 0.75, -r * 0.8, 1, r * 0.75, -r * 0.8, r * 0.45 * glow);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.35, '#c58cff');
+  g.addColorStop(1, 'rgba(160,90,255,0)');
+  c.fillStyle = g;
+  c.beginPath();
+  c.arc(r * 0.75, -r * 0.8, r * 0.45 * glow, 0, TAU);
+  c.fill();
+  c.restore();
+}
+
+/** a wolf from a Tasty Bone */
+export function drawWolf(c: C, face: number, t: number, moving: boolean, biting: boolean) {
+  c.save();
+  const dir = Math.cos(face) >= 0 ? 1 : -1;
+  c.scale(dir, 1);
+  const step = moving ? Math.sin(t * 18) * 3 : 0;
+  c.strokeStyle = '#2a2a30';
+  c.lineWidth = 1.5;
+  // legs
+  c.fillStyle = '#6d6f78';
+  for (const [x, k] of [[-8, 1], [-4, -1], [5, 1], [9, -1]]) c.fillRect(x - 1.5, 2 + k * step * 0.3, 3, 8);
+  // tail
+  c.fillStyle = '#7d808a';
+  c.beginPath();
+  c.ellipse(-14, -4 + Math.sin(t * 10) * 2, 7, 3, -0.5, 0, TAU);
+  c.fill();
+  // body
+  c.fillStyle = '#8a8d97';
+  c.beginPath();
+  c.ellipse(0, 0, 12, 6.5, 0, 0, TAU);
+  c.fill();
+  c.stroke();
+  c.fillStyle = '#c9ccd4';
+  c.beginPath();
+  c.ellipse(2, 3, 7, 3, 0, 0, TAU);
+  c.fill();
+  // head
+  c.fillStyle = '#8a8d97';
+  c.beginPath();
+  c.ellipse(13, -5, 6, 5, 0, 0, TAU);
+  c.fill();
+  c.stroke();
+  c.beginPath();
+  c.moveTo(16, -5);
+  c.lineTo(23, biting ? -6 : -3);
+  c.lineTo(16, -1);
+  c.fill();
+  c.stroke();
+  if (biting) {
+    c.fillStyle = '#fff';
+    c.beginPath();
+    c.moveTo(18, -3);
+    c.lineTo(19, -1);
+    c.lineTo(20, -3);
+    c.fill();
+  }
+  c.beginPath();
+  c.moveTo(10, -9);
+  c.lineTo(11, -15);
+  c.lineTo(14, -10);
+  c.fill();
+  c.stroke();
+  c.fillStyle = '#ffd23f';
+  c.beginPath();
+  c.arc(15, -6, 1.3, 0, TAU);
+  c.fill();
+  // collar
+  c.fillStyle = '#e04a3a';
+  c.fillRect(8, -3, 3, 5);
+  c.restore();
+}
+
 export function drawMonster(c: C, kind: MonsterKind, r: number, t: number, o: { fuse?: number; face?: number; winding?: boolean; moving?: boolean }) {
+  if (kind === 'sharpCrab') return drawSharpCrab(c, r, t, !!o.winding, o.moving ?? true);
+  if (kind === 'enchanter') return drawEnchanter(c, r, t, !!o.winding);
   if (kind === 'pot') drawPot(c, r, t, o.fuse ?? 0, o.face ?? 0);
   else if (kind === 'cactus') drawCactus(c, r, t, !!o.winding);
   else if (kind === 'stew') drawStew(c, r, t);
@@ -422,7 +577,7 @@ export function drawMonster(c: C, kind: MonsterKind, r: number, t: number, o: { 
 
 // ---------- archer ----------
 
-export function drawArcher(c: C, color: string, aim: number, t: number, moving: boolean, drawn: number) {
+export function drawArcher(c: C, color: string, aim: number, t: number, moving: boolean, drawn: number, o: { sword?: boolean; swing?: number; block?: boolean } = {}) {
   const r = 14;
   c.save();
   const bob = moving ? Math.sin(t * 14) * 1.5 : 0;
@@ -472,6 +627,12 @@ export function drawArcher(c: C, color: string, aim: number, t: number, moving: 
     c.arc(Math.cos(aim) * 2 + 2 + Math.cos(aim) * 1.5, -10.5, 1, 0, TAU);
     c.fill();
   }
+  if (o.sword) {
+    drawSword(c, aim, o.swing ?? 0);
+    if (o.block) drawShield(c, aim);
+    c.restore();
+    return;
+  }
   // bow
   c.save();
   c.translate(0, -2);
@@ -502,6 +663,66 @@ export function drawArcher(c: C, color: string, aim: number, t: number, moving: 
   c.lineTo(20, 3);
   c.fill();
   c.restore();
+  if (o.block) drawShield(c, aim);
+  c.restore();
+}
+
+function drawSword(c: C, aim: number, swing: number) {
+  c.save();
+  c.translate(0, -2);
+  // swings from one side to the other while swingT runs down
+  const k = swing > 0 ? 1 - swing / 0.22 : 0;
+  c.rotate(aim + (swing > 0 ? -1.1 + 2.2 * k : 0.5));
+  if (swing > 0) {
+    c.fillStyle = 'rgba(255,255,255,.25)';
+    c.beginPath();
+    c.moveTo(0, 0);
+    c.arc(0, 0, 70, -2.2 * k, 0);
+    c.closePath();
+    c.fill();
+  }
+  c.fillStyle = '#5a3a1e';
+  c.fillRect(6, -2, 7, 4);
+  c.fillStyle = '#ffd23f';
+  c.fillRect(12, -6, 3, 12);
+  c.fillStyle = '#dfe6ee';
+  c.strokeStyle = '#4a5462';
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(15, -2.5);
+  c.lineTo(38, -2);
+  c.lineTo(43, 0);
+  c.lineTo(38, 2);
+  c.lineTo(15, 2.5);
+  c.closePath();
+  c.fill();
+  c.stroke();
+  c.restore();
+}
+
+function drawShield(c: C, aim: number) {
+  c.save();
+  c.translate(Math.cos(aim) * 13, Math.sin(aim) * 13 - 2);
+  c.fillStyle = 'rgba(140,220,255,.18)';
+  c.beginPath();
+  c.arc(-Math.cos(aim) * 13, -Math.sin(aim) * 13, 25, 0, TAU);
+  c.fill();
+  c.fillStyle = '#8a5a2b';
+  c.strokeStyle = '#2a160a';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.arc(0, 0, 10, 0, TAU);
+  c.fill();
+  c.stroke();
+  c.strokeStyle = '#c9ccd4';
+  c.lineWidth = 2.5;
+  c.beginPath();
+  c.arc(0, 0, 8, 0, TAU);
+  c.stroke();
+  c.fillStyle = '#c9ccd4';
+  c.beginPath();
+  c.arc(0, 0, 3, 0, TAU);
+  c.fill();
   c.restore();
 }
 
@@ -601,14 +822,50 @@ export class Renderer {
       case 'pinch':
         P({ kind: 'ring', r: 4, grow: 50, life: 0.2, c: '#fff' });
         break;
+      case 'zap': {
+        // a jagged lightning line
+        const n = 6;
+        for (let i = 0; i <= n; i++) {
+          const k = i / n;
+          P({ x: f.x + ((f.x2 ?? f.x) - f.x) * k + (Math.random() - 0.5) * 14, y: f.y + ((f.y2 ?? f.y) - f.y) * k + (Math.random() - 0.5) * 14, c: i % 2 ? '#fff' : '#9fd8ff', r: 4, life: 0.25 });
+        }
+        P({ x: f.x2 ?? f.x, y: f.y2 ?? f.y, kind: 'ring', r: 4, grow: 50, life: 0.25, c: '#9fd8ff' });
+        break;
+      }
+      case 'rain':
+        for (let i = 0; i < 4; i++) P({ x: f.x + (Math.random() - 0.5) * 20, y: f.y - 90 - i * 20, vy: 420, c: '#d9c39a', r: 2.5, life: 0.22 + i * 0.03 });
+        break;
+      case 'enchant': {
+        const col = ENCHANTS[f.c as keyof typeof ENCHANTS]?.color ?? '#c58cff';
+        for (let i = 0; i <= 10; i++) {
+          const k = i / 10;
+          P({ x: f.x + ((f.x2 ?? f.x) - f.x) * k, y: f.y + ((f.y2 ?? f.y) - f.y) * k - Math.sin(k * Math.PI) * 30, c: col, r: 3, life: 0.6 });
+        }
+        P({ x: f.x2 ?? f.x, y: f.y2 ?? f.y, kind: 'ring', r: 6, grow: 70, life: 0.5, c: col });
+        break;
+      }
+      case 'block':
+        P({ kind: 'ring', r: 8, grow: 40, life: 0.2, c: '#8fd0ff' });
+        break;
+      case 'shieldbreak':
+        burst(12, ['#8a5a2b', '#c9ccd4'], 140, 0.5);
+        break;
+      case 'bite':
+        P({ kind: 'ring', r: 3, grow: 30, life: 0.18, c: '#fff' });
+        break;
+      case 'finale':
+      case 'world':
+        for (let i = 0; i < 3; i++) P({ kind: 'ring', r: 10, grow: 400 + i * 100, life: 0.8 + i * 0.2, c: '#b86bff' });
+        this.shake = 10;
+        break;
       case 'thud':
         burst(4, ['#bbb'], 60, 0.25, 2);
         break;
     }
   }
 
-  private buildFloor(stage: number) {
-    const f = FLOORS[Math.floor((stage - 1) / 10) % FLOORS.length];
+  private buildFloor(stage: number, world: number) {
+    const f = (world > 1 ? FLOORS2 : FLOORS)[Math.floor((stage - 1) / 10) % FLOORS.length];
     const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
@@ -658,7 +915,7 @@ export class Renderer {
     c.lineWidth = 3;
     c.strokeRect(WALL, WALL, W - WALL * 2, H - WALL * 2);
     this.floor = cv;
-    this.floorStage = stage;
+    this.floorStage = stage * 10 + world;
   }
 
   draw(s: State, me: string, t: number, dt: number, pos: (kind: string, id: number | string, x: number, y: number) => { x: number; y: number }) {
@@ -675,7 +932,7 @@ export class Renderer {
     this.shake = Math.max(0, this.shake - dt * 30);
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
     c.setTransform(this.scale, 0, 0, this.scale, this.ox + sx, this.oy + sy);
-    if (this.floorStage !== s.stage || !this.floor) this.buildFloor(s.stage);
+    if (this.floorStage !== s.stage * 10 + s.world || !this.floor) this.buildFloor(s.stage, s.world);
     c.drawImage(this.floor!, 0, 0);
     this.drawStairs(s, t);
     // torches in the corners
@@ -705,6 +962,20 @@ export class Renderer {
       const p = pos('e', e.id, e.x, e.y);
       list.push({ y: p.y, f: () => this.drawEnemy(e, p.x, p.y, t) });
     }
+    for (const w of s.wolves) {
+      const p = pos('w', w.id, w.x, w.y);
+      list.push({ y: p.y, f: () => {
+        const c2 = this.c;
+        c2.save();
+        c2.translate(p.x, p.y);
+        c2.fillStyle = 'rgba(0,0,0,.3)';
+        c2.beginPath();
+        c2.ellipse(0, 10, 13, 4, 0, 0, TAU);
+        c2.fill();
+        drawWolf(c2, w.face, t, w.moving, w.biteT > 0);
+        c2.restore();
+      } });
+    }
     for (const pl of s.players) {
       if (!pl.role || pl.dead) continue;
       const p = pos('p', pl.id, pl.x, pl.y);
@@ -712,6 +983,15 @@ export class Renderer {
     }
     list.sort((a, b) => a.y - b.y);
     for (const d of list) d.f();
+    // an Enchanter tells archers near it what it enchanted
+    if (meP && !meP.dead) {
+      for (const e of s.enemies) {
+        if (e.kind !== 'enchanter' || !e.said) continue;
+        const p = pos('e', e.id, e.x, e.y);
+        if (Math.hypot(p.x - meP.x, p.y - meP.y) > 170) continue;
+        this.bubble(p.x, p.y - e.r - 28, e.said);
+      }
+    }
 
     for (const sh of s.shots) this.drawShot(sh);
     this.drawParticles(dt);
@@ -819,7 +1099,8 @@ export class Renderer {
     c.restore();
   }
 
-  private drawChest(x: number, y: number, kind: 'loot' | 'health', opened: boolean, t: number) {
+  private drawChest(x: number, y: number, kind: 'loot' | 'health' | 'mythic', opened: boolean, t: number) {
+    if (kind === 'mythic') return this.drawMythicChest(x, y, opened, t);
     const c = this.c;
     c.save();
     c.translate(x, y + (opened ? 0 : Math.sin(t * 3) * 2));
@@ -858,6 +1139,66 @@ export class Renderer {
       c.fillStyle = '#000';
       c.fillRect(-16, -6, 32, 4);
     }
+    c.restore();
+  }
+
+  private bubble(x: number, y: number, text: string) {
+    const c = this.c;
+    c.font = 'bold 12px system-ui, sans-serif';
+    c.textAlign = 'center';
+    const w = c.measureText(text).width + 16;
+    x = Math.max(w / 2 + 30, Math.min(W - w / 2 - 30, x));
+    c.fillStyle = 'rgba(255,255,255,.95)';
+    c.strokeStyle = '#6b3fb8';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.roundRect(x - w / 2, y - 18, w, 22, 8);
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#2a1a40';
+    c.fillText(text, x, y - 3);
+  }
+
+  private drawMythicChest(x: number, y: number, opened: boolean, t: number) {
+    const c = this.c;
+    c.save();
+    c.translate(x, y + (opened ? 0 : Math.sin(t * 3) * 3));
+    if (!opened) {
+      const g = c.createRadialGradient(0, 0, 4, 0, 0, 60);
+      g.addColorStop(0, 'rgba(255,79,110,.6)');
+      g.addColorStop(0.5, 'rgba(182,92,255,.3)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.fillRect(-60, -60, 120, 120);
+      for (let i = 0; i < 6; i++) {
+        const a = t * 1.5 + (i * TAU) / 6;
+        c.fillStyle = i % 2 ? '#ff4f6e' : '#ffd23f';
+        c.beginPath();
+        c.arc(Math.cos(a) * 30, Math.sin(a) * 18 - 4, 2, 0, TAU);
+        c.fill();
+      }
+    }
+    c.fillStyle = '#3a1a4a';
+    c.strokeStyle = '#ffd23f';
+    c.lineWidth = 2.5;
+    c.beginPath();
+    c.roundRect(-20, -6, 40, 24, 3);
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#5a2a6a';
+    c.beginPath();
+    if (opened) c.roundRect(-20, -24, 40, 10, 3);
+    else c.roundRect(-20, -18, 40, 13, [9, 9, 2, 2]);
+    c.fill();
+    c.stroke();
+    c.fillStyle = '#ff4f6e';
+    c.beginPath();
+    c.moveTo(0, -2);
+    c.lineTo(6, 5);
+    c.lineTo(0, 12);
+    c.lineTo(-6, 5);
+    c.closePath();
+    c.fill();
     c.restore();
   }
 
@@ -910,6 +1251,34 @@ export class Renderer {
       c.stroke();
       c.setLineDash([]);
     }
+    if (e.ench) {
+      // an enchanted monster glows in its enchantment's color
+      const col = ENCHANTS[e.ench].color;
+      c.strokeStyle = col;
+      c.globalAlpha = 0.55 + 0.3 * Math.sin(t * 6);
+      c.lineWidth = 3;
+      c.beginPath();
+      c.ellipse(0, e.r * 0.2, e.r * 1.25, e.r * 1.1, 0, 0, TAU);
+      c.stroke();
+      c.globalAlpha = 1;
+      for (let i = 0; i < 3; i++) {
+        const a = t * 2.5 + (i * TAU) / 3;
+        c.fillStyle = col;
+        c.beginPath();
+        c.arc(Math.cos(a) * e.r * 1.2, e.r * 0.2 + Math.sin(a) * e.r, 2.5, 0, TAU);
+        c.fill();
+      }
+    }
+    if (e.state === 1 && e.kind === 'sharpCrab') {
+      c.strokeStyle = 'rgba(255,246,201,.45)';
+      c.setLineDash([4, 6]);
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(0, 0);
+      c.lineTo(Math.cos(e.face) * 200, Math.sin(e.face) * 200);
+      c.stroke();
+      c.setLineDash([]);
+    }
     if (e.hurtT > 0) c.filter = 'brightness(2.2)';
     else if (e.slowT > 0) c.filter = 'hue-rotate(160deg) saturate(.7) brightness(1.2)';
     if (e.boss === 'archenemy') drawArchenemy(c, e.r, t, e.face);
@@ -937,9 +1306,20 @@ export class Renderer {
     c.ellipse(0, 14, 18, 6.5, 0, 0, TAU);
     c.stroke();
     c.globalAlpha = 1;
+    if (p.role === 'archer' && up(p, 'aura')) {
+      // Burning Aura
+      const g = c.createRadialGradient(0, 0, 20, 0, 0, 110);
+      g.addColorStop(0, 'rgba(255,150,40,0)');
+      g.addColorStop(0.85, `rgba(255,150,40,${0.12 + 0.05 * Math.sin(t * 4)})`);
+      g.addColorStop(1, 'rgba(255,150,40,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(0, 0, 110, 0, TAU);
+      c.fill();
+    }
     if (p.hurtT > 0) c.filter = 'brightness(2.2)';
     if (p.role === 'archer') {
-      drawArcher(c, color, p.aim, t, p.moving, p.fireCd > 0 ? 0 : 1);
+      drawArcher(c, color, p.aim, t, p.moving, p.fireCd > 0 ? 0 : 1, { sword: p.weapon === 'sword', swing: p.swingT, block: p.blocking });
     } else {
       const r = MONSTERS[p.kind].r + 3;
       if (p.kind === 'pot' && p.fuse > 0) {

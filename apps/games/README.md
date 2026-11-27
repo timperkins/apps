@@ -153,17 +153,18 @@ A music-making sled game designed by Tim on a handwritten page (original code, a
 
 ## Archenimys
 
-An archer tower climb designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/archenimys/`.
+An archer tower climb designed by Tim on two handwritten pages (original code, art and sounds). Code in `src/games/archenimys/`.
 
-- Climb 50 stages of a tower. Beat every monster on a stage and the stairs at the top open; walk onto them to go up (with friends, a 5-second countdown starts once one archer is on the stairs).
-- Monsters: **Boom Pot** (a teapot with a fuse that blows up when it gets near you, or when it gets destroyed), **Sharp Cactus** (shoots a fan of thorns), **Acid Stew** (a mostly black, a little gray pot of bubbling green goo with acid drizzling down; it spits globs that leave a splotch for 5 seconds that hurts if you step in it) and **Snapping Crab** (scuttles sideways, then dashes in and pinches).
-- A boss every 5 stages: the Crab King, Thornlord, Teapot Titan and the Witch Cauldron take turns, and the Archenemy waits at stage 50.
-- The stage before each boss has a loot chest (a lucky upgrade pick, never Common) and a health chest (Heal to full, or +½ full health and +25 max health).
-- Levelling up shows 3 upgrade cards. Each card's quality word counts up Common → Uncommon → Rare → Epic → Legendary → Mythical until it lands. There are 18 permanent upgrades (`UPGRADES` in `data.ts`); every quality has at least 8, and higher qualities give bigger numbers (Life Steal: Rare gains 3 health per monster destroyed, Epic gains 5). Picking one again stacks. You can't be hurt while choosing; when playing alone the tower waits.
-- Up to 4 players, each an archer or a monster (Boom Pot, Sharp Cactus, Acid Stew or Snapping Crab). Monster players attack archers with click or Space, switch monster with Q or 1–4, and when knocked out wait 5 seconds and come back as a different monster. Archers who go down come back on the next stage if another archer makes it.
+- Climb 50 stages of a tower. Beat every monster on a stage and the stairs at the top open; walk onto them to go up (with friends, a 5-second countdown starts once one archer is on the stairs). Stages get harder faster as you climb (`hpScale`, `dmgScale` in `data.ts`).
+- Monsters: **Boom Pot** (a fast teapot with a fuse that blows up for 33 damage at first when it gets near you, or when it gets destroyed), **Sharp Cactus** (a fan of thorns), **Acid Stew** (a mostly black, a little gray pot of bubbling green goo; its spit leaves a splotch for 5 seconds), **Snapping Crab** (dash and pinch), **Sharp Crab** (green; shoots thorns all in a line, aimed where you're heading) and the **Enchanter** (enchants the monster nearest it with Protection, Sharp Attacks, Speed or Regrowth; walk near it and it says what it did).
+- A boss every 5 stages: the Crab King and Teapot Titan (both fast), Thornlord (dense fans and double rings of thorns) and the Witch Cauldron take turns. Stage 50 has all four at once, then the Archenemy with all their moves. Beating it opens **World 2**: 50 more stages on a new map with twice the monsters, much tougher monsters and bosses, bosses that call twice as many of their kind all over the floor, and upgrades worth 1.6× with better odds.
+- Chests: before each boss a loot chest (a lucky pick, never Common) and a health chest (Heal to full, or +½ full health and +25 max health); every 10 stages a **Mythical chest** (3 Mythical cards).
+- Levelling up shows 3 cards whose quality word counts up Common → Uncommon → Rare → Epic → Legendary → Mythical. 26 permanent upgrades (`UPGRADES` in `data.ts`): Mythical only rolls its own 7 (Phoenix Feather, Arrow Rain, Thunder Bow, Giant Slayer, Splitting Arrows, Golden Quiver, Burning Aura), and every other quality has at least 8. Tasty Bone (from Common) adds a wolf that bites monsters. Picking one again stacks. You can't be hurt while choosing; alone, the tower waits.
+- Archers switch between bow and sword (X); the sword swings a wide arc for more damage. A shield (hold right click, Shift or E) blocks 95% of damage while its bar lasts, but you move slower and can't attack.
+- 2 to 4 players, each an archer or a monster (any of the six). Monster players attack with click or Space, switch with Q or 1–6, and when knocked out come back 5 seconds later as a different monster. Archers who go down come back on the next stage if another archer makes it.
 - Hosting works like M.D. (`archenimys/net.ts` is a copy with `game: 'archenimys'`): Host a game (or Shift+Esc, from the title or during a game) lists you in the `hosts` collection; Join a game searches that list every 3 seconds and connects over WebRTC. The host's game runs the tower and sends it out about 15 times a second; each player moves their own body.
-- Keyboard and mouse (WASD, aim with the mouse, hold click or Space to shoot, Esc menu) or touch (stick on the left, shoot button aims at the closest monster).
-- Best stage reached is kept in localStorage (`archenimys-best`).
+- Keyboard and mouse or touch (stick on the left; shoot, shield and bow/sword buttons on the right; attacks aim at the closest monster).
+- Best climb is kept in localStorage (`archenimys-best`, counted across both worlds).
 
 ## Antpoculeps
 

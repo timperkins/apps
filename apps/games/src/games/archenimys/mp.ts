@@ -77,7 +77,7 @@ export class HostSession {
         p.y = Number(m.y) || p.y;
         p.moving = !!m.mv;
       }
-      g.inputs.set(id, { aim: Number(m.aim) || 0, fire: !!m.fire });
+      g.inputs.set(id, { aim: Number(m.aim) || 0, fire: !!m.fire, block: !!m.block });
     } else if (m.t === 'act') {
       g.act(id, m.a as Act);
     }
