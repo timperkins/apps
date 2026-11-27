@@ -140,6 +140,31 @@ A little collection of party games designed by Tim on a handwritten page (code i
 - **Factory** (`factory.ts`): makers make gold (a banana 1 gold every 2 seconds, an apple 2 every 3, a cat, a dragon…, 19 in five rarities). Buy a Wooden, Silver, Golden or Diamond crate, open it and pick 1 of 3 makers. Each maker upgrades 8 times. 12 slots; sell a maker to make room. First to buy the 100,000-gold Golden Trophy wins. Everyone runs their own factory; the host keeps the scoreboard and calls the winner.
 - **Knight Battle** (`knights/`): blue team at the bottom against red team at the top (red players see the field flipped, so their own heart is always at the bottom of the screen). Every player has a big heart with 1000 health at the back of their side; break all of the other team's hearts to win. You're a knight (72 damage, knockback) like the Tiny Kingdoms hero, and use its Tiny Swords art. At your castle, pay 10 gold to switch class (knight, archer, monk, lancer), buy armor (stone 15% less damage, iron 40%, gold 55%, diamond 70%) and meat. Build on your side: walls, the Infinite Gold Block (10 gold, never breaks unless you sell it, everyone walks through it, stops enemy arrows), houses, barracks, archery range, monastery and towers. No sheep farm here: hit wild sheep in the middle for meat, and eat it to heal. Warriors attack, guard your heart or follow you. Every 5 minutes a mystery box falls in the middle and gives a random weapon enchantment (freezing, burning, zapping or poisoning) until you're knocked out. T taunts. Knocked out, you're back in 5 seconds while your heart stands, otherwise you become a ghost who watches. Bots can fill empty spots. The host runs `knights/sim.ts` and sends snapshots 20 times a second.
 
+## Musitions
+
+A music-making sled game designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/musitions/`.
+
+- Draw lines by dragging, or tap to put down dots that join into a line (🧲 snap, on by default, puts taps right on a note and a beat). Lines only run left to right.
+- A kid on a sled rides the lines at a steady speed. Each time the sled crosses a beat line while riding, it plays the note it's on: 15 colored note lines labeled C D E F G A B, from middle C up two octaves. In the air it's quiet, so jumps and gaps are rests.
+- A line that climbs steeply (steeper than 2.4 up per 1 across, or straight up) gets a spring: it jumps the sled up onto the high part. Steep drops are cliffs the sled falls off. Falling off the bottom ends the ride.
+- Score: "the more like a normal song, the more points". Each note scores against the one before (steps +10, skips +8, leaps +5, repeats +4 but three-plus in a row −3, huge jumps −5, a short rest +5), plus end bonuses: ending on C, a tune shape that comes back (even higher or lower), using 5+ notes, mostly smooth steps, and length. 1–5 stars from Noisy to Hit song!
+- Tools: Draw, Move (or two fingers, mouse wheel, arrow keys), Erase, Undo, Clear, four instruments (bells, piano, flute, robot, all Web Audio), three speeds, and 🎼 to load the starter song.
+- The song and settings are kept in localStorage (`musitions-song-v1`, `musitions-settings-v1`), with the best score in `musitions-best`.
+
+## Archenimys
+
+An archer tower climb designed by Tim on a handwritten page (original code, art and sounds). Code in `src/games/archenimys/`.
+
+- Climb 50 stages of a tower. Beat every monster on a stage and the stairs at the top open; walk onto them to go up (with friends, a 5-second countdown starts once one archer is on the stairs).
+- Monsters: **Boom Pot** (a teapot with a fuse that blows up when it gets near you, or when it gets destroyed), **Sharp Cactus** (shoots a fan of thorns), **Acid Stew** (a mostly black, a little gray pot of bubbling green goo with acid drizzling down; it spits globs that leave a splotch for 5 seconds that hurts if you step in it) and **Snapping Crab** (scuttles sideways, then dashes in and pinches).
+- A boss every 5 stages: the Crab King, Thornlord, Teapot Titan and the Witch Cauldron take turns, and the Archenemy waits at stage 50.
+- The stage before each boss has a loot chest (a lucky upgrade pick, never Common) and a health chest (Heal to full, or +½ full health and +25 max health).
+- Levelling up shows 3 upgrade cards. Each card's quality word counts up Common → Uncommon → Rare → Epic → Legendary → Mythical until it lands. There are 18 permanent upgrades (`UPGRADES` in `data.ts`); every quality has at least 8, and higher qualities give bigger numbers (Life Steal: Rare gains 3 health per monster destroyed, Epic gains 5). Picking one again stacks. You can't be hurt while choosing; when playing alone the tower waits.
+- Up to 4 players, each an archer or a monster (Boom Pot, Sharp Cactus, Acid Stew or Snapping Crab). Monster players attack archers with click or Space, switch monster with Q or 1–4, and when knocked out wait 5 seconds and come back as a different monster. Archers who go down come back on the next stage if another archer makes it.
+- Hosting works like M.D. (`archenimys/net.ts` is a copy with `game: 'archenimys'`): Host a game (or Shift+Esc, from the title or during a game) lists you in the `hosts` collection; Join a game searches that list every 3 seconds and connects over WebRTC. The host's game runs the tower and sends it out about 15 times a second; each player moves their own body.
+- Keyboard and mouse (WASD, aim with the mouse, hold click or Space to shoot, Esc menu) or touch (stick on the left, shoot button aims at the closest monster).
+- Best stage reached is kept in localStorage (`archenimys-best`).
+
 ## Develop
 
 ```

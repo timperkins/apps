@@ -253,4 +253,40 @@ export const GAMES: GameEntry[] = [
     </svg>`,
     load: () => import('./2p-games/index'),
   },
+  {
+    id: 'musitions',
+    title: 'Musitions',
+    tagline: 'Draw lines for a kid on a sled to ride: the higher the line, the higher the note. Make a real song for big points.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#2a2f6a"/>
+      <g stroke-width="1.6" opacity=".7"><path d="M0 18H120" stroke="#a66bff"/><path d="M0 28H120" stroke="#4d8dff"/><path d="M0 38H120" stroke="#3ec7c2"/><path d="M0 48H120" stroke="#6bd66b"/><path d="M0 58H120" stroke="#ffd93d"/><path d="M0 68H120" stroke="#ff5a5f"/></g>
+      <path d="M8 66L30 58L46 58L50 30L78 28L100 18L116 18" fill="none" stroke="#2b2f63" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M8 66L30 58L46 58L50 30L78 28L100 18L116 18" fill="none" stroke="#f7fbff" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M44 58l6-2-6-2 6-2-6-2" fill="none" stroke="#c9ced8" stroke-width="1.5"/><rect x="42" y="47" width="10" height="2.5" fill="#ff5a5f"/>
+      <g transform="translate(26 58) rotate(-20)"><rect x="-10" y="-5" width="18" height="3" rx="1" fill="#d6453d"/><path d="M-10-1H8q4 0 3-4" stroke="#3b2a1a" stroke-width="1.2" fill="none"/>
+        <rect x="-6" y="-14" width="6" height="9" rx="2" fill="#2bb39a"/><circle cx="-3" cy="-17" r="3.4" fill="#f1c9a0"/><path d="M-6.5-17.5a3.5 3.5 0 0 1 7 0z" fill="#e04f8a"/></g>
+      <g fill="#ffe066" font-family="sans-serif" font-weight="900"><text x="62" y="20" font-size="12">♪</text><text x="86" y="12" font-size="10">♫</text><text x="34" y="46" font-size="10">♪</text></g>
+      <text x="60" y="78" font-size="10" font-weight="900" text-anchor="middle" fill="#ffe066" font-family="sans-serif" letter-spacing="1.5">MUSITIONS</text>
+    </svg>`,
+    load: () => import('./musitions/index'),
+  },
+  {
+    id: 'archenimys',
+    title: 'Archenimys',
+    tagline: 'Climb a 50-stage tower as an archer: Boom Pots, Sharp Cacti, Acid Stews, Snapping Crabs and a boss every 5 stages.',
+    art: `<svg viewBox="0 0 120 80" aria-hidden="true">
+      <rect width="120" height="80" fill="#0d0b1a"/>
+      <g fill="#fff8e0"><circle cx="8" cy="10" r="1"/><circle cx="112" cy="14" r="1.2"/><circle cx="20" cy="40" r=".8"/><circle cx="104" cy="44" r="1"/></g>
+      <rect x="34" y="8" width="52" height="72" fill="#5f574b"/>
+      <path d="M34 8h8v-6h8v6h4v-6h8v6h4v-6h8v6h4v-6h8v6" fill="#8a7f6e"/>
+      <g stroke="#3b342c" stroke-width="1.5"><path d="M34 26H86M34 44H86M34 62H86M48 8V26M70 26V44M52 44V62M74 62V80"/></g>
+      <rect x="52" y="10" width="16" height="10" fill="#ffe680" opacity=".7"/>
+      <g transform="translate(58 68)"><path d="M-6 6Q-7-3 0-4Q7-3 6 6Z" fill="#3fa7ff" stroke="#141018"/><circle cy="-7" r="5" fill="#3fa7ff" stroke="#141018"/><circle cy="-6" r="3.2" fill="#f2c7a0"/><path d="M6-12A9 9 0 0 1 6 2" stroke="#8a5a2b" stroke-width="2" fill="none"/><path d="M6-5H16" stroke="#d9c39a" stroke-width="1.5"/></g>
+      <g transform="translate(44 40)"><ellipse rx="7" ry="6" fill="#c8553d" stroke="#2a120c"/><path d="M6 0q4-1 5-5" stroke="#c8553d" stroke-width="3"/><circle cy="-7" r="1.6" fill="#ffd23f"/></g>
+      <g transform="translate(76 48)"><rect x="-4" y="-9" width="8" height="15" rx="4" fill="#3f9a3c"/><rect x="3" y="-6" width="4" height="7" rx="2" fill="#3f9a3c"/><circle cy="-10" r="1.8" fill="#ff6fa8"/></g>
+      <g transform="translate(70 28)"><ellipse rx="7" ry="5.5" fill="#121212"/><ellipse cy="-4" rx="6" ry="1.8" fill="#5ff23a"/><path d="M-3-3v5M2-3v4" stroke="#4fe02c" stroke-width="1.5"/></g>
+      <g transform="translate(50 56)"><ellipse rx="6" ry="4" fill="#e2532f"/><circle cx="-6" cy="-4" r="2.5" fill="#e2532f"/><circle cx="6" cy="-4" r="2.5" fill="#e2532f"/></g>
+    </svg>`,
+    load: () => import('./archenimys/index'),
+  },
 ];
