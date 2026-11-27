@@ -31,5 +31,8 @@ Run the app's own checks from its folder (typecheck, tests, build) as listed in 
 To re-run `create-app` by hand (for an app added before this, or to change a setting), call REST, since `gh workflow run` needs GraphQL, which Claude sessions can't use:
 `gh api -X POST repos/timperkins/apps/actions/workflows/create-app.yml/dispatches -f ref=main -f 'inputs[name]=<name>' -f 'inputs[type]=hosting' -F 'inputs[firestore]=true' -f 'inputs[ttl_collections]=rooms players rtc'`
 
+To attach a domain to a backend or site that already exists, including ones connected to another repo (such as `game-maker`), without create-app's other changes, dispatch `attach-domain.yml`:
+`gh api -X POST repos/timperkins/apps/actions/workflows/attach-domain.yml/dispatches -f ref=main -f 'inputs[domain]=<host>' -f 'inputs[backend]=<backend id>'`
+
 Raw Actions logs can't be fetched from a Claude session. Read a run's notices with `gh api repos/timperkins/apps/check-runs/<job id>/annotations`.
 

@@ -1,0 +1,63 @@
+name: attach-domain
+
+# Attaches a custom domain to an existing Hosting site or App Hosting backend, writes its DNS
+# records into the trom-dev Cloud DNS zone and adds it to Auth's authorized domains. Only that:
+# unlike create-app, it creates nothing and leaves a backend's repo link and rollout settings alone.
+# For backends that live outside this repo (e.g. game-maker, connected to timperkins/game-maker).
+#
+#   gh api -X POST repos/timperkins/apps/actions/workflows/attach-domain.yml/dispatches -f ref=main \
+#     -f 'inputs[domain]=game-maker.trom.dev' -f 'inputs[backend]=game-maker'
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Custom domain, e.g. game-maker.trom.dev
+        type: string
+        required: true
+      backend:
+        description: App Hosting backend id (leave empty when using hosting_site)
+        type: string
+        required: false
+      hosting_site:
+        description: Hosting site id (leave empty when using backend)
+        type: string
+        required: false
+      region:
+        description: App Hosting region
+        type: string
+        default: us-central1
+
+env:
+  FIREBASE_PROJECT: apps-97595
+  DNS_ZONE: trom-dev
+  RUN: ${{ github.workspace }}/scripts/ci-run.sh
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Custom domain, DNS and Auth
+        env:
+          DOMAIN: ${{ inputs.domain }}
+          BACKEND: ${{ inputs.backend }}
+          SITE: ${{ inputs.hosting_site }}
+          REGION: ${{ inputs.region }}
+        run: |
+          [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { echo "::error::Bad domain: $DOMAIN"; exit 1; }
+          if [ -n "$BACKEND" ] && [ -z "$SITE" ]; then
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --backend "$BACKEND" --region "$REGION"
+          elif [ -n "$SITE" ] && [ -z "$BACKEND" ]; then
+            "$RUN" node scripts/attach-domain.mjs --domain "$DOMAIN" --hosting-site "$SITE"
+          else
+            echo "::error::Give exactly one of backend or hosting_site"; exit 1
+          fi
+          echo "Done: https://$DOMAIN (the certificate can take up to an hour)" >> "$GITHUB_STEP_SUMMARY"
