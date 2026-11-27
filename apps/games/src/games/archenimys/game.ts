@@ -2,10 +2,15 @@
 // chests and level-ups. Each player moves their own body (moveSelf) and sends where they are,
 // so movement feels instant on every screen.
 import {
-  ARCHER, BOSSES, DMG, H, MONSTERS, MONSTER_KINDS, PLAYER_MONSTER_HP, PLAYER_MONSTER_SPEED, STAGES, W,
-  bossFor, dmgScale, hpScale, isBossStage, isChestStage, rollOffers, upValue, xpNeed,
-  type BossKind, type MonsterKind, type Offer, type UpId,
+  ARCHER, BOSSES, BOSS_ORDER, DMG, ENCHANTS, ENCHANT_IDS, H, MONSTERS, MONSTER_KINDS, PLAYER_MONSTER_HP, PLAYER_MONSTER_SPEED, STAGES, W, WORLDS,
+  bossFor, dmgScale as dmgScaleW, hpScale as hpScaleW, isBossStage, isChestStage, isMythicStage, rollOffers, upValue, xpNeed,
+  type BossKind, type Enchant, type MonsterKind, type Offer, type UpId,
 } from './data';
+
+// the current world is part of how hard everything is
+let curWorld = 1;
+const hpScale = (stage: number) => hpScaleW(stage, curWorld);
+const dmgScale = (stage: number) => dmgScaleW(stage, curWorld);
 
 export type Role = 'archer' | 'monster';
 
@@ -31,8 +36,9 @@ export interface Player {
   /** the 3 upgrade cards on screen, or null */
   offers: Offer[] | null;
   offerLucky: boolean;
-  /** level-ups and loot chests still waiting to be shown */
-  queue: ('lvl' | 'loot')[];
+  offerMyth: boolean;
+  /** level-ups and chests still waiting to be shown */
+  queue: ('lvl' | 'loot' | 'myth')[];
   healChoice: boolean;
   opened: number[];
   fireCd: number;
@@ -42,7 +48,22 @@ export interface Player {
   switchCd: number;
   slowT: number;
   kills: number;
+  weapon: 'bow' | 'sword';
+  /** shield energy 0..100; holding block takes 95% less damage */
+  shield: number;
+  blocking: boolean;
+  shieldBroken: boolean;
+  swingT: number;
+  shotN: number;
+  rainT: number;
+  // how fast they're going (for the Sharp Crab's aim)
+  vx: number;
+  vy: number;
+  lx: number;
+  ly: number;
 }
+
+export interface Wolf { id: number; owner: string; power: number; x: number; y: number; face: number; cd: number; moving: boolean; biteT: number }
 
 export interface Enemy {
   id: number;
@@ -72,6 +93,9 @@ export interface Enemy {
   hitOnce: number;
   face: number;
   pattern: number;
+  ench: Enchant | '';
+  /** the Enchanter's last spell, told to archers who come close */
+  said: string;
 }
 
 export interface Shot {
@@ -89,6 +113,7 @@ export interface Shot {
   bounce: number;
   crit: boolean;
   hit: number[];
+  child?: boolean;
   // globs fly in an arc from (sx, sy) to (tx, ty)
   sx: number;
   sy: number;
@@ -99,14 +124,18 @@ export interface Shot {
 }
 
 export interface Splotch { id: number; x: number; y: number; r: number; t: number; team: 'a' | 'm' }
-export interface Chest { id: number; kind: 'loot' | 'health'; x: number; y: number }
+export interface Chest { id: number; kind: 'loot' | 'health' | 'mythic'; x: number; y: number }
 export interface Pillar { x: number; y: number; r: number }
 /** things that happened this tick, for sounds and sparkles (sent to friends too) */
-export interface Fx { k: string; x: number; y: number; v?: number; c?: string; r?: number; who?: string }
+export interface Fx { k: string; x: number; y: number; v?: number; c?: string; r?: number; who?: string; x2?: number; y2?: number }
 
 export interface State {
   phase: 'lobby' | 'play' | 'over' | 'won';
+  world: number;
   stage: number;
+  /** stage 50: 1 = every boss at once, 2 = the boss with all their moves */
+  finale: number;
+  wolves: Wolf[];
   cleared: boolean;
   stairsT: number; // countdown once an archer is on the stairs (-1 = nobody)
   bannerT: number;
@@ -126,13 +155,15 @@ export interface State {
 export interface Input {
   fire: boolean;
   aim: number;
+  block?: boolean;
 }
 
 export type Act =
   | { t: 'role'; role: Role; kind?: MonsterKind }
   | { t: 'pick'; i: number }
   | { t: 'heal'; opt: 0 | 1 }
-  | { t: 'switch'; kind?: MonsterKind };
+  | { t: 'switch'; kind?: MonsterKind }
+  | { t: 'weapon'; w?: 'bow' | 'sword' };
 
 export const STAIRS = { x: W / 2, y: 40, w: 96, h: 40 };
 export const WALL = 26;
@@ -152,7 +183,7 @@ const dist = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax -
 
 export function newState(): State {
   return {
-    phase: 'lobby', stage: 1, cleared: false, stairsT: -1, bannerT: 0,
+    phase: 'lobby', world: 1, stage: 1, finale: 0, wolves: [], cleared: false, stairsT: -1, bannerT: 0,
     players: [], enemies: [], shots: [], splotches: [], chests: [], pillars: [],
     spawnLeft: 0, spawnT: 0, time: 0, nextId: 1, bossId: 0,
   };
@@ -162,8 +193,9 @@ export function newPlayer(id: string, name: string, slot: number): Player {
   return {
     id, name, slot, role: null, kind: 'crab', x: W / 2, y: H - 80, aim: -Math.PI / 2, moving: false,
     hp: ARCHER.hp, maxHp: ARCHER.hp, dead: false, respawnT: 0, tp: 0,
-    level: 1, xp: 0, ups: {}, offers: null, offerLucky: false, queue: [], healChoice: false, opened: [],
+    level: 1, xp: 0, ups: {}, offers: null, offerLucky: false, offerMyth: false, queue: [], healChoice: false, opened: [],
     fireCd: 0, hurtCd: 0, hurtT: 0, fuse: 0, switchCd: 0, slowT: 0, kills: 0,
+    weapon: 'bow', shield: 100, blocking: false, shieldBroken: false, swingT: 0, shotN: 0, rainT: 3, vx: 0, vy: 0, lx: W / 2, ly: H - 80,
   };
 }
 
@@ -184,7 +216,7 @@ export function archerStats(p: Player) {
 
 export function playerSpeed(p: Player) {
   const base = p.role === 'archer' ? archerStats(p).speed : PLAYER_MONSTER_SPEED[p.kind];
-  return base * (p.slowT > 0 ? 0.6 : 1) * (p.fuse > 0 ? 0.5 : 1);
+  return base * (p.slowT > 0 ? 0.6 : 1) * (p.fuse > 0 ? 0.5 : 1) * (p.blocking ? 0.55 : 1);
 }
 export const playerR = (p: Player) => (p.role === 'archer' ? ARCHER.r : MONSTERS[p.kind].r + 3);
 /** can this player be hurt and act right now? */
@@ -287,7 +319,12 @@ export class Game {
         this.spawnMonsterPlayer(p, a.kind ?? p.kind);
       }
       p.dead = false;
+      p.blocking = false;
       p.tp++;
+    } else if (a.t === 'weapon') {
+      if (p.role !== 'archer') return;
+      p.weapon = a.w ?? (p.weapon === 'bow' ? 'sword' : 'bow');
+      p.fireCd = 0.2;
     } else if (a.t === 'pick') {
       if (!p.offers) return;
       const o = p.offers[a.i];
@@ -324,6 +361,10 @@ export class Game {
       p.maxHp += v;
       p.hp += v;
     }
+    if (o.up === 'bone') {
+      // a new wolf for every Tasty Bone
+      this.s.wolves.push({ id: this.id(), owner: p.id, power: v, x: p.x + 20, y: p.y, face: 0, cd: 0, moving: false, biteT: 0 });
+    }
     this.emit({ k: 'upgrade', x: p.x, y: p.y, v: o.q });
   }
 
@@ -331,7 +372,8 @@ export class Game {
     if (p.offers || !p.queue.length) return;
     const what = p.queue.shift()!;
     p.offerLucky = what === 'loot';
-    p.offers = rollOffers(this.s.stage, p.offerLucky);
+    p.offerMyth = what === 'myth';
+    p.offers = rollOffers(this.s.stage, p.offerLucky, this.s.world, p.offerMyth);
   }
 
   private spawnMonsterPlayer(p: Player, kind: MonsterKind) {
@@ -362,11 +404,19 @@ export class Game {
     const s = this.s;
     s.stage++;
     if (s.stage > STAGES) {
-      s.stage = STAGES;
-      s.phase = 'won';
-      this.emit({ k: 'win', x: W / 2, y: H / 2 });
-      return;
+      if (s.world >= WORLDS) {
+        s.stage = STAGES;
+        s.phase = 'won';
+        this.emit({ k: 'win', x: W / 2, y: H / 2 });
+        return;
+      }
+      // the top of the tower opens onto a new map: 50 more stages, a lot harder
+      s.world++;
+      s.stage = 1;
+      this.emit({ k: 'world', x: W / 2, y: H / 2, v: s.world });
     }
+    curWorld = s.world;
+    s.finale = 0;
     s.cleared = false;
     s.stairsT = -1;
     s.bannerT = 2.5;
@@ -376,7 +426,7 @@ export class Game {
     s.chests = [];
     s.bossId = 0;
     // pillars: a few, never near the stairs or the archers' start
-    const r = rng(s.stage * 7919 + 13);
+    const r = rng(s.stage * 7919 + 13 + s.world * 104729);
     s.pillars = [];
     const n = isBossStage(s.stage) ? 2 : 2 + Math.floor(r() * 4);
     for (let i = 0; i < n * 4 && s.pillars.length < n; i++) {
@@ -397,6 +447,13 @@ export class Game {
         p.offers = null;
       }
     });
+    for (const w of s.wolves) {
+      const o = this.player(w.owner);
+      if (o) {
+        w.x = o.x + 30;
+        w.y = o.y - 10;
+      }
+    }
     for (const p of s.players) if (p.role === 'monster') {
       if (p.dead) {
         p.dead = false;
@@ -405,12 +462,24 @@ export class Game {
       this.spawnMonsterPlayer(p, p.kind);
     }
     const team = Math.max(1, archers.length);
-    if (isBossStage(s.stage)) {
+    if (s.stage === STAGES) {
+      // the top: every boss at once
+      s.spawnLeft = 0;
+      s.finale = 1;
+      BOSS_ORDER.forEach((k, i) => {
+        const b = this.spawnBoss(k, team, 0.55);
+        b.x = 180 + i * ((W - 360) / 3);
+        b.y = 140 + (i % 2) * 60;
+        b.cd = 2 + i * 0.7;
+      });
+    } else if (isBossStage(s.stage)) {
       s.spawnLeft = 0;
       const b = this.spawnBoss(bossFor(s.stage), team);
       s.bossId = b.id;
     } else {
-      s.spawnLeft = Math.min(42, Math.round((4 + s.stage * 0.9) * (1 + 0.45 * (team - 1))));
+      // World 2 sends twice as many monsters
+      const many = (5 + s.stage * 1.1) * (1 + 0.45 * (team - 1)) * (s.world > 1 ? 2 : 1);
+      s.spawnLeft = Math.min(s.world > 1 ? 90 : 48, Math.round(many));
       s.spawnT = 1.2;
     }
     this.emit({ k: 'stage', x: W / 2, y: H / 2, v: s.stage });
@@ -419,8 +488,8 @@ export class Game {
 
   private pickKind(r: () => number): MonsterKind {
     const st = this.s.stage;
-    const pool: [MonsterKind, number][] = [['pot', 30], ['crab', 30], ['cactus', 20], ['stew', 20]];
-    const ok = pool.filter(([k]) => MONSTERS[k].firstStage <= st);
+    const pool: [MonsterKind, number][] = [['pot', 30], ['crab', 28], ['cactus', 20], ['stew', 20], ['sharpCrab', 18], ['enchanter', 7]];
+    const ok = pool.filter(([k]) => this.s.world > 1 || MONSTERS[k].firstStage <= st);
     const total = ok.reduce((a, [, w]) => a + w, 0);
     let x = r() * total;
     for (const [k, w] of ok) {
@@ -436,12 +505,12 @@ export class Game {
     return {
       id: this.id(), kind, boss, x, y, hp, maxHp: hp, r: bd ? bd.r : def.r, speed: (bd ? bd.speed : def.speed) * (1 + this.s.stage * 0.004),
       state: 0, t: 0, cd: 1 + Math.random() * 1.5, cd2: 5, dx: 0, dy: 0, side: Math.random() < 0.5 ? 1 : -1, fuse: 0,
-      slowT: 0, slowPct: 0, burnT: 0, burnDps: 0, burnBy: '', hurtT: 0, hitOnce: 0, face: 0, pattern: 0,
+      slowT: 0, slowPct: 0, burnT: 0, burnDps: 0, burnBy: '', hurtT: 0, hitOnce: 0, face: 0, pattern: 0, ench: '', said: '',
     };
   }
 
-  private spawnBoss(kind: BossKind, team: number) {
-    const b = this.makeEnemy(BOSSES[kind].look, W / 2, 150, kind, 1 + 0.6 * (team - 1));
+  private spawnBoss(kind: BossKind, team: number, hpMul = 1) {
+    const b = this.makeEnemy(BOSSES[kind].look, W / 2, 150, kind, (1 + 0.6 * (team - 1)) * hpMul);
     b.cd = 2;
     b.cd2 = 6;
     this.s.enemies.push(b);
@@ -483,6 +552,11 @@ export class Game {
     if (choosing(p)) return false; // no damage while picking an upgrade or a chest choice
     if (!dot && p.hurtCd > 0) return false;
     if (p.role === 'archer') dmg *= 1 - archerStats(p).guard;
+    // the shield blocks 95% of the damage
+    if (p.blocking && p.shield > 0) {
+      dmg *= 0.05;
+      if (!dot) this.emit({ k: 'block', x: p.x, y: p.y });
+    }
     p.hp -= dmg;
     p.hurtT = 0.18;
     if (!dot) {
@@ -526,7 +600,7 @@ export class Game {
 
   private giveXp(n: number) {
     for (const p of this.archers(false)) {
-      p.xp += n;
+      p.xp += n * (1 + up(p, 'golden') / 100);
       let need = xpNeed(p.level);
       while (p.xp >= need) {
         p.xp -= need;
@@ -541,6 +615,9 @@ export class Game {
 
   hurtEnemy(e: Enemy, dmg: number, by: string, crit = false) {
     if (e.hp <= 0) return;
+    if (e.ench === 'protection') dmg *= 0.5;
+    const k = e.boss ? this.player(by) : null;
+    if (k) dmg *= 1 + up(k, 'giant') / 100;
     e.hp -= dmg;
     e.hurtT = 0.12;
     this.emit({ k: 'num', x: e.x, y: e.y - e.r, v: Math.round(dmg), c: crit ? 'crit' : '' });
@@ -600,6 +677,91 @@ export class Game {
       });
     }
     this.emit({ k: 'shoot', x: p.x, y: p.y, who: p.id });
+    // Thunder Bow: every 4th shot calls lightning
+    p.shotN++;
+    if (up(p, 'thunder') && p.shotN % 4 === 0) this.lightning(p, p.x, p.y, st.dmg * 2.2);
+  }
+
+  /** lightning jumps from (x, y) to up to 5 monsters in a row */
+  private lightning(p: Player, x: number, y: number, dmg: number) {
+    const hit: number[] = [];
+    for (let n = 0; n < 5; n++) {
+      let best: Enemy | null = null, bd = n === 0 ? 420 : 240;
+      for (const e of this.s.enemies) {
+        const d = dist(e.x, e.y, x, y);
+        if (!hit.includes(e.id) && d < bd) {
+          bd = d;
+          best = e;
+        }
+      }
+      if (!best) break;
+      hit.push(best.id);
+      this.emit({ k: 'zap', x, y, x2: best.x, y2: best.y });
+      x = best.x;
+      y = best.y;
+      this.hurtEnemy(best, dmg, p.id);
+    }
+  }
+
+  /** a sword swing: hits everything in a wide arc in front of you */
+  private swing(p: Player) {
+    const st = archerStats(p);
+    const reach = 74;
+    p.swingT = 0.22;
+    this.emit({ k: 'swing', x: p.x, y: p.y, v: p.aim, who: p.id });
+    const inArc = (x: number, y: number, r: number) => {
+      const d = dist(x, y, p.x, p.y);
+      if (d > reach + r) return false;
+      let da = Math.atan2(y - p.y, x - p.x) - p.aim;
+      da = Math.atan2(Math.sin(da), Math.cos(da));
+      return Math.abs(da) < 1.05 || d < r + 10;
+    };
+    for (const e of [...this.s.enemies]) {
+      if (!inArc(e.x, e.y, e.r)) continue;
+      const crit = Math.random() < st.crit;
+      this.hurtEnemy(e, st.dmg * 1.9 * (crit ? 2 : 1), p.id, crit);
+      this.onHitEffects(p, e);
+      // knock it back a little
+      const d = dist(e.x, e.y, p.x, p.y) || 1;
+      if (!e.boss) {
+        e.x += ((e.x - p.x) / d) * 22;
+        e.y += ((e.y - p.y) / d) * 22;
+        collide(this.s, e, e.r);
+      }
+    }
+    for (const q of this.s.players) {
+      if (q.role !== 'monster' || q.dead || !inArc(q.x, q.y, playerR(q))) continue;
+      this.hurtPlayer(q, st.dmg * 1.9, p.id);
+      this.emit({ k: 'num', x: q.x, y: q.y - 20, v: Math.round(st.dmg * 1.9), c: '' });
+    }
+  }
+
+  /** frost and fire upgrades */
+  private onHitEffects(owner: Player, e: Enemy) {
+    const fr = up(owner, 'frost');
+    if (fr) {
+      e.slowT = 2;
+      e.slowPct = Math.min(60, fr);
+    }
+    const fi = up(owner, 'fire');
+    if (fi) {
+      e.burnT = 3;
+      e.burnDps = Math.max(e.burnDps, fi);
+      e.burnBy = owner.id;
+    }
+  }
+
+  /** the Sharp Crab's shot: thorns one behind another, all in a line */
+  thornLine(x: number, y: number, aim: number, n: number, owner: string, dmgMul = 1) {
+    const cx = Math.cos(aim), cy = Math.sin(aim);
+    for (let i = 0; i < n; i++) {
+      this.s.shots.push({
+        id: this.id(), kind: 'thorn', team: 'm', owner, x: x - cx * i * 16, y: y - cy * i * 16, vx: cx * 400, vy: cy * 400,
+        dmg: DMG.thorn * dmgScale(this.s.stage) * dmgMul, life: 2.2, pierce: 0, bounce: 0, crit: false, hit: [],
+        sx: 0, sy: 0, tx: 0, ty: 0, t: 0, dur: 0,
+      });
+    }
+    this.emit({ k: 'thorns', x, y });
   }
 
   thorns(x: number, y: number, aim: number, n: number, spreadDeg: number, owner: string, dmgMul = 1) {
@@ -642,6 +804,7 @@ export class Game {
   update(dt: number) {
     const s = this.s;
     if (s.phase !== 'play') return;
+    curWorld = s.world;
     // alone and picking an upgrade: the tower waits for you
     const humans = s.players.filter((p) => p.role);
     if (humans.length === 1 && choosing(humans[0])) return;
@@ -665,6 +828,17 @@ export class Game {
     for (const e of [...s.enemies]) this.updateEnemy(e, dt);
     this.updateShots(dt);
     this.updateOrbs(dt);
+    this.updateWolves(dt);
+    this.updateMythics(dt);
+
+    // stage 50: once every boss is beaten, the boss with all their moves shows up
+    if (s.finale === 1 && !s.enemies.some((e) => e.boss)) {
+      s.finale = 2;
+      const b = this.spawnBoss('archenemy', Math.max(1, this.archers(false).length));
+      b.y = 120;
+      s.bossId = b.id;
+      this.emit({ k: 'finale', x: b.x, y: b.y });
+    }
 
     // acid splotches
     for (const sp of s.splotches) {
@@ -680,15 +854,20 @@ export class Game {
     s.splotches = s.splotches.filter((sp) => sp.t > 0);
 
     // the stage is clear once every monster the tower sent is gone
-    if (!s.cleared && s.spawnLeft <= 0 && !s.enemies.length) {
+    if (!s.cleared && s.spawnLeft <= 0 && !s.enemies.length && s.finale !== 1) {
       s.cleared = true;
       this.emit({ k: 'clear', x: W / 2, y: H / 2 });
+      if (s.stage === STAGES && s.world >= WORLDS) {
+        this.nextStage(); // the very top: you win
+        return;
+      }
       if (isChestStage(s.stage)) {
         s.chests = [
           { id: this.id(), kind: 'loot', x: W / 2 - 70, y: H / 2 },
           { id: this.id(), kind: 'health', x: W / 2 + 70, y: H / 2 },
         ];
       }
+      if (isMythicStage(s.stage)) s.chests.push({ id: this.id(), kind: 'mythic', x: W / 2, y: H / 2 + 70 });
     }
     if (s.cleared) this.updateExit(dt);
   }
@@ -701,8 +880,8 @@ export class Game {
         if (p.opened.includes(c.id) || dist(p.x, p.y, c.x, c.y) > 34) continue;
         p.opened.push(c.id);
         this.emit({ k: 'chest', x: c.x, y: c.y, who: p.id, c: c.kind });
-        if (c.kind === 'loot') {
-          p.queue.unshift('loot');
+        if (c.kind === 'loot' || c.kind === 'mythic') {
+          p.queue.unshift(c.kind === 'loot' ? 'loot' : 'myth');
           this.nextOffer(p);
         } else p.healChoice = true;
       }
@@ -729,6 +908,15 @@ export class Game {
     p.switchCd = Math.max(0, p.switchCd - dt);
     p.slowT = Math.max(0, p.slowT - dt);
     p.fireCd = Math.max(0, p.fireCd - dt);
+    p.swingT = Math.max(0, p.swingT - dt);
+    // how fast they're moving (the Sharp Crab aims where you're going)
+    if (dt > 0) {
+      p.vx = p.vx * 0.7 + ((p.x - p.lx) / dt) * 0.3;
+      p.vy = p.vy * 0.7 + ((p.y - p.ly) / dt) * 0.3;
+      if (Math.hypot(p.x - p.lx, p.y - p.ly) > 80) p.vx = p.vy = 0;
+    }
+    p.lx = p.x;
+    p.ly = p.y;
     if (!p.role) return;
     if (p.dead) {
       if (p.role === 'monster') {
@@ -748,12 +936,28 @@ export class Game {
     if (p.role === 'archer') {
       const regen = up(p, 'regen');
       if (regen > 0) p.hp = Math.min(p.maxHp, p.hp + regen * dt);
-      if (inp?.fire && !choosing(p) && p.fireCd <= 0) {
-        p.fireCd = archerStats(p).fireEvery;
-        this.fireArrows(p);
+      // the shield: hold to block 95% of damage while its energy lasts
+      if (p.shieldBroken && p.shield >= 40) p.shieldBroken = false;
+      p.blocking = !!inp?.block && !p.shieldBroken && p.shield > 0;
+      if (p.blocking) {
+        p.shield = Math.max(0, p.shield - 28 * dt);
+        if (p.shield <= 0) {
+          p.shieldBroken = true;
+          this.emit({ k: 'shieldbreak', x: p.x, y: p.y, who: p.id });
+        }
+      } else p.shield = Math.min(100, p.shield + 16 * dt);
+      if (inp?.fire && !p.blocking && !choosing(p) && p.fireCd <= 0) {
+        if (p.weapon === 'sword') {
+          p.fireCd = archerStats(p).fireEvery * 1.15;
+          this.swing(p);
+        } else {
+          p.fireCd = archerStats(p).fireEvery;
+          this.fireArrows(p);
+        }
       }
       return;
     }
+    p.blocking = false;
     // monster players
     const dm = dmgScale(this.s.stage);
     if (p.fuse > 0) {
@@ -780,6 +984,13 @@ export class Game {
       p.fireCd = 1.5;
       const reach = 260;
       this.glob(p.x, p.y, p.x + cx * reach, p.y + cy * reach, p.id, 1.2);
+    } else if (p.kind === 'sharpCrab') {
+      p.fireCd = 1.4;
+      this.thornLine(p.x + cx * 20, p.y + cy * 20, p.aim, 5, p.id, 1.2);
+    } else if (p.kind === 'enchanter') {
+      p.fireCd = 2.5;
+      const t = this.enchantNearest(p.x, p.y, 320);
+      if (!t) this.emit({ k: 'fizzle', x: p.x, y: p.y, who: p.id });
     } else {
       p.fireCd = 0.55;
       const px = p.x + cx * 30, py = p.y + cy * 30;
@@ -805,7 +1016,10 @@ export class Game {
     e.t += dt;
     e.cd -= dt * slow;
     e.cd2 -= dt;
-    const dm = dmgScale(s.stage);
+    // enchantments from an Enchanter
+    const em = e.ench === 'sharp' ? 1.6 : 1;
+    const dm = dmgScale(s.stage) * em;
+    if (e.ench === 'regrowth') e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.05 * dt);
     if (!target) {
       return;
     }
@@ -813,7 +1027,7 @@ export class Game {
     const d = Math.hypot(tx, ty) || 1;
     const nx = tx / d, ny = ty / d;
     e.face = Math.atan2(ty, tx);
-    const sp = e.speed * slow;
+    const sp = e.speed * slow * (e.ench === 'speed' ? 1.6 : 1);
     const move = (mx: number, my: number, speed = sp) => {
       e.x += mx * speed * dt;
       e.y += my * speed * dt;
@@ -855,7 +1069,7 @@ export class Game {
     } else if (e.kind === 'cactus') {
       if (e.state === 1) {
         if (e.t > 0.45) {
-          this.thorns(e.x, e.y, e.face, 5 + Math.floor(s.stage / 12), 50, '');
+          this.thorns(e.x, e.y, e.face, 5 + Math.floor(s.stage / 12), 50, '', em);
           e.state = 0;
           e.t = 0;
           e.cd = 2.2 + Math.random();
@@ -875,9 +1089,58 @@ export class Game {
       if (e.cd <= 0 && d < 480) {
         e.cd = 2.6 + Math.random() * 0.8;
         // aim a little ahead of a running archer
-        this.glob(e.x, e.y - 10, target.x + (Math.random() - 0.5) * 40, target.y + (Math.random() - 0.5) * 40, '');
+        this.glob(e.x, e.y - 10, target.x + (Math.random() - 0.5) * 40, target.y + (Math.random() - 0.5) * 40, '', em);
+      }
+    } else if (e.kind === 'sharpCrab') {
+      // keeps its distance, then shoots a line of thorns right where you're heading (3× a cactus's aim)
+      if (e.state === 1) {
+        if (e.t > 0.5) {
+          const fly = d / 400;
+          const ax = target.x + target.vx * fly, ay = target.y + target.vy * fly;
+          this.thornLine(e.x, e.y, Math.atan2(ay - e.y, ax - e.x), 5 + Math.floor(s.stage / 15), '', em);
+          e.state = 0;
+          e.t = 0;
+          e.cd = 2 + Math.random() * 0.8;
+        }
+        return;
+      }
+      const want = 230;
+      const circle = d > want + 30 ? 0.8 : d < want - 40 ? -0.8 : 0;
+      move(nx * circle - ny * e.side, ny * circle + nx * e.side, sp);
+      if (Math.random() < dt * 0.5) e.side *= -1;
+      if (e.cd <= 0 && d < 520) {
+        e.state = 1;
+        e.t = 0;
+      }
+    } else if (e.kind === 'enchanter') {
+      // stays back and enchants the monster closest to it
+      const want = 320;
+      if (d < want - 40) move(-nx, -ny);
+      else if (d > want + 80) move(nx, ny, sp * 0.6);
+      else move(-ny * e.side, nx * e.side, sp * 0.4);
+      if (e.cd <= 0) {
+        e.cd = 4 + Math.random() * 1.5;
+        const t = this.enchantNearest(e.x, e.y, 360, e);
+        if (t) e.said = `I gave the ${t.boss ? BOSSES[t.boss].name.replace(/^The /, '') : MONSTERS[t.kind].name} ${ENCHANTS[t.ench as Enchant].name}!`;
       }
     }
+  }
+
+  /** enchant the monster nearest to (x, y); ones without an enchantment come first */
+  enchantNearest(x: number, y: number, range: number, by?: Enemy): Enemy | null {
+    let best: Enemy | null = null, bd = Infinity;
+    for (const o of this.s.enemies) {
+      if (o === by || o.kind === 'enchanter') continue;
+      const d = dist(o.x, o.y, x, y) + (o.ench ? 400 : 0);
+      if (d < bd && dist(o.x, o.y, x, y) < range) {
+        bd = d;
+        best = o;
+      }
+    }
+    if (!best) return null;
+    best.ench = ENCHANT_IDS[Math.floor(Math.random() * ENCHANT_IDS.length)];
+    this.emit({ k: 'enchant', x, y, x2: best.x, y2: best.y, c: best.ench });
+    return best;
   }
 
   private crabStep(e: Enemy, dt: number, target: Player, d: number, nx: number, ny: number, sp: number, pinch: number, dashes: number) {
@@ -940,10 +1203,13 @@ export class Game {
       collide(s, e, e.r);
     };
     const summon = (k: MonsterKind, n: number) => {
-      if (s.enemies.length > 14) return;
-      for (let i = 0; i < n; i++) {
+      const w2 = s.world > 1;
+      if (s.enemies.length > (w2 ? 26 : 14)) return;
+      // in World 2 bosses call twice as many of their kind, all over the floor
+      for (let i = 0; i < n * (w2 ? 2 : 1); i++) {
         const a = Math.random() * Math.PI * 2;
-        this.spawnEnemy(k, { x: e.x + Math.cos(a) * (e.r + 24), y: e.y + Math.sin(a) * (e.r + 24) });
+        if (w2 && i % 2) this.spawnEnemy(k);
+        else this.spawnEnemy(k, { x: e.x + Math.cos(a) * (e.r + 24), y: e.y + Math.sin(a) * (e.r + 24) });
       }
     };
     const crab = () => this.crabStep(e, dt, target, d, nx, ny, sp, 30 * dm, 3);
@@ -951,12 +1217,18 @@ export class Game {
       if (d > 300) move(nx, ny);
       if (e.state === 1) {
         if (e.t > 0.6) {
+          // denser and more often: a thick fan, then a full ring with a second ring offset into its gaps
           e.pattern++;
-          if (e.pattern % 2) this.thorns(e.x, e.y, e.face, 9, 80, '', 1.2);
-          else this.thorns(e.x, e.y, e.face, 18, 360 - 20, '', 1.1);
+          if (e.pattern % 2) {
+            this.thorns(e.x, e.y, e.face, 15, 80, '', 1.2);
+            this.thorns(e.x, e.y, e.face, 8, 40, '', 1.2);
+          } else {
+            this.thorns(e.x, e.y, e.face, 32, 360 - 360 / 32, '', 1.1);
+            this.thorns(e.x, e.y, e.face + Math.PI / 32, 32, 360 - 360 / 32, '', 1.1);
+          }
           e.state = 0;
           e.t = 0;
-          e.cd = 2.2;
+          e.cd = 1.4;
         }
       } else if (e.cd <= 0) {
         e.state = 1;
@@ -1078,16 +1350,19 @@ export class Game {
     const hitEnemy = (e: Enemy) => {
       this.hurtEnemy(e, sh.dmg, sh.owner, sh.crit);
       if (owner) {
-        const fr = up(owner, 'frost');
-        if (fr) {
-          e.slowT = 2;
-          e.slowPct = Math.min(60, fr);
-        }
-        const fi = up(owner, 'fire');
-        if (fi) {
-          e.burnT = 3;
-          e.burnDps = Math.max(e.burnDps, fi);
-          e.burnBy = sh.owner;
+        this.onHitEffects(owner, e);
+        // Splitting Arrows: burst into more arrows
+        const n = up(owner, 'split');
+        if (n && !sh.child) {
+          const sp = Math.hypot(sh.vx, sh.vy) * 0.8;
+          const base = Math.atan2(sh.vy, sh.vx);
+          for (let i = 0; i < n; i++) {
+            const a = base + ((i + 1) / (n + 1) - 0.5) * 2.4;
+            this.s.shots.push({
+              ...sh, id: this.id(), child: true, x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+              dmg: sh.dmg * 0.5, life: 0.5, pierce: 0, bounce: 0, hit: [e.id],
+            });
+          }
         }
       }
     };
@@ -1136,6 +1411,74 @@ export class Game {
       return false;
     }
     return true;
+  }
+
+  private updateWolves(dt: number) {
+    const s = this.s;
+    s.wolves = s.wolves.filter((w) => s.players.some((p) => p.id === w.owner));
+    for (const w of s.wolves) {
+      const o = this.player(w.owner)!;
+      w.cd = Math.max(0, w.cd - dt);
+      w.biteT = Math.max(0, w.biteT - dt);
+      if (o.role !== 'archer') {
+        w.moving = false;
+        continue;
+      }
+      // go for the monster closest to its archer
+      let t: Enemy | null = null, bd = 380;
+      for (const e of s.enemies) {
+        const d = dist(e.x, e.y, o.x, o.y);
+        if (d < bd) {
+          bd = d;
+          t = e;
+        }
+      }
+      const gx = t ? t.x : o.x + Math.cos(w.id) * 40, gy = t ? t.y : o.y + Math.sin(w.id) * 30;
+      const d = dist(w.x, w.y, gx, gy);
+      const reach = t ? t.r + 14 : 20;
+      w.moving = d > reach;
+      if (d > reach) {
+        const sp = (d > 300 ? 420 : 280) * dt;
+        w.x += ((gx - w.x) / d) * Math.min(sp, d - reach);
+        w.y += ((gy - w.y) / d) * Math.min(sp, d - reach);
+        collide(s, w, 10);
+      }
+      w.face = Math.atan2(gy - w.y, gx - w.x);
+      if (t && d <= reach + 4 && w.cd <= 0) {
+        w.cd = 0.55;
+        w.biteT = 0.15;
+        this.hurtEnemy(t, 9 * w.power * Math.sqrt(hpScale(s.stage)), o.id);
+        this.emit({ k: 'bite', x: t.x, y: t.y });
+      }
+    }
+  }
+
+  /** Arrow Rain and Burning Aura */
+  private updateMythics(dt: number) {
+    for (const p of this.archers()) {
+      const st = archerStats(p);
+      const rain = up(p, 'rain');
+      if (rain) {
+        p.rainT -= dt;
+        if (p.rainT <= 0 && this.s.enemies.length) {
+          p.rainT = 3;
+          for (let i = 0; i < rain; i++) {
+            const e = this.s.enemies[Math.floor(Math.random() * this.s.enemies.length)];
+            if (!e) break;
+            this.emit({ k: 'rain', x: e.x, y: e.y });
+            this.hurtEnemy(e, st.dmg, p.id);
+          }
+        }
+      }
+      const aura = up(p, 'aura');
+      if (aura) {
+        for (const e of [...this.s.enemies]) {
+          if (dist(e.x, e.y, p.x, p.y) > 110 + e.r) continue;
+          e.hp -= aura * dt * (e.ench === 'protection' ? 0.5 : 1);
+          if (e.hp <= 0) this.killEnemy(e, p.id);
+        }
+      }
+    }
   }
 
   private orbHit = new Map<string, number>();

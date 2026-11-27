@@ -37,16 +37,18 @@ const write = (k: string, v: string) => {
 const HELP = `
   <h3>How to play</h3>
   <p>You're an archer climbing to the top of a tower: 50 stages. Beat every monster on a stage and the stairs at the top open. Walk onto them to go up.</p>
-  <p><b>WASD</b> or arrows: move · <b>Mouse</b>: aim · <b>Hold click</b> or <b>Space</b>: shoot · <b>Esc</b>: menu · <b>Shift+Esc</b>: host a game right away</p>
+  <p><b>WASD</b> or arrows: move · <b>Mouse</b>: aim · <b>Hold click</b> or <b>Space</b>: shoot or swing · <b>Hold right click</b>, <b>Shift</b> or <b>E</b>: shield (blocks 95% of damage while its bar lasts) · <b>X</b>: bow or sword · <b>Esc</b>: menu · <b>Shift+Esc</b>: host a game right away</p>
+  <p>Every 10 stages a <b>Mythical chest</b> shows up: 3 Mythical upgrades that nothing else can roll. At stage 50 every boss comes at once, then the Archenemy. Beat it and a new map opens: <b>World 2</b>, 50 more stages with twice the monsters, tougher bosses and even crazier upgrades.</p>
   <p>Every 5 stages there's a boss. Before each boss you'll find a <b>loot chest</b> (a lucky upgrade) and a <b>health chest</b> (heal to full, or +½ health and +25 max health).</p>
   <p>Beating monsters levels you up. Pick 1 of 3 upgrades: Common, Uncommon, Rare, Epic, Legendary or Mythical. They last the whole climb and stack. You can't be hurt while you choose.</p>
   <ul class="ar-mons">
     ${MONSTER_KINDS.map((k) => `<li><img src="${monsterPicture(k, 56)}" alt=""><span><b>${MONSTERS[k].name}</b> ${MONSTERS[k].blurb}</span></li>`).join('')}
   </ul>
-  <p><b>Play together</b> (up to 4): each player picks archer or monster. Monsters attack the archers with click or Space; <b>Q</b> or <b>1</b>–<b>4</b> switches monster. A monster that gets knocked out comes back 5 seconds later as a different monster.</p>
+  <p><b>Play together</b> (2 to 4 players): each player picks archer or monster. Monsters attack the archers with click or Space; <b>Q</b> or <b>1</b>–<b>6</b> switches monster. A monster that gets knocked out comes back 5 seconds later as a different monster.</p>
   <p>On a phone: drag on the left to move; the button on the right shoots at the closest monster.</p>`;
 
 type Screen = 'title' | 'join' | 'lobby' | 'play' | 'help';
+const bestText = (n: number) => (n > STAGES ? `World 2, stage ${n - STAGES}` : `stage ${n} of ${STAGES}`);
 
 const game: GameModule = {
   mount(root, { onExit }) {
@@ -58,6 +60,7 @@ const game: GameModule = {
         <div class="ar-tl">
           <div class="ar-hp"><i></i><span></span></div>
           <div class="ar-xp"><i></i><span></span></div>
+          <div class="ar-sh"><i></i><span>🛡️ Shield</span></div>
           <div class="ar-ups"></div>
         </div>
         <div class="ar-top">
@@ -66,6 +69,7 @@ const game: GameModule = {
           <div class="ar-boss" hidden><b></b><div class="ar-bossbar"><i></i></div></div>
         </div>
         <div class="ar-tr">
+          <button data-a="weapon" title="Bow or sword (X)" class="ar-weap">🏹</button>
           <button data-a="mute" title="Sound"></button>
           <button data-a="menu" title="Menu (Esc)">☰</button>
         </div>
@@ -77,6 +81,8 @@ const game: GameModule = {
         <div class="ar-stick"><div class="ar-knob"></div></div>
         <div class="ar-tbtns">
           <button data-t="switch" class="ar-tsw" hidden>🔄</button>
+          <button data-t="weapon" class="ar-tweap">🗡️</button>
+          <button data-t="block" class="ar-tblock">🛡️</button>
           <button data-t="fire" class="ar-tfire">🏹</button>
         </div>
       </div>
@@ -86,6 +92,7 @@ const game: GameModule = {
     root.appendChild(el);
     const cv = el.querySelector('canvas')!;
     const $ = <T extends HTMLElement>(s: string) => el.querySelector<T>(s)!;
+    const shEl = $('.ar-sh'), weapBtn = $<HTMLButtonElement>('.ar-weap');
     const hud = $('.ar-hud'), hpEl = $('.ar-hp'), xpEl = $('.ar-xp'), upsEl = $('.ar-ups'), stageEl = $('.ar-stage');
     const towerEl = $('.ar-tower'), bossEl = $('.ar-boss'), msgEl = $('.ar-msg'), monEl = $('.ar-mon'), teamEl = $('.ar-team');
     const toastEl = $('.ar-toast'), bannerEl = $('.ar-banner'), ui = $('.ar-ui'), touchEl = $('.ar-touch');
@@ -167,7 +174,7 @@ const game: GameModule = {
           <button class="ar-btn" data-b="help">❓ How to play</button>
           <button class="ar-btn ar-dim" data-b="exit">← Back to games</button>
         </div>
-        ${best ? `<p class="ar-best">Best climb: stage ${best} of ${STAGES}</p>` : ''}
+        ${best ? `<p class="ar-best">Best climb: ${bestText(best)}</p>` : ''}
       </div>`;
       const inp = ui.querySelector('input')!;
       inp.addEventListener('input', () => {
@@ -472,9 +479,9 @@ const game: GameModule = {
       }
       if (key.startsWith('offers')) {
         revealStart = performance.now();
-        sfx(p!.offerLucky ? 'chest' : 'level');
+        sfx(p!.offerLucky || p!.offerMyth ? 'chest' : 'level');
         ui.innerHTML = `<div class="ar-panel ar-level">
-          <h2>${p!.offerLucky ? '🎁 Loot chest!' : `⭐ Level ${p!.level}!`} Pick an upgrade</h2>
+          <h2>${p!.offerMyth ? '✨ Mythical chest!' : p!.offerLucky ? '🎁 Loot chest!' : `⭐ Level ${p!.level}!`} Pick an upgrade</h2>
           <p class="ar-dimtext">Upgrades last the whole climb. You can't be hurt while choosing.</p>
           <div class="ar-cards">${p!.offers!.map((o, i) => offerCard(o, i, p!)).join('')}</div>
           ${p!.queue.length ? `<p class="ar-dimtext">${p!.queue.length} more to pick after this one</p>` : ''}
@@ -484,14 +491,15 @@ const game: GameModule = {
       }
       if (key.startsWith('end')) {
         const won = s.phase === 'won';
-        const best = Math.max(Number(read(BEST_KEY, '0')), won ? STAGES : s.stage);
+        // best is counted across both worlds: World 2 stage 3 is 53
+        const best = Math.max(Number(read(BEST_KEY, '0')), won ? STAGES * 2 : (s.world - 1) * STAGES + s.stage);
         write(BEST_KEY, String(best));
         const archers = s.players.filter((x) => x.role === 'archer');
         ui.innerHTML = `<div class="ar-panel ar-end">
-          <h1>${won ? '🏆 You reached the top!' : 'The tower wins this time'}</h1>
-          <p>${won ? `All ${STAGES} stages climbed. The Archenemy is beaten!` : `You made it to stage ${s.stage} of ${STAGES}.`}</p>
+          <h1>${won ? '🏆 You beat both worlds!' : 'The tower wins this time'}</h1>
+          <p>${won ? `All ${STAGES} stages of World 1 and World 2 climbed. The Archenemy is beaten twice!` : `You made it to ${s.world > 1 ? 'World 2, ' : ''}stage ${s.stage} of ${STAGES}.`}</p>
           <div class="ar-endstats">${archers.map((a) => `<div style="--c:${PLAYER_COLORS[a.slot]}"><b>${esc(a.name)}</b><span>Level ${a.level} · ${a.kills} monsters</span></div>`).join('')}</div>
-          <p class="ar-best">Best climb: stage ${best}</p>
+          <p class="ar-best">Best climb: ${bestText(best)}</p>
           <div class="ar-row">
             ${guest ? '<p class="ar-dimtext">Waiting for the host…</p>' : `<button class="ar-btn ar-go" data-b="again">Climb again</button>`}
             <button class="ar-btn ar-dim" data-b="quit">${guest ? 'Leave' : 'Title'}</button>
@@ -556,6 +564,8 @@ const game: GameModule = {
     const keys = new Set<string>();
     let mouse = { x: 0, y: 0, down: false };
     let touchFire = false;
+    let touchBlock = false;
+    let rightDown = false;
     const stick = { id: -1, x0: 0, y0: 0, dx: 0, dy: 0 };
 
     const onKey = (e: KeyboardEvent) => {
@@ -583,7 +593,10 @@ const game: GameModule = {
       else if (p.healChoice && ['1', '2'].includes(k)) pickHeal((Number(k) - 1) as 0 | 1);
       else if (p.role === 'monster' && !p.dead) {
         if (k === 'q') act({ t: 'switch' });
-        else if (['1', '2', '3', '4'].includes(k)) act({ t: 'switch', kind: MONSTER_KINDS[Number(k) - 1] });
+        else if (/^[1-6]$/.test(k)) act({ t: 'switch', kind: MONSTER_KINDS[Number(k) - 1] });
+      } else if (p.role === 'archer' && k === 'x') {
+        act({ t: 'weapon' });
+        sfx('click');
       }
     };
     const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
@@ -601,11 +614,15 @@ const game: GameModule = {
     cv.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse') {
         mouse = { x: e.offsetX, y: e.offsetY, down: e.button === 0 };
+        if (e.button === 2) rightDown = true;
         el.focus();
       }
     });
     window.addEventListener('pointerup', (e) => {
-      if (e.pointerType === 'mouse') mouse.down = false;
+      if (e.pointerType === 'mouse') {
+        if (e.button === 2) rightDown = false;
+        else mouse.down = false;
+      }
     });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -615,11 +632,18 @@ const game: GameModule = {
       const t = e.target as HTMLElement;
       const btn = t.closest<HTMLButtonElement>('[data-t]');
       if (btn) {
-        if (btn.dataset.t === 'fire') touchFire = true;
+        const w = btn.dataset.t;
+        if (w === 'fire') touchFire = true;
+        else if (w === 'block') touchBlock = true;
+        else if (w === 'weapon') act({ t: 'weapon' });
         else act({ t: 'switch' });
         btn.setPointerCapture(e.pointerId);
-        btn.addEventListener('pointerup', () => (btn.dataset.t === 'fire' ? (touchFire = false) : 0), { once: true });
-        btn.addEventListener('pointercancel', () => (touchFire = false), { once: true });
+        const end = () => {
+          if (w === 'fire') touchFire = false;
+          if (w === 'block') touchBlock = false;
+        };
+        btn.addEventListener('pointerup', end, { once: true });
+        btn.addEventListener('pointercancel', end, { once: true });
         return;
       }
       if (e.clientX < window.innerWidth * 0.55 && stick.id < 0) {
@@ -661,6 +685,7 @@ const game: GameModule = {
         write(MUTE_KEY, isMuted() ? '1' : '0');
         syncMute();
       } else if (b.dataset.a === 'menu') openMenu();
+      else if (b.dataset.a === 'weapon') act({ t: 'weapon' });
     });
     monEl.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-k]');
@@ -696,8 +721,17 @@ const game: GameModule = {
           sfx('stage');
           if (s) {
             const st = f.v ?? s.stage;
-            banner(`Stage ${st}`, isBossStage(st) ? `Boss: ${BOSSES[bossNameFor(s)]?.name ?? ''}` : st === STAGES - 1 ? 'One more to the top!' : `${STAGES - st} to go`);
+            const w2 = s.world > 1 ? 'World 2 · ' : '';
+            banner(`${w2}Stage ${st}`, st === STAGES ? 'Every boss at once!' : isBossStage(st) ? `Boss: ${BOSSES[bossNameFor(s)]?.name ?? ''}` : st === STAGES - 1 ? 'One more to the top!' : `${STAGES - st} to go`);
           }
+          break;
+        case 'world':
+          sfx('win');
+          toast('A new map opens: World 2! Twice the monsters, tougher bosses and crazier upgrades.', 5000);
+          break;
+        case 'finale':
+          sfx('bossdie');
+          banner('The Archenemy!', 'It has every boss\'s moves');
           break;
         case 'clear':
           sfx('clear');
@@ -716,8 +750,8 @@ const game: GameModule = {
         case 'level':
           break;
         default:
-          if (['boom', 'pop', 'thorns', 'spit', 'splat', 'fuse', 'pinch', 'dash', 'bossdie', 'phoenix', 'over', 'win', 'thud', 'heal', 'upgrade'].includes(f.k)) {
-            if ((f.k === 'heal' || f.k === 'upgrade') && !mine) break;
+          if (['boom', 'pop', 'thorns', 'spit', 'splat', 'fuse', 'pinch', 'dash', 'bossdie', 'phoenix', 'over', 'win', 'thud', 'heal', 'upgrade', 'zap', 'rain', 'enchant', 'block', 'swing', 'bite', 'shieldbreak'].includes(f.k)) {
+            if ((f.k === 'heal' || f.k === 'upgrade' || f.k === 'swing' || f.k === 'block' || f.k === 'shieldbreak') && !mine) break;
             sfx(f.k);
           }
       }
@@ -731,26 +765,38 @@ const game: GameModule = {
     let hudKey = '';
     function syncHud(s: State) {
       const p = me();
-      stageEl.textContent = `Stage ${s.stage} / ${STAGES}`;
+      stageEl.textContent = `${s.world > 1 ? 'World 2 · ' : ''}Stage ${s.stage} / ${STAGES}`;
       (towerEl.firstElementChild as HTMLElement).style.width = `${(s.stage / STAGES) * 100}%`;
-      const boss = s.enemies.find((e) => e.boss);
+      // stage 50 has every boss at once: one bar for all of them
+      const bosses = s.enemies.filter((e) => e.boss);
+      const boss = bosses[0];
       bossEl.hidden = !boss;
       if (boss) {
-        bossEl.querySelector('b')!.textContent = BOSSES[boss.boss!].name;
-        (bossEl.querySelector('.ar-bossbar i') as HTMLElement).style.width = `${(boss.hp / boss.maxHp) * 100}%`;
+        bossEl.querySelector('b')!.textContent = bosses.length > 1 ? `${bosses.length} bosses` : BOSSES[boss.boss!].name;
+        const hp = bosses.reduce((a, b) => a + b.hp, 0), max = bosses.reduce((a, b) => a + b.maxHp, 0);
+        (bossEl.querySelector('.ar-bossbar i') as HTMLElement).style.width = `${(hp / max) * 100}%`;
       }
       if (p) {
         hpEl.querySelector('i')!.style.width = `${Math.max(0, (p.hp / p.maxHp) * 100)}%`;
         hpEl.querySelector('span')!.textContent = `${Math.ceil(Math.max(0, p.hp))} / ${p.maxHp}`;
         hpEl.classList.toggle('low', p.hp < p.maxHp * 0.3);
         xpEl.hidden = p.role !== 'archer';
+        shEl.hidden = p.role !== 'archer';
+        weapBtn.hidden = p.role !== 'archer';
+        if (p.role === 'archer') {
+          shEl.querySelector('i')!.style.width = `${p.shield}%`;
+          shEl.classList.toggle('broken', p.shieldBroken);
+          shEl.classList.toggle('on', p.blocking);
+          const wi = p.weapon === 'sword' ? '🗡️' : '🏹';
+          if (weapBtn.textContent !== wi) weapBtn.textContent = wi;
+        }
         if (p.role === 'archer') {
           xpEl.querySelector('i')!.style.width = `${(p.xp / xpNeed(p.level)) * 100}%`;
           xpEl.querySelector('span')!.textContent = `Level ${p.level}`;
         }
       }
       // upgrades list and team (only rebuilt when they change)
-      const key = JSON.stringify([p?.ups, p?.role, p?.kind, p?.dead, s.players.map((q) => [q.name, q.role, q.kind, q.dead, Math.round((q.hp / q.maxHp) * 10)])]);
+      const key = JSON.stringify([p?.ups, p?.role, p?.kind, p?.dead, p?.weapon, s.players.map((q) => [q.name, q.role, q.kind, q.dead, Math.round((q.hp / q.maxHp) * 10)])]);
       if (key !== hudKey) {
         hudKey = key;
         upsEl.innerHTML = p?.role === 'archer'
@@ -758,13 +804,20 @@ const game: GameModule = {
           : '';
         monEl.hidden = p?.role !== 'monster';
         if (p?.role === 'monster') {
-          monEl.innerHTML = `<div>${MONSTER_KINDS.map((k, i) => `<button data-k="${k}" class="${p.kind === k ? 'sel' : ''}" title="${MONSTERS[k].name} (${i + 1})"><img src="${monsterPicture(k, 44)}" alt=""><em>${i + 1}</em></button>`).join('')}</div><span>${MONSTERS[p.kind].name}: ${p.kind === 'pot' ? 'click to light your fuse and blow up' : p.kind === 'cactus' ? 'click to shoot thorns' : p.kind === 'stew' ? 'click to spit acid' : 'click to pinch'} · Q switches</span>`;
+          const how: Record<MonsterKind, string> = {
+            pot: 'click to light your fuse and blow up', cactus: 'click to shoot thorns', stew: 'click to spit acid', crab: 'click to pinch',
+            sharpCrab: 'click to shoot a line of thorns', enchanter: 'click to enchant the monster nearest you',
+          };
+          monEl.innerHTML = `<div>${MONSTER_KINDS.map((k, i) => `<button data-k="${k}" class="${p.kind === k ? 'sel' : ''}" title="${MONSTERS[k].name} (${i + 1})"><img src="${monsterPicture(k, 44)}" alt=""><em>${i + 1}</em></button>`).join('')}</div><span>${MONSTERS[p.kind].name}: ${how[p.kind]} · Q switches</span>`;
         }
         teamEl.innerHTML = s.players.length > 1
           ? s.players.map((q) => `<div style="--c:${PLAYER_COLORS[q.slot]}" class="${q.dead ? 'dead' : ''}"><b>${q.slot + 1}</b>${esc(q.name)} <small>${q.role === 'archer' ? '🏹' : q.role === 'monster' ? '👾' : '…'}</small></div>`).join('')
           : '';
         $<HTMLButtonElement>('.ar-tsw').hidden = p?.role !== 'monster';
-        $<HTMLButtonElement>('.ar-tfire').textContent = p?.role === 'monster' ? '💥' : '🏹';
+        $<HTMLButtonElement>('.ar-tweap').hidden = p?.role !== 'archer';
+        $<HTMLButtonElement>('.ar-tblock').hidden = p?.role !== 'archer';
+        $<HTMLButtonElement>('.ar-tfire').textContent = p?.role === 'monster' ? '💥' : p?.weapon === 'sword' ? '🗡️' : '🏹';
+        $<HTMLButtonElement>('.ar-tweap').textContent = p?.weapon === 'sword' ? '🏹' : '🗡️';
       }
       // message line
       let msg = '';
@@ -776,7 +829,7 @@ const game: GameModule = {
         if (s.stairsT >= 0) msg = `Going up in ${Math.ceil(s.stairsT)}…`;
         else if (left.length && p?.role === 'archer') msg = 'Stage clear! Open the chests, then take the stairs ▲';
         else msg = s.stage >= STAGES ? '' : 'Stage clear! Take the stairs at the top ▲';
-      } else if (!s.cleared && s.bannerT <= 0 && boss && s.stage === STAGES) msg = 'The Archenemy guards the top of the tower!';
+      } else if (!s.cleared && s.bannerT <= 0 && boss && s.stage === STAGES && s.finale === 2) msg = 'The Archenemy has every boss\'s moves!';
       msgEl.hidden = !msg;
       if (msg && msgEl.textContent !== msg) msgEl.textContent = msg;
     }
@@ -818,6 +871,7 @@ const game: GameModule = {
       if (blocked) mx = my = 0;
       let aim = p?.aim ?? 0;
       let fire = false;
+      const block = !blocked && (rightDown || touchBlock || keys.has('shift') || keys.has('e'));
       if (p && !blocked) {
         if (touchMode && !mouse.x) {
           aim = autoAim(s, p);
@@ -834,7 +888,7 @@ const game: GameModule = {
         // solo or host
         if (p) {
           moveSelf(s, p, mx, my, dt);
-          g.inputs.set(myId, { aim, fire });
+          g.inputs.set(myId, { aim, fire, block });
         }
         if (!paused && screen === 'play') g.update(dt);
         const fx = g.fx.splice(0);
@@ -848,14 +902,14 @@ const game: GameModule = {
           local.y = p.y;
           local.tp = p.tp;
         }
-        const body = { ...p, x: local.x, y: local.y };
+        const body = { ...p, x: local.x, y: local.y, blocking: block && p.role === 'archer' && !p.shieldBroken && p.shield > 0 };
         moveSelf(s, body, mx, my, dt);
         local.x = body.x;
         local.y = body.y;
         sendT -= dt;
         if (sendT <= 0) {
           sendT = 1 / 30;
-          guest.send({ t: 'in', x: local.x, y: local.y, aim, fire, mv: body.moving, tp: local.tp });
+          guest.send({ t: 'in', x: local.x, y: local.y, aim, fire, block, mv: body.moving, tp: local.tp });
         }
         // shots keep flying between snapshots
         for (const sh of s.shots) {

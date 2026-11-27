@@ -135,6 +135,29 @@ export function sfx(name: string) {
     case 'thud':
       tone(120, 0.06, 'sine', 0.05);
       break;
+    case 'zap':
+      noise(0.2, 0.15, 3000, 'highpass');
+      tone(900, 0.15, 'sawtooth', 0.05, -700);
+      break;
+    case 'rain':
+      noise(0.15, 0.05, 2500, 'bandpass');
+      break;
+    case 'enchant':
+      [880, 1175, 1568].forEach((f, i) => tone(f, 0.18, 'sine', 0.05, 0, i * 0.05));
+      break;
+    case 'block':
+      tone(1500, 0.05, 'square', 0.04);
+      noise(0.06, 0.06, 4000, 'highpass');
+      break;
+    case 'shieldbreak':
+      noise(0.3, 0.15, 900);
+      break;
+    case 'swing':
+      noise(0.12, 0.08, 1800, 'bandpass');
+      break;
+    case 'bite':
+      tone(220, 0.06, 'square', 0.05, -80);
+      break;
     case 'click':
       tone(800, 0.04, 'square', 0.03);
       break;
