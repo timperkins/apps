@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>Escape the Mansion</title>
+    <meta name="description" content="Help Lenny sneak out of Jeff's creepy mansion. 50 levels of guards, dogs and lasers." />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Escape" />
+    <link rel="icon" href="lenny.png" />
+    <link rel="apple-touch-icon" href="lenny.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Creepster&family=VT323&display=swap" />
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="game"></canvas>
+
+      <div id="hud" hidden>
+        <div class="hud-left">
+          <div id="hearts"></div>
+          <div id="levelName"></div>
+          <div class="xp"><span id="plevel">Lv 1</span><div class="bar"><i id="xpbar"></i></div></div>
+        </div>
+        <div class="hud-right">
+          <canvas id="minimap"></canvas>
+          <button id="pauseBtn" aria-label="Pause">II</button>
+        </div>
+      </div>
+
+      <div id="toast" role="status" aria-live="polite"></div>
+      <div id="levelCard"></div>
+
+      <div id="stick"><div id="knob"></div></div>
+      <button id="action" aria-label="Throw or use"><span id="actionIcon"></span><b id="actionCount"></b></button>
+
+      <section id="title" class="screen show">
+        <img id="titleLenny" src="lenny.png" alt="Lenny" />
+        <h1>Escape<br />the Mansion</h1>
+        <p class="lead">Lenny woke up in Jeff's dungeon. Get him out.</p>
+        <button class="primary" id="continueBtn" hidden>Continue</button>
+        <button class="primary" id="newBtn">New game</button>
+        <button class="ghost small" id="muteBtn">Sound: on</button>
+        <p class="fine" id="howTo"></p>
+      </section>
+
+      <section id="dialog" class="screen clear">
+        <div class="dialog-box">
+          <canvas id="portrait" width="96" height="96"></canvas>
+          <div class="dialog-body">
+            <div id="speaker"></div>
+            <p id="line"></p>
+            <div class="next">tap to continue ▸</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="caught" class="screen clear">
+        <h2 id="caughtTitle">Caught!</h2>
+        <div id="caughtJeff" class="taunt" hidden>
+          <canvas id="caughtPortrait" width="96" height="96"></canvas>
+          <p id="caughtLine"></p>
+        </div>
+        <p class="fine">Back to the start of the level…</p>
+      </section>
+
+      <section id="complete" class="screen">
+        <h2 id="completeTitle">Level complete</h2>
+        <dl class="stats" id="completeStats"></dl>
+        <button class="primary" id="nextBtn">Next</button>
+      </section>
+
+      <section id="powerups" class="screen">
+        <h2>Level up!</h2>
+        <p class="lead" id="puLead">Choose a powerup</p>
+        <div id="cards" class="cards"></div>
+      </section>
+
+      <section id="pause" class="screen">
+        <h2>Paused</h2>
+        <button class="primary" id="resumeBtn">Resume</button>
+        <button class="ghost" id="restartBtn">Restart level</button>
+        <button class="ghost" id="muteBtn2">Sound: on</button>
+        <div id="powerList" class="powerlist"></div>
+        <button class="ghost small" id="quitBtn">Quit to title</button>
+      </section>
+
+      <section id="ending" class="screen">
+        <h1 class="ending-title">Free!</h1>
+        <canvas id="endingArt" width="320" height="140"></canvas>
+        <p class="lead" id="endingText"></p>
+        <button class="primary" id="endingBtn">Title screen</button>
+      </section>
+
+      <div id="version"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
