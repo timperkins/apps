@@ -41,8 +41,19 @@ function bricks(ctx: CanvasRenderingContext2D, rng: Rng, y0: number, bw: number,
   for (let y = y0; y < T; y += bh, row++) {
     const off = row % 2 ? Math.floor(bw / 2) + offset : offset;
     for (let x = -bw; x < T + bw; x += bw) {
+      const h = Math.min(bh - 1, T - y - 1);
       ctx.fillStyle = rng.pick(base);
-      ctx.fillRect(x + off + 1, y + 1, bw - 1, Math.min(bh - 1, T - y - 1));
+      ctx.fillRect(x + off + 1, y + 1, bw - 1, h);
+      // bevel: lit top edge, shadowed bottom edge, the odd chip
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(x + off + 1, y + 1, bw - 1, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x + off + 1, y + h, bw - 1, 1);
+      ctx.fillRect(x + off + bw - 1, y + 1, 1, h);
+      if (rng.chance(0.15)) {
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(x + off + 2 + rng.int(0, bw - 5), y + 2 + rng.int(0, Math.max(0, h - 3)), 2, 1);
+      }
     }
   }
 }

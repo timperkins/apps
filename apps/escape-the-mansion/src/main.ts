@@ -2,12 +2,13 @@ import './style.css';
 import { Game, type GameEvent } from './game';
 import { Renderer } from './render';
 import { Controls } from './input';
-import { isMuted, setMuted, sfx, startDrone, stopDrone, unlockAudio } from './audio';
+import { isMuted, pauseMusic, playMusic, resumeMusic, setMuted, sfx, trackForLevel, unlockAudio } from './audio';
 import { itemSprite, jeffSprite, jeffStage, lennySprite, lennyStage } from './sprites';
 import { themeFor } from './themes';
 import { POWERUPS, offer, rank, xpForLevel, type Powerup, type Ranks } from './powerups';
 import { Rng } from './rng';
-import { ENDING, JEFF_CAUGHT, JEFF_INTRO, LENNY_INTRO, stageLines } from './story';
+import { Bonus } from './bonus';
+import { ENDING, JEFF_CAUGHT, JEFF_INTRO, LENNY_INTRO, freshLine, stageLines } from './story';
 
 declare const __VERSION__: string;
 
@@ -58,7 +59,9 @@ $('howTo').textContent = coarse
   ? 'Drag anywhere to sneak. Tap the round button to throw or use what you are holding.'
   : 'Arrow keys or WASD to sneak. Space to throw or use what you are holding.';
 
-type Mode = 'title' | 'dialog' | 'play' | 'caught' | 'complete' | 'powerups' | 'pause' | 'ending';
+type Mode = 'title' | 'dialog' | 'play' | 'caught' | 'complete' | 'powerups' | 'pause' | 'ending' | 'bonus';
+let bonus: Bonus | null = null;
+let bonusResult: { coins: number; time: number; bumps: number } | null = null;
 let mode: Mode = 'title';
 let game: Game | null = null;
 let attemptXp = 0;
@@ -116,7 +119,7 @@ controls.onAction = () => {
 function toTitle() {
   mode = 'title';
   game = null;
-  stopDrone();
+  playMusic('main');
   const s = load();
   const cont = $('continueBtn');
   cont.hidden = !s || s.level <= 1;
@@ -160,7 +163,7 @@ function startLevel(n: number, withIntro: boolean) {
   levelStartXp = save.xp;
   save.level = n;
   store();
-  startDrone(Math.floor((n - 1) / 5));
+  playMusic(trackForLevel(n));
   updateHud(true);
   const intro = JEFF_INTRO[n];
   if (withIntro && intro) {
@@ -304,6 +307,10 @@ function handle(e: GameEvent) {
     case 'hint':
       toast(e.text, 1600);
       break;
+    case 'intercom':
+      sfx('intercom');
+      toast(`📢 Jeff, over the intercom: “${e.text}”`, 5500);
+      break;
     case 'spotted':
       break;
     case 'caught': {
@@ -318,7 +325,7 @@ function handle(e: GameEvent) {
         $('caughtJeff').hidden = !taunt;
         if (taunt && game) {
           drawPortrait($<HTMLCanvasElement>('caughtPortrait'), 'jeff', game.level);
-          $('caughtLine').textContent = flavour.pick(stageLines(JEFF_CAUGHT, game.jstage));
+          $('caughtLine').textContent = freshLine(stageLines(JEFF_CAUGHT, game.jstage), `caught${game.jstage}`);
         }
         showScreen('caught');
       }, 700);
@@ -394,7 +401,7 @@ function afterComplete() {
     return;
   }
   if (game.level === 50) {
-    showEnding();
+    startBonus();
     return;
   }
   startLevel(game.level + 1, true);
@@ -473,8 +480,19 @@ $('quitBtn').addEventListener('click', () => {
   toTitle();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) pause();
+  if (document.hidden) {
+    pause();
+    pauseMusic();
+  } else resumeMusic();
 });
+// browsers only start audio after a tap or key press
+const firstGesture = () => {
+  unlockAudio();
+  window.removeEventListener('pointerdown', firstGesture);
+  window.removeEventListener('keydown', firstGesture);
+};
+window.addEventListener('pointerdown', firstGesture);
+window.addEventListener('keydown', firstGesture);
 for (const id of ['title', 'complete', 'powerups', 'pause', 'ending'])
   $(id).addEventListener('pointerdown', (e) => {
     controls.touch = e.pointerType !== 'mouse';
@@ -482,11 +500,50 @@ for (const id of ['title', 'complete', 'powerups', 'pause', 'ending'])
     e.stopPropagation();
   });
 
+// ---------------------------------------------------------------- bonus: the getaway
+
+function startBonus() {
+  mode = 'bonus';
+  bonus = new Bonus();
+  bonusResult = null;
+  game = null;
+  playMusic('main');
+  showScreen(null);
+  document.body.classList.add('playing');
+  $('hud').hidden = true;
+  $('actionIcon').textContent = '📯';
+  $('actionCount').textContent = '';
+  const card = $('levelCard');
+  card.innerHTML = '<div class="n">Bonus</div><div class="a">The Getaway</div>';
+  card.classList.add('show');
+  setTimeout(() => card.classList.remove('show'), 2200);
+  setTimeout(
+    () => toast(coarse ? 'Steer by dragging. Drag down to floor it. Tap the button to honk.' : 'Left and right to steer, down to floor it, up to brake. Space honks.', 4500),
+    6000,
+  );
+}
+
+function bonusFrame(dt: number) {
+  if (!bonus) return;
+  const m = controls.move();
+  bonus.update(dt, { mx: m.x, my: m.y, action: controls.takeAction() });
+  for (const e of bonus.events) {
+    if (e.type === 'sfx') sfx(e.name);
+    else if (e.type === 'say') toast((e.who === 'jeff' ? 'Jeff' : 'Lenny') + ': “' + e.text + '”', 3000);
+    else if (e.type === 'done') {
+      bonusResult = { coins: e.coins, time: e.time, bumps: e.bumps };
+      setTimeout(showEnding, 1200);
+    }
+  }
+  const v = renderer.view;
+  bonus.draw(canvas.getContext('2d')!, v.cssW, v.cssH, v.dpr);
+}
+
 // ---------------------------------------------------------------- ending
 
 function showEnding() {
   mode = 'ending';
-  stopDrone();
+  playMusic('main');
   sfx('levelup');
   const cv = $<HTMLCanvasElement>('endingArt');
   const c = cv.getContext('2d')!;
@@ -513,7 +570,10 @@ function showEnding() {
   // Jeff, defeated, by the gate; Lenny walking away
   c.drawImage(jeffSprite(4, 'down', 0), 70, 50, 64, 64);
   c.drawImage(lennySprite(4, 'side', 1, false), 200, 46, 64, 64);
-  $('endingText').innerHTML = `<b>Jeff:</b> “${ENDING.jeff}”<br><br><b>Lenny:</b> “${ENDING.lenny}”<br><br>Lenny escaped the mansion. Lv ${save.plevel}.`;
+  const loot = bonusResult ? ` He drove off in Jeff's limo with ${bonusResult.coins} of Jeff's gold coins and left the mansion in flames.` : '';
+  $('endingText').innerHTML = `<b>Jeff:</b> “${ENDING.jeff}”<br><br><b>Lenny:</b> “${ENDING.lenny}”<br><br>Lenny escaped the mansion.${loot} Lv ${save.plevel}.`;
+  bonus = null;
+  document.body.classList.remove('playing');
   save.level = 1;
   save.xp = 0;
   save.plevel = 1;
@@ -569,7 +629,9 @@ function frame(now: number) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
   clock += dt;
-  if (game) {
+  if (mode === 'bonus' && bonus) {
+    bonusFrame(dt);
+  } else if (game) {
     if (mode === 'play') {
       const m = controls.move();
       game.update(dt, { mx: m.x, my: m.y, action: controls.takeAction() });
@@ -609,4 +671,5 @@ requestAnimationFrame(frame);
 // dev hook: ?level=N jumps straight to a level
 const qLevel = Number(new URLSearchParams(location.search).get('level'));
 if (qLevel >= 1 && qLevel <= 50) startLevel(qLevel, new URLSearchParams(location.search).has('intro'));
+if (new URLSearchParams(location.search).has('bonus')) startBonus();
 if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { __renderer: renderer, __getGame: () => game });

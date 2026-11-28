@@ -3,6 +3,7 @@
 import { Rng, weighted } from './rng';
 import { TILE, themeFor } from './themes';
 import type { ItemKind } from './sprites';
+import { THEME_PROPS, type Prop } from './props';
 
 export interface Pt {
   x: number;
@@ -12,6 +13,7 @@ export interface Pt {
 export interface GuardSpec {
   route: Pt[]; // px waypoints, walked back and forth; one point = sentry
   variant: number;
+  armored?: boolean; // suit of armour (after level 35): rocks only stagger it
 }
 export interface DogSpec {
   home: Pt; // px
@@ -60,6 +62,7 @@ export interface LevelData {
   items: ItemSpec[];
   lights: Pt[]; // wall-face tiles with a torch/candle
   decor: Pt[]; // floor tiles with scatter
+  props: { x: number; y: number; kind: Prop }[]; // tiles with a prop against the wall above
   cameo: Pt | null; // px where Jeff shows up mid-level
   pathCells: number; // length of the start-to-exit path, in cells
   final: boolean;
@@ -268,6 +271,14 @@ export function generateLevel(level: number, weights: ItemWeights, itemScale = 1
     used.add(home);
   }
 
+  // after level 35 some guards are suits of armour
+  if (level > 35) {
+    const share = level > 45 ? 0.45 : level > 40 ? 0.35 : 0.25;
+    guards.forEach((g, i) => {
+      if (i > 0 && rng.chance(share)) g.armored = true;
+    });
+  }
+
   // dogs
   const dogs: DogSpec[] = [];
   const dogCells = farCells(4);
@@ -368,6 +379,26 @@ export function generateLevel(level: number, weights: ItemWeights, itemScale = 1
     if (!grid[idx(x, y)]) decor.push({ x, y });
   }
 
+  // props standing against walls
+  const props: { x: number; y: number; kind: Prop }[] = [];
+  const kinds = THEME_PROPS[Math.min(THEME_PROPS.length - 1, Math.floor((level - 1) / 5))];
+  const laserTiles = new Set<string>();
+  for (const l of lasers) {
+    laserTiles.add(Math.floor(l.a.x / T) + ',' + Math.floor(l.a.y / T));
+    laserTiles.add(Math.floor(l.b.x / T - 0.01) + ',' + Math.floor(l.b.y / T - 0.01));
+  }
+  const spots = rng.shuffle(faces.map((f) => ({ x: f.x, y: f.y + 1 })));
+  const startCellTile = { x: 1 + (startCell % C) * 3, y: 1 + Math.floor(startCell / C) * 3 };
+  for (const t of spots) {
+    if (props.length >= Math.floor((C * R) / 3)) break;
+    if (spikeAt.has(t.x + ',' + t.y) || laserTiles.has(t.x + ',' + t.y)) continue;
+    if (t.x >= exitTile.x - 1 && t.x <= exitTile.x + 2 && t.y >= exitTile.y - 1 && t.y <= exitTile.y + 2) continue;
+    if (t.x >= startCellTile.x && t.x <= startCellTile.x + 1 && t.y >= startCellTile.y && t.y <= startCellTile.y + 1) continue;
+    if (lights.some((l) => l.x === t.x && l.y + 1 === t.y)) continue;
+    if (props.some((p) => Math.abs(p.x - t.x) + Math.abs(p.y - t.y) < 3)) continue;
+    props.push({ x: t.x, y: t.y, kind: rng.pick(kinds) });
+  }
+
   // Jeff's mid-level cameo spot, part way along the main path
   let cameo: Pt | null = null;
   if (!final && mainPath.length > 6 && rng.chance(level % 5 === 1 ? 0.3 : 0.6)) cameo = centre(mainPath[Math.floor(mainPath.length * 0.45)]);
@@ -389,6 +420,7 @@ export function generateLevel(level: number, weights: ItemWeights, itemScale = 1
     items,
     lights,
     decor,
+    props,
     cameo,
     pathCells: mainPath.length,
     final,

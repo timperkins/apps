@@ -2,8 +2,9 @@
 import type { Game } from './game';
 import { isWall, type LevelData, type Pt } from './level';
 import { Rng } from './rng';
-import { dogSprite, guardSprite, itemSprite, jeffSprite, lennySprite, type Dir } from './sprites';
+import { dogSprite, guardSprite, itemSprite, jeffSprite, lennyPose, lennySprite, type Dir } from './sprites';
 import { TILE, themeFor, type Theme } from './themes';
+import { drawProp, GLOWING } from './props';
 
 const T = TILE;
 const FONT = '"VT323", ui-monospace, monospace';
@@ -303,12 +304,15 @@ export class Renderer {
     if (p.invuln > 0 && Math.floor(t * 14) % 2) return;
     shadow(ctx, p.x, p.y + 4, 10);
     const dir: Dir = p.face === 'up' ? 'up' : p.face === 'down' ? 'down' : 'side';
-    const frame = p.moving ? (Math.floor(p.anim) % 2 ? 1 : 2) : 0;
-    const twitch = g.stage <= 1 && p.twitchT < 0 && dir !== 'up';
+    const pose = lennyPose(g.level);
+    // tiptoeing takes small, slow steps; the swagger is bouncier
+    const step = Math.floor(p.anim * (pose === 0 ? 0.75 : 1));
+    const frame = p.moving ? (step % 2 ? 1 : 2) : 0;
+    const twitch = g.stage <= 2 && p.twitchT < 0 && dir !== 'up';
     // nervous shiver when something is onto him (fades as he gains confidence)
     const shiver = p.danger > 0.3 && g.stage <= 2 ? (Math.random() - 0.5) * (2.2 - g.stage * 0.7) : 0;
-    const bob = p.moving && frame ? -1 : 0;
-    const spr = lennySprite(g.stage, dir, frame, twitch);
+    const bob = 0;
+    const spr = lennySprite(g.stage, dir, frame, twitch, pose);
     drawSprite(ctx, spr, p.x + shiver, p.y + 6 + bob, p.face === 'left');
     if (p.danger > 0.4 && g.stage <= 2) {
       ctx.fillStyle = '#8fd0ff';
@@ -334,6 +338,13 @@ export class Renderer {
   private drawGuard(g: Game, gd: Game['guards'][number], t: number) {
     const ctx = this.ctx;
     shadow(ctx, gd.x, gd.y + 4, 10);
+    if (gd.state === 'ko' && gd.armored) {
+      // armour only staggers
+      const wob = Math.sin(t * 30) * 1.5;
+      drawSprite(ctx, guardSprite('down', 0, gd.variant, true), gd.x + wob, gd.y + 6, false);
+      stars(ctx, gd.x, gd.y - 30, t);
+      return;
+    }
     if (gd.state === 'ko') {
       ctx.save();
       ctx.translate(gd.x, gd.y);
@@ -345,7 +356,7 @@ export class Renderer {
     }
     const f = faceDir(gd.ang);
     const frame = gd.moving ? (Math.floor(gd.anim) % 2 ? 1 : 2) : 0;
-    drawSprite(ctx, guardSprite(f.dir, frame, gd.variant), gd.x, gd.y + 6, f.flip);
+    drawSprite(ctx, guardSprite(f.dir, frame, gd.variant, gd.armored), gd.x, gd.y + 6, f.flip);
     void g;
   }
 
@@ -471,6 +482,7 @@ export class Renderer {
       glow((l.x + 0.5) * T, (l.y + 1.2) * T, 3.4 * T * flick, 0.95);
     }
     glow(L.exit.x, L.exit.y, 2.2 * T, 0.9);
+    for (const pr of L.props) if (GLOWING[pr.kind]) glow((pr.x + 0.5) * T, (pr.y + 0.4) * T, 1.6 * T, 0.7);
     for (const it of g.items) glow(it.x, it.y, 0.7 * T, 0.5);
     for (const l of g.lasers) if (l.on) glow((l.a.x + l.b.x) / 2, (l.a.y + l.b.y) / 2, 1.3 * T, 0.6);
     // guards' lanterns light up what they see
@@ -508,6 +520,26 @@ export class Renderer {
 
     // torch flames are drawn above the darkness so they glow
     for (const l of L.lights) this.drawLight(l, t, th);
+    // the armoured guards' red eyes glow in the dark
+    const c2 = this.ctx;
+    for (const gd of g.guards) {
+      if (!gd.armored || gd.state === 'ko') continue;
+      const f = faceDir(gd.ang);
+      if (f.dir === 'up') continue;
+      const ex = f.dir === 'side' ? gd.x + (f.flip ? -4 : 4) : gd.x;
+      const ey = gd.y - 19;
+      const pulse = 0.6 + 0.4 * Math.sin(t * 5 + gd.variant);
+      const grad = c2.createRadialGradient(ex, ey, 0, ex, ey, 10);
+      grad.addColorStop(0, `rgba(255,40,40,${0.55 * pulse})`);
+      grad.addColorStop(1, 'rgba(255,0,0,0)');
+      c2.fillStyle = grad;
+      c2.fillRect(ex - 10, ey - 10, 20, 20);
+      c2.fillStyle = '#ff3030';
+      if (f.dir === 'down') {
+        c2.fillRect(gd.x - 3, ey, 2, 1);
+        c2.fillRect(gd.x + 1, ey, 2, 1);
+      } else c2.fillRect(ex - 1, ey, 2, 1);
+    }
   }
 
   private drawLight(l: Pt, t: number, th: Theme) {
@@ -722,10 +754,50 @@ function buildStatic(L: LevelData, th: Theme): HTMLCanvasElement {
     th.decor(ctx, rng);
     ctx.restore();
   }
+  const indoor = L.level <= 40;
+  for (let y = 1; y < L.h; y++)
+    for (let x = 0; x < L.w; x++) {
+      if (!isWall(L, x, y) || isWall(L, x, y + 1) || y + 1 >= L.h) continue;
+      // grime along the base of each wall face
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(x * T, y * T + T - 3, T, 3);
+      // cobwebs in the corners indoors
+      if (indoor && rng.chance(0.12)) {
+        const left = isWall(L, x - 1, y) && !isWall(L, x - 1, y + 1) ? rng.chance(0.5) : true;
+        cobweb(ctx, x * T + (left ? 0 : T), (y + 1) * T, left ? 1 : -1);
+      }
+    }
+  for (const p of L.props) {
+    ctx.save();
+    ctx.translate(p.x * T, p.y * T);
+    drawProp(ctx, p.kind, rng);
+    ctx.restore();
+  }
   return cv;
 }
 
 // ---------------------------------------------------------------- helpers
+
+function cobweb(ctx: CanvasRenderingContext2D, x: number, y: number, dir: number) {
+  ctx.strokeStyle = 'rgba(220,220,230,0.35)';
+  ctx.lineWidth = 0.6;
+  const r = 12;
+  ctx.beginPath();
+  for (let i = 0; i <= 4; i++) {
+    const a = (i / 4) * (Math.PI / 2);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * r * dir, y + Math.sin(a) * r);
+  }
+  for (const rr of [4, 8, 11]) {
+    for (let i = 0; i < 4; i++) {
+      const a0 = (i / 4) * (Math.PI / 2);
+      const a1 = ((i + 1) / 4) * (Math.PI / 2);
+      ctx.moveTo(x + Math.cos(a0) * rr * dir, y + Math.sin(a0) * rr);
+      ctx.lineTo(x + Math.cos(a1) * rr * 0.85 * dir, y + Math.sin(a1) * rr * 0.85);
+    }
+  }
+  ctx.stroke();
+}
 
 function drawSprite(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, x: number, y: number, flip: boolean) {
   const dx = Math.round(x - spr.width / 2);

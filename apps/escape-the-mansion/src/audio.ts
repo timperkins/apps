@@ -1,9 +1,8 @@
-// Tiny synthesised sound effects and a creepy ambient drone. No audio files.
+// Synthesised sound effects, plus the music tracks (mp3s in public/music).
 
 let ac: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
-let drone: { stop: () => void } | null = null;
 
 export function unlockAudio() {
   if (!ac) {
@@ -15,11 +14,103 @@ export function unlockAudio() {
     master.connect(ac.destination);
   }
   if (ac.state === 'suspended') void ac.resume();
+  resumeMusic();
 }
 
 export function setMuted(m: boolean) {
   muted = m;
   if (master && ac) master.gain.setTargetAtTime(m ? 0 : 0.5, ac.currentTime, 0.05);
+  for (const a of Object.values(tracks)) a.muted = m;
+}
+
+// ---------------------------------------------------------------- music
+
+export type Track = 'main' | 'loop' | 'hall' | 'manor';
+const TRACK_FILES: Record<Track, string> = {
+  main: 'music/main-theme.mp3', // "Escape Mansion 3": opening, level 50 and the getaway
+  loop: 'music/mansion-escape-2.mp3', // "Mansion Escape2": after level 5, on a loop
+  hall: 'music/levels-15-25.mp3',
+  manor: 'music/levels-26-36.mp3',
+};
+const tracks: Partial<Record<Track, HTMLAudioElement>> = {};
+const missing = new Set<Track>();
+let current: Track | null = null;
+const MUSIC_VOL = 0.55;
+
+function el(t: Track): HTMLAudioElement {
+  let a = tracks[t];
+  if (!a) {
+    a = new Audio(TRACK_FILES[t]);
+    a.loop = true;
+    a.preload = 'auto';
+    a.volume = 0;
+    a.muted = muted;
+    a.addEventListener('error', () => {
+      // a track that isn't in the build yet falls back to the loop theme
+      missing.add(t);
+      if (current === t) {
+        current = null;
+        playMusic('loop');
+      }
+    });
+    tracks[t] = a;
+  }
+  return a;
+}
+
+function fade(a: HTMLAudioElement, to: number, ms: number, done?: () => void) {
+  const from = a.volume;
+  const start = performance.now();
+  const step = () => {
+    const k = Math.min(1, (performance.now() - start) / ms);
+    a.volume = Math.max(0, Math.min(1, from + (to - from) * k));
+    if (k < 1) requestAnimationFrame(step);
+    else done?.();
+  };
+  step();
+}
+
+/** Crossfades to a track. Restarting the same track does nothing. */
+export function playMusic(t: Track) {
+  if (missing.has(t)) t = 'loop';
+  if (current === t) {
+    const a = el(t);
+    if (a.paused) void a.play().catch(() => {});
+    return;
+  }
+  const old = current ? tracks[current] : null;
+  current = t;
+  if (old) fade(old, 0, 900, () => old.pause());
+  const a = el(t);
+  a.currentTime = 0;
+  void a.play().catch(() => {});
+  fade(a, MUSIC_VOL, 1200);
+}
+
+export function stopMusic() {
+  if (!current) return;
+  const old = tracks[current];
+  current = null;
+  if (old) fade(old, 0, 700, () => old.pause());
+}
+
+export function pauseMusic() {
+  if (current) tracks[current]?.pause();
+}
+
+/** Resume after the tab comes back or audio unlocks. */
+export function resumeMusic() {
+  if (current) {
+    const a = el(current);
+    if (a.paused) void a.play().catch(() => {});
+  }
+}
+
+export function trackForLevel(level: number): Track {
+  if (level <= 5 || level >= 50) return 'main';
+  if (level >= 15 && level <= 25) return 'hall';
+  if (level >= 26 && level <= 36) return 'manor';
+  return 'loop';
 }
 export const isMuted = () => muted;
 
@@ -137,6 +228,33 @@ export function sfx(name: string) {
     case 'levelup':
       [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.16, 'triangle', 0.16, 0, i * 0.08));
       break;
+    case 'whoosh':
+      noise(1.2, 0.35, 400, 0.6, 0, 'lowpass');
+      noise(0.8, 0.2, 1200, 0.5, 0.2);
+      break;
+    case 'engine':
+      tone(55, 0.9, 'sawtooth', 0.18, 60);
+      tone(82, 0.9, 'sawtooth', 0.1, 90, 0.1);
+      break;
+    case 'horn':
+      tone(392, 0.35, 'square', 0.12);
+      tone(494, 0.35, 'square', 0.1);
+      break;
+    case 'gate':
+      noise(0.5, 0.4, 900, 0.8);
+      tone(180, 0.5, 'square', 0.2, -100);
+      tone(1400, 0.4, 'triangle', 0.08, -600, 0.05);
+      break;
+    case 'intercom':
+      tone(660, 0.12, 'sine', 0.12);
+      tone(880, 0.18, 'sine', 0.12, 0, 0.13);
+      noise(0.4, 0.04, 3000, 0.5, 0.3);
+      break;
+    case 'clang':
+      tone(1800, 0.35, 'triangle', 0.14, -300);
+      tone(2650, 0.3, 'sine', 0.08, -200);
+      noise(0.06, 0.25, 5000, 3);
+      break;
     case 'click':
       tone(800, 0.04, 'square', 0.1);
       break;
@@ -144,46 +262,4 @@ export function sfx(name: string) {
       tone(300 + Math.random() * 60, 0.03, 'square', 0.04);
       break;
   }
-}
-
-/** Low droning ambience; the pitch drops in the dungeon and lifts outside. */
-export function startDrone(section: number) {
-  stopDrone();
-  if (!ac || !master) return;
-  const g = ac.createGain();
-  g.gain.value = 0;
-  g.gain.setTargetAtTime(0.05, ac.currentTime, 1.5);
-  g.connect(master);
-  const base = [41.2, 43.65, 49, 55, 46.25, 51.9, 43.65, 58.3, 61.7, 55][section] ?? 49;
-  const oscs = [base, base * 1.5, base * 2.02].map((f, i) => {
-    const o = ac!.createOscillator();
-    o.type = i === 0 ? 'sawtooth' : 'sine';
-    o.frequency.value = f;
-    const lfo = ac!.createOscillator();
-    lfo.frequency.value = 0.07 + i * 0.05;
-    const lg = ac!.createGain();
-    lg.gain.value = f * 0.01;
-    lfo.connect(lg).connect(o.frequency);
-    lfo.start();
-    const f2 = ac!.createBiquadFilter();
-    f2.type = 'lowpass';
-    f2.frequency.value = 220;
-    o.connect(f2).connect(g);
-    o.start();
-    return { o, lfo };
-  });
-  drone = {
-    stop: () => {
-      if (!ac) return;
-      g.gain.setTargetAtTime(0, ac.currentTime, 0.3);
-      oscs.forEach(({ o, lfo }) => {
-        o.stop(ac!.currentTime + 1.5);
-        lfo.stop(ac!.currentTime + 1.5);
-      });
-    },
-  };
-}
-export function stopDrone() {
-  drone?.stop();
-  drone = null;
 }

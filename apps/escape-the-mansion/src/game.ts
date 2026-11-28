@@ -5,7 +5,7 @@ import type { ItemKind } from './sprites';
 import { lennyStage, jeffStage } from './sprites';
 import { CARRY, itemWeights, stats, type Ranks, type Stats } from './powerups';
 import { Rng } from './rng';
-import { JEFF_CAMEO, JEFF_FINAL_CHASE, LENNY_CAMEO, stageLines } from './story';
+import { JEFF_CAMEO, JEFF_FINAL_CHASE, LENNY_CAMEO, freshLine, stageLines } from './story';
 
 const T = TILE;
 export type Face = 'down' | 'up' | 'left' | 'right';
@@ -48,6 +48,7 @@ export interface Guard {
   moving: boolean;
   sentry: boolean;
   lookBase: number;
+  armored: boolean;
 }
 
 export type DogState = 'wander' | 'idle' | 'chase' | 'eat' | 'retreat' | 'ko';
@@ -177,7 +178,8 @@ export type GameEvent =
   | { type: 'caught'; reason: 'guard' | 'health' | 'jeff' }
   | { type: 'complete'; ghost: boolean; time: number }
   | { type: 'spotted' }
-  | { type: 'hint'; text: string };
+  | { type: 'hint'; text: string }
+  | { type: 'intercom'; text: string };
 
 export interface Input {
   mx: number;
@@ -207,6 +209,7 @@ export class Game {
   bubbles: Bubble[] = [];
   jeff: Jeff | null = null;
   cameoDone = false;
+  intercomT = 0;
   time = 0;
   spotted = false;
   over: 'caught' | 'complete' | null = null;
@@ -247,6 +250,7 @@ export class Game {
     this.poofs = [];
     this.bubbles = [];
     this.cameoDone = false;
+    this.intercomT = 25 + this.rng.next() * 25;
     this.dropGuard = null;
     this.p = {
       x: L.start.x,
@@ -284,6 +288,7 @@ export class Game {
       moving: false,
       sentry: g.route.length === 1,
       lookBase: this.rng.next() * Math.PI * 2,
+      armored: !!g.armored,
     }));
     this.dogs = L.dogs.map((d) => ({
       x: d.home.x,
@@ -657,6 +662,17 @@ export class Game {
         // hits
         for (const g of this.guards) {
           if (g.state === 'ko' || Math.hypot(g.x - pr.x, g.y - 10 - pr.y) > 15) continue;
+          if (g.armored) {
+            // rocks bounce off armour: it only staggers
+            g.state = 'ko';
+            g.ko = 1.3;
+            g.path = [];
+            this.popup(g.x, g.y - 34, 'CLANG!', '#cfd8e0');
+            this.emit({ type: 'sfx', name: 'clang' });
+            this.emit({ type: 'xp', amount: 3, reason: 'Stagger' });
+            land = true;
+            break;
+          }
           g.state = 'ko';
           g.ko = 6 * this.st.koMul;
           g.alert = 0;
@@ -775,6 +791,7 @@ export class Game {
     const fov = (68 * Math.PI) / 180;
     for (const g of this.guards) {
       g.moving = false;
+      const slow = g.armored ? 0.85 : 1;
       if (g.state === 'ko') {
         g.ko -= dt;
         if (g.ko <= 0) {
@@ -831,7 +848,7 @@ export class Game {
             break;
           }
           const tgt = g.route[g.wp];
-          if (this.stepTo(g, tgt.x, tgt.y, patrolSpeed, dt)) {
+          if (this.stepTo(g, tgt.x, tgt.y, patrolSpeed * slow, dt)) {
             if (g.route.length > 1) {
               if (g.wp + g.wpDir < 0 || g.wp + g.wpDir >= g.route.length) {
                 g.wpDir *= -1;
@@ -846,7 +863,7 @@ export class Game {
           break;
         }
         case 'investigate': {
-          if (this.followPath(g, patrolSpeed * 1.35, dt)) {
+          if (this.followPath(g, patrolSpeed * 1.35 * slow, dt)) {
             g.state = 'look';
             g.timer = 0;
             g.lookBase = g.ang;
@@ -863,7 +880,7 @@ export class Game {
           break;
         }
         case 'search': {
-          if (this.followPath(g, patrolSpeed * 1.4, dt)) {
+          if (this.followPath(g, patrolSpeed * 1.4 * slow, dt)) {
             g.state = 'look';
             g.timer = 0;
             g.target = g.lastSeen;
@@ -873,7 +890,7 @@ export class Game {
           break;
         }
         case 'return': {
-          if (this.followPath(g, patrolSpeed, dt)) {
+          if (this.followPath(g, patrolSpeed * slow, dt)) {
             g.state = 'patrol';
             g.target = null;
           }
@@ -894,8 +911,8 @@ export class Game {
             g.path = this.pathTo(g, goal);
           }
           if (seen > 0 && lineOfSight(this.L, g.x, g.y, p.x, p.y) && Math.hypot(p.x - g.x, p.y - g.y) < T * 1.5) {
-            this.stepTo(g, p.x, p.y, chaseSpeed, dt);
-          } else this.followPath(g, chaseSpeed, dt);
+            this.stepTo(g, p.x, p.y, chaseSpeed * slow, dt);
+          } else this.followPath(g, chaseSpeed * slow, dt);
           break;
         }
       }
@@ -1042,6 +1059,12 @@ export class Game {
   private updateJeff(dt: number) {
     const p = this.p;
     const L = this.L;
+    // now and then Jeff pipes up over the house intercom
+    this.intercomT -= dt;
+    if (this.intercomT <= 0 && !this.jeff && !L.final) {
+      this.intercomT = 45 + this.rng.next() * 40;
+      this.emit({ type: 'intercom', text: freshLine(stageLines(JEFF_CAMEO, this.jstage), `jeff${this.jstage}`, () => this.rng.next()) });
+    }
     // mid-level cameo
     if (!this.jeff && !this.cameoDone && L.cameo && Math.hypot(p.x - L.cameo.x, p.y - L.cameo.y) < T * 5.5) {
       this.cameoDone = true;
@@ -1049,7 +1072,7 @@ export class Game {
       this.jeff = { x: L.cameo.x, y: L.cameo.y, mode: 'cameo', t: 0, visible: true, stun: 0, path: [], repath: 0, ang: 0, anim: 0, moving: false, shout: 0 };
       this.poofs.push({ x: L.cameo.x, y: L.cameo.y - 12, t: 0 });
       this.emit({ type: 'sfx', name: 'jeff' });
-      this.say('jeff', this.rng.pick(stageLines(JEFF_CAMEO, this.jstage)));
+      this.say('jeff', freshLine(stageLines(JEFF_CAMEO, this.jstage), `jeff${this.jstage}`, () => this.rng.next()));
     }
     const j = this.jeff;
     if (!j) return;
@@ -1057,7 +1080,7 @@ export class Game {
     j.moving = false;
     if (j.mode === 'cameo') {
       j.ang = Math.atan2(p.y - j.y, p.x - j.x);
-      if (j.t > 2.4 && j.t - dt <= 2.4) this.say('lenny', this.rng.pick(stageLines(LENNY_CAMEO, this.stage)));
+      if (j.t > 2.4 && j.t - dt <= 2.4) this.say('lenny', freshLine(stageLines(LENNY_CAMEO, this.stage), `lenny${this.stage}`, () => this.rng.next()));
       if (j.t > 3.8) {
         this.poofs.push({ x: j.x, y: j.y - 12, t: 0 });
         this.emit({ type: 'sfx', name: 'poof' });
@@ -1073,7 +1096,7 @@ export class Game {
     j.shout -= dt;
     if (j.shout <= 0) {
       j.shout = 4 + this.rng.next() * 2;
-      this.say('jeff', this.rng.pick(JEFF_FINAL_CHASE));
+      this.say('jeff', freshLine(JEFF_FINAL_CHASE, 'final', () => this.rng.next()));
     }
     j.repath -= dt;
     if (j.repath <= 0) {
