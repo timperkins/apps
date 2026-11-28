@@ -70,21 +70,24 @@ function fade(a: HTMLAudioElement, to: number, ms: number, done?: () => void) {
   step();
 }
 
-/** Crossfades to a track. Restarting the same track does nothing. */
-export function playMusic(t: Track) {
+/**
+ * Crossfades to a track. Restarting the same track does nothing, so the main
+ * theme carries on from the title through the opening dialogue and levels 1-5.
+ * Resolves false when the browser blocked playback until a tap.
+ */
+export function playMusic(t: Track): Promise<boolean> {
   if (missing.has(t)) t = 'loop';
   if (current === t) {
     const a = el(t);
-    if (a.paused) void a.play().catch(() => {});
-    return;
+    return a.paused ? a.play().then(() => true, () => false) : Promise.resolve(true);
   }
   const old = current ? tracks[current] : null;
   current = t;
   if (old) fade(old, 0, 900, () => old.pause());
   const a = el(t);
   a.currentTime = 0;
-  void a.play().catch(() => {});
   fade(a, MUSIC_VOL, 1200);
+  return a.play().then(() => true, () => false);
 }
 
 export function stopMusic() {

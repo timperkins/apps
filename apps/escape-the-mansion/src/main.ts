@@ -105,6 +105,7 @@ controls.onDir = (dx, dy) => {
 };
 controls.onAction = () => {
   unlockAudio();
+  if (mode === 'title' && titleStage !== 'ready') return; // the key listener below handles it
   if (mode === 'dialog') {
     advanceDialog();
     return;
@@ -116,17 +117,74 @@ controls.onAction = () => {
 
 // ---------------------------------------------------------------- title
 
-function toTitle() {
+// The game opens on a black screen: two torches and the title, with the main
+// theme. Browsers only play sound after a tap, so if the music is blocked a
+// quiet "Tap to begin" comes first and the tap lights the torches.
+type TitleStage = 'dark' | 'locked' | 'lit' | 'ready';
+let titleStage: TitleStage = 'dark';
+let titleTimer = 0;
+
+function setTitleStage(st: TitleStage) {
+  titleStage = st;
+  const el = $('title');
+  el.classList.toggle('locked', st === 'locked');
+  el.classList.toggle('lit', st === 'lit' || st === 'ready');
+  el.classList.toggle('ready', st === 'ready');
+  clearTimeout(titleTimer);
+  if (st === 'lit') titleTimer = window.setTimeout(() => setTitleStage('ready'), 3200);
+  // a short delay so the tap or key press that skipped ahead can't also press a button
+  if (st === 'ready') titleTimer = window.setTimeout(() => mode === 'title' && setTitleMenu(), 250);
+  else setMenu([]);
+}
+
+function setTitleMenu() {
+  const cont = $('continueBtn');
+  setMenu([cont, $('newBtn'), $('muteBtn')]);
+}
+
+function lightTorches() {
+  setTitleStage('lit');
+  sfx('whoosh');
+}
+
+/** A tap or key on the title before the menu is up. Returns true if it was used. */
+function titleTap(): boolean {
+  if (mode !== 'title' || titleStage === 'ready') return false;
+  unlockAudio();
+  if (titleStage === 'dark' || titleStage === 'locked') lightTorches();
+  else setTitleStage('ready');
+  return true;
+}
+
+function toTitle(opening = false) {
   mode = 'title';
   game = null;
-  playMusic('main');
   const s = load();
   const cont = $('continueBtn');
   cont.hidden = !s || s.level <= 1;
   if (s) cont.textContent = `Continue · Level ${s.level}`;
   $('muteBtn').textContent = `Sound: ${isMuted() ? 'off' : 'on'}`;
   showScreen('title');
-  setMenu([cont, $('newBtn'), $('muteBtn')]);
+  if (!opening) {
+    playMusic('main');
+    setTitleStage('ready');
+    return;
+  }
+  setTitleStage('dark');
+  let settled = false;
+  void playMusic('main').then((ok) => {
+    if (settled) return;
+    settled = true;
+    if (ok) lightTorches();
+    else setTitleStage('locked');
+  });
+  // slow connection: light up anyway, the music joins when it has loaded
+  setTimeout(() => {
+    if (!settled && titleStage === 'dark') {
+      settled = true;
+      lightTorches();
+    }
+  }, 1500);
 }
 
 $('continueBtn').addEventListener('click', () => {
@@ -496,9 +554,13 @@ window.addEventListener('keydown', firstGesture);
 for (const id of ['title', 'complete', 'powerups', 'pause', 'ending'])
   $(id).addEventListener('pointerdown', (e) => {
     controls.touch = e.pointerType !== 'mouse';
+    if (id === 'title' && titleTap()) e.preventDefault();
     paintMenu();
     e.stopPropagation();
   });
+window.addEventListener('keydown', (e) => {
+  if (!e.repeat) titleTap();
+});
 
 // ---------------------------------------------------------------- bonus: the getaway
 
@@ -583,7 +645,7 @@ function showEnding() {
   showScreen('ending');
   setMenu([$('endingBtn')]);
 }
-$('endingBtn').addEventListener('click', toTitle);
+$('endingBtn').addEventListener('click', () => toTitle());
 
 // ---------------------------------------------------------------- HUD
 
@@ -623,6 +685,61 @@ function updateHud(force = false) {
   void levelStartXp;
 }
 
+// ---------------------------------------------------------------- title torches
+
+const torchCanvases = [...document.querySelectorAll<HTMLCanvasElement>('#title canvas.torch')];
+let torchLitAt = -1;
+function drawTitleTorches(t: number, lit: boolean) {
+  if (lit && torchLitAt < 0) torchLitAt = t;
+  if (!lit) torchLitAt = -1;
+  const grow = lit ? Math.min(1, (t - torchLitAt) / 0.6) : 0;
+  torchCanvases.forEach((c, i) => {
+    const g = c.getContext('2d')!;
+    g.clearRect(0, 0, 24, 56);
+    // iron sconce on a bracket
+    g.fillStyle = '#1b1714';
+    g.fillRect(10, 30, 4, 22);
+    g.fillRect(6, 44, 12, 3);
+    g.fillStyle = '#3a312a';
+    g.fillRect(11, 30, 1, 22);
+    g.fillStyle = '#4a2e18';
+    g.fillRect(8, 24, 8, 7);
+    g.fillStyle = '#6b4424';
+    g.fillRect(8, 24, 8, 2);
+    g.fillStyle = '#2a1a0e';
+    g.fillRect(9, 27, 6, 1);
+    g.fillRect(9, 29, 6, 1);
+    g.fillStyle = '#5a5048';
+    g.fillRect(7, 30, 10, 2);
+    if (grow <= 0) return;
+    // flame: three layers that flicker on their own beats
+    const ph = t * 9 + i * 2.3;
+    const flick = (k: number) => Math.sin(ph * k) * 0.5 + Math.sin(ph * k * 2.7 + 1) * 0.5;
+    const tongue = (cx: number, base: number, w: number, h: number, col: string, k: number) => {
+      const hh = Math.max(1, Math.round(h * grow + flick(k) * 2));
+      g.fillStyle = col;
+      for (let y = 0; y < hh; y++) {
+        const ww = Math.max(1, Math.round(w * (1 - y / hh) * (y < 2 ? 0.8 : 1)));
+        const sway = Math.round(Math.sin(ph * 0.7 + y * 0.6) * (y / hh) * 1.2);
+        g.fillRect(Math.round(cx - ww / 2) + sway, base - y, ww, 1);
+      }
+    };
+    tongue(12, 25, 14, 20, '#b3201c', 1);
+    tongue(12, 25, 11, 16, '#ff6a1a', 1.3);
+    tongue(12, 25, 7, 11, '#ffb52e', 1.7);
+    tongue(12, 25, 4, 6, '#fff2a8', 2.1);
+    // sparks drifting up
+    g.fillStyle = '#ffcf5a';
+    for (let k = 0; k < 3; k++) {
+      const life = (t * 0.9 + k * 0.37 + i * 0.5) % 1;
+      if (grow < 1) break;
+      g.fillRect(12 + Math.round(Math.sin((t + k) * 3) * 3), Math.round(6 - life * 6), 1, 1);
+    }
+  });
+  const glow = 0.85 + Math.sin(t * 11) * 0.06 + Math.sin(t * 23) * 0.04;
+  $('title').style.setProperty('--glow', String(lit ? glow * grow : 0));
+}
+
 // ---------------------------------------------------------------- loop
 
 function frame(now: number) {
@@ -652,6 +769,7 @@ function frame(now: number) {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
+  if (mode === 'title') drawTitleTorches(clock, titleStage === 'lit' || titleStage === 'ready');
   // typewriter
   if (mode === 'dialog') {
     const l = dialogLines[dialogIdx];
@@ -665,7 +783,7 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 
-toTitle();
+toTitle(!new URLSearchParams(location.search).has('level'));
 requestAnimationFrame(frame);
 
 // dev hook: ?level=N jumps straight to a level

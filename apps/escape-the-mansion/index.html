@@ -38,14 +38,17 @@
       <div id="stick"><div id="knob"></div></div>
       <button id="action" aria-label="Throw or use"><span id="actionIcon"></span><b id="actionCount"></b></button>
 
-      <section id="title" class="screen show">
-        <img id="titleLenny" src="lenny.png" alt="Lenny" />
-        <h1>Escape<br />the Mansion</h1>
-        <p class="lead">Lenny woke up in Jeff's dungeon. Get him out.</p>
-        <button class="primary" id="continueBtn" hidden>Continue</button>
-        <button class="primary" id="newBtn">New game</button>
-        <button class="ghost small" id="muteBtn">Sound: on</button>
-        <p class="fine" id="howTo"></p>
+      <section id="title" class="screen show intro">
+        <canvas class="torch left" width="24" height="56"></canvas>
+        <canvas class="torch right" width="24" height="56"></canvas>
+        <p class="tap" id="tapToBegin">Tap to begin</p>
+        <h1 id="titleText">Escape<br />the Mansion</h1>
+        <div class="title-menu" id="titleMenu">
+          <button class="primary" id="continueBtn" hidden>Continue</button>
+          <button class="primary" id="newBtn">New game</button>
+          <button class="ghost small" id="muteBtn">Sound: on</button>
+          <p class="fine" id="howTo"></p>
+        </div>
       </section>
 
       <section id="dialog" class="screen clear">

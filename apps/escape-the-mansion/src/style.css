@@ -302,11 +302,96 @@ h2 {
   color: var(--dim);
 }
 
-#titleLenny {
-  width: min(42vw, 180px);
+/* the opening: a black screen, two torches and the title */
+#title {
+  --glow: 0;
+  background: #000;
+  overflow: hidden;
+}
+#title::before,
+#title::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 70vmin;
+  height: 70vmin;
+  margin-top: -44vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 130, 40, 0.42), rgba(179, 50, 20, 0.12) 40%, transparent 68%);
+  opacity: var(--glow);
+  pointer-events: none;
+}
+#title::before {
+  left: calc(max(4vw, 10px) + min(7vw, 48px) - 35vmin);
+}
+#title::after {
+  right: calc(max(4vw, 10px) + min(7vw, 48px) - 35vmin);
+}
+#title .torch {
+  position: absolute;
+  top: 50%;
+  width: min(14vw, 96px);
+  height: auto;
+  aspect-ratio: 24 / 56;
+  transform: translateY(-75%);
   image-rendering: pixelated;
-  animation: shiver 2.6s infinite;
-  filter: drop-shadow(0 0 22px rgba(255, 120, 40, 0.25));
+  z-index: 1;
+}
+#title .torch.left {
+  left: max(4vw, 10px);
+}
+#title .torch.right {
+  right: max(4vw, 10px);
+}
+#title h1 {
+  position: relative;
+  z-index: 1;
+  max-width: 64vw;
+  opacity: 0;
+  transform: scale(0.96);
+  filter: blur(3px);
+  transition: opacity 2.4s ease 0.4s, transform 3.2s ease 0.4s, filter 2.4s ease 0.4s;
+}
+#title.lit h1 {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+#title .title-menu {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 1s ease, visibility 0s linear 1s;
+}
+#title.ready .title-menu {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 1s ease;
+}
+#title .tap {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom) + 14%);
+  margin: 0;
+  font-size: 24px;
+  color: var(--dim);
+  letter-spacing: 3px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+#title.locked .tap {
+  opacity: 1;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.9; }
 }
 @keyframes shiver {
   0%, 86%, 100% { transform: translate(0, 0); }
