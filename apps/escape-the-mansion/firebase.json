@@ -1,0 +1,11 @@
+{
+  "hosting": {
+    "site": "trom-escape-the-mansion",
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ]
+  }
+}
