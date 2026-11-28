@@ -3,7 +3,7 @@ import type { BotLevel } from './bot';
 import { ART, RGB, WorldField, css, dirIndex, hash2, mix, nearestCopy, rng } from '../gfx';
 import { CH, Tile, Tiles, drawTiles, windingRoad } from '../tiles';
 import { GROUP_COUNT, type Action, type BuildItem, type BuildMenu, type CursorAt, type GameLike, type GroupInfo, type UnitType } from '../types';
-import { COMBAT_CREDITS, COMBAT_STORE, DERRICK, ORE, POWER, QUEUE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
+import { COMBAT_CREDITS, COMBAT_STORE, DERRICK, ORE, POWER, QUEUE_MAX, MINI_QUEUE_MAX, MINI_GROUP, MINI_TIME, MINI_ALIVE_MAX, START_CREDITS, STORE, TABS, TECH, Tab, Tech, buildTime } from './tech';
 import { HP, IsoTerrain, K, OV, Rect } from './terrain';
 import { StackSprite, dirSet, drawGoingUp, drawSprite, renderStack, toScreen, toWorld } from './stack';
 import { buildingArt as workerBuilding, constructionArt, glowArt, pooled, prefetch } from './art-pool';
@@ -686,6 +686,22 @@ interface Eco {
   lowPower: boolean;
   paraT: number; // seconds until the Air command's paratroopers are ready
 }
+// A queue as a short list: runs of the same thing become id*count.
+const packQueue = (q: Tech[]): string[] => {
+  const out: string[] = [];
+  for (let i = 0; i < q.length; ) {
+    let n = 1;
+    while (q[i + n] === q[i]) n++;
+    out.push(n > 1 ? `${q[i].id}*${n}` : q[i].id);
+    i += n;
+  }
+  return out;
+};
+const unpackQueue = (ids: string[]): string[] =>
+  ids.flatMap((s) => {
+    const [id, n] = s.split('*');
+    return n ? Array<string>(Math.min(Number(n) || 0, MINI_QUEUE_MAX)).fill(id) : [id];
+  });
 const newEco = (credits: number): Eco => ({ credits, jobs: new Map(), queue: new Map(), lowPower: false, paraT: PARA_S });
 
 // Paratroopers: one planeload every few minutes from the Paratrooper plane.
@@ -1760,6 +1776,8 @@ export class IsoGame implements GameLike {
 
   // A message (and an announcement) for side f's player: yours straight
   // away, another player's sent with the host's next update.
+  // sides told they have as many mini troops out as they can
+  private minisFull = new Set<number>();
   private tell(f: number, msg?: string, line?: Parameters<typeof announce>[0]): void {
     if (f === this.me) {
       if (msg) this.notice(msg);
@@ -1963,6 +1981,17 @@ export class IsoGame implements GameLike {
         return;
       }
       const queued = (e.queue.get(t.tab) ?? []).filter((q) => q === t).length;
+      if (t.unit === 'mini') {
+        // a whole group at a time
+        const n = Math.min(MINI_GROUP, MINI_QUEUE_MAX - queued - (j?.tech === t ? 1 : 0));
+        if (n <= 0) return;
+        const q = e.queue.get(t.tab) ?? [];
+        for (let i = j ? 0 : 1; i < n; i++) q.push(t);
+        e.queue.set(t.tab, q);
+        if (!j) e.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
+        this.tell(f, `${n.toLocaleString()} mini troops queued`, 'training');
+        return;
+      }
       if ((j?.tech === t ? 1 : 0) + queued >= QUEUE_MAX) return;
       if (!j) e.jobs.set(t.tab, { tech: t, spent: 0, paused: false, ready: false });
       else {
@@ -1995,6 +2024,12 @@ export class IsoGame implements GameLike {
     const q = e.queue.get(t.tab) ?? [];
     const qi = q.lastIndexOf(t);
     if (qi >= 0) {
+      if (t.unit === 'mini') {
+        // call off a whole group of them
+        let n = MINI_GROUP;
+        for (let i = q.length - 1; i >= 0 && n > 0; i--) if (q[i] === t) { q.splice(i, 1); n--; }
+        return;
+      }
       q.splice(qi, 1);
       return;
     }
@@ -2009,7 +2044,9 @@ export class IsoGame implements GameLike {
   private nextJob(e: Eco, tab: Tab): void {
     e.jobs.delete(tab);
     const q = e.queue.get(tab);
-    const n = q?.shift();
+    // anything else waiting goes ahead of a long line of mini troops
+    const other = q && q[0]?.unit === 'mini' ? q.findIndex((t) => t.unit !== 'mini') : -1;
+    const n = other > 0 ? q!.splice(other, 1)[0] : q?.shift();
     if (n) e.jobs.set(tab, { tech: n, spent: 0, paused: false, ready: false });
   }
 
@@ -2156,11 +2193,21 @@ export class IsoGame implements GameLike {
     e.lowPower = pw.used > pw.made;
     this.paraClock(f, dt);
     let paid = false;
+    let minis = -1;
     for (const j of [...e.jobs.values()]) {
       if (j.ready || j.paused) continue;
+      if (j.tech.unit === 'mini') {
+        if (minis < 0) minis = this.units.filter((u) => u.f === f && u.kind === 'mini' && !u.dead).length;
+        if (minis >= MINI_ALIVE_MAX) {
+          if (!this.minisFull.has(f)) this.tell(f, `${MINI_ALIVE_MAX} mini troops is the most at once: more come when some are lost`);
+          this.minisFull.add(f);
+          continue;
+        }
+        this.minisFull.delete(f);
+      }
       if (j.tech.building && !have.has('yard')) continue;
       if (j.tech.unit && !j.tech.needs.every((k) => have.has(k))) continue;
-      const want = (j.tech.cost / (j.tech.building === 'wall' ? WALL_S : buildTime(j.tech.cost))) * dt * (e.lowPower ? 0.5 : 1);
+      const want = (j.tech.cost / (j.tech.building === 'wall' ? WALL_S : j.tech.unit === 'mini' ? MINI_TIME : buildTime(j.tech.cost))) * dt * (e.lowPower ? 0.5 : 1);
       const pay = Math.min(want, e.credits, j.tech.cost - j.spent);
       e.credits -= pay;
       j.spent += pay;
@@ -2170,7 +2217,7 @@ export class IsoGame implements GameLike {
         j.spent = j.tech.cost;
         if (j.tech.unit) {
           if (this.deliver(j.tech, f)) {
-            this.tell(f, `${j.tech.name} ready`, 'unit_ready');
+            if (j.tech.unit !== 'mini') this.tell(f, `${j.tech.name} ready`, 'unit_ready');
             this.nextJob(e, j.tech.tab);
           }
         } else {
@@ -5006,7 +5053,8 @@ export class IsoGame implements GameLike {
         Math.round(e.credits),
         e.lowPower ? 1 : 0,
         [...e.jobs].map(([tab, j]): [string, string, number, number, number] => [tab, j.tech.id, Math.round(j.spent), j.paused ? 1 : 0, j.ready ? 1 : 0]),
-        [...e.queue].map(([tab, q]): [string, string[]] => [tab, q.map((t) => t.id)]),
+        // runs of the same thing go as id*count, so 10,000 mini troops stay small
+        [...e.queue].map(([tab, q]): [string, string[]] => [tab, packQueue(q)]),
         Math.ceil(e.paraT),
       ];
     });
@@ -5228,7 +5276,7 @@ export class IsoGame implements GameLike {
         if (t) nj.set(tab as Tab, { tech: t, spent, paused: !!paused, ready: !!ready });
       }
       e.jobs = nj;
-      e.queue = new Map(queue.map(([tab, ids]) => [tab as Tab, ids.map(tech).filter((t): t is Tech => !!t)]));
+      e.queue = new Map(queue.map(([tab, ids]) => [tab as Tab, unpackQueue(ids).map(tech).filter((t): t is Tech => !!t)]));
       if (this.ghost && !nj.get(this.ghost.tech.tab)?.ready) this.ghost = null;
     }
     // the ore, as the host has it
