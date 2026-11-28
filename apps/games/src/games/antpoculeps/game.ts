@@ -127,6 +127,14 @@ export class Game {
     this.events.push({ e: 'evolve', slot, level: a.level });
   }
 
+  /** The J + K cheat: up one level right away, no food needed. */
+  cheatLevel(slot: number) {
+    const a = this.playerAnt(slot);
+    if (!a || a.dead > 0 || a.level >= MAX_LEVEL) return;
+    a.food = foodNeeded(a.level);
+    this.evolve(slot);
+  }
+
   rebirth(slot: number) {
     const a = this.playerAnt(slot);
     if (!a || a.dead > 0 || a.level < MAX_LEVEL || a.food < foodNeeded(a.level)) return;

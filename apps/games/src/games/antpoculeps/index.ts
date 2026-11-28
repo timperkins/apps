@@ -32,7 +32,8 @@ type ToHost =
   | { t: 'hi'; name: string; level: number; food: number; rebirths: number }
   | { t: 'me'; x: number; y: number; a: number; m: boolean; b: boolean }
   | { t: 'evolve' }
-  | { t: 'rebirth' };
+  | { t: 'rebirth' }
+  | { t: 'cheat' };
 type FoodRow = [number, number, number, number, number];
 type ToFriend =
   | { t: 'init'; seed: number; food: FoodRow[] }
@@ -79,7 +80,7 @@ export default {
             <div class="ap-stick" hidden><i></i></div>
             <button class="ap-bitebtn">BITE</button>
           </div>
-          <div class="ap-help">WASD / arrows to walk · Space or click to bite · E to evolve · Esc menu</div>
+          <div class="ap-help">WASD / arrows to walk · Space or click to bite · E to evolve · J+K level up · Esc menu</div>
         </div>
         <div class="ap-toasts"></div>
         <div class="ap-dead" hidden></div>
@@ -130,7 +131,9 @@ export default {
         if (k === 'm') toggleMute();
         keys.add(k);
       } else keys.delete(k);
-      if (k === ' ' || k === 'j') { biteHeld = down; e.preventDefault(); }
+      if (k === ' ') { biteHeld = down; e.preventDefault(); }
+      // cheat: hold J and K together to level up instantly
+      if (down && !e.repeat && (k === 'j' || k === 'k') && keys.has('j') && keys.has('k') && mode !== 'title') doCheat();
       if (k.startsWith('arrow')) e.preventDefault();
     };
     const kd = (e: KeyboardEvent) => onKey(e, true), ku = (e: KeyboardEvent) => onKey(e, false);
@@ -379,6 +382,7 @@ export default {
           game.inputs.set(slot, { mx: 0, my: 0, bite: !!m.b });
         } else if (m.t === 'evolve') game.evolve(slot);
         else if (m.t === 'rebirth') game.rebirth(slot);
+        else if (m.t === 'cheat') game.cheatLevel(slot);
       });
       h.onLeave((slot) => {
         const a = game?.playerAnt(slot);
@@ -481,6 +485,13 @@ export default {
       if (myFood() < foodNeeded(me.level)) return;
       if (mode === 'local') game!.evolve(mySlot);
       else friend?.send({ t: 'evolve' } satisfies ToHost);
+    }
+    function doCheat() {
+      const me = myView();
+      if (!me || me.dead) return;
+      if (me.level >= MAX_LEVEL) { toast('You are already the Cosmic Ant! Fill the food bar to rebirth.', '#9fe8ff'); return; }
+      if (mode === 'local') game!.cheatLevel(mySlot);
+      else friend?.send({ t: 'cheat' } satisfies ToHost);
     }
     function doRebirth() {
       const me = myView();
