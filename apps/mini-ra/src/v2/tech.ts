@@ -42,7 +42,7 @@ export const TECH: Tech[] = [
   { id: 'prism', name: 'Lumen tower', tab: 'defense', cost: 1500, needs: ['radar', 'lab'], building: 'prism', blurb: 'Long-range light beam. Lumen towers near one that fires beam their light into it and add to the blow.' },
 
   { id: 'inf', name: 'G.I.', tab: 'inf', cost: 100, needs: ['barracks'], unit: 'inf', from: 'barracks', blurb: 'Cheap foot soldier. Deploys behind sandbags to hold ground.' },
-  { id: 'mini', name: 'Mini troop', tab: 'inf', cost: 1, needs: ['barracks'], unit: 'mini', from: 'barracks', blurb: 'A pocket-sized G.I. for just $1. Tiny, fragile and barely hurts anyone, so bring lots.' },
+  { id: 'mini', name: 'Mini troop', tab: 'inf', cost: 1, needs: ['barracks'], unit: 'mini', from: 'barracks', blurb: 'A pocket-sized G.I. for just $1. Tiny, fragile and barely hurts anyone, so bring lots: each tap queues 1,000 (up to 10,000), five made a second.' },
   { id: 'dog', name: 'Attack dog', tab: 'inf', cost: 200, needs: ['barracks'], unit: 'dog', from: 'barracks', blurb: 'Fast and sharp-eyed. Kills a soldier in one bite, but cannot hurt vehicles or buildings.' },
   { id: 'gren', name: 'Grenadier', tab: 'inf', cost: 160, needs: ['barracks'], unit: 'gren', from: 'barracks', blurb: 'Lobs grenades: good against soldiers and buildings.' },
   { id: 'flamer', name: 'Flame trooper', tab: 'inf', cost: 300, needs: ['barracks'], unit: 'flamer', from: 'barracks', blurb: 'Short-range flamethrower: burns soldiers in groups and sets buildings alight.' },
@@ -74,6 +74,14 @@ export const TECH: Tech[] = [
 
 // Most of one unit you can have waiting in a queue.
 export const QUEUE_MAX = 5;
+// The mini troop goes in groups: each tap queues MINI_GROUP more, up to
+// MINI_QUEUE_MAX waiting. Each takes MINI_TIME seconds, and the Barracks holds
+// off while a side already has MINI_ALIVE_MAX of them out, which keeps the
+// game running smoothly.
+export const MINI_QUEUE_MAX = 10000;
+export const MINI_GROUP = 1000;
+export const MINI_TIME = 0.2;
+export const MINI_ALIVE_MAX = 300;
 
 // Seconds to build something of this cost.
 export const buildTime = (cost: number) => Math.max(3, cost / 80);
